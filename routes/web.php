@@ -17,11 +17,13 @@ use Inertia\Inertia;
 */
 
 Route::get('/', function () {
+    if (Auth::check()) {
+        return redirect('/dashboard');
+    }
+
     return Inertia::render('Welcome', [
         'canLogin' => Route::has('login'),
-        'canRegister' => Route::has('register'),
-        'laravelVersion' => Application::VERSION,
-        'phpVersion' => PHP_VERSION,
+        'canRegister' => Route::has('register')
     ]);
 });
 
