@@ -1,7 +1,8 @@
 <?php
 
+use App\Http\Controllers\ForwarderController;
 use App\Http\Controllers\ProfileController;
-use Illuminate\Foundation\Application;
+use App\Http\Controllers\AgentController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -18,7 +19,7 @@ use Inertia\Inertia;
 
 Route::get('/', function () {
     if (Auth::check()) {
-        return redirect('/agents');
+        return redirect()->route('agents.index');
     }
 
     return Inertia::render('Welcome', [
@@ -27,16 +28,15 @@ Route::get('/', function () {
     ]);
 });
 
-Route::get('/agents', function () {
-    $user = Auth::user();
-    return Inertia::render('Agents', ['agents' => $user->agents]);
-})->middleware(['auth'])->name('agents');
-
 Route::middleware('auth')->group(function () {
+    // all api calls will go through this route
+    Route::get('/forward', [ForwarderController::class, 'forward'])->name('forward');
+
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 
+    Route::resource('agents', AgentController::class);
 
 });
 

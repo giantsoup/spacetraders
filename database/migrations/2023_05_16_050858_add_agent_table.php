@@ -18,7 +18,7 @@ return new class extends Migration
             $table->mediumText('token');
             $table->string('account_id');
             $table->string('faction');
-            $table->string('email');
+            $table->string('email')->nullable();
             $table->timestamps();
         });
     }
