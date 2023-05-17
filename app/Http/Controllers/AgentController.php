@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Routing\Redirector;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Inertia\Inertia;
@@ -49,6 +50,13 @@ class AgentController extends Controller
             return redirect()->route('agents.index');
         }
 
-        return Inertia::render('Agent/CreateAgent', ['errors' => $response->json('error.data')]);
+        [$keys, $values] = Arr::divide($response->json('error.data'));
+        $errors = [
+            'header' => $keys[0],
+            'message' => $values[0][0],
+        ];
+
+        // if the request was not successful, return the errors
+        return Inertia::render('Agent/CreateAgent', ['errors' => $errors]);
     }
 }

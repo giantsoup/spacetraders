@@ -108,9 +108,8 @@ function submit() {
                 </form>
 
                 <div class="mt-6 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
-                    <pre>{{ errors }}</pre>
-<!--                    <div><strong class="font-bold">{{ errorKey }}</strong></div>-->
-<!--                    <span class="block sm:inline">{{ errors[errorKey] }}</span>-->
+                    <div><strong class="font-bold">{{ errors.header.charAt(0).toUpperCase() + errors.header.slice(1) }}</strong></div>
+                    <span class="block sm:inline">{{ errors.message }}</span>
                 </div>
             </div>
         </div>
