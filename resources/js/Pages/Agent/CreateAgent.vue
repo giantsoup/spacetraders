@@ -73,6 +73,7 @@ function fetchAndSaveAgent() {
 
                             <TextInput
                                 id="token"
+
                                 type="text"
                                 class="mt-1 block w-full"
                                 v-model="formExisting.token"

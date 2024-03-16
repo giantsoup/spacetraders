@@ -10,7 +10,6 @@ use Inertia\Inertia;
 use Inertia\Response;
 use Illuminate\Http\Request;
 
-
 class AgentController extends Controller
 {
     public function index(): Response
