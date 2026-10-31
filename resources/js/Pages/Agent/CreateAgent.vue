@@ -1,5 +1,5 @@
 <script setup>
-import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout.vue";
+import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
@@ -8,6 +8,7 @@ import { Head, useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
 
 const form = useForm({
+    account_token: '',
     symbol: '',
     faction: '',
     email: '',
@@ -17,42 +18,29 @@ const formExisting = useForm({
     token: '',
 });
 
-const props = defineProps(['errors', 'showRegisterForm']);
-
-const showRegisterForm = ref(false);
-
-// setup empty headers if they are undefined, so we don't error out
-if (props.errors.header === undefined) {
-    props.errors.header = '';
-}
+const showExistingForm = ref(false);
 
 function createAgent() {
-    form
-        .transform((data) => ({
-            url: '/register',
-            method: 'post',
-            data: {
-                ...data,
-            },
-        }))
-        .post(route('agents.store'), {
+    form.post(route('agents.store'), {
         preserveScroll: true,
-    });
-}
-function fetchAndSaveAgent() {
-  formExisting
-        .transform((data) => ({
-            url: '/my/agent',
-            method: 'get',
-            data: {
-                ...data,
-            },
-        }))
-        .post(route('agents.storeExisting'), {
-        preserveScroll: true,
+        onFinish: () => form.reset('account_token'),
     });
 }
 
+function fetchAndSaveAgent() {
+    formExisting.post(route('agents.storeExisting'), {
+        preserveScroll: true,
+        onFinish: () => formExisting.reset('token'),
+    });
+}
+
+function toggleForm() {
+    showExistingForm.value = !showExistingForm.value;
+    form.clearErrors();
+    formExisting.clearErrors();
+    form.reset('account_token');
+    formExisting.reset('token');
+}
 </script>
 
 <template>
@@ -63,93 +51,109 @@ function fetchAndSaveAgent() {
             <h2 class="font-semibold text-xl text-gray-800 leading-tight">Agents | Create</h2>
         </template>
 
-
         <div class="py-12">
             <div class="max-w-xl mx-auto sm:px-6 lg:px-8">
-                <template v-if="showRegisterForm">
-                    <form @submit.prevent="fetchAndSaveAgent">
-                        <div>
-                            <InputLabel for="token" value="Agent Token" />
+                <form v-if="showExistingForm" @submit.prevent="fetchAndSaveAgent">
+                    <div>
+                        <InputLabel for="token" value="Agent token" />
 
-                            <TextInput
-                                id="token"
-                                type="text"
-                                class="mt-1 block w-full"
-                                v-model="formExisting.token"
-                                required
-                            />
+                        <TextInput
+                            id="token"
+                            type="password"
+                            class="mt-1 block w-full"
+                            v-model="formExisting.token"
+                            autocomplete="off"
+                            required
+                        />
 
-                            <InputError class="mt-2" :message="formExisting.errors.token" />
-                        </div>
+                        <InputError class="mt-2" :message="formExisting.errors.token" />
+                    </div>
 
-                        <div class="flex items-center justify-end mt-4">
-                            <div @click="showRegisterForm = !showRegisterForm" class="cursor-pointer underline">Back to Create New Agent</div>
-                            <PrimaryButton type="submit" class="ml-4" :class="{ 'opacity-25': formExisting.processing }" :disabled="formExisting.processing">
-                                Save Existing Agent
-                            </PrimaryButton>
-                        </div>
-                    </form>
-                </template>
-                <template v-else>
-                    <form @submit.prevent="createAgent">
-                        <div>
-                            <InputLabel for="symbol" value="Agent Name" />
+                    <InputError class="mt-4" :message="formExisting.errors.api" role="alert" />
 
-                            <TextInput
-                                id="symbol"
-                                type="text"
-                                class="mt-1 block w-full"
-                                min="3"
-                                max="14"
-                                v-model="form.symbol"
-                                required
-                            />
+                    <div class="flex items-center justify-end mt-4">
+                        <button type="button" @click="toggleForm" class="underline" :disabled="formExisting.processing">
+                            Back to Create New Agent
+                        </button>
+                        <PrimaryButton type="submit" class="ml-4" :class="{ 'opacity-25': formExisting.processing }" :disabled="formExisting.processing">
+                            Save Existing Agent
+                        </PrimaryButton>
+                    </div>
+                </form>
+                <form v-else @submit.prevent="createAgent">
+                    <div>
+                        <InputLabel for="account_token" value="Account token" />
 
-                            <InputError class="mt-2" :message="form.errors.name" />
-                        </div>
+                        <TextInput
+                            id="account_token"
+                            type="password"
+                            class="mt-1 block w-full"
+                            v-model="form.account_token"
+                            autocomplete="off"
+                            required
+                        />
 
-                        <div class="mt-4">
-                            <InputLabel for="faction" value="Faction" />
+                        <p class="mt-2 text-sm text-gray-600">
+                            Use your SpaceTraders account token to register a new agent.
+                            Your account token is used for this request and is not saved.
+                        </p>
+                        <InputError class="mt-2" :message="form.errors.account_token" />
+                    </div>
 
-                            <TextInput
-                                id="faction"
-                                type="text"
-                                class="mt-1 block w-full"
-                                v-model="form.faction"
-                                required
-                                autocomplete="new-password"
-                            />
+                    <div class="mt-4">
+                        <InputLabel for="symbol" value="Agent name" />
 
-                            <InputError class="mt-2" :message="form.errors.password" />
-                        </div>
+                        <TextInput
+                            id="symbol"
+                            type="text"
+                            class="mt-1 block w-full"
+                            minlength="3"
+                            maxlength="14"
+                            v-model="form.symbol"
+                            required
+                        />
 
-                        <div class="mt-4">
-                            <InputLabel for="email" value="Email" />
+                        <InputError class="mt-2" :message="form.errors.symbol" />
+                    </div>
 
-                            <TextInput
-                                id="email"
-                                type="email"
-                                class="mt-1 block w-full"
-                                v-model="form.email"
-                            />
+                    <div class="mt-4">
+                        <InputLabel for="faction" value="Faction" />
 
-                            <InputError class="mt-2" :message="form.errors.email" />
-                        </div>
+                        <TextInput
+                            id="faction"
+                            type="text"
+                            class="mt-1 block w-full"
+                            v-model="form.faction"
+                            required
+                        />
 
-                        <div class="flex items-center justify-end mt-4">
-                            <div @click="showRegisterForm = !showRegisterForm" class="cursor-pointer underline">Already have an Agent?</div>
-                            <PrimaryButton type="submit" class="ml-4" :class="{ 'opacity-25': form.processing }" :disabled="form.processing">
-                                Register New Agent
-                            </PrimaryButton>
-                        </div>
-                    </form>
-                </template>
+                        <InputError class="mt-2" :message="form.errors.faction" />
+                    </div>
 
-                <div v-if="errors.header !== ''" class="mt-6 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
-                  <pre>{{ errors }}</pre>
-<!--                    <div><strong class="font-bold">{{ errors.header.charAt(0).toUpperCase() + errors.header.slice(1) }}</strong></div>-->
-<!--                    <span class="block sm:inline">{{ errors.message }}</span>-->
-                </div>
+                    <div class="mt-4">
+                        <InputLabel for="email" value="Email" />
+
+                        <TextInput
+                            id="email"
+                            type="email"
+                            class="mt-1 block w-full"
+                            v-model="form.email"
+                        />
+
+                        <InputError class="mt-2" :message="form.errors.email" />
+                    </div>
+
+                    <InputError class="mt-4" :message="form.errors.api" role="alert" />
+
+                    <div class="flex items-center justify-end mt-4">
+                        <button type="button" @click="toggleForm" class="underline" :disabled="form.processing">
+                            Already have an Agent?
+                        </button>
+                        <PrimaryButton type="submit" class="ml-4" :class="{ 'opacity-25': form.processing }" :disabled="form.processing">
+                            Register New Agent
+                        </PrimaryButton>
+                    </div>
+                </form>
             </div>
         </div>
     </AuthenticatedLayout>

@@ -1,66 +1,49 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# SpaceTraders client
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A Laravel 10, Inertia, Vue 3, and Pinia client for SpaceTraders. The existing app registers agents, imports agents with a token, and lists the current user's saved agents. An authenticated forwarder relays requests to the SpaceTraders API.
 
-## About Laravel
+## API compatibility
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+The integration targets [SpaceTraders API v2.3.0](https://docs.spacetraders.io/openapi), verified against the [official bundled OpenAPI specification](https://spacetraders.io/SpaceTraders.json).
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+- New-agent registration sends `POST /v2/register` with an **account token** as the bearer credential. The returned **agent token** is saved locally. The account token is not saved.
+- `symbol` must contain 3 to 14 characters. Symbol and faction inputs are uppercased before registration. Email remains optional and is omitted from the request when empty.
+- Existing-agent import sends `GET /v2/my/agent` with the agent token and saves the response's `startingFaction`. It does not fetch or infer the faction from headquarters.
+- Saved agents are scoped to the signed-in user. Page data contains a masked token preview. Full tokens are hidden from model serialization.
+- Upstream errors appear on the active form. Failed or incomplete responses do not create local agents. Registration requests are not automatically retried because an ambiguous failure may already have created an upstream agent.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+SpaceTraders resets invalidate agent tokens. An account token and an agent token have different purposes and are not interchangeable. See the [official authentication definitions](https://docs.spacetraders.io/openapi).
 
-## Learning Laravel
+## Forward existing API requests
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+Use authenticated `POST /forward` with a local CSRF token. The JSON body contains `method`, `url`, optional `data`, and optional `headers.Authorization`:
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+```json
+{
+    "method": "get",
+    "url": "/my/agent",
+    "headers": {
+        "Authorization": "Bearer YOUR_AGENT_TOKEN"
+    }
+}
+```
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains over 2000 video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+`url` is a relative path below `https://api.spacetraders.io/v2`. Put query parameters such as `page` and `limit` in `data`. Supported methods are `get`, `post`, `put`, `patch`, and `delete`. The forwarder preserves the upstream status, response body, pagination metadata, content type, and supported rate-limit headers. Responses are not cached or logged.
 
-## Laravel Sponsors
+`GET /forward` remains available for upstream reads. Use POST for authenticated requests to keep bearer tokens out of URLs. GET cannot trigger an upstream write. Arbitrary hosts, path traversal, and custom headers other than `Authorization` are rejected.
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the Laravel [Patreon page](https://patreon.com/taylorotwell).
+The agent forms submit fields directly to their local routes. Clients using the previous `{method, url, data}` envelope for those forms must use the flat fields shown in `AgentController` instead.
 
-### Premium Partners
+## Verify changes
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Cubet Techno Labs](https://cubettech.com)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[Many](https://www.many.co.uk)**
-- **[Webdock, Fast VPS Hosting](https://www.webdock.io/en)**
-- **[DevSquad](https://devsquad.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[OP.GG](https://op.gg)**
-- **[WebReinvent](https://webreinvent.com/?utm_source=laravel&utm_medium=github&utm_campaign=patreon-sponsors)**
-- **[Lendio](https://lendio.com)**
+The committed dependency locks require PHP 8.1 or 8.2. Install Composer dependencies from `composer.lock` and frontend dependencies with pnpm 8 from `pnpm-lock.yaml`. The API update does not change either lockfile.
 
-## Contributing
+Run with locked dependencies installed:
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```bash
+./scripts/verify.sh
+```
 
-## Code of Conduct
+Set `PHP_BIN` to a PHP 8.2 executable when your default PHP differs. The script builds the frontend before running PHPUnit, checks the changed PHP files with Pint, and checks whitespace. Build files under `public/build` are tracked by this repository and must stay synchronized with the source.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+PHPUnit uses a disposable in-memory SQLite database. The API regression tests fake SpaceTraders responses and prevent stray HTTP requests. They cover registration, import, validation, token handling, owner-only listings, connection failures, malformed responses, forwarding, pagination, and rate limits. They do not prove live authenticated API acceptance.

@@ -1,7 +1,6 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import {Head, Link} from '@inertiajs/vue3';
-import ApplicationLogo from "@/Components/ApplicationLogo.vue";
 const props = defineProps(['agents']);
 </script>
 
@@ -20,13 +19,13 @@ const props = defineProps(['agents']);
 
                     <div v-for="agent in agents" :key="agent.id"
                          class="agents mt-6 p-6 bg-white border-b border-gray-400 rounded-md hover:bg-gray-200 hover:cursor-pointer">
-                        <div class="flex justify-between">
-                            <span class="text-black px-4">{{ agent.name }}</span>
-                            <span class="text-black px-4">{{ agent.account_id }}</span>
-                            <span class="text-black px-4">
-                                {{ agent.token.substring(0, 5) + " ... " + agent.token.substring(agent.token.length - 5) }}
+                        <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                            <span class="text-black px-4 break-words">{{ agent.name }}</span>
+                            <span class="text-black px-4 break-words">{{ agent.account_id }}</span>
+                            <span class="text-black px-4 break-words">
+                                {{ agent.token_preview }}
                             </span>
-                            <span class="text-black px-4">{{ agent.email }}</span>
+                            <span class="text-black px-4 break-words">{{ agent.email }}</span>
                         </div>
                     </div>
 
