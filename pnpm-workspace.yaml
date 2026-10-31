@@ -1,0 +1,4 @@
+packages:
+  - '.'
+minimumReleaseAgeStrict: true
+strictPeerDependencies: true

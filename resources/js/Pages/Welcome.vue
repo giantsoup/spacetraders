@@ -31,32 +31,32 @@ defineProps({
                 <Link
                     v-if="$page.props.auth.user"
                     :href="route('dashboard')"
-                    class="font-semibold text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white focus:outline focus:outline-2 focus:rounded-sm focus:outline-red-500"
+                    class="font-semibold text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white focus:outline focus:outline-2 focus:rounded-xs focus:outline-red-500"
                 >Dashboard</Link
                 >
 
                 <template v-else>
                     <Link
                         :href="route('login')"
-                        class="font-semibold text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white focus:outline focus:outline-2 focus:rounded-sm focus:outline-red-500"
+                        class="font-semibold text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white focus:outline focus:outline-2 focus:rounded-xs focus:outline-red-500"
                     >Log in</Link
                     >
 
                     <Link
                         v-if="canRegister"
                         :href="route('register')"
-                        class="ml-4 font-semibold text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white focus:outline focus:outline-2 focus:rounded-sm focus:outline-red-500"
+                        class="ml-4 font-semibold text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white focus:outline focus:outline-2 focus:rounded-xs focus:outline-red-500"
                     >Register</Link
                     >
                 </template>
             </div>
             <div class="mt-16 px-6">
                 <div class="text-center text-sm text-gray-500 dark:text-gray-400">
-                    <a href="https://github.com/giantsoup/spacetraders" class="hover:text-gray-700 dark:hover:text-white focus:outline focus:outline-2 focus:rounded-sm focus:outline-red-500">Implementation Developed by Taylor Oyer</a>
+                    <a href="https://github.com/giantsoup/spacetraders" class="hover:text-gray-700 dark:hover:text-white focus:outline focus:outline-2 focus:rounded-xs focus:outline-red-500">Implementation Developed by Taylor Oyer</a>
                 </div>
 
                 <div class="text-center text-sm text-gray-500 dark:text-gray-400 mt-4">
-                    API Developed by <a href="https://spacetraders.io" class="hover:text-gray-700 dark:hover:text-white focus:outline focus:outline-2 focus:rounded-sm focus:outline-red-500">Space Traders</a>
+                    API Developed by <a href="https://spacetraders.io" class="hover:text-gray-700 dark:hover:text-white focus:outline focus:outline-2 focus:rounded-xs focus:outline-red-500">Space Traders</a>
                 </div>
             </div>
         </div>

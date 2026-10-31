@@ -15,7 +15,7 @@ const props = defineProps(['agents']);
         <div class="py-12">
             <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
 
-                <div class="agents-wrapper overflow-hidden shadow-sm sm:rounded-lg">
+                <div class="agents-wrapper overflow-hidden shadow-xs sm:rounded-lg">
 
                     <div v-for="agent in agents" :key="agent.id"
                          class="agents mt-6 p-6 bg-white border-b border-gray-400 rounded-md hover:bg-gray-200 hover:cursor-pointer">

@@ -1,6 +1,6 @@
 # SpaceTraders client
 
-A Laravel 10, Inertia, Vue 3, and Pinia client for SpaceTraders. The existing app registers agents, imports agents with a token, and lists the current user's saved agents. An authenticated forwarder relays requests to the SpaceTraders API.
+A Laravel 13, Inertia 3, Vue 3, and Pinia 4 client for SpaceTraders. The existing app registers agents, imports agents with a token, and lists the current user's saved agents. An authenticated forwarder relays requests to the SpaceTraders API.
 
 ## API compatibility
 
@@ -34,16 +34,44 @@ Use authenticated `POST /forward` with a local CSRF token. The JSON body contain
 
 The agent forms submit fields directly to their local routes. Clients using the previous `{method, url, data}` envelope for those forms must use the flat fields shown in `AgentController` instead.
 
+## Local setup
+
+Use Herd's existing PHP 8.4 runtime, Node 26.13.0, and pnpm 12.16.1. The application requires PHP 8.4.1 or later within the 8.4 series. Composer resolves against PHP 8.4.1; verify the actual runtime with `composer check-platform-reqs`.
+
+Install pnpm 12.16.1 through your existing package-manager tooling. For a temporary invocation without changing global Node or pnpm, use `npm exec --yes --package=pnpm@12.16.1 -- pnpm`.
+
+For a new local environment:
+
+```bash
+composer install
+pnpm install --frozen-lockfile --strict-peer-dependencies
+cp .env.example .env
+php artisan key:generate
+touch database/database.sqlite
+php artisan migrate
+pnpm build
+```
+
+Copy the environment template and generate a key only for a new environment. For an existing environment, retain its key, database, session cookie, and cache prefixes. The template uses an owned local SQLite database, file sessions/cache, synchronous queues, and log mail. Select and verify your database before migrations. Serve the application through Herd at `http://spacetraders.test`; use `pnpm dev` for Vite HMR. Herd can manage that Vite process.
+
+The upgrade retains the existing kernels, providers, authentication screens, and database schema. Session serialization stays `php` to preserve existing sessions. Cache object unserialization is disabled. Inertia SSR and request-recording devtools are disabled because this application does not use them. Ziggy loads from Composer's package through Vite, with `@routes` providing route metadata.
+
+The frontend uses Tailwind 4 and requires Safari 16.4+, Chrome 111+, or Firefox 128+. Older browsers are outside this build's support. Inertia uses its own HTTP client; `window.axios` remains available separately.
+
 ## Verify changes
 
-The committed dependency locks require PHP 8.1 or 8.2. Install Composer dependencies from `composer.lock` and frontend dependencies with pnpm 8 from `pnpm-lock.yaml`. The API update does not change either lockfile.
-
-Run with locked dependencies installed:
+With locked dependencies installed:
 
 ```bash
 ./scripts/verify.sh
+composer validate --strict
+composer check-platform-reqs
+composer audit
+pnpm audit
 ```
 
-Set `PHP_BIN` to a PHP 8.2 executable when your default PHP differs. The script builds the frontend before running PHPUnit, checks the changed PHP files with Pint, and checks whitespace. Build files under `public/build` are tracked by this repository and must stay synchronized with the source.
+Set `PHP_BIN` or `PNPM_BIN` to the matching executable when it is not on your path. The verification script checks PHP 8.4 and pnpm 12.16.1, builds production assets, checks Pinia's saved-state compatibility, runs the complete backend suite, checks affected PHP files with Pint, and checks whitespace. Source and tracked `public/build` files must stay synchronized.
 
-PHPUnit uses a disposable in-memory SQLite database. The API regression tests fake SpaceTraders responses and prevent stray HTTP requests. They cover registration, import, validation, token handling, owner-only listings, connection failures, malformed responses, forwarding, pagination, and rate limits. They do not prove live authenticated API acceptance.
+PHPUnit uses disposable in-memory SQLite and an isolated test key. External API regression tests fake SpaceTraders responses and prevent stray requests. Upgrade regressions exercise normal request-forgery middleware and Sanctum bearer authentication. The suite covers authentication, profiles, registration, import, validation, token handling, owner-only listings, connection failures, malformed responses, forwarding, pagination, and rate limits. It does not prove live authenticated SpaceTraders acceptance.
+
+The approved scope and acceptance requirements are in [the migration plan](docs/laravel13-upgrade-plan.md). The baseline commit `a3ea1d4` remains the rollback point for code and locks. Its old dependencies require PHP 8.2, so it is not a PHP 8.4 fallback. This upgrade requires no schema migration beyond the existing migrations.
