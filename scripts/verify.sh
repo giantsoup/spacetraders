@@ -6,7 +6,7 @@ php_bin="${PHP_BIN:-php}"
 pnpm_bin="${PNPM_BIN:-pnpm}"
 "$php_bin" -r 'exit(PHP_VERSION_ID >= 80401 && PHP_VERSION_ID < 80500 ? 0 : 1);'
 [[ "$("$pnpm_bin" --version)" == "12.16.1" ]]
-"$pnpm_bin" build
+PNPM_BIN="$pnpm_bin" node scripts/verify-build-sources.mjs
 node scripts/verify-store.mjs
 "$php_bin" vendor/bin/phpunit --display-all-issues
 "$php_bin" vendor/bin/pint --test \

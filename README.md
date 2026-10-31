@@ -70,7 +70,7 @@ composer audit
 pnpm audit
 ```
 
-Set `PHP_BIN` or `PNPM_BIN` to the matching executable when it is not on your path. The verification script checks PHP 8.4 and pnpm 12.16.1, builds production assets, checks Pinia's saved-state compatibility, runs the complete backend suite, checks affected PHP files with Pint, and checks whitespace. Source and tracked `public/build` files must stay synchronized.
+Set `PHP_BIN` or `PNPM_BIN` to the matching executable when it is not on your path. The verification script checks PHP 8.4 and pnpm 12.16.1, builds production assets twice to verify that unrelated Markdown and generated views cannot change them, checks Pinia's saved-state compatibility, runs the complete backend suite, checks affected PHP files with Pint, and checks whitespace. Source and tracked `public/build` files must stay synchronized.
 
 A focused browser regression is available with `node scripts/verify-modal.mjs`. Use an existing Playwright installation, or set `PLAYWRIGHT_MODULE` to its module path. Set `QA_URL`, `QA_EMAIL`, and `QA_PASSWORD` for an owned local `.test` account. The check waits for modal transitions to finish, verifies pointer access, submits an intentionally incorrect password, and checks Cancel and Escape. Set `QA_ARTIFACT_DIR` to retain screenshots. It does not delete the account.
 
