@@ -20,6 +20,7 @@ class AgentTest extends TestCase
         parent::setUp();
 
         Http::preventStrayRequests();
+        Http::fake(['https://api.spacetraders.io/v2/' => Http::response(['version' => 'v2.3.0', 'resetDate' => '2026-10-25'])]);
     }
 
     public function test_registration_uses_an_account_token_and_saves_the_returned_agent_token(): void
@@ -45,9 +46,9 @@ class AgentTest extends TestCase
             && $request->data() === [
                 'symbol' => 'TEST_AGENT', 'faction' => 'COSMIC', 'email' => 'pilot@example.com',
             ]);
-        Http::assertSentCount(1);
+        Http::assertSentCount(2);
         $this->assertDatabaseHas('agents', [
-            'user_id' => $user->id, 'name' => 'TEST_AGENT', 'token' => 'agent-secret-token',
+            'user_id' => $user->id, 'name' => 'TEST_AGENT',
             'account_id' => 'account-123', 'faction' => 'COSMIC', 'email' => 'pilot@example.com',
         ]);
         $this->assertDatabaseMissing('agents', ['token' => 'account-secret-token']);
@@ -82,9 +83,9 @@ class AgentTest extends TestCase
             && $request->url() === 'https://api.spacetraders.io/v2/my/agent'
             && $request->hasHeader('Authorization', 'Bearer existing-agent-secret')
             && $request->data() === []);
-        Http::assertSentCount(1);
+        Http::assertSentCount(2);
         $this->assertDatabaseHas('agents', [
-            'user_id' => $user->id, 'name' => 'TEST_AGENT', 'token' => 'existing-agent-secret',
+            'user_id' => $user->id, 'name' => 'TEST_AGENT',
             'faction' => 'COSMIC', 'account_id' => 'account-123',
         ]);
     }
@@ -104,7 +105,7 @@ class AgentTest extends TestCase
         $this->actingAs($user)->get(route('agents.index'))->assertInertia(fn (Assert $page) => $page
             ->component('Agent/Agents')->has('agents', 1)
             ->where('agents.0.name', 'TEST_AGENT')
-            ->where('agents.0.token_preview', 'agent ... token')
+            ->missing('agents.0.token_preview')
             ->missing('agents.0.token'));
         $this->get(route('agents.create'))->assertInertia(fn (Assert $page) => $page
             ->component('Agent/CreateAgent')->where('errors', []));

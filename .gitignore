@@ -20,3 +20,7 @@ _ide_helper.php
 _ide_helper_models.php
 !.env.example
 /.phpunit.cache
+
+/storage/framework/game-locks/
+/storage/app/mvp-evidence/
+/storage/app/mvp-fixture/

@@ -92,7 +92,7 @@ class UpgradeCompatibilityTest extends TestCase
         $this->actingAs(User::factory()->create())
             ->withHeader('Sec-Fetch-Site', 'cross-site')
             ->head(route('forward', ['method' => $method, 'url' => '/register']))
-            ->assertStatus(405);
+            ->assertSessionHasErrors('method');
 
         Http::assertNothingSent();
     }
@@ -104,11 +104,11 @@ class UpgradeCompatibilityTest extends TestCase
 
     public function test_head_can_forward_a_read_without_a_csrf_token(): void
     {
-        Http::fake(['api.spacetraders.io/v2/my/agent' => Http::response(['data' => []])]);
+        Http::fake(['api.spacetraders.io/v2/factions' => Http::response(['data' => []])]);
 
         $this->actingAs(User::factory()->create())
             ->withHeader('Sec-Fetch-Site', 'cross-site')
-            ->head(route('forward', ['method' => 'get', 'url' => '/my/agent']))
+            ->head(route('forward', ['method' => 'get', 'url' => '/factions']))
             ->assertOk();
 
         Http::assertSentCount(1);

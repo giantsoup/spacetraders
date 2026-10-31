@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Gameplay\GameException;
+use App\Gameplay\RequestBudget;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
@@ -12,6 +14,7 @@ class SpaceTradersClient
 {
     public function request(string $method, string $path, array $data = [], ?string $token = null): Response
     {
+        app(RequestBudget::class)->reserve();
         $request = Http::baseUrl('https://api.spacetraders.io/v2')
             ->acceptJson()
             ->connectTimeout(10)
@@ -22,9 +25,16 @@ class SpaceTradersClient
             $request = $request->withToken($token);
         }
 
-        return $request->send(strtoupper($method), $path, $data === [] ? [] : [
+        $response = $request->send(strtoupper($method), $path, $data === [] ? [] : [
             strtolower($method) === 'get' ? 'query' : 'json' => $data,
         ]);
+        if ($response->status() === 429 || $response->serverError()) {
+            $header = $response->header('Retry-After');
+            $delay = is_numeric($header) ? (int) $header : (strtotime($header ?: '') ?: time()) - time();
+            app(RequestBudget::class)->defer(max($response->status() === 502 ? 180 : 5, min(3600, $delay)) + random_int(0, 2));
+        }
+
+        return $response;
     }
 
     public function register(array $data, string $accountToken): array
@@ -50,19 +60,20 @@ class SpaceTradersClient
     {
         try {
             $response = $this->request($method, $path, $data, $token);
-        } catch (ConnectionException $exception) {
+        } catch (ConnectionException|GameException $exception) {
             throw ValidationException::withMessages([
                 'api' => 'Could not connect to SpaceTraders. Please try again later.',
             ]);
         }
 
         if (! $response->successful()) {
-            $message = $response->json('error.message');
-
             throw ValidationException::withMessages([
-                'api' => is_string($message) && $message !== ''
-                    ? $message
-                    : 'SpaceTraders could not complete the request. Please try again later.',
+                'api' => match ($response->status()) {
+                    401 => 'Token is invalid.',
+                    422 => 'Invalid symbol.',
+                    429 => 'Rate limit reached.',
+                    default => 'SpaceTraders could not complete the request. Please try again later.',
+                },
             ]);
         }
 

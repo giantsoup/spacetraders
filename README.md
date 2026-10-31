@@ -1,6 +1,6 @@
 # SpaceTraders client
 
-A Laravel 13, Inertia 3, Vue 3, and Pinia 4 client for SpaceTraders. The existing app registers agents, imports agents with a token, and lists the current user's saved agents. An authenticated forwarder relays requests to the SpaceTraders API.
+A Laravel 13, Inertia 3, Vue 3, and Pinia 4 client for SpaceTraders. The existing app registers agents, imports agents with a token, and lists the current user's saved agents. The flight deck provides previewed manual commands and a bounded local mining runner.
 
 ## API compatibility
 
@@ -9,30 +9,14 @@ The integration targets [SpaceTraders API v2.3.0](https://docs.spacetraders.io/o
 - New-agent registration sends `POST /v2/register` with an **account token** as the bearer credential. The returned **agent token** is saved locally. The account token is not saved.
 - `symbol` must contain 3 to 14 characters. Symbol and faction inputs are uppercased before registration. Email remains optional and is omitted from the request when empty.
 - Existing-agent import sends `GET /v2/my/agent` with the agent token and saves the response's `startingFaction`. It does not fetch or infer the faction from headquarters.
-- Saved agents are scoped to the signed-in user. Page data contains a masked token preview. Full tokens are hidden from model serialization.
+- Saved agents are scoped to the signed-in user. Tokens are encrypted at rest and absent from page data, including partial previews. Existing plaintext credentials require the explicit maintenance conversion below.
 - Upstream errors appear on the active form. Failed or incomplete responses do not create local agents. Registration requests are not automatically retried because an ambiguous failure may already have created an upstream agent.
 
 SpaceTraders resets invalidate agent tokens. An account token and an agent token have different purposes and are not interchangeable. See the [official authentication definitions](https://docs.spacetraders.io/openapi).
 
-## Forward existing API requests
+## Gameplay command boundary
 
-Use authenticated `POST /forward` with a local CSRF token. The JSON body contains `method`, `url`, optional `data`, and optional `headers.Authorization`:
-
-```json
-{
-    "method": "get",
-    "url": "/my/agent",
-    "headers": {
-        "Authorization": "Bearer YOUR_AGENT_TOKEN"
-    }
-}
-```
-
-`url` is a relative path below `https://api.spacetraders.io/v2`. Put query parameters such as `page` and `limit` in `data`. Supported methods are `get`, `post`, `put`, `patch`, and `delete`. The forwarder preserves the upstream status, response body, pagination metadata, content type, and supported rate-limit headers. Responses are not cached or logged.
-
-`GET /forward` remains available for upstream reads. Use POST for authenticated requests to keep bearer tokens out of URLs. GET and HEAD cannot trigger an upstream write; incoming POST is required for upstream writes. Arbitrary hosts, path traversal, and custom headers other than `Authorization` are rejected.
-
-The agent forms submit fields directly to their local routes. Clients using the previous `{method, url, data}` envelope for those forms must use the flat fields shown in `AgentController` instead.
+The authenticated legacy forwarder now accepts only public `GET /` and `GET /factions` requests, with bounded pagination. Caller credentials and every upstream mutation are rejected. This deliberate compatibility change closes the command-ownership bypass. Gameplay uses owner-scoped saved-agent routes, server credentials, previews and the shared durable executor.
 
 ## Local setup
 

@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use Tests\Support\FakeSpaceTraders;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -19,6 +20,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        if (config('gameplay.fixture_path')) {
+            if (! $this->app->environment(['local', 'testing'])) {
+                throw new \RuntimeException('Synthetic SpaceTraders transport is restricted to local/testing.');
+            }
+            require_once base_path('tests/Support/FakeSpaceTraders.php');
+            FakeSpaceTraders::install(config('gameplay.fixture_path'));
+        }
     }
 }

@@ -35,6 +35,8 @@
         <env name="MAIL_MAILER" value="array" force="true"/>
         <env name="QUEUE_CONNECTION" value="sync" force="true"/>
         <env name="SESSION_DRIVER" value="array" force="true"/>
+        <env name="SPACETRADERS_FIXTURE_PATH" value="" force="true"/>
+        <env name="SPACETRADERS_AUTOMATION_ENABLED" value="false" force="true"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
     </php>
 </phpunit>
