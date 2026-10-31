@@ -2,12 +2,18 @@
 
 namespace App\Http\Controllers;
 
+use App\Gameplay\GameException;
+use App\Gameplay\HostLock;
+use App\Gameplay\ShipCommandExecutor;
 use App\Http\Requests\ProfileUpdateRequest;
+use App\Models\AutomationRun;
+use App\Models\ShipAction;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Redirect;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -51,9 +57,26 @@ class ProfileController extends Controller
 
         $user = $request->user();
 
-        Auth::logout();
-
-        $user->delete();
+        try {
+            app(HostLock::class)->run('imports', function () use ($user) {
+                $agents = $user->agents()->orderBy('id')->get();
+                $delete = function () use ($user, $agents) {
+                    $ids = $agents->modelKeys();
+                    if (ShipAction::whereIn('agent_id', $ids)->whereIn('state', ['pending', 'sending', 'uncertain'])->exists() || AutomationRun::whereIn('agent_id', $ids)->whereNotNull('active_agent_id')->exists()) {
+                        throw new GameException('Stop and reconcile gameplay before deleting this account.');
+                    }
+                    Auth::logout();
+                    $user->delete();
+                };
+                foreach ($agents->reverse() as $agent) {
+                    $next = $delete;
+                    $delete = fn () => app(ShipCommandExecutor::class)->locked($agent, $next);
+                }
+                $delete();
+            });
+        } catch (GameException $e) {
+            throw ValidationException::withMessages(['password' => $e->getMessage()]);
+        }
 
         $request->session()->invalidate();
         $request->session()->regenerateToken();

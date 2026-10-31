@@ -31,7 +31,11 @@ class SpaceTradersClient
         if ($response->status() === 429 || $response->serverError()) {
             $header = $response->header('Retry-After');
             $delay = is_numeric($header) ? (int) $header : (strtotime($header ?: '') ?: time()) - time();
-            app(RequestBudget::class)->defer(max($response->status() === 502 ? 180 : 5, min(3600, $delay)) + random_int(0, 2));
+            try {
+                app(RequestBudget::class)->defer(max($response->status() === 502 ? 180 : 5, min(3600, $delay)) + random_int(0, 2));
+            } catch (GameException) {
+                throw new GameException('Could not save upstream backoff. Reconcile before another write.', uncertain: strtolower($method) !== 'get', retryAfter: 10);
+            }
         }
 
         return $response;

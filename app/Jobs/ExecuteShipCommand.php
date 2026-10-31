@@ -1,0 +1,33 @@
+<?php
+
+namespace App\Jobs;
+
+use App\Gameplay\GameException;
+use App\Gameplay\ShipCommandExecutor;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\DB;
+
+class ExecuteShipCommand implements ShouldQueue
+{
+    use Queueable;
+
+    public int $tries = 1;
+
+    public int $timeout = 120;
+
+    public function __construct(public int $actionId)
+    {
+        $this->onConnection('database')->onQueue('spacetraders');
+    }
+
+    public function handle(ShipCommandExecutor $executor): void
+    {
+        DB::table('game_runtime')->updateOrInsert(['key' => 'worker'], ['value' => json_encode(now()->toIso8601String())]);
+        try {
+            $executor->execute($this->actionId);
+        } catch (GameException) {
+            // Durable pending intent is rediscovered by the scheduler; no unsafe queue retry.
+        }
+    }
+}

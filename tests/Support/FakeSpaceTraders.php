@@ -62,6 +62,7 @@ final class FakeSpaceTraders
             try {
                 $world = json_decode(stream_get_contents($handle), true, flags: JSON_THROW_ON_ERROR);
                 [$body, $status] = self::respond($world, $request);
+                $pause = $request->method() === 'POST' && $world['failure'] === 'pause_after';
                 $timeout = $request->method() === 'POST' && $world['failure'] === 'timeout_after';
                 if ($timeout) {
                     $world['failure'] = null;
@@ -72,6 +73,10 @@ final class FakeSpaceTraders
             } finally {
                 flock($handle, LOCK_UN);
                 fclose($handle);
+            }
+            if ($pause) {
+                file_put_contents($file.'.sent', 'synthetic upstream committed');
+                sleep(20); // Fault injection only: verification kills this worker during the lost-response window.
             }
             if ($timeout) {
                 throw new ConnectionException('Synthetic lost response after upstream mutation.');

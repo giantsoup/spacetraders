@@ -1,6 +1,6 @@
 # SpaceTraders client
 
-A Laravel 13, Inertia 3, Vue 3, and Pinia 4 client for SpaceTraders. The existing app registers agents, imports agents with a token, and lists the current user's saved agents. The flight deck provides previewed manual commands and a bounded local mining runner.
+A Laravel 13, Inertia 3, Vue 3, and Pinia 4 client for SpaceTraders. Register or import an agent, then open its flight deck. The flight deck provides previewed manual commands and a bounded local mining runner.
 
 ## API compatibility
 
@@ -36,9 +36,9 @@ php artisan migrate
 pnpm build
 ```
 
-Copy the environment template and generate a key only for a new environment. For an existing environment, retain its key, database, session cookie, and cache prefixes. The template uses an owned local SQLite database, file sessions/cache, synchronous queues, and log mail. Select and verify your database before migrations. Serve the application through Herd at `http://spacetraders.test`; use `pnpm dev` for Vite HMR. Herd can manage that Vite process.
+Copy the environment template and generate a key only for a new environment. For an existing environment, retain its key, database, session cookie, and cache prefixes. The template uses an owned local SQLite database, file sessions/cache, database queues, and log mail. Select and verify your database before migrations. Serve the application through Herd at `http://spacetraders.test`; use `pnpm dev` for Vite HMR. Herd can manage that Vite process.
 
-The upgrade retains the existing kernels, providers, authentication screens, and database schema. Session serialization stays `php` to preserve existing sessions. Cache object unserialization is disabled. Inertia SSR and request-recording devtools are disabled because this application does not use them. Ziggy loads from Composer's package through Vite, with `@routes` providing route metadata.
+The MVP retains the existing kernels, providers and authentication screens, with additive gameplay and queue migrations. Session serialization stays `php` to preserve existing sessions. Cache object unserialization is disabled. Inertia SSR and request-recording devtools are disabled because this application does not use them. Ziggy loads from Composer's package through Vite, with `@routes` providing route metadata.
 
 The frontend uses Tailwind 4 and requires Safari 16.4+, Chrome 111+, or Firefox 128+. Older browsers are outside this build's support. Inertia uses its own HTTP client; `window.axios` remains available separately.
 
@@ -61,3 +61,53 @@ A focused browser regression is available with `node scripts/verify-modal.mjs`. 
 PHPUnit uses disposable in-memory SQLite and an isolated test key. External API regression tests fake SpaceTraders responses and prevent stray requests. Upgrade regressions exercise normal request-forgery middleware and Sanctum bearer authentication. The suite covers authentication, profiles, registration, import, validation, token handling, owner-only listings, connection failures, malformed responses, forwarding, pagination, and rate limits. It does not prove live authenticated SpaceTraders acceptance.
 
 The approved scope and acceptance requirements are in [the migration plan](docs/laravel13-upgrade-plan.md). The baseline commit `a3ea1d4` remains the rollback point for code and locks. Its old dependencies require PHP 8.2, so it is not a PHP 8.4 fallback. This upgrade requires no schema migration beyond the existing migrations.
+
+## Early-game MVP
+
+Open a saved agent to use the responsive dark flight deck. Synchronize explicitly to observe the reset, credits, fleet, waypoints, markets and shipyards. Polling refreshes saved local state only. Discovery is limited to 10 pages per collection, three fleet systems and 24 market/yard reads per synchronization. Unknown prices stay unknown. If a market or yard needs an observer, approve manual orbit and navigation commands to scout it, then synchronize there.
+
+Manual orbit, dock, navigate, refuel, mine, cargo purchase and cargo sale all use expiring previews. Enter a total maximum cost for purchases/refueling, a minimum sale total for sales, and a protected-credit floor. Limits are checked against fresh quotes before execution. SpaceTraders provides no upstream limit-price parameter, so these are estimates rather than guaranteed execution ceilings. Unsupported hard guarantees block spending. Trade-volume, cargo, credits, transit, cooldown and equipment checks run on the server.
+
+A missing miner opens a separate one-time setup preview. It requires a complete offered configuration, an owned observer at that yard, a verified same-system route and enough post-purchase reserve. It never installs equipment or automatically buys another ship after a lost response. Review delivered configuration before generating a new mining preview.
+
+Mining starts with empty cargo, CRUISE mode and enough observed fuel. Each trip makes one extraction, waits for server timestamps, sells attributable cargo in fresh-quote batches, refuels within the approved budget and records the outcome. One trip is the default. Explicit previews can approve up to ten trips within 60 minutes. Nonpositive observed cash contribution stops repeats. Unknown buyers retain cargo and block the run. Credits, fuel, yields, sold/retained units and cash contribution are recorded separately. Cash contribution is not an economic-profit forecast.
+
+Only one run owns an agent. The selected ship requires Stop before manual takeover. Other ships share the agent lock and the run's reserved-credit floor. Unexpected external credit/cargo changes pause the run. Stop persists even while workers are offline. A reserved/in-flight upstream operation cannot be cancelled. Uncertain actions block all writes until reconciliation; idempotent dock/orbit can settle from observed nav state. Other writes retain fresh fleet/cargo/credit/transaction evidence for operator inspection. Explicit acknowledgement records an unresolved adjustment and ends the run without replaying it.
+
+Account deletion and credential replacement require stopped, settled gameplay. Legacy duplicates remain inert until one record claims the canonical environment/reset/symbol identity. Re-import for the same owner updates that authority; another owner cannot acquire it. A world reset archives the old authority and requires import of current credentials and a new preview. Never auto-register to recover.
+
+### Owned offline fixture
+
+`php scripts/mvp-fixture.php` creates a private disposable SQLite database, fake upstream world and synthetic local login, and verifies a database/key backup restore. It refuses to overwrite an existing `.env` or fixture directory. The resulting `.env` intercepts every SpaceTraders HTTP call locally. Its login metadata stays in the ignored private fixture directory. Do not put live tokens into this environment. PHPUnit explicitly overrides fixture configuration and uses separate disposable databases/locks.
+
+`php scripts/verify-mvp-worker.php` creates its own new file-backed SQLite/world and exercises two actual database workers, duplicate delivery, a complete trip across worker restarts, SIGKILL after a simulated upstream commit, uncertain-response recovery and offline Stop. It prints its owned artifact directory. No live API or shared database is used.
+
+### Local operation
+
+Serve HTTP with Herd at `http://spacetraders.test`. On a new environment install the locked dependencies, choose the owned SQLite database and retain its key. Back up before migrations. Use PHP 8.4.1+ in the 8.4 series, Node 26 and pnpm 12.16.1.
+
+For an existing plaintext database, stop workers and scheduler, enter maintenance mode, back up the SQLite database with SQLite's backup mechanism and save its matching APP_KEY privately as `app-key.txt`. The backup directory must contain `database.sqlite` and `app-key.txt`. Verify restoration on a disposable copy. Apply additive migrations, then run:
+
+```bash
+php artisan down
+php artisan migrate --force
+php artisan spacetraders:encrypt-tokens --backup=/absolute/private/backup-directory
+php artisan up
+```
+
+The resumable converter checks the backup's integrity, matching key and legacy credential rows, encrypts each row atomically and verifies decryption. Existing APP_KEY is required forever for those credentials. A code-only rollback to the plaintext implementation is incompatible. Restore compatible code and data together after stopping and reconciling all work. Never delete action history to clear an uncertain write.
+
+Automation defaults to disabled. After owned-data backup, conversion and local verification, set `SPACETRADERS_AUTOMATION_ENABLED=true` in that environment, then run these in two terminals from this checkout:
+
+```bash
+php artisan queue:work database --queue=spacetraders --sleep=1 --tries=1 --timeout=120
+php artisan schedule:work
+```
+
+The feature jobs always use the `database` connection and `spacetraders` queue. HTTP timeout is 30 seconds, job timeout 120 seconds, queue retry-after 180 seconds. OS file locks serialize shared commands and a persisted global request budget on this Mac; no expiring lock can be stolen while a process still runs. Keep the same database and lock directory for every worker. A scheduler pass dispatches due work every five seconds, bounds redispatch frequency and recovers lost dispatch and stale senders. Closing the browser leaves those processes running. Mac sleep/shutdown pauses them. Restarting reconciles saved state and honors expiry/Stop rather than replaying missed writes.
+
+To stop: click **Stop automation**, wait for the status to settle or reconcile an uncertain action, then press Ctrl-C in the worker and scheduler terminals. Set `SPACETRADERS_AUTOMATION_ENABLED=false` to disable new starts. Pending manual commands still need to settle. `php artisan spacetraders:dispatch-due` runs one recovery/dispatch pass when using finite worker sessions. No launchd service is installed.
+
+### Evidence boundary
+
+The acceptance contract is in [mvp-implementation.md](docs/mvp-implementation.md). Local fake-provider workflows prove application behavior, not live SpaceTraders acceptance, fresh-agent economics or profitability. No live agent creation, credit spending, recurring service, push or deployment is part of this work. General outfitting, contracts, surveys, repairs, intersystem travel and fleet expansion remain outside this MVP. Conservative fuel estimates and missing observations can block an otherwise viable live route; inspect the visible reason and scout manually.

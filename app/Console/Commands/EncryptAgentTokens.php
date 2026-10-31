@@ -19,6 +19,27 @@ class EncryptAgentTokens extends Command
 
             return self::FAILURE;
         }
+        try {
+            if (DB::connection()->getDriverName() !== 'sqlite' || ! hash_equals(trim(file_get_contents($backup.'/app-key.txt')), config('app.key'))) {
+                throw new \RuntimeException('Backup/key do not match this SQLite application.');
+            }
+            $restored = new \PDO('sqlite:'.$backup.'/database.sqlite');
+            if ($restored->query('PRAGMA integrity_check')->fetchColumn() !== 'ok') {
+                throw new \RuntimeException('Backup integrity check failed.');
+            }
+            $statement = $restored->prepare('select token from agents where id = ?');
+            foreach (DB::table('agents')->where('token_version', 0)->get() as $row) {
+                $statement->execute([$row->id]);
+                $saved = $statement->fetchColumn();
+                if (! is_string($saved) || ! hash_equals($row->token, $saved)) {
+                    throw new \RuntimeException('Backup lacks matching legacy credentials.');
+                }
+            }
+        } catch (\Throwable) {
+            $this->error('Backup restore verification failed. No credentials were converted.');
+
+            return self::FAILURE;
+        }
         foreach (DB::table('agents')->where('token_version', 0)->orderBy('id')->get() as $row) {
             DB::transaction(function () use ($row) {
                 $encrypted = encrypt($row->token, false);

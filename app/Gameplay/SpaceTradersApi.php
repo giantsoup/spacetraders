@@ -116,7 +116,12 @@ class SpaceTradersApi
             'fuel.current' => 'required|integer|min:0', 'fuel.capacity' => 'required|integer|min:0',
             'cargo.capacity' => 'required|integer|min:0', 'cargo.units' => 'required|integer|min:0', 'cargo.inventory' => 'present|array',
             'cargo.inventory.*.symbol' => 'required|string|max:80', 'cargo.inventory.*.units' => 'required|integer|min:1',
-            'mounts' => 'present|array', 'modules' => 'present|array', 'crew.current' => 'required|integer|min:0', 'crew.required' => 'required|integer|min:0',
+            'mounts' => 'present|array|max:100', 'modules' => 'present|array|max:100',
+            'mounts.*.symbol' => 'required|string|max:80', 'mounts.*.requirements' => 'present|array', 'mounts.*.requirements.*' => 'integer|min:0',
+            'mounts.*.deposits' => 'sometimes|array|max:100', 'mounts.*.deposits.*' => 'string|max:80',
+            'modules.*.symbol' => 'required|string|max:80', 'modules.*.capacity' => 'sometimes|integer|min:0', 'modules.*.requirements' => 'present|array', 'modules.*.requirements.*' => 'integer|min:0', 'crew.current' => 'required|integer|min:0', 'crew.required' => 'required|integer|min:0',
+            'frame.moduleSlots' => 'required|integer|min:0', 'frame.mountingPoints' => 'required|integer|min:0',
+            'frame.integrity' => 'required|numeric|between:0,1', 'engine.integrity' => 'required|numeric|between:0,1', 'reactor.integrity' => 'required|numeric|between:0,1',
             'frame.condition' => 'required|numeric|between:0,1', 'engine.condition' => 'required|numeric|between:0,1', 'reactor.condition' => 'required|numeric|between:0,1',
             'reactor.powerOutput' => 'required|integer|min:0', 'cooldown.remainingSeconds' => 'required|integer|min:0',
         ]);
@@ -167,6 +172,9 @@ class SpaceTradersApi
             }
             throw new GameException('SpaceTraders rejected the request, HTTP '.$response->status().'.', is_int($code) && $code > 0 ? $code : null,
                 $method !== 'get' && ($response->serverError() || $response->status() === 429), max(5, (int) $response->header('Retry-After')));
+        }
+        if (strlen($response->body()) > 2 * 1024 * 1024) {
+            throw new GameException('SpaceTraders response exceeds the local state limit.', uncertain: $method !== 'get');
         }
         $data = $response->json();
         if (! is_array($data)) {

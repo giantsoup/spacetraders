@@ -17,17 +17,17 @@ const props = defineProps(['agents']);
 
                 <div class="agents-wrapper overflow-hidden shadow-xs sm:rounded-lg">
 
-                    <div v-for="agent in agents" :key="agent.id"
+                    <Link :href="route('agents.show', agent.id)" v-for="agent in agents" :key="agent.id"
                          class="agents mt-6 p-6 bg-white border-b border-gray-400 rounded-md hover:bg-gray-200 hover:cursor-pointer">
                         <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
                             <span class="text-black px-4 break-words">{{ agent.name }}</span>
                             <span class="text-black px-4 break-words">{{ agent.account_id }}</span>
                             <span class="text-black px-4 break-words">
-                                {{ agent.token_preview }}
+                                {{ agent.connection_state || 'Open flight deck' }}
                             </span>
                             <span class="text-black px-4 break-words">{{ agent.email }}</span>
                         </div>
-                    </div>
+                    </Link>
 
                     <div class="mt-10">
                         <Link :href="route('agents.create')">
