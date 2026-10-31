@@ -9,7 +9,9 @@ class GameplayRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->route('agent')->user_id === $this->user()->id;
+        abort_unless($this->route('agent')->user_id === $this->user()->id, 404);
+
+        return true;
     }
 
     public function rules(): array

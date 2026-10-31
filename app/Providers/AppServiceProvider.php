@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use Illuminate\Database\Events\ConnectionEstablished;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Tests\Support\FakeSpaceTraders;
 
@@ -20,6 +22,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Event::listen(ConnectionEstablished::class, function (ConnectionEstablished $event) {
+            if ($event->connection->getDriverName() === 'sqlite') {
+                $event->connection->statement('PRAGMA fullfsync = ON');
+            }
+        });
+
         if (config('gameplay.fixture_path')) {
             if (! $this->app->environment(['local', 'testing'])) {
                 throw new \RuntimeException('Synthetic SpaceTraders transport is restricted to local/testing.');

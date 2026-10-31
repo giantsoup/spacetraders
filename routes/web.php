@@ -43,14 +43,16 @@ Route::middleware('auth')->group(function () {
     Route::resource('/agents', AgentController::class)->only(['index', 'create', 'store']);
 
     Route::get('/agents/{agent}', [AgentDashboardController::class, 'show'])->name('agents.show');
-    Route::post('/agents/{agent}/sync', [AgentDashboardController::class, 'sync'])->name('game.sync');
-    Route::post('/agents/{agent}/commands/preview', [AgentCommandController::class, 'preview'])->name('game.commands.preview');
-    Route::post('/agents/{agent}/commands/{action}/approve', [AgentCommandController::class, 'approve'])->name('game.commands.approve');
-    Route::post('/agents/{agent}/commands/{action}/reconcile', [AgentCommandController::class, 'reconcile'])->name('game.commands.reconcile');
-    Route::post('/agents/{agent}/commands/{action}/acknowledge', [AgentCommandController::class, 'acknowledge'])->name('game.commands.acknowledge');
-    Route::post('/agents/{agent}/runs/preview', [AutomationRunController::class, 'preview'])->name('game.runs.preview');
-    Route::post('/agents/{agent}/runs/{run}/start', [AutomationRunController::class, 'start'])->name('game.runs.start');
-    Route::post('/agents/{agent}/runs/{run}/stop', [AutomationRunController::class, 'stop'])->name('game.runs.stop');
+    Route::middleware('throttle:60,1')->group(function () {
+        Route::post('/agents/{agent}/sync', [AgentDashboardController::class, 'sync'])->name('game.sync');
+        Route::post('/agents/{agent}/commands/preview', [AgentCommandController::class, 'preview'])->name('game.commands.preview');
+        Route::post('/agents/{agent}/commands/{action}/approve', [AgentCommandController::class, 'approve'])->name('game.commands.approve');
+        Route::post('/agents/{agent}/commands/{action}/reconcile', [AgentCommandController::class, 'reconcile'])->name('game.commands.reconcile');
+        Route::post('/agents/{agent}/commands/{action}/acknowledge', [AgentCommandController::class, 'acknowledge'])->name('game.commands.acknowledge');
+        Route::post('/agents/{agent}/runs/preview', [AutomationRunController::class, 'preview'])->name('game.runs.preview');
+        Route::post('/agents/{agent}/runs/{run}/start', [AutomationRunController::class, 'start'])->name('game.runs.start');
+        Route::post('/agents/{agent}/runs/{run}/stop', [AutomationRunController::class, 'stop'])->name('game.runs.stop');
+    });
 
 });
 

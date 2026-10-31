@@ -129,7 +129,7 @@ class GameplayTest extends TestCase
         $this->actingAs(User::factory()->create());
         $this->get(route('agents.show', $this->agent))->assertNotFound();
         foreach ($routes as [$name, $params]) {
-            $this->postJson(route($name, ['agent' => $this->agent->id] + $params))->assertForbidden();
+            $this->postJson(route($name, ['agent' => $this->agent->id] + $params))->assertNotFound();
         }
         auth()->forgetGuards();
         foreach ($routes as [$name, $params]) {
@@ -829,5 +829,40 @@ class GameplayTest extends TestCase
         $this->assertStringContainsString('Cargo response', $action->fresh()->message);
         app(ShipCommandExecutor::class)->execute($action->id);
         $this->assertCount(2, $this->world()['writes']);
+    }
+
+    public function test_discovery_prioritizes_owned_locations_without_increasing_the_request_cap(): void
+    {
+        $this->world(function (&$world) {
+            $owned = $world['waypoints'][0];
+            $world['waypoints'] = [];
+            for ($i = 0; $i < 30; $i++) {
+                $world['waypoints'][] = ['symbol' => 'X1-TEST-M'.$i, 'systemSymbol' => 'X1-TEST', 'type' => 'PLANET', 'x' => $i, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]];
+            }
+            $world['waypoints'][] = $owned;
+            $world['calls'] = [];
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $market = GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-ROCK')->firstOrFail();
+        $this->assertNotEmpty($market->data['tradeGoods']);
+        $observations = array_filter($this->world()['calls'], fn ($call) => str_ends_with($call['path'], '/market') || str_ends_with($call['path'], '/shipyard'));
+        $this->assertCount(config('gameplay.max_observations'), $observations);
+    }
+
+    public function test_sqlite_connections_use_full_durability_and_mac_sync_support(): void
+    {
+        $this->assertSame(2, (int) DB::selectOne('PRAGMA synchronous')->synchronous);
+        $this->assertSame(1, (int) DB::selectOne('PRAGMA fullfsync')->fullfsync);
+    }
+
+    public function test_foreign_and_absent_agents_have_the_same_scoped_binding_response(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $foreign = $this->postJson(route('game.sync', $this->agent));
+        $absent = $this->postJson(route('game.sync', ['agent' => $this->agent->id + 1000]));
+        $foreign->assertNotFound();
+        $absent->assertNotFound();
+        $this->assertSame($foreign->json(), $absent->json());
+        $this->assertSame($foreign->headers->get('X-RateLimit-Limit'), $absent->headers->get('X-RateLimit-Limit'));
     }
 }

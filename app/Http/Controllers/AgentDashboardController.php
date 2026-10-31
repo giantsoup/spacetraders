@@ -32,6 +32,7 @@ class AgentDashboardController extends Controller
             'runs' => AutomationRun::where('agent_id', $agent->id)->latest('id')->limit(10)->get(),
             'health' => collect(['scheduler', 'worker'])->mapWithKeys(fn ($key) => [$key => json_decode(DB::table('game_runtime')->where('key', $key)->value('value') ?? 'null', true)]),
             'automationEnabled' => (bool) config('gameplay.enabled'),
+            'synthetic' => (bool) config('gameplay.fixture_path'),
         ]);
     }
 

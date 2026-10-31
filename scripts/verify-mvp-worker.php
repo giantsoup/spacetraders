@@ -59,6 +59,8 @@ function workers(string $root, array $env, string $directory): void
         check(proc_close($child) === 0, 'real database worker exited successfully');
     }
 }
+check((int) DB::selectOne('PRAGMA synchronous')->synchronous === 2, 'file-backed SQLite commits use FULL synchronization');
+check((int) DB::selectOne('PRAGMA fullfsync')->fullfsync === 1, 'SQLite enables macOS fullfsync support');
 $executor = app(ShipCommandExecutor::class);
 $action = $executor->preview($agent, 'LOCAL-1', 'orbit', [], (string) Str::uuid());
 $executor->approve($agent, $action);

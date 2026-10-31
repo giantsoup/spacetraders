@@ -189,9 +189,10 @@ try {
         assert.deepEqual(diagnostics.pageErrors, []);
     });
 } catch (error) {
-    results.push({ scenario: 'browser journey', status: 'failed', message: error.message });
+    const message = String(error.message).replaceAll(auth.password, '[redacted]');
+    results.push({ scenario: 'browser journey', status: 'failed', message });
     await shot('failed.png', true).catch(() => {});
-    throw error;
+    throw new Error(message);
 } finally {
     await fs.writeFile(path.join(output, 'results.json'), JSON.stringify({ results, diagnostics, origin, engine: await browser.version(), fakeProvider: true }, null, 2));
     await browser.close();

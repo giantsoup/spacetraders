@@ -65,7 +65,10 @@ class AgentSynchronizer
             }
         }
         $observations = 0;
-        foreach (GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->get() as $waypoint) {
+        $locations = array_column(array_column($fleet, 'nav'), 'waypointSymbol');
+        $points = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->get()
+            ->sortByDesc(fn ($point) => in_array($point->symbol, $locations, true));
+        foreach ($points as $waypoint) {
             foreach (['MARKETPLACE' => 'market', 'SHIPYARD' => 'shipyard'] as $trait => $kind) {
                 if (in_array($trait, array_column($waypoint->data['traits'], 'symbol'), true) && $observations++ < config('gameplay.max_observations')) {
                     $this->observe($agent, $kind, $waypoint->symbol, $this->api->$kind($agent, $waypoint->symbol));

@@ -43,7 +43,7 @@ return [
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
             'busy_timeout' => 5000,
             'journal_mode' => 'WAL',
-            'synchronous' => 'NORMAL',
+            'synchronous' => 'FULL',
         ],
 
         'mysql' => [
