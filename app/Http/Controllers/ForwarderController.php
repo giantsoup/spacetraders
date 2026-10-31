@@ -20,7 +20,7 @@ class ForwarderController extends Controller
             'headers.Authorization' => ['sometimes', 'string', 'regex:/\ABearer [A-Za-z0-9\-._~+\/]+=*\z/'],
         ]);
 
-        abort_if($request->isMethod('get') && $data['method'] !== 'get', 405);
+        abort_if(! $request->isMethod('post') && $data['method'] !== 'get', 405);
 
         $authorization = $data['headers']['Authorization'] ?? null;
 

@@ -30,7 +30,7 @@ Use authenticated `POST /forward` with a local CSRF token. The JSON body contain
 
 `url` is a relative path below `https://api.spacetraders.io/v2`. Put query parameters such as `page` and `limit` in `data`. Supported methods are `get`, `post`, `put`, `patch`, and `delete`. The forwarder preserves the upstream status, response body, pagination metadata, content type, and supported rate-limit headers. Responses are not cached or logged.
 
-`GET /forward` remains available for upstream reads. Use POST for authenticated requests to keep bearer tokens out of URLs. GET cannot trigger an upstream write. Arbitrary hosts, path traversal, and custom headers other than `Authorization` are rejected.
+`GET /forward` remains available for upstream reads. Use POST for authenticated requests to keep bearer tokens out of URLs. GET and HEAD cannot trigger an upstream write; incoming POST is required for upstream writes. Arbitrary hosts, path traversal, and custom headers other than `Authorization` are rejected.
 
 The agent forms submit fields directly to their local routes. Clients using the previous `{method, url, data}` envelope for those forms must use the flat fields shown in `AgentController` instead.
 

@@ -84,6 +84,37 @@ class UpgradeCompatibilityTest extends TestCase
         $this->assertSame('Accepted', $user->fresh()->name);
     }
 
+    #[DataProvider('upstreamWrites')]
+    public function test_head_cannot_trigger_an_upstream_write_without_csrf(string $method): void
+    {
+        Http::fake(['*' => Http::response(['data' => []])]);
+
+        $this->actingAs(User::factory()->create())
+            ->withHeader('Sec-Fetch-Site', 'cross-site')
+            ->head(route('forward', ['method' => $method, 'url' => '/register']))
+            ->assertStatus(405);
+
+        Http::assertNothingSent();
+    }
+
+    public static function upstreamWrites(): array
+    {
+        return [['post'], ['put'], ['patch'], ['delete']];
+    }
+
+    public function test_head_can_forward_a_read_without_a_csrf_token(): void
+    {
+        Http::fake(['api.spacetraders.io/v2/my/agent' => Http::response(['data' => []])]);
+
+        $this->actingAs(User::factory()->create())
+            ->withHeader('Sec-Fetch-Site', 'cross-site')
+            ->head(route('forward', ['method' => 'get', 'url' => '/my/agent']))
+            ->assertOk();
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request) => $request->method() === 'GET');
+    }
+
     public function test_sanctum_bearer_authentication_preserves_safe_user_serialization(): void
     {
         $user = User::factory()->create();
