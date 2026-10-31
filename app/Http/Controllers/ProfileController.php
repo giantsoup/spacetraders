@@ -62,7 +62,7 @@ class ProfileController extends Controller
                 $agents = $user->agents()->orderBy('id')->get();
                 $delete = function () use ($user, $agents) {
                     $ids = $agents->modelKeys();
-                    if (ShipAction::whereIn('agent_id', $ids)->whereIn('state', ['pending', 'sending', 'uncertain'])->exists() || AutomationRun::whereIn('agent_id', $ids)->whereNotNull('active_agent_id')->exists()) {
+                    if (ShipAction::whereIn('agent_id', $ids)->where(fn ($q) => $q->whereIn('state', ['pending', 'sending', 'uncertain'])->orWhere('review_required', true))->exists() || AutomationRun::whereIn('agent_id', $ids)->whereNotNull('active_agent_id')->exists()) {
                         throw new GameException('Stop and reconcile gameplay before deleting this account.');
                     }
                     Auth::logout();

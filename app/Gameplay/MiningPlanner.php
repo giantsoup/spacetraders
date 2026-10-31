@@ -97,8 +97,8 @@ class MiningPlanner
 
             return MiningStep::wait($arrival->greaterThan($now) ? $arrival : $now->addSeconds(5));
         }
-        if ($totals['no_progress'] >= 2) {
-            return MiningStep::blocked('Repeated extractions produced no cargo.');
+        if ($totals['no_progress'] >= 1) {
+            return MiningStep::blocked('Extraction produced no usable cargo. No further attempts are approved.');
         }
         $inventory = self::inventory($ship);
         $expected = $plan['initial_inventory'];

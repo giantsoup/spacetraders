@@ -2,6 +2,8 @@
 
 namespace Tests\Support;
 
+use App\Gameplay\MiningRunner;
+use App\Models\AutomationRun;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -62,6 +64,9 @@ final class FakeSpaceTraders
             try {
                 $world = json_decode(stream_get_contents($handle), true, flags: JSON_THROW_ON_ERROR);
                 [$body, $status] = self::respond($world, $request);
+                if ($request->method() === 'POST' && isset($world['write_stop_run_id'])) {
+                    app(MiningRunner::class)->stop(AutomationRun::findOrFail($world['write_stop_run_id']));
+                }
                 $pause = $request->method() === 'POST' && $world['failure'] === 'pause_after';
                 $timeout = $request->method() === 'POST' && $world['failure'] === 'timeout_after';
                 if ($timeout) {
@@ -94,6 +99,11 @@ final class FakeSpaceTraders
         if ($request->method() === 'GET') {
             if ($path === '/') {
                 return [['version' => 'v2.3.0', 'resetDate' => $world['reset']], 200];
+            }
+            if ($path !== '/' && str_starts_with($world['failure'] ?? '', 'read_')) {
+                $status = (int) substr($world['failure'], 5);
+
+                return [['error' => ['code' => $status]], $status];
             }
             if ($path === '/my/agent') {
                 return [['data' => ['symbol' => $world['symbol'], 'credits' => $world['credits'], 'accountId' => 'synthetic-account', 'startingFaction' => 'COSMIC']], 200];
@@ -170,6 +180,9 @@ final class FakeSpaceTraders
                 $yield = $world['yields'][count(array_filter($world['writes'], fn ($w) => str_ends_with($w['path'], '/extract'))) % count($world['yields'])];
                 self::cargo($ship, $yield['symbol'], $yield['units']);
                 $ship['cooldown'] = ['remainingSeconds' => $world['cooldown_seconds'], 'expiration' => now()->addSeconds($world['cooldown_seconds'])->toIso8601String()];
+                if ($world['failure'] === 'mismatched_yield') {
+                    $yield = ['symbol' => 'IRON_ORE', 'units' => 999];
+                }
                 if ($world['failure'] === 'malformed') {
                     return [['data' => ['unexpected' => true]], 200];
                 }

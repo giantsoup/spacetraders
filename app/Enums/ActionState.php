@@ -10,4 +10,5 @@ enum ActionState: string
     case Confirmed = 'confirmed';
     case Rejected = 'rejected';
     case Uncertain = 'uncertain';
+    case Acknowledged = 'acknowledged';
 }

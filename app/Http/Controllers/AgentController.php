@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\GameException;
 use App\Gameplay\HostLock;
+use App\Gameplay\ShipCommandExecutor;
 use App\Gameplay\SpaceTradersApi;
 use App\Models\Agent;
 use App\Models\AutomationRun;
@@ -90,10 +91,12 @@ class AgentController extends Controller
                     'canonical_identity' => $identity, 'connection_state' => 'unsynchronized',
                 ];
                 if ($existing) {
-                    if (ShipAction::where('agent_id', $existing->id)->whereIn('state', ['pending', 'sending', 'uncertain'])->exists() || AutomationRun::where('agent_id', $existing->id)->whereNotNull('active_agent_id')->exists()) {
-                        throw new GameException('Stop and reconcile this agent before replacing credentials.');
-                    }
-                    $existing->update($attributes);
+                    app(ShipCommandExecutor::class)->locked($existing, function () use ($existing, $attributes) {
+                        if (ShipAction::where('agent_id', $existing->id)->whereIn('state', ['pending', 'sending'])->exists() || AutomationRun::where('agent_id', $existing->id)->whereNotNull('active_agent_id')->whereNull('stop_requested_at')->exists()) {
+                            throw new GameException('Stop automation and wait for pending or sending work before replacing credentials. Unresolved outcomes remain blocked.');
+                        }
+                        $existing->update($attributes);
+                    });
                 } else {
                     $request->user()->agents()->create($attributes);
                 }

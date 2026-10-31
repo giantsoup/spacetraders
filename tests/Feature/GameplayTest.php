@@ -20,8 +20,10 @@ use App\Models\User;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\FakeSpaceTraders;
 use Tests\TestCase;
 
@@ -399,7 +401,7 @@ class GameplayTest extends TestCase
 
     public function test_host_lock_prevents_competing_command_paths(): void
     {
-        app(HostLock::class)->run('agent-'.$this->agent->canonical_identity, function () {
+        app(HostLock::class)->run('agent-'.$this->agent->id, function () {
             try {
                 $this->preview('orbit');
                 $this->fail('Competing lock acquired');
@@ -425,7 +427,8 @@ class GameplayTest extends TestCase
         $this->assertStringContainsString('power', $planner->capability($ship));
         $ship['cargo']['capacity'] = 0;
         $this->assertStringContainsString('cargo', $planner->capability($ship));
-        GameObservation::where('kind', 'market')->update(['observed_at' => now()->subHour()]);
+        GameObservation::where('kind', 'market')->delete();
+        $this->world(fn (&$w) => $w['goods'] = []);
         $this->expectException(GameException::class);
         $this->miningRun();
     }
@@ -520,9 +523,9 @@ class GameplayTest extends TestCase
             $run->update(['next_action_at' => now()]);
             $this->advance($run);
         }
-        $this->assertSame(RunState::Completed, $run->state);
+        $this->assertSame(RunState::Blocked, $run->state);
         $this->assertSame(1, $run->totals['attempts']);
-        $this->assertSame(0, $run->totals['cash_contribution']);
+        $this->assertSame(0, $run->totals['sale_proceeds']);
         $this->world(fn (&$w) => $w['ships'][0]['engine']['condition'] = 0.2);
         $this->expectException(GameException::class);
         $this->miningRun();
@@ -606,7 +609,8 @@ class GameplayTest extends TestCase
         }
         $this->assertTrue($found);
         $this->assertSame(RunState::Blocked, $run->fresh()->state);
-        $this->assertSame(ActionState::Uncertain, $action->fresh()->state);
+        $this->assertSame(ActionState::Confirmed, $action->fresh()->state);
+        $this->assertTrue($action->fresh()->review_required);
         $this->assertSame(15, $run->fresh()->totals['fuel_cost']);
         $this->assertTrue($action->fresh()->outcome['price_discrepancy']);
         $count = count($this->world()['writes']);
@@ -621,5 +625,209 @@ class GameplayTest extends TestCase
         $this->delete(route('profile.destroy'), ['password' => 'password'])->assertSessionHasErrors('password');
         $this->assertDatabaseHas('agents', ['id' => $this->agent->id]);
         $this->assertDatabaseHas('ship_actions', ['id' => $action->id, 'state' => 'pending']);
+    }
+
+    public function test_other_ship_manual_spend_continues_run_and_is_accounted_separately(): void
+    {
+        $this->world(fn (&$w) => $w['ships'][] = FakeSpaceTraders::ship('LOCAL-2'));
+        app(AgentSynchronizer::class)->sync($this->agent);
+        // A preview may predate Start but its eventual confirmation must still be counted.
+        $manual = $this->preview('buy', ['symbol' => 'IRON_ORE', 'units' => 2, 'maxTotal' => 60], 'LOCAL-2');
+        $run = $this->miningRun();
+        $this->advance($run);
+        app(ShipCommandExecutor::class)->approve($this->agent->fresh(), $manual);
+        app(ShipCommandExecutor::class)->execute($manual->id);
+        for ($i = 0; $i < 15 && $run->active_agent_id; $i++) {
+            $run->update(['next_action_at' => now()]);
+            $this->advance($run);
+        }
+        $this->assertSame(RunState::Completed, $run->state, $run->blocked_reason ?? '');
+        $this->assertSame(-60, $run->totals['other_credit_delta']);
+        $this->assertSame(240, $run->totals['credit_delta']);
+        $this->assertSame(180, $run->totals['agent_balance_delta']);
+        $this->assertSame(180, $this->agent->fresh()->credits - 100000);
+    }
+
+    public function test_budget_contention_before_transport_retains_pending_without_blocking_run(): void
+    {
+        $run = $this->miningRun();
+        app(MiningRunner::class)->advance($run->id);
+        $action = ShipAction::where('state', 'pending')->firstOrFail();
+        $held = null;
+        Http::globalRequestMiddleware(function ($request) use (&$held) {
+            if ($request->getMethod() === 'GET' && str_ends_with((string) $request->getUri(), '/my/ships/LOCAL-1') && ! $held) {
+                $held = fopen(config('gameplay.lock_path').'/'.hash('sha256', 'upstream-budget').'.lock', 'c');
+                flock($held, LOCK_EX | LOCK_NB);
+            }
+
+            return $request;
+        });
+        try {
+            app(ShipCommandExecutor::class)->execute($action->id);
+            $this->assertSame(ActionState::Pending, $action->fresh()->state);
+            $this->assertNull($action->fresh()->sent_at);
+            $this->assertSame(RunState::Running, $run->fresh()->state);
+            $this->assertCount(0, $this->world()['writes']);
+        } finally {
+            flock($held, LOCK_UN);
+            fclose($held);
+        }
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertSame(ActionState::Confirmed, $action->fresh()->state);
+        $this->assertCount(1, $this->world()['writes']);
+    }
+
+    public function test_preview_error_shows_numeric_limits_and_start_refreshes_expiring_quotes(): void
+    {
+        $this->postJson(route('game.runs.preview', $this->agent), [
+            'ship_symbol' => 'LOCAL-1', 'site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-ROCK',
+            'reserve' => 1, 'max_spend' => 1, 'max_loss' => 1, 'minutes' => 60, 'cycles' => 1,
+        ])->assertUnprocessable()->assertJsonPath('message', 'This route requires a reserve of at least 1000 CR and a fuel spending ceiling of at least 10 CR. Their sum must fit the available 100000 CR.');
+        $runner = app(MiningRunner::class);
+        $run = $runner->preview($this->agent, 'LOCAL-1', ['site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-ROCK', 'reserve' => 2000, 'max_spend' => 100, 'max_loss' => 100, 'minutes' => 60, 'cycles' => 1]);
+        GameObservation::where('kind', 'market')->update(['observed_at' => now()->subSeconds(200)]);
+        $runner->start($this->agent, $run);
+        $this->assertSame(RunState::Running, $run->fresh()->state);
+        $this->assertTrue(GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-ROCK')->first()->observed_at->greaterThan(now()->subSeconds(2)));
+    }
+
+    public function test_confirmed_price_discrepancy_review_preserves_truthful_history(): void
+    {
+        $this->world(fn (&$w) => $w['ships'][0]['fuel']['current'] = 90);
+        $action = $this->preview('refuel', ['units' => 10, 'maxTotal' => 5]);
+        app(ShipCommandExecutor::class)->approve($this->agent, $action);
+        $this->world(fn (&$w) => $w['failure'] = 'price_jump');
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertSame(ActionState::Confirmed, $action->fresh()->state);
+        $this->assertTrue($action->fresh()->review_required);
+        $this->postJson(route('game.commands.preview', $this->agent), ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'orbit', 'arguments' => []])->assertUnprocessable();
+        app(ShipCommandExecutor::class)->reconcile($this->agent->fresh(), $action);
+        $this->postJson(route('game.commands.acknowledge', ['agent' => $this->agent->id, 'action' => $action->id]), ['acknowledge' => true, 'note' => 'Reviewed actual fuel and balance change'])->assertAccepted()->assertJsonPath('state', 'confirmed');
+        $this->assertFalse($action->fresh()->review_required);
+        $this->assertSame(-15, $action->fresh()->outcome['credit_delta']);
+        $this->assertFalse($action->fresh()->outcome['unresolved_adjustment']);
+    }
+
+    public function test_first_synchronization_keeps_the_same_lock_before_and_after_identity_claim(): void
+    {
+        $this->agent->update(['canonical_identity' => null, 'reset_id' => null]);
+        app(ShipCommandExecutor::class)->locked($this->agent, function () {
+            app(AgentSynchronizer::class)->guardReset($this->agent);
+            $this->expectException(GameException::class);
+            app(ShipCommandExecutor::class)->locked($this->agent->fresh(), fn () => $this->fail('Canonicalization changed lock ownership'));
+        });
+    }
+
+    public function test_invalid_cooldown_is_rejected_at_boundary_and_blocks_active_run(): void
+    {
+        $run = $this->miningRun();
+        $this->world(fn (&$w) => $w['ships'][0]['cooldown']['expiration'] = 'not-a-date');
+        app(MiningRunner::class)->advance($run->id);
+        $this->assertSame(RunState::Blocked, $run->fresh()->state);
+        $this->assertStringContainsString('incompatible', $run->fresh()->blocked_reason);
+        $this->assertCount(0, $this->world()['writes']);
+    }
+
+    public function test_stop_during_transit_keeps_arrival_state_and_starts_no_further_mutation(): void
+    {
+        $this->world(function (&$w) {
+            $w['ships'][] = FakeSpaceTraders::ship('LOCAL-2', 'X1-TEST-PORT');
+            $w['travel_seconds'] = 300;
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $run = $this->miningRun(['market' => 'X1-TEST-PORT']);
+        $this->advance($run);
+        $this->advance($run);
+        $this->advance($run);
+        $count = count($this->world()['writes']);
+        $this->assertSame('IN_TRANSIT', Ship::where('symbol', 'LOCAL-1')->first()->snapshot['nav']['status']);
+        $this->postJson(route('game.runs.stop', ['agent' => $this->agent->id, 'run' => $run->id]))->assertAccepted();
+        $this->advance($run);
+        $this->assertSame(RunState::Stopped, $run->state);
+        $this->assertCount($count, $this->world()['writes']);
+        $this->expectException(GameException::class);
+        $this->preview('orbit');
+    }
+
+    public function test_world_reset_stops_an_active_run_before_another_write(): void
+    {
+        $run = $this->miningRun();
+        $this->world(fn (&$w) => $w['reset'] = '2026-11-01');
+        $this->advance($run);
+        $this->assertSame(RunState::Blocked, $run->state);
+        $this->assertNotNull($run->stop_requested_at);
+        $this->assertCount(0, $this->world()['writes']);
+    }
+
+    public function test_form_numeric_strings_become_integer_trade_payloads(): void
+    {
+        $id = $this->postJson(route('game.commands.preview', $this->agent), ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'buy', 'arguments' => ['units' => '1', 'symbol' => 'IRON_ORE', 'maxTotal' => '30']])->assertAccepted()->json('id');
+        $action = ShipAction::findOrFail($id);
+        app(ShipCommandExecutor::class)->approve($this->agent, $action);
+        app(ShipCommandExecutor::class)->execute($id);
+        $this->assertIsInt($this->world()['writes'][0]['arguments']['units']);
+        $this->assertSame(ActionState::Confirmed, $action->fresh()->state);
+    }
+
+    #[DataProvider('readFailureStatuses')]
+    public function test_read_side_errors_pause_without_mutation_or_automatic_replay(int $status): void
+    {
+        $run = $this->miningRun();
+        $this->world(fn (&$w) => $w['failure'] = 'read_'.$status);
+        app(MiningRunner::class)->advance($run->id);
+        $this->assertSame(RunState::Blocked, $run->fresh()->state);
+        $this->assertCount(0, $this->world()['writes']);
+        $this->assertGreaterThan(microtime(true), (float) json_decode(DB::table('game_runtime')->where('key', 'request_at')->value('value')));
+        $count = count($this->world()['calls']);
+        app(MiningRunner::class)->advance($run->id);
+        $this->assertCount($count, $this->world()['calls']);
+    }
+
+    public static function readFailureStatuses(): array
+    {
+        return [[429], [503]];
+    }
+
+    public function test_stop_arriving_while_an_upstream_action_settles_allows_no_next_action(): void
+    {
+        $run = $this->miningRun();
+        app(MiningRunner::class)->advance($run->id);
+        $action = ShipAction::where('state', 'pending')->firstOrFail();
+        $this->world(fn (&$w) => $w['write_stop_run_id'] = $run->id);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertSame(ActionState::Confirmed, $action->fresh()->state);
+        $this->assertNotNull($run->fresh()->stop_requested_at);
+        app(MiningRunner::class)->advance($run->id);
+        $this->assertSame(RunState::Stopped, $run->fresh()->state);
+        $this->assertCount(1, $this->world()['writes']);
+    }
+
+    public function test_credential_repair_preserves_uncertainty_and_does_not_release_commands(): void
+    {
+        $action = $this->preview('orbit');
+        app(ShipCommandExecutor::class)->approve($this->agent, $action);
+        $this->world(fn (&$w) => $w['failure'] = 'timeout_after');
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertSame(ActionState::Uncertain, $action->fresh()->state);
+        $this->post(route('agents.storeExisting'), ['token' => 'repaired-synthetic-token'])->assertSessionHasNoErrors();
+        $this->assertSame('repaired-synthetic-token', $this->agent->fresh()->credential());
+        $this->assertSame(ActionState::Uncertain, $action->fresh()->state);
+        $this->postJson(route('game.commands.preview', $this->agent), ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'orbit', 'arguments' => []])->assertUnprocessable();
+        app(ShipCommandExecutor::class)->reconcile($this->agent->fresh(), $action);
+        $this->assertSame(ActionState::Confirmed, $action->fresh()->state);
+        $this->assertCount(1, $this->world()['writes']);
+    }
+
+    public function test_schema_valid_but_inconsistent_extraction_becomes_uncertain_without_replay(): void
+    {
+        $this->command('orbit');
+        $action = $this->preview('mine');
+        app(ShipCommandExecutor::class)->approve($this->agent, $action);
+        $this->world(fn (&$w) => $w['failure'] = 'mismatched_yield');
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertSame(ActionState::Uncertain, $action->fresh()->state);
+        $this->assertStringContainsString('Cargo response', $action->fresh()->message);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertCount(2, $this->world()['writes']);
     }
 }

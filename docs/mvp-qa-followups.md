@@ -1,0 +1,19 @@
+# MVP QA follow-ups
+
+The independent Sonnet 5.5 review of `f1bb6d1` is retained locally at `storage/app/mvp-evidence/sonnet-qa.md`. It found safe failures rather than replay or money-loss defects. The subsequent local changes resolve them.
+
+| Finding | Correction | Regression evidence |
+| --- | --- | --- |
+| F1: a permitted manual spend on another ship blocked the run | Track confirmed manual credit changes separately from the run's contribution and the total agent balance change. Capture the baseline at Start, including previews that confirm later. Unexplained changes still block. | `test_other_ship_manual_spend_continues_run_and_is_accounted_separately` |
+| F2: a budget lock after reservation rejected an unsent command | A typed pre-transport deferral returns to pending. Only this proven no-send path can revert sending; lost responses still become uncertain. | `test_budget_contention_before_transport_retains_pending_without_blocking_run` |
+| F3: missing numeric minimums and stale Start quotes | Show computed reserve, fuel ceiling and available credits in the error. Refresh an observed buyer market at preview and Start when an owned observer is present. | `test_preview_error_shows_numeric_limits_and_start_refreshes_expiring_quotes`; real browser invalid/valid previews |
+| F4: settled trades were called uncertain/rejected after a price discrepancy | Keep confirmed transactions confirmed, with a durable review flag. Review blocks subsequent writes until acknowledged, without falsifying history. Unproven writes use an acknowledged unresolved-adjustment state. | `test_confirmed_price_discrepancy_review_preserves_truthful_history`; real browser refuel discrepancy and acknowledgement |
+| Initial identity claim changed the host lock key | Use the stable local authority ID throughout its lifetime. Canonical identity remains uniquely constrained. | `test_first_synchronization_keeps_the_same_lock_before_and_after_identity_claim` |
+| Malformed cooldown escaped the API boundary | Validate optional expiration dates and response envelopes. Reject inconsistent extraction/trade cargo and destination responses as uncertain after dispatch. Bound and validate pagination. | `test_invalid_cooldown_is_rejected_at_boundary_and_blocks_active_run`; inconsistent-yield regression |
+| SQLite main-file copies omitted active WAL data | Use SQLite `VACUUM INTO`; verify restoration and credential decryption on a separate copy. An isolated fixture mode verifies this without replacing the checkout environment. | `php scripts/mvp-fixture.php --isolated`; retained WAL reproduction |
+
+Additional checks cover Stop during transit, Stop while an upstream action settles, reset during an active run, read-side 429/503, numeric form strings, credential repair without clearing uncertainty, and unknown-yield cargo retention. A zero-yield extraction now blocks after its first attempt. One extraction per trip remains an explicit conservative policy because the next yield size is unknown.
+
+The first review's browser claims are kept separate from the implementation checks. Sonnet independently exercised manual mining, reload, setup purchase and recovery in a disposable fixture. Later root browser checks exercised the numeric reserve message, an active narrow-screen Stop and confirmed-price review. Retained screenshots now include these states. The optional `scripts/verify-mvp-browser.mjs` provides a replayable journey with per-step assertions and screenshots; it requires the explicitly configured owned fake provider and never starts a server.
+
+All evidence here uses synthetic state and fake SpaceTraders responses. None proves live-game mechanics, profitability, browser portability or macOS sleep/wake behavior. No recurring service or live gameplay was authorized or installed. QA is followed by a separate security audit before final handoff.

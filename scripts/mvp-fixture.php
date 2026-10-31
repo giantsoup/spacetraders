@@ -2,8 +2,10 @@
 
 use App\Gameplay\AgentSynchronizer;
 use App\Models\User;
+use Dotenv\Dotenv;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Tests\Support\FakeSpaceTraders;
 
@@ -11,8 +13,10 @@ use Tests\Support\FakeSpaceTraders;
 require __DIR__.'/../vendor/autoload.php';
 
 $root = dirname(__DIR__);
-$directory = $root.'/storage/app/mvp-fixture';
-if (file_exists($root.'/.env')) {
+$isolated = in_array('--isolated', $argv, true);
+$directory = $isolated ? sys_get_temp_dir().'/spacetraders-fixture-'.bin2hex(random_bytes(6)) : $root.'/storage/app/mvp-fixture';
+$environmentFile = $isolated ? $directory.'/.env' : $root.'/.env';
+if (! $isolated && file_exists($environmentFile)) {
     fwrite(STDERR, "An environment already exists. Refusing to replace it. Use the documented isolated fixture.\n");
     exit(1);
 }
@@ -32,6 +36,7 @@ $values = [
     'APP_ENV' => 'local', 'APP_KEY' => $key, 'APP_DEBUG' => 'false', 'APP_NAME' => 'SpaceTradersMVPFixture',
     'DB_CONNECTION' => 'sqlite', 'DB_DATABASE' => $directory.'/database.sqlite', 'QUEUE_CONNECTION' => 'database',
     'MAIL_MAILER' => 'array', 'SESSION_COOKIE' => 'spacetraders_mvp_fixture',
+    'SPACETRADERS_LOCK_PATH' => $directory.'/locks',
     'SPACETRADERS_FIXTURE_PATH' => $directory.'/world.json', 'SPACETRADERS_AUTOMATION_ENABLED' => 'true',
 ];
 foreach ($values as $name => $value) {
@@ -40,8 +45,16 @@ foreach ($values as $name => $value) {
         ? preg_replace('/^'.preg_quote($name, '/').'=.*$/m', $line, $environment)
         : $environment."\n".$line;
 }
-file_put_contents($root.'/.env', $environment."\n");
-chmod($root.'/.env', 0600);
+file_put_contents($environmentFile, $environment."\n");
+chmod($environmentFile, 0600);
+if ($isolated) {
+    foreach (Dotenv::parse($environment) as $name => $value) {
+        putenv($name.'='.$value);
+        $_ENV[$name] = $_SERVER[$name] = $value;
+    }
+    putenv('APP_CONFIG_CACHE='.$directory.'/no-config.php');
+    $_ENV['APP_CONFIG_CACHE'] = $_SERVER['APP_CONFIG_CACHE'] = $directory.'/no-config.php';
+}
 $app = require $root.'/bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
 Artisan::call('migrate', ['--force' => true]);
@@ -57,7 +70,8 @@ chmod($directory.'/browser.json', 0600);
 // Verify a private database/key backup restores and decrypts on a disposable copy.
 $backup = $directory.'/backup';
 mkdir($backup, 0700);
-copy($directory.'/database.sqlite', $backup.'/database.sqlite');
+$connection = DB::connection()->getPdo();
+$connection->exec('VACUUM INTO '.$connection->quote($backup.'/database.sqlite'));
 file_put_contents($backup.'/app-key.txt', $key);
 chmod($backup.'/database.sqlite', 0600);
 chmod($backup.'/app-key.txt', 0600);
@@ -69,3 +83,5 @@ if (decrypt($encrypted, false) !== 'synthetic-offline-only') {
 }
 unlink($directory.'/restore-check.sqlite');
 echo "Synthetic fixture ready. All SpaceTraders HTTP is intercepted. Database/key backup restore verified.\n";
+
+echo 'Owned fixture directory: '.$directory."\n";

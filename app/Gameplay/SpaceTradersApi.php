@@ -22,7 +22,7 @@ class SpaceTradersApi
 
     public function agent(Agent $agent): array
     {
-        $data = $this->call('get', '/my/agent', [], $agent)['data'] ?? [];
+        $data = $this->payload($this->call('get', '/my/agent', [], $agent));
         $this->validate($data, ['symbol' => 'required|string|max:80', 'credits' => 'required|integer|min:0']);
         if ($data['symbol'] !== $agent->name) {
             throw new GameException('Credential belongs to a different agent. Re-import it.');
@@ -38,7 +38,7 @@ class SpaceTradersApi
 
     public function ship(Agent $agent, string $symbol): array
     {
-        $ship = $this->shipData($this->call('get', '/my/ships/'.$symbol, [], $agent)['data'] ?? []);
+        $ship = $this->shipData($this->payload($this->call('get', '/my/ships/'.$symbol, [], $agent)));
         if ($ship['symbol'] !== $symbol) {
             throw new GameException('SpaceTraders returned a different ship.');
         }
@@ -62,7 +62,7 @@ class SpaceTradersApi
 
     public function market(Agent $agent, string $waypoint): array
     {
-        $data = $this->call('get', $this->waypointPath($waypoint).'/market', [], $agent)['data'] ?? [];
+        $data = $this->payload($this->call('get', $this->waypointPath($waypoint).'/market', [], $agent));
         $this->validate($data, [
             'symbol' => 'required|in:'.$waypoint, 'imports' => 'present|array', 'exports' => 'present|array', 'exchange' => 'present|array',
             'tradeGoods' => 'sometimes|array', 'tradeGoods.*.symbol' => 'required|string|max:80',
@@ -74,7 +74,7 @@ class SpaceTradersApi
 
     public function shipyard(Agent $agent, string $waypoint): array
     {
-        $data = $this->call('get', $this->waypointPath($waypoint).'/shipyard', [], $agent)['data'] ?? [];
+        $data = $this->payload($this->call('get', $this->waypointPath($waypoint).'/shipyard', [], $agent));
         $this->validate($data, ['symbol' => 'required|in:'.$waypoint, 'shipTypes' => 'present|array', 'ships' => 'sometimes|array', 'ships.*.purchasePrice' => 'required|integer|min:1']);
 
         return Arr::only($data, ['symbol', 'shipTypes', 'ships', 'transactions']);
@@ -93,11 +93,12 @@ class SpaceTradersApi
             'refuel' => Arr::only($arguments, ['units']),
             default => [],
         };
-        $data = $this->call('post', $path, $body, $agent)['data'] ?? [];
+        $data = $this->payload($this->call('post', $path, $body, $agent), true);
         $rules = match ($command) {
-            'dock', 'orbit' => ['nav' => 'required|array', 'nav.status' => 'required|in:DOCKED,IN_ORBIT'],
+            'dock' => ['nav' => 'required|array', 'nav.status' => 'required|in:DOCKED'],
+            'orbit' => ['nav' => 'required|array', 'nav.status' => 'required|in:IN_ORBIT'],
             'navigate' => ['nav' => 'required|array', 'nav.status' => 'required|in:IN_TRANSIT', 'nav.route.arrival' => 'required|date', 'fuel.current' => 'required|integer|min:0'],
-            'mine' => ['cargo' => 'required|array', 'cooldown.remainingSeconds' => 'required|integer|min:0', 'extraction.yield.symbol' => 'required|string|max:80', 'extraction.yield.units' => 'required|integer|min:0'],
+            'mine' => ['cargo' => 'required|array', 'cooldown.remainingSeconds' => 'required|integer|min:0', 'cooldown.expiration' => 'sometimes|nullable|date', 'extraction.yield.symbol' => 'required|string|max:80', 'extraction.yield.units' => 'required|integer|min:0'],
             'buy_ship' => ['ship' => 'required|array', 'ship.symbol' => 'required|string', 'agent.credits' => 'required|integer|min:0', 'transaction.price' => 'required|integer|min:0'],
             'refuel' => ['fuel.current' => 'required|integer|min:0', 'agent.credits' => 'required|integer|min:0', 'transaction.totalPrice' => 'required|integer|min:0'],
             default => ['cargo' => 'required|array', 'agent.credits' => 'required|integer|min:0', 'transaction.totalPrice' => 'required|integer|min:0', 'transaction.units' => 'required|integer|min:1', 'transaction.tradeSymbol' => 'required|string'],
@@ -115,7 +116,7 @@ class SpaceTradersApi
             'nav.flightMode' => 'required|in:CRUISE,DRIFT,BURN,STEALTH', 'nav.route.arrival' => 'required|date',
             'fuel.current' => 'required|integer|min:0', 'fuel.capacity' => 'required|integer|min:0',
             'cargo.capacity' => 'required|integer|min:0', 'cargo.units' => 'required|integer|min:0', 'cargo.inventory' => 'present|array',
-            'cargo.inventory.*.symbol' => 'required|string|max:80', 'cargo.inventory.*.units' => 'required|integer|min:1',
+            'cargo.inventory.*.symbol' => 'required|string|distinct|max:80|regex:/^[A-Z0-9_]+$/', 'cargo.inventory.*.units' => 'required|integer|min:1',
             'mounts' => 'present|array|max:100', 'modules' => 'present|array|max:100',
             'mounts.*.symbol' => 'required|string|max:80', 'mounts.*.requirements' => 'present|array', 'mounts.*.requirements.*' => 'integer|min:0',
             'mounts.*.deposits' => 'sometimes|array|max:100', 'mounts.*.deposits.*' => 'string|max:80',
@@ -123,7 +124,7 @@ class SpaceTradersApi
             'frame.moduleSlots' => 'required|integer|min:0', 'frame.mountingPoints' => 'required|integer|min:0',
             'frame.integrity' => 'required|numeric|between:0,1', 'engine.integrity' => 'required|numeric|between:0,1', 'reactor.integrity' => 'required|numeric|between:0,1',
             'frame.condition' => 'required|numeric|between:0,1', 'engine.condition' => 'required|numeric|between:0,1', 'reactor.condition' => 'required|numeric|between:0,1',
-            'reactor.powerOutput' => 'required|integer|min:0', 'cooldown.remainingSeconds' => 'required|integer|min:0',
+            'reactor.powerOutput' => 'required|integer|min:0', 'cooldown.remainingSeconds' => 'required|integer|min:0', 'cooldown.expiration' => 'sometimes|nullable|date',
         ]);
         if (array_sum(array_column($data['cargo']['inventory'], 'units')) !== $data['cargo']['units'] || $data['cargo']['units'] > $data['cargo']['capacity'] || $data['fuel']['current'] > $data['fuel']['capacity']) {
             throw new GameException('Inconsistent ship cargo or fuel response.');
@@ -147,11 +148,16 @@ class SpaceTradersApi
     private function pages(string $path, Agent $agent): array
     {
         $all = [];
+        $total = null;
         for ($page = 1; $page <= config('gameplay.max_pages'); $page++) {
             $body = $this->call('get', $path, ['page' => $page, 'limit' => 20], $agent);
-            $this->validate($body, ['data' => 'present|array', 'meta.total' => 'required|integer|min:0', 'meta.page' => 'required|integer|in:'.$page, 'meta.limit' => 'required|integer|in:20']);
+            $this->validate($body, ['data' => 'present|array|max:20', 'data.*' => 'array', 'data.*.symbol' => 'required|string|distinct|max:80', 'meta.total' => 'required|integer|min:0', 'meta.page' => 'required|integer|in:'.$page, 'meta.limit' => 'required|integer|in:20']);
+            $total ??= $body['meta']['total'];
             $all = array_merge($all, $body['data']);
-            if (count($all) >= $body['meta']['total']) {
+            if ($total !== $body['meta']['total'] || count(array_unique(array_column($all, 'symbol'))) !== count($all) || count($all) > $total) {
+                throw new GameException('Discovery changed or repeated records while paginating. Synchronize again.');
+            }
+            if (count($all) === $total) {
                 return $all;
             }
         }
@@ -182,6 +188,15 @@ class SpaceTradersApi
         }
 
         return $data;
+    }
+
+    private function payload(array $body, bool $uncertain = false): array
+    {
+        if (! isset($body['data']) || ! is_array($body['data'])) {
+            throw new GameException('SpaceTraders returned an incompatible data envelope.', uncertain: $uncertain);
+        }
+
+        return $body['data'];
     }
 
     private function validate(array $data, array $rules, bool $uncertain = false): void

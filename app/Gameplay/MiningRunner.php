@@ -28,9 +28,10 @@ class MiningRunner
             if ($ship['nav']['status'] === 'IN_TRANSIT' || $ship['cargo']['units'] !== 0) {
                 throw new GameException('Begin with a stationary ship and empty cargo. Existing cargo remains protected.');
             }
+            $this->refreshBuyer($agent, $limits['market']);
             $route = $this->planner->route($agent, $ship, $limits['site'], $limits['market']);
             if ($limits['reserve'] < $route['minimum_reserve'] || $agent->credits < $limits['reserve'] + $limits['max_spend'] || $limits['max_spend'] < $route['fuel_ceiling']) {
-                throw new GameException('Reserve and spending limits must cover the displayed fuel reserve and fit current credits.');
+                throw new GameException('This route requires a reserve of at least '.$route['minimum_reserve'].' CR and a fuel spending ceiling of at least '.$route['fuel_ceiling'].' CR. Their sum must fit the available '.$agent->credits.' CR.');
             }
 
             return AutomationRun::create([
@@ -60,11 +61,13 @@ class MiningRunner
             $this->sync->sync($agent, false);
             $ship = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->firstOrFail()->snapshot;
             $plan = $run->plan;
+            $this->refreshBuyer($agent, $plan['market']);
             $route = $this->planner->route($agent, $ship, $plan['site'], $plan['market']);
             if ($agent->credits !== $plan['initial_credits'] || MiningPlanner::inventory($ship) !== $plan['initial_inventory'] || $ship['fuel']['current'] !== $plan['initial_fuel'] || $ship['nav']['waypointSymbol'] !== $plan['initial_waypoint'] || $ship['nav']['status'] !== $plan['initial_status'] || $plan['reserve'] < $route['minimum_reserve'] || $plan['max_spend'] < $route['fuel_ceiling']) {
                 throw new GameException('State or route economics changed. Create a new mining preview.');
             }
-            $run->update(['active_agent_id' => $agent->id, 'state' => RunState::Running, 'started_at' => now(), 'expires_at' => now()->addMinutes($plan['minutes']), 'next_action_at' => now(), 'last_dispatched_at' => now()]);
+            $plan['initial_manual_credit_delta'] = $this->manualCreditDelta($agent);
+            $run->update(['plan' => $plan, 'active_agent_id' => $agent->id, 'state' => RunState::Running, 'started_at' => now(), 'expires_at' => now()->addMinutes($plan['minutes']), 'next_action_at' => now(), 'last_dispatched_at' => now()]);
             AdvanceMiningRun::dispatch($run->id)->afterCommit();
 
             return $run;
@@ -89,8 +92,8 @@ class MiningRunner
                 return;
             }
             $run->update(['heartbeat_at' => now()]);
-            if (ShipAction::where('agent_id', $agent->id)->whereIn('state', ['sending', 'uncertain'])->exists()) {
-                $this->executor->block($run, 'An action is uncertain. Reconcile before takeover.');
+            if (ShipAction::where('agent_id', $agent->id)->where(fn ($q) => $q->whereIn('state', ['sending', 'uncertain'])->orWhere('review_required', true))->exists()) {
+                $this->executor->block($run, 'An action is uncertain or requires price review. Reconcile before takeover.');
 
                 return;
             }
@@ -110,12 +113,17 @@ class MiningRunner
                 $ship = $this->sync->refreshShip($agent, $run->ship_symbol)->snapshot;
                 $credits = $this->api->agent($agent)['credits'];
                 $agent->update(['credits' => $credits]);
-                if ($credits !== $run->plan['initial_credits'] + $run->totals['credit_delta']) {
+                $otherDelta = $this->manualCreditDelta($agent) - ($run->plan['initial_manual_credit_delta'] ?? 0);
+                if ($credits !== $run->plan['initial_credits'] + $run->totals['credit_delta'] + $otherDelta) {
                     throw new GameException('Agent credits changed outside this run. Create a new preview after reconciliation.');
                 }
                 if ($credits < $run->plan['reserve'] || $run->totals['credit_delta'] < -$run->plan['max_loss']) {
                     throw new GameException('Credit reserve or loss limit reached.');
                 }
+                $totals = $run->totals;
+                $totals['other_credit_delta'] = $otherDelta;
+                $totals['agent_balance_delta'] = $credits - $run->plan['initial_credits'];
+                $run->update(['totals' => $totals]);
                 $market = [];
                 if ($ship['nav']['waypointSymbol'] === $run->plan['market'] && $ship['nav']['status'] !== 'IN_TRANSIT') {
                     $market = $this->api->market($agent, $run->plan['market']);
@@ -136,6 +144,20 @@ class MiningRunner
                 }
             }
         });
+    }
+
+    private function manualCreditDelta(Agent $agent): int
+    {
+        return (int) ShipAction::where('agent_id', $agent->id)->whereNull('automation_run_id')->where('state', 'confirmed')
+            ->get()->sum(fn ($action) => $action->outcome['credit_delta'] ?? 0);
+    }
+
+    private function refreshBuyer(Agent $agent, string $market): void
+    {
+        $observer = Ship::where('agent_id', $agent->id)->get()->contains(fn ($ship) => $ship->snapshot['nav']['waypointSymbol'] === $market && $ship->snapshot['nav']['status'] !== 'IN_TRANSIT');
+        if ($observer) {
+            $this->sync->observe($agent, 'market', $market, $this->api->market($agent, $market));
+        }
     }
 
     private function enqueue(AutomationRun $run, MiningStep $step): void
