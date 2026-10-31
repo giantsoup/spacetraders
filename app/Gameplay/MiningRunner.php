@@ -163,7 +163,7 @@ class MiningRunner
     private function enqueue(AutomationRun $run, MiningStep $step): void
     {
         DB::transaction(function () use ($run, $step) {
-            if (! AutomationRun::whereKey($run->id)->whereNull('stop_requested_at')->whereNotNull('active_agent_id')->update(['state' => 'running', 'next_action_at' => now()->addSeconds(5)])) {
+            if (! AutomationRun::whereKey($run->id)->whereNull('stop_requested_at')->whereNotNull('active_agent_id')->where('expires_at', '>', now())->update(['state' => 'running', 'next_action_at' => now()->addSeconds(5)])) {
                 return;
             }
             $action = ShipAction::create([

@@ -95,8 +95,11 @@ class ShipCommandExecutor
                 $before = $this->rules->inspect($agent, $action->ship_symbol, $action->command, $action->arguments, $run);
                 // Stop and reservation contend on a database transaction, independently of the host lock.
                 DB::transaction(function () use ($action, $run, $before) {
-                    if ($run && ! AutomationRun::whereKey($run->id)->whereNull('stop_requested_at')->whereNotNull('active_agent_id')->update(['heartbeat_at' => now()])) {
-                        throw new GameException('Stop was recorded before this action was reserved.');
+                    if ($action->expires_at->isPast()) {
+                        throw new GameException('Intent expired during preflight. Create a fresh preview.');
+                    }
+                    if ($run && ! AutomationRun::whereKey($run->id)->whereNull('stop_requested_at')->whereNotNull('active_agent_id')->where('expires_at', '>', now())->update(['heartbeat_at' => now()])) {
+                        throw new GameException('Run stopped or expired before this action was reserved.');
                     }
                     if (! ShipAction::whereKey($action->id)->where('state', 'pending')->update(['state' => 'sending', 'before_state' => json_encode($before), 'sent_at' => now()])) {
                         throw new GameException('Action was already reserved.');

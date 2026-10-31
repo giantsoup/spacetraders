@@ -7,16 +7,19 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const php = process.env.PHP_BIN || 'php';
 const root = path.resolve(import.meta.dirname, '..');
 const cli = code => JSON.parse(execFileSync(php, ['-r', `require 'vendor/autoload.php'; $app=require 'bootstrap/app.php'; $app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap(); ${code}`], { cwd: root, encoding: 'utf8' }));
-const metadata = cli("echo json_encode(['fixture'=>config('gameplay.fixture_path'),'origin'=>config('app.url'),'fresh'=>Tests\\Support\\FakeSpaceTraders::world(),'active'=>App\\Models\\AutomationRun::whereNotNull('active_agent_id')->exists(),'pending'=>App\\Models\\ShipAction::whereIn('state',['pending','sending','uncertain'])->orWhere('review_required',true)->exists()]);");
+const metadata = cli("echo json_encode(['fixture'=>config('gameplay.fixture_path'),'origin'=>config('app.url'),'fresh'=>Tests\\Support\\FakeSpaceTraders::world(),'setupUsed'=>App\\Models\\ShipAction::where('command','buy_ship')->exists(),'active'=>App\\Models\\AutomationRun::whereNotNull('active_agent_id')->exists(),'pending'=>App\\Models\\ShipAction::whereIn('state',['pending','sending','uncertain'])->orWhere('review_required',true)->exists()]);");
 assert.ok(metadata.fixture && metadata.fresh.symbol === 'LOCAL', 'An explicitly configured synthetic provider is required.');
 assert.equal(metadata.active || metadata.pending, false, 'Settle existing owned fixture gameplay before this check.');
+assert.equal(metadata.setupUsed, false, 'This journey needs a fresh fixture: the one-time setup purchase is already recorded. Create a new owned fixture before rerunning.');
 const fixtureDirectory = path.dirname(await fs.realpath(metadata.fixture));
 const auth = JSON.parse(await fs.readFile(path.join(fixtureDirectory, 'browser.json'), 'utf8'));
+assert.ok(Number.isSafeInteger(auth.agent_id) && auth.agent_id > 0, 'Fixture must have one saved synthetic agent.');
 const origin = process.env.QA_URL || metadata.origin;
 assert.ok(new URL(origin).hostname.endsWith('.test') || ['localhost', '127.0.0.1'].includes(new URL(origin).hostname));
 assert.equal(new URL(origin).origin, new URL(metadata.origin).origin, 'Use this checkout\'s configured local origin.');
 const output = path.resolve(process.env.QA_ARTIFACT_DIR || path.join(root, 'storage/app/mvp-evidence/browser-replay'));
 await fs.mkdir(output, { recursive: true, mode: 0o700 });
+let journeyError;
 const results = [], diagnostics = { pageErrors: [], console: [], responses: [], deniedExternal: [], failedLocal: [] };
 const state = () => cli("echo json_encode(['run'=>App\\Models\\AutomationRun::latest('id')->first(),'actions'=>App\\Models\\ShipAction::latest('id')->limit(20)->get(),'credits'=>App\\Models\\Agent::first()->credits]);");
 const world = async mutate => {
@@ -128,7 +131,7 @@ try {
         await shot('03-run-preview.png', true);
         await clickResponse('Start approved mining run', `/runs/${preview.id}/start`);
         await refresh();
-        assert.equal(await page.locator('#manual fieldset').isDisabled(), true);
+        assert.equal(await page.locator('#manual fieldset').evaluate(element => element.disabled), true);
         await button('Stop automation').scrollIntoViewIfNeeded();
         await shot('04-active-stop.png');
         const writes = (await world()).writes.length;
@@ -136,7 +139,7 @@ try {
         await drain();
         assert.equal(state().run.state, 'stopped');
         assert.equal((await world()).writes.length, writes);
-        assert.equal(await page.locator('#manual fieldset').isDisabled(), false);
+        assert.equal(await page.locator('#manual fieldset').evaluate(element => element.disabled), false);
     });
     await record('complete bounded mining trip through database worker and dispatch', async () => {
         await limits();
@@ -192,8 +195,33 @@ try {
     const message = String(error.message).replaceAll(auth.password, '[redacted]');
     results.push({ scenario: 'browser journey', status: 'failed', message });
     await shot('failed.png', true).catch(() => {});
-    throw new Error(message);
+    journeyError = error;
+    error.message = message;
+    if (error.stack) error.stack = String(error.stack).replaceAll(auth.password, '[redacted]');
+    throw error;
 } finally {
-    await fs.writeFile(path.join(output, 'results.json'), JSON.stringify({ results, diagnostics, origin, engine: await browser.version(), fakeProvider: true }, null, 2));
-    await browser.close();
+    let cleanupError;
+    try {
+        const cleanup = cli(`$runs=App\\Models\\AutomationRun::where('agent_id',${auth.agent_id})->whereNotNull('active_agent_id')->get(); foreach($runs as $run){app(App\\Gameplay\\MiningRunner::class)->stop($run);} echo json_encode(['stop_requested_for'=>$runs->modelKeys()]);`);
+        if (cleanup.stop_requested_for.length) {
+            execFileSync(php, ['artisan', 'spacetraders:dispatch-due'], { cwd: root, stdio: 'pipe' });
+            execFileSync(php, ['artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, stdio: 'pipe' });
+        }
+        const remaining = cli(`echo json_encode(App\\Models\\AutomationRun::where('agent_id',${auth.agent_id})->whereNotNull('active_agent_id')->exists());`);
+        assert.equal(remaining, false, 'Cleanup could not settle automation; inspect saved state before takeover.');
+        diagnostics.cleanup = cleanup;
+    } catch (error) {
+        cleanupError = error;
+        diagnostics.cleanup = { error: String(error.message).replaceAll(auth.password, '[redacted]'), stopUnverified: true };
+    }
+    try {
+        await fs.writeFile(path.join(output, 'results.json'), JSON.stringify({ results, diagnostics, origin, engine: await browser.version(), fakeProvider: true }, null, 2));
+    } finally {
+        await browser.close();
+    }
+    if (cleanupError && !journeyError) {
+        cleanupError.message = String(cleanupError.message).replaceAll(auth.password, '[redacted]');
+        if (cleanupError.stack) cleanupError.stack = String(cleanupError.stack).replaceAll(auth.password, '[redacted]');
+        throw cleanupError;
+    }
 }

@@ -6,6 +6,7 @@ use App\Gameplay\MiningRunner;
 use App\Models\AutomationRun;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 final class FakeSpaceTraders
@@ -64,6 +65,9 @@ final class FakeSpaceTraders
             try {
                 $world = json_decode(stream_get_contents($handle), true, flags: JSON_THROW_ON_ERROR);
                 [$body, $status] = self::respond($world, $request);
+                if ($request->method() === 'POST' && ($world['verify_worker_storage'] ?? false)) {
+                    $world['worker_storage'] = ['pid' => getmypid(), 'synchronous' => (int) DB::selectOne('PRAGMA synchronous')->synchronous, 'fullfsync' => (int) DB::selectOne('PRAGMA fullfsync')->fullfsync];
+                }
                 if ($request->method() === 'POST' && isset($world['write_stop_run_id'])) {
                     app(MiningRunner::class)->stop(AutomationRun::findOrFail($world['write_stop_run_id']));
                 }

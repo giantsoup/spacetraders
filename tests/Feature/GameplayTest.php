@@ -17,6 +17,8 @@ use App\Models\GameObservation;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
+use Carbon\Carbon;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -864,5 +866,61 @@ class GameplayTest extends TestCase
         $absent->assertNotFound();
         $this->assertSame($foreign->json(), $absent->json());
         $this->assertSame($foreign->headers->get('X-RateLimit-Limit'), $absent->headers->get('X-RateLimit-Limit'));
+    }
+
+    public function test_intent_expiring_during_preflight_is_rejected_before_transport(): void
+    {
+        $action = $this->preview('orbit');
+        app(ShipCommandExecutor::class)->approve($this->agent, $action);
+        $action->update(['expires_at' => now()->addSecond()]);
+        $moved = false;
+        Http::globalRequestMiddleware(function ($request) use (&$moved) {
+            if (! $moved && str_ends_with((string) $request->getUri(), '/my/ships/LOCAL-1')) {
+                $future = now()->addSeconds(2);
+                Carbon::setTestNow($future);
+                CarbonImmutable::setTestNow($future);
+                $moved = true;
+            }
+
+            return $request;
+        });
+        try {
+            app(ShipCommandExecutor::class)->execute($action->id);
+            $this->assertSame(ActionState::Rejected, $action->fresh()->state);
+            $this->assertCount(0, $this->world()['writes']);
+        } finally {
+            Carbon::setTestNow();
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_run_expiring_during_preflight_cannot_reserve_a_write(): void
+    {
+        $run = $this->miningRun();
+        app(MiningRunner::class)->advance($run->id);
+        $action = ShipAction::where('state', 'pending')->firstOrFail();
+        $run->update(['expires_at' => now()->addSecond()]);
+        $action->update(['expires_at' => now()->addMinute()]);
+        $moved = false;
+        Http::globalRequestMiddleware(function ($request) use (&$moved) {
+            if (! $moved && str_ends_with((string) $request->getUri(), '/my/ships/LOCAL-1')) {
+                $future = now()->addSeconds(2);
+                Carbon::setTestNow($future);
+                CarbonImmutable::setTestNow($future);
+                $moved = true;
+            }
+
+            return $request;
+        });
+        try {
+            app(ShipCommandExecutor::class)->execute($action->id);
+            $this->assertSame(ActionState::Rejected, $action->fresh()->state);
+            app(MiningRunner::class)->advance($run->id);
+            $this->assertSame(RunState::Stopped, $run->fresh()->state);
+            $this->assertCount(0, $this->world()['writes']);
+        } finally {
+            Carbon::setTestNow();
+            CarbonImmutable::setTestNow();
+        }
     }
 }

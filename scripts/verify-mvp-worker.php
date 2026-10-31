@@ -21,7 +21,9 @@ $root = dirname(__DIR__);
 $directory = sys_get_temp_dir().'/spacetraders-worker-'.bin2hex(random_bytes(6));
 mkdir($directory, 0700);
 $file = $directory.'/world.json';
-file_put_contents($file, json_encode(FakeSpaceTraders::world()));
+$world = FakeSpaceTraders::world();
+$world['verify_worker_storage'] = true;
+file_put_contents($file, json_encode($world));
 touch($directory.'/database.sqlite');
 $env = [
     'APP_ENV' => 'testing', 'APP_DEBUG' => 'false', 'APP_KEY' => 'base64:'.base64_encode(random_bytes(32)),
@@ -66,6 +68,8 @@ $action = $executor->preview($agent, 'LOCAL-1', 'orbit', [], (string) Str::uuid(
 $executor->approve($agent, $action);
 ExecuteShipCommand::dispatch($action->id); // deliberately duplicate delivery to another worker
 workers($root, $env, $directory);
+$workerStorage = json_decode(file_get_contents($file), true)['worker_storage'];
+check($workerStorage['pid'] !== getmypid() && $workerStorage['synchronous'] === 2 && $workerStorage['fullfsync'] === 1, 'separate queue worker uses FULL and macOS fullfsync');
 check($action->fresh()->state === ActionState::Confirmed, 'persisted manual intent confirmed by real worker');
 check(count(json_decode(file_get_contents($file), true)['writes']) === 1, 'two workers plus duplicate delivery caused exactly one simulated mutation');
 $run = app(MiningRunner::class)->preview($agent->fresh(), 'LOCAL-1', ['site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-ROCK', 'reserve' => 2000, 'max_spend' => 100, 'max_loss' => 100, 'minutes' => 60, 'cycles' => 1]);
