@@ -1,0 +1,10 @@
+{
+  "reproduced": true,
+  "status_counts": {
+    "200": 295,
+    "500": 11
+  },
+  "fixture": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-fixture-5585f113e1f9",
+  "reason": "Concurrent build temporarily removes the Vite manifest; stable login before and after is HTTP 200."
+}
+[2026-11-01 23:09:36] local.ERROR: Vite manifest not found at: /Users/Taylor/.t3/worktrees/spacetraders/implement-issue-67-cycl-57b8b6dde1f4501f/public/build/manifest.json {"exception":"[object] (Spatie\\LaravelIgnition\\Exceptions\\ViewException(code: 0): Vite manifest not found at: /Users/Taylor/.t3/worktrees/spacetraders/implement-issue-67-cycl-57b8b6dde1f4501f/public/build/manifest.json at /Users/Taylor/.t3/worktrees/spacetraders/implement-issue-67-cycl-57b8b6dde1f4501f/vendor/laravel/framework/src/Illuminate/Foundation/Vite.php:974)

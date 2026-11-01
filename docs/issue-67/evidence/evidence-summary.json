@@ -1,0 +1,248 @@
+{
+  "reset_id": "2026-10-25",
+  "travel": [
+    {
+      "configuration": "aff421b6e6da69ab25398ca8fc3d28454a290a9d34c7a87122265ece569fbd2c",
+      "from": "X1-TEST-ROCK",
+      "to": "X1-TEST-PORT",
+      "mode": "CRUISE",
+      "distance": 5,
+      "engine_speed": 30,
+      "tank_capacity": 100,
+      "sample_count": 2,
+      "invalid_fuel_samples": 0,
+      "first_at": "2026-11-01T23:08:38+00:00",
+      "last_at": "2026-11-01T23:08:47+00:00",
+      "actual_fuel_min": 5,
+      "actual_fuel_max": 5,
+      "actual_fuel_mean": 5,
+      "fuel_error_mean": -2,
+      "fuel_overruns": 0,
+      "server_duration_samples": 2,
+      "server_duration_mean": 0,
+      "duration_error_mean": -19
+    },
+    {
+      "configuration": "aff421b6e6da69ab25398ca8fc3d28454a290a9d34c7a87122265ece569fbd2c",
+      "from": "X1-TEST-PORT",
+      "to": "X1-TEST-ROCK",
+      "mode": "CRUISE",
+      "distance": 5,
+      "engine_speed": 30,
+      "tank_capacity": 100,
+      "sample_count": 2,
+      "invalid_fuel_samples": 0,
+      "first_at": "2026-11-01T23:08:40+00:00",
+      "last_at": "2026-11-01T23:08:53+00:00",
+      "actual_fuel_min": 5,
+      "actual_fuel_max": 5,
+      "actual_fuel_mean": 5,
+      "fuel_error_mean": -2,
+      "fuel_overruns": 0,
+      "server_duration_samples": 2,
+      "server_duration_mean": 0,
+      "duration_error_mean": -19
+    }
+  ],
+  "mining_loads": [],
+  "cycles": [
+    {
+      "run_id": 2,
+      "ship": "LOCAL-1",
+      "strategy": "trade",
+      "state": "completed",
+      "site": "X1-TEST-ROCK",
+      "market": "X1-TEST-PORT",
+      "started_at": "2026-11-01T23:08:44+00:00",
+      "accounted_at": "2026-11-01T23:08:55+00:00",
+      "accounting": {
+        "state": "estimated_comparable",
+        "cash_contribution": 295,
+        "operating_costs": {
+          "goods": 300,
+          "fuel": 5,
+          "repairs": 0,
+          "jump": 0,
+          "other": 0
+        },
+        "wear_basis": "explicit_run_allowance_including_repairs",
+        "wear_cost_or_allowance": 25,
+        "additional_wear_deduction": 25,
+        "net_after_wear": 270,
+        "net_credits_per_hour": 88363.63636363637,
+        "realized_net_per_hour": null,
+        "cash_per_elapsed_hour": 96545.45454545454,
+        "income_per_ship_hour": 88363.63636363637,
+        "ship_count": 1,
+        "ship_hours": 0.0030555555555555557,
+        "sold_units_per_elapsed_hour": 3272.7272727272725,
+        "elapsed_seconds": 11,
+        "capital": {
+          "ships": {
+            "LOCAL-1": null
+          },
+          "known_ship_capital": 0,
+          "total": null,
+          "basis": "Confirmed delivered ship purchase including its original loadout. Imported assets and later equipment costs remain unknown."
+        },
+        "start": {
+          "waypoint": "X1-TEST-ROCK",
+          "fuel": 100,
+          "inventory": []
+        },
+        "end": {
+          "waypoint": "X1-TEST-ROCK",
+          "status": "DOCKED",
+          "fuel": 100,
+          "inventory": []
+        },
+        "unsold_inventory": [],
+        "unresolved": []
+      },
+      "capital": {
+        "ships": {
+          "LOCAL-1": null
+        },
+        "known_ship_capital": 0,
+        "total": null,
+        "basis": "Confirmed delivered ship purchase including its original loadout. Imported assets and later equipment costs remain unknown."
+      }
+    },
+    {
+      "run_id": 1,
+      "ship": "LOCAL-1",
+      "strategy": "scout",
+      "state": "completed",
+      "site": "X1-TEST-ROCK",
+      "market": "X1-TEST-PORT",
+      "started_at": "2026-11-01T23:08:36+00:00",
+      "accounted_at": "2026-11-01T23:08:42+00:00",
+      "accounting": {
+        "state": "unresolved",
+        "cash_contribution": -5,
+        "operating_costs": {
+          "goods": 0,
+          "fuel": 5,
+          "repairs": 0,
+          "jump": 0,
+          "other": 0
+        },
+        "wear_basis": "unmeasured",
+        "wear_cost_or_allowance": null,
+        "additional_wear_deduction": null,
+        "net_after_wear": null,
+        "net_credits_per_hour": null,
+        "realized_net_per_hour": null,
+        "cash_per_elapsed_hour": -3000,
+        "income_per_ship_hour": null,
+        "ship_count": 1,
+        "ship_hours": 0.0016666666666666668,
+        "sold_units_per_elapsed_hour": 0,
+        "elapsed_seconds": 6,
+        "capital": {
+          "ships": {
+            "LOCAL-1": null
+          },
+          "known_ship_capital": 0,
+          "total": null,
+          "basis": "Confirmed delivered ship purchase including its original loadout. Imported assets and later equipment costs remain unknown."
+        },
+        "start": {
+          "waypoint": "X1-TEST-ROCK",
+          "fuel": 100,
+          "inventory": []
+        },
+        "end": {
+          "waypoint": "X1-TEST-ROCK",
+          "status": "DOCKED",
+          "fuel": 100,
+          "inventory": []
+        },
+        "unsold_inventory": [],
+        "unresolved": [
+          "Wear and repair exposure is unmeasured."
+        ]
+      },
+      "capital": {
+        "ships": {
+          "LOCAL-1": null
+        },
+        "known_ship_capital": 0,
+        "total": null,
+        "basis": "Confirmed delivered ship purchase including its original loadout. Imported assets and later equipment costs remain unknown."
+      }
+    }
+  ],
+  "current_inventory_estimates": {
+    "LOCAL-1": {
+      "state": "empty",
+      "estimated_value_after_fuel": 0,
+      "net_after_all_remaining_costs": 0,
+      "unpriced": []
+    },
+    "LOCAL-2": {
+      "state": "empty",
+      "estimated_value_after_fuel": 0,
+      "net_after_all_remaining_costs": 0,
+      "unpriced": []
+    }
+  },
+  "fleet_capital": {
+    "ships": {
+      "LOCAL-1": null,
+      "LOCAL-2": null
+    },
+    "known_ship_capital": 0,
+    "total": null,
+    "basis": "Confirmed delivered ship purchase including its original loadout. Imported assets and later equipment costs remain unknown."
+  },
+  "request_usage": {
+    "host": {
+      "requests": 1920,
+      "responses": 1915,
+      "rate_limits": 0,
+      "server_errors": 0,
+      "deferrals": 0,
+      "deferred_seconds": 0,
+      "wait_seconds": 0,
+      "priorities": {
+        "discovery": 176,
+        "critical": 1603,
+        "write": 141
+      },
+      "requests_last_60_seconds": 343,
+      "requests_per_second_last_60": 5.716666666666667,
+      "sustained_per_second": 1.9,
+      "burst_capacity": 10,
+      "available": 1.298949980735779,
+      "blocked_until": 0
+    },
+    "account": {
+      "requests": 1521,
+      "responses": 1516,
+      "rate_limits": 0,
+      "server_errors": 0,
+      "deferrals": 0,
+      "deferred_seconds": 0,
+      "wait_seconds": 0,
+      "priorities": {
+        "discovery": 144,
+        "critical": 1236,
+        "write": 141
+      },
+      "requests_last_60_seconds": 271,
+      "requests_per_second_last_60": 4.516666666666667,
+      "sustained_per_second": 1.9,
+      "burst_capacity": 10,
+      "available": 1.2989726305007936,
+      "blocked_until": 0
+    }
+  },
+  "travel_samples_in_window": 4,
+  "total_travel_samples": 4,
+  "mining_runs_in_window": 0,
+  "total_mining_runs": 0,
+  "policy": "Conservative CRUISE stays the default. Samples do not automatically fit or promote a fuel formula or change a departure policy. Review representative configurations and distances before opting into measured edges.",
+  "travel_limits": "Fuel comes from confirmed tank changes. Duration uses server departure/arrival timestamps when supplied, not delayed polling time. Legacy samples without inputs remain visibly unknown.",
+  "mining_limits": "Compare matching sites, buyers, starting position/fuel and equipment. Count blocked, stopped and retained-cargo runs alongside successes. Cash rates exclude unresolved fuel, inventory and wear adjustments; they are not economic profit."
+}
