@@ -1,0 +1,240 @@
+{
+  "status": "pass",
+  "scenario": "preparation",
+  "steps": [
+    {
+      "kind": "read",
+      "title": "Your guided first trip",
+      "phase": "welcome"
+    },
+    {
+      "kind": "sync",
+      "title": "Click Synchronize",
+      "phase": "sync"
+    },
+    {
+      "kind": "plan",
+      "title": "Review your exact route",
+      "phase": "plan"
+    },
+    {
+      "kind": "read",
+      "title": "Inspect LOCAL-1",
+      "phase": "briefing"
+    },
+    {
+      "kind": "field",
+      "title": "Set Protected credits to 1000",
+      "phase": "outbound"
+    },
+    {
+      "kind": "field",
+      "title": "Set Quantity / refuel tank units to 99",
+      "phase": "outbound"
+    },
+    {
+      "kind": "field",
+      "title": "Set Maximum cost / minimum sale total to 5",
+      "phase": "outbound"
+    },
+    {
+      "kind": "preview",
+      "title": "Click Preview refueling",
+      "phase": "outbound"
+    },
+    {
+      "kind": "approve",
+      "title": "Review and approve refuel",
+      "phase": "outbound"
+    },
+    {
+      "kind": "field",
+      "title": "Set Protected credits to 1000",
+      "phase": "outbound"
+    },
+    {
+      "kind": "preview",
+      "title": "Click Preview orbit",
+      "phase": "outbound"
+    },
+    {
+      "kind": "approve",
+      "title": "Review and approve orbit",
+      "phase": "outbound"
+    },
+    {
+      "kind": "field",
+      "title": "Set Protected credits to 1000",
+      "phase": "outbound"
+    },
+    {
+      "kind": "field",
+      "title": "Set Destination to X1-TEST-PORT",
+      "phase": "outbound"
+    },
+    {
+      "kind": "preview",
+      "title": "Click Preview navigation",
+      "phase": "outbound"
+    },
+    {
+      "kind": "approve",
+      "title": "Review and approve navigate",
+      "phase": "outbound"
+    },
+    {
+      "kind": "sync",
+      "title": "Click Synchronize",
+      "phase": "outbound"
+    },
+    {
+      "kind": "read",
+      "title": "Mining site reached",
+      "phase": "outbound"
+    },
+    {
+      "kind": "field",
+      "title": "Set Protected credits to 1000",
+      "phase": "extract"
+    },
+    {
+      "kind": "preview",
+      "title": "Click Preview mining",
+      "phase": "extract"
+    },
+    {
+      "kind": "approve",
+      "title": "Review and approve mine",
+      "phase": "extract"
+    },
+    {
+      "kind": "field",
+      "title": "Set Protected credits to 1000",
+      "phase": "inbound"
+    },
+    {
+      "kind": "preview",
+      "title": "Click Preview docking",
+      "phase": "inbound"
+    },
+    {
+      "kind": "approve",
+      "title": "Review and approve dock",
+      "phase": "inbound"
+    },
+    {
+      "kind": "sync",
+      "title": "Click Synchronize",
+      "phase": "marketSync"
+    },
+    {
+      "kind": "field",
+      "title": "Set Protected credits to 1000",
+      "phase": "sell"
+    },
+    {
+      "kind": "field",
+      "title": "Set Trade good to Copper Ore",
+      "phase": "sell"
+    },
+    {
+      "kind": "field",
+      "title": "Set Quantity / refuel tank units to 4",
+      "phase": "sell"
+    },
+    {
+      "kind": "field",
+      "title": "Set Maximum cost / minimum sale total to 120",
+      "phase": "sell"
+    },
+    {
+      "kind": "preview",
+      "title": "Click Preview cargo sale",
+      "phase": "sell"
+    },
+    {
+      "kind": "approve",
+      "title": "Review and approve sell",
+      "phase": "sell"
+    },
+    {
+      "kind": "field",
+      "title": "Set Protected credits to 1000",
+      "phase": "sell"
+    },
+    {
+      "kind": "field",
+      "title": "Set Trade good to Copper Ore",
+      "phase": "sell"
+    },
+    {
+      "kind": "field",
+      "title": "Set Quantity / refuel tank units to 4",
+      "phase": "sell"
+    },
+    {
+      "kind": "field",
+      "title": "Set Maximum cost / minimum sale total to 120",
+      "phase": "sell"
+    },
+    {
+      "kind": "preview",
+      "title": "Click Preview cargo sale",
+      "phase": "sell"
+    },
+    {
+      "kind": "approve",
+      "title": "Review and approve sell",
+      "phase": "sell"
+    },
+    {
+      "kind": "read",
+      "title": "All extracted cargo sold",
+      "phase": "sell"
+    },
+    {
+      "kind": "field",
+      "title": "Set Protected credits to 1000",
+      "phase": "refuel"
+    },
+    {
+      "kind": "field",
+      "title": "Set Quantity / refuel tank units to 5",
+      "phase": "refuel"
+    },
+    {
+      "kind": "field",
+      "title": "Set Maximum cost / minimum sale total to 5",
+      "phase": "refuel"
+    },
+    {
+      "kind": "preview",
+      "title": "Click Preview refueling",
+      "phase": "refuel"
+    },
+    {
+      "kind": "approve",
+      "title": "Review and approve refuel",
+      "phase": "refuel"
+    },
+    {
+      "kind": "read",
+      "title": "Fuel tank ready",
+      "phase": "refuel"
+    },
+    {
+      "kind": "read",
+      "title": "Review your confirmed results",
+      "phase": "review"
+    },
+    {
+      "kind": "complete",
+      "title": "Guided first trip complete",
+      "phase": "complete"
+    }
+  ],
+  "errors": [],
+  "responses": [],
+  "browser": "156.0.8078.76",
+  "failure": null
+}

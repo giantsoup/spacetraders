@@ -52,6 +52,15 @@ class AgentDashboardController extends Controller
         ]);
     }
 
+    public function history(Request $request, Agent $agent)
+    {
+        abort_unless($agent->user_id === $request->user()->id, 404);
+        $input = $request->validate(['before' => ['required', 'integer', 'min:1']]);
+        $actions = ShipAction::where('agent_id', $agent->id)->where('id', '<', $input['before'])->latest('id')->limit(41)->get();
+
+        return response()->json(['actions' => $actions->take(40)->values(), 'has_more' => $actions->count() > 40])->header('Cache-Control', 'no-store');
+    }
+
     public function sync(GameplayRequest $request, Agent $agent, ShipCommandExecutor $executor, AgentSynchronizer $sync)
     {
         return $this->result(fn () => $executor->locked($agent, function () use ($agent, $sync) {

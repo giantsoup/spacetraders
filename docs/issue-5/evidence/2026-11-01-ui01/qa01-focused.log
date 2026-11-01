@@ -1,0 +1,10 @@
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.4.27
+Configuration: [workspace]/phpunit.xml
+
+.                                                                   1 / 1 (100%)
+
+Time: 00:00.522, Memory: 67.00 MB
+
+OK (1 test, 7 assertions)

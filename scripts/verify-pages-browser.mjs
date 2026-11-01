@@ -74,7 +74,7 @@ try {
                 assert.equal(await page.locator('h1').count(), 1, `${name} has one primary heading`);
                 assert.equal(await page.locator('a button, button a').count(), 0);
                 assert.equal(await page.locator('.app-topbar').evaluate(el => el.scrollWidth <= el.clientWidth), true);
-                assert.match(await page.locator('.app-topbar').evaluate(el => getComputedStyle(el).fontFamily), /monospace/);
+                assert.match(await page.locator('.app-topbar').evaluate(el => getComputedStyle(el).fontFamily), /sans-serif/);
                 assert.deepEqual(await page.evaluate(() => {
                     const ids = [...document.querySelectorAll('[id]')].map(el => el.id);
                     return ids.filter((id, index) => ids.indexOf(id) !== index);
@@ -175,7 +175,7 @@ try {
         await trigger.click();
         await modal.waitFor();
         assert.equal(await modal.getByLabel('Password', { exact: true }).evaluate(el => el === document.activeElement), true);
-        assert.equal(await modal.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(16, 27, 43)');
+        assert.equal(await modal.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(13, 21, 36)');
         await page.keyboard.press('Tab');
         assert.equal(await modal.getByRole('button', { name: 'Cancel', exact: true }).evaluate(el => el === document.activeElement), true);
         await page.keyboard.press('Tab');

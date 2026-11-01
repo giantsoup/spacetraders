@@ -44,8 +44,8 @@ fieldset:disabled { opacity: .65; }
 legend, .muted { color: var(--color-muted); }
 .warning { color: #f8d99b; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin: 20px 0; }
-label { display: grid; gap: 7px; font-size: 13px; color: var(--color-ink); }
-input, select { border: 1px solid #67829f; background: var(--color-field); color: var(--color-ink); padding: 10px; width: 100%; min-height: 44px; border-radius: 0; font: inherit; }
+label { display: grid; gap: 7px; font-size: 15px; color: var(--color-ink); }
+input, select { border: 1px solid #67829f; background: var(--color-field); color: var(--color-ink); padding: 10px; width: 100%; min-height: 44px; border-radius: 12px; font: inherit; }
 input:focus-visible, select:focus-visible { outline: 3px solid var(--color-focus); outline-offset: 4px; }
 @media (max-width: 900px) { .form-grid { grid-template-columns: 1fr; } }
 </style>

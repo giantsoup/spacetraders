@@ -5,7 +5,7 @@ import SecondaryButton from '@/Components/SecondaryButton.vue';
 import { readableText } from '@/dataPresentation.js';
 
 const props = defineProps({ session: Object, step: Object, storageAvailable: Boolean, busy: Boolean });
-const emit = defineEmits(['start', 'pause', 'resume', 'finish', 'advance', 'sync', 'recover', 'clear-expired']);
+const emit = defineEmits(['start', 'pause', 'resume', 'finish', 'advance', 'sync', 'recover', 'clear-expired', 'reveal']);
 const panel = ref(null);
 const confirmingRestart = ref(false);
 let highlighted;
@@ -23,6 +23,8 @@ function clear() {
 }
 async function highlight(focus = false) {
     clear();
+    if (props.session?.active) emit('reveal');
+    await nextTick();
     await nextTick();
     if (!props.session?.active || !props.step || props.step.kind === 'complete') return;
     highlighted = document.querySelector(`[data-guide="${CSS.escape(props.step.target)}"]`);
@@ -37,11 +39,16 @@ async function highlight(focus = false) {
         if (focus && described && !described.disabled) described.focus({ preventScroll: true });
         return;
     }
-    const offset = (panel.value?.offsetHeight || 0) + 24;
+    const sheetHeader = panel.value?.closest('dialog')?.querySelector('.sheet-header');
+    const headerHeight = sheetHeader?.getBoundingClientRect().height || 0;
+    panel.value?.style.setProperty('--guide-header-height', `${headerHeight}px`);
+    const offset = (panel.value?.offsetHeight || 0) + headerHeight + 24;
     highlighted.style.setProperty('--guide-offset', `${offset}px`);
     const reveal = props.step.kind === 'approve' && !focus ? highlighted.closest('.approval') || highlighted : highlighted;
     reveal.style.setProperty('--guide-offset', `${offset}px`);
     const bounds = reveal.getBoundingClientRect();
+    const sheet = reveal.closest('dialog');
+    if (sheet) { sheet.style.scrollPaddingTop = `${offset}px`; reveal.style.scrollMarginTop = '0px'; }
     const editing = document.activeElement?.matches('input,select');
     if (focus || (!editing && (bounds.top < offset || bounds.top > window.innerHeight - 100))) reveal.scrollIntoView({ block: 'start', behavior: 'instant' });
     if (focus && described && !described.disabled) described.focus({ preventScroll: true });
@@ -89,7 +96,7 @@ onUnmounted(clear);
 
 <style scoped>
 .guided-coach { color-scheme: dark; background: #142b35; color: #e9f4fc; border: 2px solid #79d7b1; padding: 18px 22px; margin: 0 0 24px; font: 14px/1.6 var(--font-terminal); overflow-wrap: anywhere; }
-.guided-coach.running { position: sticky; top: 0; z-index: 40; box-shadow: 0 8px 24px #02080fe6; }
+.guided-coach.running { position: sticky; top: var(--guide-header-height, 0px); z-index: 40; box-shadow: 0 8px 24px #02080fe6; }
 .guided-coach .guided-kicker { font-size: 11px; letter-spacing: .1em; color: var(--color-accent); margin: 0; }
 .guided-coach h2 { border: 0; padding: 0; margin: 6px 0; color: #f1f8ff; font-size: 20px; line-height: 1.3; letter-spacing: 0; }
 .guided-coach p { margin: 8px 0; }

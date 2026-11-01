@@ -1,0 +1,19 @@
+The unchanged quote-age assertion is timing-dependent. The current focused run
+passed. To verify it against the original read-only presentation implementation,
+this execution preloaded the baseline OpportunityAssessor before PHPUnit's
+normal Composer bootstrap. It did not modify the checkout:
+
+  git show 4bf70d7:app/Gameplay/OpportunityAssessor.php > /tmp/ui01-baseline-OpportunityAssessor.php
+
+Temporary PHP bootstrap:
+  <?php
+  require getcwd().'/vendor/autoload.php';
+  require '/tmp/ui01-baseline-OpportunityAssessor.php';
+
+Command, repeated with every result retained until the failure on attempt 4:
+  php -d auto_prepend_file=/tmp/ui01-baseline-bootstrap.php vendor/bin/phpunit --filter test_local_mutation_invalidates_a_quote_without_renewing_its_age
+
+The assertion at OpportunityTest.php:561 occurs before OpportunityAssessor is
+called. ShipCommandExecutor, AgentSynchronizer, SpaceTradersApi, the test and
+fake provider are unchanged from 4bf70d7. This is a focused baseline-path
+reproduction, not a second complete checkout or a clean full-suite pass.

@@ -1,0 +1,26 @@
+PASS login, normal guide entry, keyboard focus and preparation persistence
+PASS agent-scoped progress, lesson links, flight-deck checklist and real manual mining loop
+PASS complete, undo, resume, reset cancellation and confirmed checklist reset
+PASS agent/reset boundaries, malformed and unavailable storage, cross-tab updates
+node:internal/modules/run_main:111
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
++ actual - expected
+
++ ''
+- 'rgb(7, 13, 23)'
+
+    at file://[workspace]/scripts/verify-tutorial-browser.mjs:242:16
+    at async record (file://[workspace]/scripts/verify-tutorial-browser.mjs:58:40)
+    at async file://[workspace]/scripts/verify-tutorial-browser.mjs:235:5 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: '',
+  expected: 'rgb(7, 13, 23)',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v26.13.0

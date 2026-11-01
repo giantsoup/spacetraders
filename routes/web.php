@@ -47,6 +47,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/agents/storeExisting', [AgentController::class, 'storeExisting'])->name('agents.storeExisting');
     Route::resource('/agents', AgentController::class)->only(['index', 'create', 'store']);
 
+    Route::get('/agents/{agent}/history', [AgentDashboardController::class, 'history'])->name('game.history');
     Route::get('/agents/{agent}', [AgentDashboardController::class, 'show'])->name('agents.show');
     Route::middleware('throttle:60,1')->group(function () {
         Route::post('/agents/{agent}/accounting/review', [LocalAutomationController::class, 'reviewBalance'])->name('game.accounting.review');

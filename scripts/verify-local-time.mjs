@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { formatLocalTime, formatLocalJson, localTimeZone } from '../resources/js/dateTime.js';
+import { formatLocalTime, formatLocalClock, formatLocalJson, localTimeZone } from '../resources/js/dateTime.js';
 import { flightStep, newFlight } from '../resources/js/guidedFlight.js';
 
 if (!process.argv.includes('--timezone')) {
@@ -18,6 +18,8 @@ if (!process.argv.includes('--timezone')) {
         'Asia/Tokyo': 'Nov 1, 2026, 3:57:16 PM GMT+9',
         UTC: 'Nov 1, 2026, 6:57:16 AM UTC',
     }[process.env.TZ];
+    assert.equal(formatLocalClock(utc), expected.split(', ').slice(2).join(', '));
+    assert.equal(formatLocalClock(null), 'Unknown');
     assert.equal(localTimeZone, process.env.TZ);
     assert.equal(formatLocalTime(utc), expected);
     assert.equal(formatLocalTime('2026-10-31T23:57:16.395-07:00'), expected);
