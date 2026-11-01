@@ -1,0 +1,19 @@
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.4.27
+Configuration: <owned-worktree>/phpunit.xml
+
+................................................................. 65 / 90 ( 72%)
+...F.....................                                         90 / 90 (100%)
+
+Time: 00:33.223, Memory: 75.00 MB
+
+There was 1 failure:
+
+1) Tests\Feature\OpportunityTest::test_local_mutation_invalidates_a_quote_without_renewing_its_age
+Failed asserting that false is true.
+
+<owned-worktree>/tests/Feature/OpportunityTest.php:561
+
+FAILURES!
+Tests: 90, Assertions: 484, Failures: 1.
