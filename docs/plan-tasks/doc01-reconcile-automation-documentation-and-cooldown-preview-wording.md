@@ -17,10 +17,10 @@ Plan audit task **DOC01**. Status: documentation drift. Audited local source `22
 
 ## Acceptance
 
-- [ ] Document version-3 scout/trade previews and preserve historical versions.
-- [ ] Make preview copy reflect cooldown/travel overlap without changing command rules.
-- [ ] Link every document family to current implementation status and task pairs; keep historical findings dated.
-- [ ] Include the existing reviewed server deployment plan as a reference; no server changes.
+- [x] Document version-3 scout/trade previews and preserve historical versions.
+- [x] Make preview copy reflect cooldown/travel overlap without changing command rules.
+- [x] Link every document family to current implementation status and task pairs; keep historical findings dated.
+- [x] Include the existing reviewed server deployment plan as a reference; no server changes.
 
 ## Dependencies
 
@@ -32,6 +32,8 @@ Offline implementation and owned fixtures only. Live gameplay, paid calls, exter
 
 Keep Laravel gameplay rules, owner scoping, CSRF or the agreed mobile authentication boundary, durable intent/reconciliation, integer amounts and UTC deadlines. Use the locked stack and focused regression checks. Saved reports and UI remain dark.
 
-## Draft handoff
+## Review handoff · November 1, 2026
 
-This branch starts with an implementation brief. The planned feature or acceptance work remains open until the requirements above are implemented and verified. This document is not evidence of deployment, live gameplay, paid API access or external delivery.
+Implemented and verified offline on this dedicated branch. [Current status index](../plan-implementation-audit.md#current-status-index) and [actual before/after and check evidence](../issue-1/evidence/doc01-20261101/README.md) cover the four acceptance items. Versioned execution and command rules are unchanged; only the staged mining preview sentence changes application output.
+
+Final standard verification passed 294 tests / 1,548 assertions. The initial baseline reproduced QA01's quote-timestamp failure; DOC01 does not claim to fix that intermittent test. All 42 tracking pairs remain, with original audit snapshots explicitly labeled. The reviewed server plan remains a reference, with no server changes. PR #2 stays draft for Taylor's review; no new independent review ran. No deployment or live gameplay acceptance is claimed.

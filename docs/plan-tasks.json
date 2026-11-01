@@ -32,8 +32,8 @@
       "pr_number": 2,
       "pr_url": "https://github.com/giantsoup/spacetraders/pull/2",
       "branch": "plan/doc01-reconcile-automation-documentation-and-cooldown-preview-wording",
-      "head_sha": null,
-      "changed_files": [
+      "audit_head_sha": null,
+      "audit_changed_files": [
         "docs/plan-tasks/doc01-reconcile-automation-documentation-and-cooldown-preview-wording.md",
         "docs/plan-implementation-audit.md",
         "docs/plan-implementation-audit.html",
@@ -67,8 +67,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 3,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/3",
-      "head_sha": "c178f1b9404c30dafc74382c80d69c5c3c73ac13",
-      "changed_files": [
+      "audit_head_sha": "c178f1b9404c30dafc74382c80d69c5c3c73ac13",
+      "audit_changed_files": [
         "docs/plan-tasks/qa01-make-market-quote-invalidation-acceptance-deterministic.md"
       ],
       "branch": "plan/qa01-make-market-quote-invalidation-acceptance-deterministic",
@@ -101,8 +101,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 5,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/5",
-      "head_sha": "4bf70d7ce98c340f3ded63666876d265bbb9b1a0",
-      "changed_files": [
+      "audit_head_sha": "4bf70d7ce98c340f3ded63666876d265bbb9b1a0",
+      "audit_changed_files": [
         "docs/plan-tasks/ui01-implement-the-approved-native-ship-web-experience.md"
       ],
       "branch": "plan/ui01-implement-the-approved-native-ship-web-experience",
@@ -134,8 +134,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 7,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/7",
-      "head_sha": "54e998d95ee02bb993c4de5d866c6fadf9cfcacf",
-      "changed_files": [
+      "audit_head_sha": "54e998d95ee02bb993c4de5d866c6fadf9cfcacf",
+      "audit_changed_files": [
         "docs/plan-tasks/ops01-migrate-the-application-and-verification-runtime-to-php-8-5.md"
       ],
       "branch": "plan/ops01-migrate-the-application-and-verification-runtime-to-php-8-5",
@@ -168,8 +168,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 9,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/9",
-      "head_sha": "e8e4d71dad0b020a25a453a3a64acbeca02f067d",
-      "changed_files": [
+      "audit_head_sha": "e8e4d71dad0b020a25a453a3a64acbeca02f067d",
+      "audit_changed_files": [
         "docs/plan-tasks/ops02-close-public-account-routes-and-add-secure-operator-provisioning.md"
       ],
       "branch": "plan/ops02-close-public-account-routes-and-add-secure-operator-provisioning",
@@ -204,8 +204,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 11,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/11",
-      "head_sha": "47146e524ceae77f410d5847d47efebda5b6c886",
-      "changed_files": [
+      "audit_head_sha": "47146e524ceae77f410d5847d47efebda5b6c886",
+      "audit_changed_files": [
         "docs/plan-tasks/ops03-implement-deployment-drain-gates-and-worker-readiness-acknowledgements.md"
       ],
       "branch": "plan/ops03-implement-deployment-drain-gates-and-worker-readiness-acknowledgements",
@@ -242,8 +242,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 13,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/13",
-      "head_sha": "e3fb9bec67f09365261e6a1cb4255f85525d6da7",
-      "changed_files": [
+      "audit_head_sha": "e3fb9bec67f09365261e6a1cb4255f85525d6da7",
+      "audit_changed_files": [
         "docs/plan-tasks/ops04-add-reproducible-ci-gates-and-immutable-release-artifacts.md"
       ],
       "branch": "plan/ops04-add-reproducible-ci-gates-and-immutable-release-artifacts",
@@ -279,8 +279,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 15,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/15",
-      "head_sha": "cd935fb73550d7ce157352437eba24bbf519cf84",
-      "changed_files": [
+      "audit_head_sha": "cd935fb73550d7ce157352437eba24bbf519cf84",
+      "audit_changed_files": [
         "docs/plan-tasks/ops05-build-the-atomic-deployment-transaction-and-recovery-harness.md"
       ],
       "branch": "plan/ops05-build-the-atomic-deployment-transaction-and-recovery-harness",
@@ -317,8 +317,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 17,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/17",
-      "head_sha": "44e32784c7694d8ffb9a719a2fa36debcef0f0e6",
-      "changed_files": [
+      "audit_head_sha": "44e32784c7694d8ffb9a719a2fa36debcef0f0e6",
+      "audit_changed_files": [
         "docs/plan-tasks/ops06-prepare-restricted-linux-runtime-and-deployment-configuration.md"
       ],
       "branch": "plan/ops06-prepare-restricted-linux-runtime-and-deployment-configuration",
@@ -350,8 +350,8 @@
       "boundary": "This is a cross-repository coordination task. Do not change other repositories or shared-host processes without explicit execution scope and current inspection.",
       "issue_number": 19,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/19",
-      "head_sha": "d0e6889b7bb46e1cc2cd073685aef53566697cc6",
-      "changed_files": [
+      "audit_head_sha": "d0e6889b7bb46e1cc2cd073685aef53566697cc6",
+      "audit_changed_files": [
         "docs/plan-tasks/ops07-prepare-shared-app-queue-scheduling-changes-with-email-priority.md"
       ],
       "branch": "plan/ops07-prepare-shared-app-queue-scheduling-changes-with-email-priority",
@@ -382,8 +382,8 @@
       "boundary": "Prepare and verify proposals first. Shared database/service changes require current execution authorization; no new resources or broad tuning.",
       "issue_number": 21,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/21",
-      "head_sha": "79b5b14e3a1e0398cde36e5b1c7c116de09225f8",
-      "changed_files": [
+      "audit_head_sha": "79b5b14e3a1e0398cde36e5b1c7c116de09225f8",
+      "audit_changed_files": [
         "docs/plan-tasks/ops08-prepare-measured-shared-server-cache-and-journal-adjustments.md"
       ],
       "branch": "plan/ops08-prepare-measured-shared-server-cache-and-journal-adjustments",
@@ -415,8 +415,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 23,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/23",
-      "head_sha": "bc63a61ce731152424cebc58b4bfe88e3c05dbde",
-      "changed_files": [
+      "audit_head_sha": "bc63a61ce731152424cebc58b4bfe88e3c05dbde",
+      "audit_changed_files": [
         "docs/plan-tasks/ops09-implement-consistent-backups-mac-retrieval-and-restore-verification.md"
       ],
       "branch": "plan/ops09-implement-consistent-backups-mac-retrieval-and-restore-verification",
@@ -454,8 +454,8 @@
       "boundary": "Requires explicit live deployment, credential provisioning and shared-host execution authorization. Opening this draft does not deploy anything.",
       "issue_number": 25,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/25",
-      "head_sha": "314d522f09e441740ed69733df58a78e7123177a",
-      "changed_files": [
+      "audit_head_sha": "314d522f09e441740ed69733df58a78e7123177a",
+      "audit_changed_files": [
         "docs/plan-tasks/ops10-provision-the-private-linode-application-and-first-release.md"
       ],
       "branch": "plan/ops10-provision-the-private-linode-application-and-first-release",
@@ -488,8 +488,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 27,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/27",
-      "head_sha": "f12c59fb3763a22e6535b7af92380542b7f651c0",
-      "changed_files": [
+      "audit_head_sha": "f12c59fb3763a22e6535b7af92380542b7f651c0",
+      "audit_changed_files": [
         "docs/plan-tasks/ops11-prove-deployment-behavior-recovery-and-combined-server-capacity.md"
       ],
       "branch": "plan/ops11-prove-deployment-behavior-recovery-and-combined-server-capacity",
@@ -518,8 +518,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 29,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/29",
-      "head_sha": "f58177bab2cba7d5af69c8443fb6c72f26caa2ae",
-      "changed_files": [
+      "audit_head_sha": "f58177bab2cba7d5af69c8443fb6c72f26caa2ae",
+      "audit_changed_files": [
         "docs/plan-tasks/mob01-define-the-first-iphone-release-workflow-and-technical-decisions.md"
       ],
       "branch": "plan/mob01-define-the-first-iphone-release-workflow-and-technical-decisions",
@@ -553,8 +553,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 31,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/31",
-      "head_sha": "516c8bdb61eded3e211ac4c367d27f38c51a1df8",
-      "changed_files": [
+      "audit_head_sha": "516c8bdb61eded3e211ac4c367d27f38c51a1df8",
+      "audit_changed_files": [
         "docs/plan-tasks/mob02-expose-a-versioned-authenticated-mobile-gameplay-api.md"
       ],
       "branch": "plan/mob02-expose-a-versioned-authenticated-mobile-gameplay-api",
@@ -587,8 +587,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 33,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/33",
-      "head_sha": "40863ab756462ab23f3de1b1260d934caeb64f66",
-      "changed_files": [
+      "audit_head_sha": "40863ab756462ab23f3de1b1260d934caeb64f66",
+      "audit_changed_files": [
         "docs/plan-tasks/mob03-build-the-iphone-client-against-the-shared-laravel-engine.md"
       ],
       "branch": "plan/mob03-build-the-iphone-client-against-the-shared-laravel-engine",
@@ -621,8 +621,8 @@
       "boundary": "Signing credentials, Apple setup, distribution and any live commands need explicit execution authorization. Use owned offline fixtures first.",
       "issue_number": 35,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/35",
-      "head_sha": "33092656213581d267fdb16f5a142388e9b87ce0",
-      "changed_files": [
+      "audit_head_sha": "33092656213581d267fdb16f5a142388e9b87ce0",
+      "audit_changed_files": [
         "docs/plan-tasks/mob04-verify-phone-to-engine-recovery-and-distribute-through-testflight.md"
       ],
       "branch": "plan/mob04-verify-phone-to-engine-recovery-and-distribute-through-testflight",
@@ -653,8 +653,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 37,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/37",
-      "head_sha": "35fad9d13334a164dd92f9cd3bce8386760447f6",
-      "changed_files": [
+      "audit_head_sha": "35fad9d13334a164dd92f9cd3bce8386760447f6",
+      "audit_changed_files": [
         "docs/plan-tasks/adv01-add-versioned-adviser-policy-grants-and-deterministic-activity-selection.md"
       ],
       "branch": "plan/adv01-add-versioned-adviser-policy-grants-and-deterministic-activity-selection",
@@ -686,8 +686,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 39,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/39",
-      "head_sha": "b3a6938cedf4119eb727a63659491a5fadcf6c1d",
-      "changed_files": [
+      "audit_head_sha": "b3a6938cedf4119eb727a63659491a5fadcf6c1d",
+      "audit_changed_files": [
         "docs/plan-tasks/adv02-enforce-the-policy-credit-floor-with-durable-agent-wide-debit-reservations.md"
       ],
       "branch": "plan/adv02-enforce-the-policy-credit-floor-with-durable-agent-wide-debit-reservations",
@@ -719,8 +719,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 41,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/41",
-      "head_sha": "0e7ae106fda152325c0008a1b30b9832edf6252b",
-      "changed_files": [
+      "audit_head_sha": "0e7ae106fda152325c0008a1b30b9832edf6252b",
+      "audit_changed_files": [
         "docs/plan-tasks/adv03-implement-the-adviser-dollar-budget-reservation-ledger.md"
       ],
       "branch": "plan/adv03-implement-the-adviser-dollar-budget-reservation-ledger",
@@ -755,8 +755,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 43,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/43",
-      "head_sha": "3636043b80b5494b00eb445712f33ab07bddd2d7",
-      "changed_files": [
+      "audit_head_sha": "3636043b80b5494b00eb445712f33ab07bddd2d7",
+      "audit_changed_files": [
         "docs/plan-tasks/adv04-integrate-the-openai-adviser-in-observation-mode-and-evaluate-its-value.md"
       ],
       "branch": "plan/adv04-integrate-the-openai-adviser-in-observation-mode-and-evaluate-its-value",
@@ -791,8 +791,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 45,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/45",
-      "head_sha": "5390fb23c75877f679c78b8afb94b196c63edf12",
-      "changed_files": [
+      "audit_head_sha": "5390fb23c75877f679c78b8afb94b196c63edf12",
+      "audit_changed_files": [
         "docs/plan-tasks/adv05-add-policy-authorized-one-time-decision-execution-and-trigger-recovery.md"
       ],
       "branch": "plan/adv05-add-policy-authorized-one-time-decision-execution-and-trigger-recovery",
@@ -825,8 +825,8 @@
       "boundary": "Requires explicit paid API and live gameplay authorization under selected numeric bounds; no paid or game actions during audit or draft creation.",
       "issue_number": 47,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/47",
-      "head_sha": "ac8d1f9d6bdb5634696d1c7982370824a2d26513",
-      "changed_files": [
+      "audit_head_sha": "ac8d1f9d6bdb5634696d1c7982370824a2d26513",
+      "audit_changed_files": [
         "docs/plan-tasks/adv06-run-a-bounded-live-adviser-evaluation-under-an-explicit-policy.md"
       ],
       "branch": "plan/adv06-run-a-bounded-live-adviser-evaluation-under-an-explicit-policy",
@@ -858,8 +858,8 @@
       "boundary": "No webhook secret, external message or Discord channel change is authorized by this issue or draft.",
       "issue_number": 49,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/49",
-      "head_sha": "54cdd1ee1950cdb19ac7dacc7410b53031374461",
-      "changed_files": [
+      "audit_head_sha": "54cdd1ee1950cdb19ac7dacc7410b53031374461",
+      "audit_changed_files": [
         "docs/plan-tasks/adv07-add-a-sanitized-discord-notification-outbox.md"
       ],
       "branch": "plan/adv07-add-a-sanitized-discord-notification-outbox",
@@ -890,8 +890,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 51,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/51",
-      "head_sha": "ad2dae8602505843b91ce82c2c3379190e01965d",
-      "changed_files": [
+      "audit_head_sha": "ad2dae8602505843b91ce82c2c3379190e01965d",
+      "audit_changed_files": [
         "docs/plan-tasks/exp01-add-bounded-scan-and-chart-commands-for-hidden-trait-evidence.md"
       ],
       "branch": "plan/exp01-add-bounded-scan-and-chart-commands-for-hidden-trait-evidence",
@@ -922,8 +922,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 53,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/53",
-      "head_sha": "64b560e060fdeaf9d35e06b858822d94bdaea210",
-      "changed_files": [
+      "audit_head_sha": "64b560e060fdeaf9d35e06b858822d94bdaea210",
+      "audit_changed_files": [
         "docs/plan-tasks/exp02-validate-additional-flight-modes-and-unusual-ship-fuel-mechanics.md"
       ],
       "branch": "plan/exp02-validate-additional-flight-modes-and-unusual-ship-fuel-mechanics",
@@ -953,8 +953,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 55,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/55",
-      "head_sha": "d0760503e60da61c9ca32641ddf674ec7dc902fa",
-      "changed_files": [
+      "audit_head_sha": "d0760503e60da61c9ca32641ddf674ec7dc902fa",
+      "audit_changed_files": [
         "docs/plan-tasks/exp03-validate-and-implement-cargo-based-refueling-safely.md"
       ],
       "branch": "plan/exp03-validate-and-implement-cargo-based-refueling-safely",
@@ -983,8 +983,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 57,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/57",
-      "head_sha": "5bc6f0dc51840448bd61b729162e3f372d5cd880",
-      "changed_files": [
+      "audit_head_sha": "5bc6f0dc51840448bd61b729162e3f372d5cd880",
+      "audit_changed_files": [
         "docs/plan-tasks/exp04-execute-approved-fuel-stop-itineraries-through-the-existing-runner.md"
       ],
       "branch": "plan/exp04-execute-approved-fuel-stop-itineraries-through-the-existing-runner",
@@ -1016,8 +1016,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 59,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/59",
-      "head_sha": "f5cb2be7e5ade217e6218ce96e4fd369204de2a6",
-      "changed_files": [
+      "audit_head_sha": "f5cb2be7e5ade217e6218ce96e4fd369204de2a6",
+      "audit_changed_files": [
         "docs/plan-tasks/exp05-add-purpose-bounded-multi-market-scouting-tours.md"
       ],
       "branch": "plan/exp05-add-purpose-bounded-multi-market-scouting-tours",
@@ -1049,8 +1049,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 61,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/61",
-      "head_sha": "8f9e2e86dd218d8d77f6c18ea99840d7074210a7",
-      "changed_files": [
+      "audit_head_sha": "8f9e2e86dd218d8d77f6c18ea99840d7074210a7",
+      "audit_changed_files": [
         "docs/plan-tasks/exp06-evaluate-probe-placement-and-require-a-separate-investment-approval.md"
       ],
       "branch": "plan/exp06-evaluate-probe-placement-and-require-a-separate-investment-approval",
@@ -1082,8 +1082,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 63,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/63",
-      "head_sha": "6b7b01d44827c369d149f868bdcbabbc86f73c5d",
-      "changed_files": [
+      "audit_head_sha": "6b7b01d44827c369d149f868bdcbabbc86f73c5d",
+      "audit_changed_files": [
         "docs/plan-tasks/exp07-evaluate-and-orchestrate-a-dedicated-surveyor-only-when-justified.md"
       ],
       "branch": "plan/exp07-evaluate-and-orchestrate-a-dedicated-surveyor-only-when-justified",
@@ -1117,8 +1117,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 65,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/65",
-      "head_sha": "d068fbf66e99e9052fe008eb0eedc713ee253eeb",
-      "changed_files": [
+      "audit_head_sha": "d068fbf66e99e9052fe008eb0eedc713ee253eeb",
+      "audit_changed_files": [
         "docs/plan-tasks/exp08-evaluate-and-orchestrate-miner-hauler-capacity-and-buyer-throughput.md"
       ],
       "branch": "plan/exp08-evaluate-and-orchestrate-miner-hauler-capacity-and-buyer-throughput",
@@ -1150,8 +1150,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 67,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/67",
-      "head_sha": "61e9f1242159b3e4509722d7da8a716bea44d81f",
-      "changed_files": [
+      "audit_head_sha": "61e9f1242159b3e4509722d7da8a716bea44d81f",
+      "audit_changed_files": [
         "docs/plan-tasks/exp09-integrate-comparable-complete-cycle-economics-and-conservative-forecasts.md"
       ],
       "branch": "plan/exp09-integrate-comparable-complete-cycle-economics-and-conservative-forecasts",
@@ -1183,8 +1183,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 69,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/69",
-      "head_sha": "b141d0c87ffc10ecae5194cbfd8385f4bb6ccbed",
-      "changed_files": [
+      "audit_head_sha": "b141d0c87ffc10ecae5194cbfd8385f4bb6ccbed",
+      "audit_changed_files": [
         "docs/plan-tasks/exp10-assess-refining-and-production-support-as-separate-investments.md"
       ],
       "branch": "plan/exp10-assess-refining-and-production-support-as-separate-investments",
@@ -1217,8 +1217,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 71,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/71",
-      "head_sha": "10f07c2fec89bc5b66414b40b865b4592dea82eb",
-      "changed_files": [
+      "audit_head_sha": "10f07c2fec89bc5b66414b40b865b4592dea82eb",
+      "audit_changed_files": [
         "docs/plan-tasks/exp11-assess-wider-exploration-only-after-verified-local-opportunity-limits.md"
       ],
       "branch": "plan/exp11-assess-wider-exploration-only-after-verified-local-opportunity-limits",
@@ -1250,8 +1250,8 @@
       "boundary": "Requires explicit selected-environment cutover authorization. No live database, APP_KEY, credential or service change during audit.",
       "issue_number": 73,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/73",
-      "head_sha": "75a29b10d6026af46057a12c562262d0573e1ef6",
-      "changed_files": [
+      "audit_head_sha": "75a29b10d6026af46057a12c562262d0573e1ef6",
+      "audit_changed_files": [
         "docs/plan-tasks/live01-record-live-local-backup-restore-and-controlled-cutover-acceptance.md"
       ],
       "branch": "plan/live01-record-live-local-backup-restore-and-controlled-cutover-acceptance",
@@ -1281,8 +1281,8 @@
       "boundary": "Requires permission for disruptive actual Mac sleep. Independent fixture preparation is safe; never put live gameplay at risk.",
       "issue_number": 75,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/75",
-      "head_sha": "f3584e7c1d2f614031d4762c42cdd3408b5c9699",
-      "changed_files": [
+      "audit_head_sha": "f3584e7c1d2f614031d4762c42cdd3408b5c9699",
+      "audit_changed_files": [
         "docs/plan-tasks/live02-rehearse-real-macos-sleep-and-wake-with-an-owned-offline-engine.md"
       ],
       "branch": "plan/live02-rehearse-real-macos-sleep-and-wake-with-an-owned-offline-engine",
@@ -1317,8 +1317,8 @@
       "boundary": "Every live mutation and numeric experiment budget requires explicit approval. No agent registration, purchase, paid trial or autonomous spending during this audit.",
       "issue_number": 77,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/77",
-      "head_sha": "9dd115fee052b074ab017f0ad07eaaa7412ae5dd",
-      "changed_files": [
+      "audit_head_sha": "9dd115fee052b074ab017f0ad07eaaa7412ae5dd",
+      "audit_changed_files": [
         "docs/plan-tasks/live03-record-bounded-live-trip-and-comparable-mining-survey-and-trade-evidence.md"
       ],
       "branch": "plan/live03-record-bounded-live-trip-and-comparable-mining-survey-and-trade-evidence",
@@ -1347,8 +1347,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 79,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/79",
-      "head_sha": "27372602b2bffea48c0841955b7ca4aa20d6c320",
-      "changed_files": [
+      "audit_head_sha": "27372602b2bffea48c0841955b7ca4aa20d6c320",
+      "audit_changed_files": [
         "docs/plan-tasks/opt01-batch-reset-scoped-fuel-market-listing-queries.md"
       ],
       "branch": "plan/opt01-batch-reset-scoped-fuel-market-listing-queries",
@@ -1378,8 +1378,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 81,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/81",
-      "head_sha": "159bc0758ac7b355bd874484b7858ad2aaa8153c",
-      "changed_files": [
+      "audit_head_sha": "159bc0758ac7b355bd874484b7858ad2aaa8153c",
+      "audit_changed_files": [
         "docs/plan-tasks/opt02-remove-owned-temporary-verification-fixtures-after-successful-runs.md"
       ],
       "branch": "plan/opt02-remove-owned-temporary-verification-fixtures-after-successful-runs",
@@ -1409,8 +1409,8 @@
       "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
       "issue_number": 83,
       "issue_url": "https://github.com/giantsoup/spacetraders/issues/83",
-      "head_sha": "96488b05aebd962e4bf4b05c9cc5846c16f22d68",
-      "changed_files": [
+      "audit_head_sha": "96488b05aebd962e4bf4b05c9cc5846c16f22d68",
+      "audit_changed_files": [
         "docs/plan-tasks/opt03-measure-and-reduce-redundant-upstream-reads-without-stale-preflight.md"
       ],
       "branch": "plan/opt03-measure-and-reduce-redundant-upstream-reads-without-stale-preflight",
@@ -1419,5 +1419,6 @@
       "pr_url": "https://github.com/giantsoup/spacetraders/pull/84",
       "brief_path": "docs/plan-tasks/opt03-measure-and-reduce-redundant-upstream-reads-without-stale-preflight.md"
     }
-  ]
+  ],
+  "snapshot_note": "Original 2026-11-01 audit at local_head and remote_base. Evidence, audit_head_sha and audit_changed_files describe that dated snapshot, not current acceptance. See plan-implementation-audit.md for the current status index."
 }
