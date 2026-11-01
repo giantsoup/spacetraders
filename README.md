@@ -2,6 +2,10 @@
 
 A Laravel 13, Inertia 3, Vue 3, and Pinia 4 client for SpaceTraders. Register or import an agent, then open its flight deck. The flight deck provides previewed manual commands and opt-in local Mining and Contracts automation.
 
+## Design direction
+
+Use the [design brief](docs/design-brief.md) for new UI work. It records the approved dark, phone-first screen family, shared visual rules, ship-report interactions, and gameplay safeguards. The [interactive redesign report](docs/single-ship-redesigns.html) and screenshots in `docs/design-reference/` provide the visual references. Horizon is the recommended starting point, with Logbook and Voyage retained as alternatives. These are design references; the current app styling is described in [app-styling.md](docs/app-styling.md).
+
 ## API compatibility
 
 The integration targets [SpaceTraders API v2.3.0](https://docs.spacetraders.io/openapi), verified against the [official bundled OpenAPI specification](https://spacetraders.io/SpaceTraders.json).

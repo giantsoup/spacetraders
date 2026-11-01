@@ -1,5 +1,9 @@
 # App styling
 
+The [design brief](design-brief.md) defines the approved direction for new UI work, including the Horizon, Logbook, and Voyage references. This page describes the current terminal-style implementation; the redesigned screens remain prototypes until their application workflows are implemented and verified.
+
+## Current implementation
+
 Every Inertia page uses `resources/js/Layouts/AppShell.vue`, either directly or through `AuthenticatedLayout` or `GuestLayout`. The shell owns the dark background, navigation, and keyboard skip link. Navigation wraps on small screens without hiding account links behind a menu.
 
 `resources/css/command.css` defines the existing command-terminal palette as Tailwind theme variables. It also owns panels, form controls, buttons, focus outlines, and the account dialog. The guide keeps its sans-serif reading text and uses the shared terminal header.
