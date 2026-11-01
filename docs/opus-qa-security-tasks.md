@@ -1,5 +1,7 @@
 # Opus QA and security review: exploration, calibration, loads, scout/trade, surveys/transfers
 
+Current status: **Accepted for local fixture scope** by Claude Opus 5.5 at `f56513bad2db946ce83ca29e88df30eb30a8e7bc`. All QA/security blockers T1–T6 are closed. See [round 3](#round-3-independent-re-review) for the independent evidence and live gate. Earlier verdicts below are preserved as review history.
+
 | Item | Value |
 | --- | --- |
 | Checkout | `/Users/Taylor/.t3/worktrees/spacetraders/feature-local-automation` |
@@ -414,3 +416,97 @@ Small optional review items were addressed alongside T6:
 Evidence is under `storage/app/review-fixes-r3/`: standard verification log, T6 red/green tests, Opus P5b rerun, both real-worker suites, and browser artifact directories. All calls used synthetic fixtures and owned databases. Original input checksums and cleanup are checked again before the next review.
 
 Final parent reruns for the T6 correction: both browser journeys pass with no console errors, the existing engine journey reports serviceRemoved=true, and both real-worker suites pass. The 390px dark usage panel and mining preview were visually inspected. All four protected input hashes still match. Fresh independent acceptance remains pending.
+
+## Round 3: independent re-review
+
+| Item | Value |
+| --- | --- |
+| Reviewed head | `f56513bad2db946ce83ca29e88df30eb30a8e7bc` on `feature/local-automation` |
+| Correction base | `05910dca4ff4a530c5b823daa9b68f95efcd2775` (round 2 head) |
+| Overall implementation base | `032b822dffab2353189ea683eea81e707702356b` |
+| Reviewer | Claude Opus 5.5, single independent reviewer with no delegation |
+| Date | 2026-11-01 |
+
+### Round 3 verdicts
+
+| Stage | Verdict | Basis |
+| --- | --- | --- |
+| **QA** | **ACCEPTED** | T6 meets all seven acceptance cases. I reproduced each case independently and added probes for the boundaries the parent's tests do not cover. No regressions in R01–R08 behavior. |
+| **Security** | **No confirmed vulnerabilities in scope** | The new log line, process hold, read-only usage path, symlink and corrupt-store handling, and account isolation were reviewed and probed. |
+| **Overall** | **Accepted for local fixture scope at `f56513b`** | No blocking tasks remain. D3 still gates any live activation, and live activation remains unauthorized. |
+
+### Round 3 executed evidence
+
+All checks were synthetic: owned temporary SQLite or in-memory databases, `FakeSpaceTraders` with stray HTTP prevented, and owned loopback servers.
+- No authenticated or live SpaceTraders request.
+- No `.env`, game database, credentials or Herd configuration touched.
+- `/Users/Taylor/Sites/spacetraders` not modified.
+
+Evidence is in `storage/app/opus-review-r3/`, which git ignores.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| `PNPM_BIN=… bash scripts/verify.sh` | **Pass.** 286 tests / 1,491 assertions, build determinism, all application, time and environment checks, Ignition controls, Pint, `git diff --check`. Tree unchanged after the rebuild. | `verify-sh.txt` |
+| Round-2 probes at HEAD | **P5 inverted as expected.** The in-process lock is held for the whole post-response record, longer than the 1.5 s bound. The orbit is now `confirmed` with 1 upstream write. The probe's old "uncertain" assertion is what fails, and that failure is the fix. **P5b: 0 / 1,200** busy failures across 3 real processes (was 207 and 296). P5 control and P9 unchanged. | `r2-probes-at-head.txt` |
+| Round-3 probes (`ReviewProbeR3Test.php`, 8 tests / 31 assertions) | **Pass.** See the table below. | `r3-probes.txt` |
+| `verify-automation-browser.mjs` | **Pass.** 7 steps, `errors=[]`, `serviceRemoved=true`. `launchctl list` shows no SpaceTraders job and `~/Library/LaunchAgents` has no plist. | `browser-automation/`, `browser-automation.log` |
+| `verify-opportunities-browser.mjs` | **Pass.** Scout, 4/4/2 trade, evidence export and usage panel; `errors=[]`. | `browser-opportunities/`, `browser-opportunities.log` |
+| `scripts/verify-automation-worker.php` | **Pass.** 5 cases. | `automation-worker.txt` |
+| `scripts/verify-mvp-worker.php` | **Pass.** Duplicate, non-replay, offline Stop, no failed jobs. | `mvp-worker.txt` |
+| Screenshots inspected | Dark theme throughout. Usage panel values are rounded (`0.811`, `3.783`) and an inactive pause shows "No active pause". An active pause is passed as ISO and rendered through `formatLocalTime` in `DataDetails`, so it displays in local time. The mining preview at 390 px reads "Up to 1 extraction per trip" in both the warning and ordered step 2. The cut-off right edge in `api-usage-panel-1440.png` comes from the element crop; the full-page `api-usage-1440.png` lays out correctly. | PNGs listed above |
+| Inputs and cleanup | All four untracked inputs match `/tmp/spacetraders-preserved-docs.json`. `git status` is identical before and after, apart from this report. A `queue:listen` running in `/Users/Taylor/Sites/spacetraders` predates this review and belongs to the user's own session; I left it untouched. | `inputs-before.sha256`, `status-before.txt` |
+
+Round-3 probes (`php vendor/bin/phpunit storage/app/opus-review-r3/ReviewProbeR3Test.php`):
+
+| Probe | What it challenges | Result |
+| --- | --- | --- |
+| R3-1 | A 2xx write whose recording fails, followed by the *next* action in the same process, using a fresh `RequestBudget` instance | First action `confirmed`. The next preview's read throws `RequestDeferred` with no transport. After the hold expires (simulated clock), the second write confirms once, for 2 writes total. |
+| R3-1b | An already-approved write that reaches `execute()` during a process hold | Returns to `pending`, `sent_at` null, no upstream write, not uncertain. |
+| R3-2 | A known 4xx write rejection (401) whose recording fails | `rejected`, neither `uncertain` nor `confirmed`. The certainty boundary holds: only 429/5xx without a saved pause stay uncertain. |
+| R3-3 | HTTP-date `Retry-After` (240 s) and an absurd `Retry-After` (999999) on an unsaved pause | Hold of 230–242 s; the absurd value is capped at 3,600 s. |
+| R3-4 | Dashboard evidence with a corrupt `budget.json`, then with a symlinked store directory | `request_usage.unavailable` is shown. Corrupt bytes and lock mtime are unchanged, and nothing is created inside the symlink target. |
+| R3-5 | `usage()` while another descriptor holds the writer lock | Returns in under 0.2 s. `budget.json` mtime is unchanged, and the token and account ID are absent from the file. |
+| R3-6 | Log contents when the response carries an `Authorization` header and a secret-looking body | The log line contains only `{"http_status":200}`, and `gameplay.log` is mode 0600. |
+| R3-7 | A real second process holds the lock for 1.2 s, inside the bound, before a pre-transport `reserve()` | Waited 1.208 s, then succeeded with no deferral. |
+
+### T6 closure
+
+- [x] **T6 closed.** Each acceptance case was independently verified:
+  1. **Short contention after a 2xx write confirms once.** Parent test (150 ms real holder); R2 P5 inverted.
+  2. **Contention beyond the bound after a 2xx write still confirms.** The parent test's 1.9 s real holder and the R2 P5 indefinite holder both confirm. The sanitized warning carries the status only (R3-6). Redispatch adds no write.
+  3. **An unsaved 429/5xx write stays uncertain and further process transport is blocked until expiry.** Covered by parent tests for 429, 503, 502 (180 s minimum), Retry-After 90 and a 2xx exhausted response; R3-3 adds the HTTP-date and cap cases. R3-1 and R3-1b show the hold survives new instances, defers approved writes to `pending` without transport, and releases after expiry.
+  4. **3-process stress has 0 failures.** Shown by the new regression and by my rerun of P5b (0 / 1,200).
+  5. **Pre-transport contention still returns to pending.** The parent's reworked test passes, and R3-1b covers the same pending path for the process hold.
+  6. **`usage()` does not modify the store.** Shown by the parent test and by R3-4 and R3-5. No lock is taken, nothing is written, created or chmodded, and corrupt or unsafe stores degrade to "unavailable".
+  7. **Full suite, `verify.sh`, both browser scripts and both workers pass.** All rerun independently at this exact HEAD.
+- **Source check.**
+  - The `change()` retry is bounded at 1.5 s by `hrtime`. Its critical section only reads, transforms and atomically replaces a small JSON file, so it cannot deadlock against SQLite.
+  - `SpaceTradersClient::request` catches any `Throwable` from `observe()`. For 429 or 5xx it throws `uncertain: ! $read`; otherwise it returns the response. Normal body validation then still runs: the parent test shows a malformed 2xx stays uncertain.
+  - `recordingFailed()` wraps logging in its own `try`. The static hold key is a hash of the store path, so it contains no secret.
+
+### Remaining items (none blocking)
+
+- [ ] **D3 (live gate, unchanged).** The live semantics of `X-RateLimit-Remaining` and `Reset` are unverified (R2 P9 still shows a `Remaining: 1` window deferring everything). This must be resolved with a separately authorized, bounded, read-only header check before any live activation. It fails safe by underusing the allowance.
+- [ ] **N1 (informational, accepted by design).** The process hold is in memory only.
+  - Another process, or a restart, does not inherit a pause that failed to save, and a 2xx `Remaining: 0` correction that failed to save is lost to other processes.
+  - The durable admission still counts the request, and this behavior is documented in `docs/exploration-implementation.md`.
+  - An account-type 429 whose pause cannot be saved holds all accounts in that process. That is more conservative than account isolation, and acceptable.
+- [ ] **N2 (informational).** Pre-transport `reserve()` and post-response recording can each wait up to 1.5 s for the lock, which can add latency to a web request under heavy contention. This is bounded and acceptable.
+- O4 (read reduction) remains optional. O5, O6 and O7 are addressed and verified above. O1–O3 remain optional. D1 and D2 remain accepted.
+
+### Round 3 security assessment
+
+| Component | Disposition |
+| --- | --- |
+| Recording-failure log | Writes only `http_status` to `storage/logs/gameplay.log` at mode 0600. No exception message, header, body, token or account ID (R3-6, plus a parent test that a thrown message is absent). Logging failure is swallowed and cannot change the result. |
+| Process hold | A static array keyed by `sha256(serialize(path))`. It holds no secret and cannot be influenced by users. It only *blocks* transport, never relaxes it, and is checked before any admission. |
+| Read-only usage | No `mkdir`, `chmod`, lock or write. A symlinked directory or state file is refused, and a foreign owner is refused. Corrupt state raises `RequestDeferred` (a `GameException`), which `EvidenceAnalysis` turns into a static "unavailable" message (R3-4). Rename-based writes mean reads never see a partial file. |
+| Budget file | Still written through a 0600 `tempnam` file and an atomic rename under the 0700, owner-checked directory. Raw tokens and account IDs are absent (R3-5). |
+| Telemetry, export and authorization | The display-only rounding in `EvidencePanel.vue` leaves the exported numbers raw. No route, controller, middleware or dependency changed since `05910dc`. Owner-only access from round 2 still applies. |
+| Account isolation | Saved account-type 429 pauses still affect only that account's bucket (existing tests pass). The unsaved-pause fallback is broader, which is conservative. |
+
+No confidentiality, authorization or injection issue was found. T6 is closed.
+
+### Round 3 decision
+
+**ACCEPTED at `f56513bad2db946ce83ca29e88df30eb30a8e7bc` for local fixture scope.** No blocking QA or security task remains. This acceptance covers synthetic and local-fixture behavior only; it guarantees no live mechanics, throughput or profit. Before any live activation, which remains unauthorized, resolve D3 through a separately authorized, bounded, read-only header check, and keep the existing explicit approvals, protected credits, limits and reconciliation in force.
