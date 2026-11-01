@@ -2,7 +2,7 @@
 
 A Laravel 13, Inertia 3, Vue 3, and Pinia 4 client for SpaceTraders. Register or import an agent, then open its flight deck. The flight deck provides previewed manual commands and opt-in local Mining and Contracts automation.
 
-The [local batch-two integration report](docs/integration-batch2-20261101/README.md) records the combined OPS02, OPS03, ADV01, EXP01, EXP09 and OPT02 implementation and verification. The original six PRs merged only briefs. Their dated branch reports remain historical evidence; their old instructions to update those PRs are superseded by this integration report. Publication and issue acceptance remain pending.
+The [batch-two integration report](docs/integration-batch2-20261101/README.md) records the combined OPS02, OPS03, ADV01, EXP01, EXP09 and OPT02 implementation and verification. The original six PRs merged only briefs. Their dated branch reports remain historical evidence; their old instructions to update those PRs are superseded by this integration report. The [publication handoff](docs/integration-batch2-20261101/publication.md) records the authorized PR preparation and refreshed base. Issue acceptance remains pending.
 
 ## Design direction
 

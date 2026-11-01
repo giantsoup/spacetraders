@@ -1,0 +1,20 @@
+{
+  "recorded_at_utc": "2026-11-01T23:38:32.952643+00:00",
+  "refreshed_source": "5c0e6c03c47391087cc04bdcf21f7639c8c1ced7",
+  "main": "ddbc1e013a8f3252c7e60d9161816bde38b1468e",
+  "runtime_unchanged_from": "55c7fd4c2f091dff8ada13df3b00e9167a9b8c40",
+  "verify": {
+    "passed": true,
+    "tests": 391,
+    "assertions": 2244,
+    "seconds": 37.78
+  },
+  "combined_browser": {
+    "passed": true,
+    "seconds": 4.96,
+    "fixtureRemoved": true
+  },
+  "committed_asset_hashes_match": true,
+  "remote_ci": "determined by PR checks after publication",
+  "independent_review": "not run; no agents permitted"
+}
