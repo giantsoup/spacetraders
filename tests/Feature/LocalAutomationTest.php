@@ -582,4 +582,27 @@ class LocalAutomationTest extends TestCase
         $this->assertSame(0, $delivery->outcome['credit_delta']);
         $this->assertSame(0, $delivery->outcome['transaction_total']);
     }
+
+    public function test_accepted_partial_contract_completes_multiple_trips_and_delivery_terms(): void
+    {
+        $this->world(function (&$w) {
+            $w['contracts'][0]['accepted'] = true;
+            $w['contracts'][0]['terms']['deliver'][0]['unitsRequired'] = 50;
+            $w['contracts'][0]['terms']['deliver'][0]['unitsFulfilled'] = 5;
+            $w['contracts'][0]['terms']['deliver'][] = ['tradeSymbol' => 'COPPER_ORE', 'destinationSymbol' => 'X1-TEST-ROCK', 'unitsRequired' => 8, 'unitsFulfilled' => 2];
+        });
+        $run = $this->preview('contracts', ['max_spend' => 2000, 'max_loss' => 2000]);
+        $this->assertSame(1500, $run->plan['contract_plan']['future_receipts']);
+        $this->assertSame(3, $run->plan['contract_plan']['deliveries']);
+        app(AutomationRunner::class)->start($this->agent, $run);
+        $this->drain($run);
+        $this->assertSame(RunState::Completed, $run->fresh()->state, $run->fresh()->blocked_reason ?? '');
+        $this->assertSame(1500, $run->fresh()->totals['receipts']);
+        $this->assertSame(1560, $run->fresh()->totals['acquisition_cost']);
+        $this->assertSame(-60, $run->fresh()->totals['cash_contribution']);
+        $this->assertSame(3, $run->fresh()->totals['deliveries']);
+        $this->assertSame(0, $this->world()['ships'][0]['cargo']['units']);
+        $this->assertFalse(collect($this->world()['writes'])->contains(fn ($w) => str_ends_with($w['path'], '/accept')));
+        $this->assertSame([50, 8], array_column($this->world()['contracts'][0]['terms']['deliver'], 'unitsFulfilled'));
+    }
 }
