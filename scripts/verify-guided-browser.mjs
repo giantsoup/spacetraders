@@ -10,7 +10,7 @@ import miningYields from '../resources/data/mining-yields.json' with { type: 'js
 const root = path.resolve(import.meta.dirname, '..');
 const php = process.env.PHP_BIN || 'php';
 const scenario = process.env.QA_GUIDED_SCENARIO || 'mining';
-assert.ok(['mining', 'setup', 'uncertain', 'rejected', 'recovery', 'preparation'].includes(scenario));
+assert.ok(['mining', 'setup', 'uncertain', 'rejected', 'recovery', 'preparation', 'scroll'].includes(scenario));
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const created = execFileSync(php, ['scripts/mvp-fixture.php', '--isolated'], { cwd: root, encoding: 'utf8' });
 const directory = created.match(/Owned fixture directory: (.+)/)?.[1];
@@ -88,6 +88,51 @@ const state = () => cli("echo json_encode(['actions'=>App\\Models\\ShipAction::o
 const reload = async () => { await page.reload(); await coach.waitFor(); };
 const drain = () => execFileSync(php, ['artisan', 'queue:work', 'database', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' });
 const shot = name => page.screenshot({ path: path.join(output, name), animations: 'disabled' });
+async function verifyScrollFreedom() {
+    await page.evaluate(() => {
+        window.guideScrolls = [];
+        const original = Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = function (...args) {
+            window.guideScrolls.push(this.dataset.guide || this.className);
+            return original.apply(this, args);
+        };
+    });
+    await page.locator('[data-guide="sync"].guided-target').waitFor();
+    for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 844 });
+        await button('Show highlighted control').click();
+        assert.equal(await page.locator('[data-guide="sync"]').evaluate(element => element === document.activeElement), true);
+        await page.mouse.move(width - 40, 700);
+        await page.mouse.wheel(0, 10000);
+        await page.waitForFunction(() => scrollY > 500);
+        await page.evaluate(() => { window.guideScrolls = []; });
+        const position = await page.evaluate(() => scrollY);
+        await page.waitForTimeout(6500);
+        const after = await page.evaluate(() => ({ y: scrollY, scrolls: window.guideScrolls }));
+        assert.deepEqual(after.scrolls, [], 'Tutorial timer and fleet polling must not scroll the same instruction again');
+        assert.ok(Math.abs(after.y - position) <= 2, `User scroll must remain at ${position}px, got ${after.y}px`);
+        await shot(`free-scroll-${width}.png`);
+        steps.push({ scenario: 'free scroll across timer ticks and fleet polling', width, position: after.y });
+    }
+    await button('Show highlighted control').click();
+    assert.equal(await page.locator('[data-guide="sync"]').evaluate(element => element === document.activeElement), true);
+    assert.ok((await page.evaluate(() => window.guideScrolls.length)) > 0, 'Explicit show control can scroll again');
+    const [response] = await Promise.all([page.waitForResponse(response => response.url().endsWith('/sync') && response.request().method() === 'POST'), button('Synchronize').click()]);
+    assert.equal(response.status(), 202);
+    await button('Use this route').click();
+    for (let index = 0; index < 4 && await coach.getAttribute('data-step-kind') === 'read'; index++) await button('Continue guided flight').click();
+    await page.locator('.guided-target').waitFor();
+    await page.mouse.move(350, 700);
+    await page.mouse.wheel(0, 10000);
+    await page.waitForFunction(() => scrollY > 500);
+    await page.evaluate(() => { window.guideScrolls = []; });
+    await page.waitForTimeout(1500);
+    assert.deepEqual(await page.evaluate(() => window.guideScrolls), [], 'New steps also relinquish scroll after their initial reveal');
+    await button('Show highlighted control').click();
+    assert.equal(await page.locator('.guided-target').evaluate(element => element === document.activeElement), true);
+    steps.push({ scenario: 'New instruction still highlights and explicit show control remains available' });
+}
+
 let failure;
 try {
     await page.goto(`${origin}/login`);
@@ -126,6 +171,7 @@ try {
         const phase = await coach.getAttribute('data-step-phase');
         steps.push({ kind, title, phase });
         if (kind === 'complete') { completed = true; break; }
+        if (scenario === 'scroll' && kind === 'sync') { await verifyScrollFreedom(); break; }
         if (kind === 'blocked') {
             if (['uncertain', 'rejected'].includes(scenario) && injected) {
                 assert.equal((await session()).phase, 'extract');
@@ -148,7 +194,10 @@ try {
             const target = page.locator('.guided-target');
             await target.waitFor();
             assert.equal(await target.count(), 1);
-            if (await target.evaluate(element => element.tagName) === 'SELECT') await target.selectOption(expected);
+            if (await target.evaluate(element => element.tagName) === 'SELECT') {
+                const value = await target.locator('option').evaluateAll((options, label) => options.find(option => option.label === label)?.value, expected);
+                await target.selectOption(value ?? expected);
+            }
             else await target.fill(expected);
             if (!paused && scenario === 'mining') {
                 await button('Pause guidance').click();
@@ -257,11 +306,31 @@ try {
             assert.equal(actions.filter(action => action.command === 'refuel').length, 2, 'Preparation and final refill each require a confirmed approval');
             assert.equal(actions.filter(action => action.command === 'mine').length, 1);
         }
-    } else assert.ok(injected, 'Fault injection was exercised');
+    } else if (scenario !== 'scroll') assert.ok(injected, 'Fault injection was exercised');
     if (['mining', 'setup'].includes(scenario)) {
+        const completedSession = await session();
+        const writesBeforeFinish = (await world()).writes.length;
+        await button('Finish tutorial').click();
+        await coach.waitFor({ state: 'detached' });
+        assert.equal(await page.getByRole('region', { name: 'Early-game tutorial', exact: true }).count(), 0, 'Finishing must not replace the completed banner with another tutorial banner');
+        assert.equal(await page.locator('.guided-target').count(), 0);
+        assert.equal(await page.locator('#manual').evaluate(element => element === document.activeElement), true, 'Finishing returns keyboard focus to manual controls without scrolling');
+        assert.equal(await button('Preview orbit').isEnabled(), true);
+        assert.equal(await button('Preview mining run').isEnabled(), true);
+        assert.deepEqual(await session(), { ...completedSession, active: false }, 'Keep completed trip receipts and totals when dismissing guidance');
+        await page.screenshot({ path: path.join(output, '06-tutorial-finished.png'), animations: 'disabled' });
+        await page.reload();
+        await button('Restart tutorial').waitFor();
+        assert.equal(await coach.count(), 0, 'Completed banner stays dismissed after reload, including guided=1');
+        assert.equal(await page.getByRole('region', { name: 'Early-game tutorial', exact: true }).count(), 0);
+        assert.deepEqual(await session(), { ...completedSession, active: false });
+        assert.equal((await world()).writes.length, writesBeforeFinish, 'Finishing and reloading must not execute game commands');
+        steps.push({ scenario: 'Finish tutorial dismisses banners, restores controls and preserves completed history after reload' });
         await page.setViewportSize({ width: 390, height: 844 });
-        await button('Restart guidance').click();
-        await button('Restart instructions').click();
+        await button('Restart tutorial').click();
+        await coach.getByRole('heading', { name: 'Your guided first trip', exact: true }).waitFor();
+        assert.equal((await session()).phase, 'welcome');
+        assert.equal((await world()).writes.length, writesBeforeFinish, 'Restarting instructions does not execute commands');
         await button('Continue guided flight').click();
         await button('Show highlighted control').click();
         const visibleTarget = () => page.locator('.guided-target').evaluate(element => {

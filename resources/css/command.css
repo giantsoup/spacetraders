@@ -40,7 +40,9 @@
     .app-link { color: var(--color-accent); text-decoration: underline; text-underline-offset: 4px; }
     .app-link:hover { color: #c4ffe4; }
     .app-link:is(a, button) { display: inline-flex; align-items: center; min-height: 44px; }
-    .app-button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; max-width: 100%; padding: 10px 16px; border: 1px solid transparent; border-radius: 0; font: 700 13px/1.6 var(--font-terminal); text-align: center; white-space: normal; }
+    .app-button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; max-width: 100%; padding: 10px 16px; border: 2px solid transparent; border-radius: 0; font: 700 13px/1.6 var(--font-terminal); text-align: center; white-space: normal; box-shadow: 2px 2px 0 #05090f; cursor: pointer; }
+    .app-button:focus-visible { outline: 3px solid var(--color-focus); outline-offset: 4px; }
+    .app-button:active:not(:disabled) { box-shadow: none; }
     .app-button-primary { background: var(--color-accent); border-color: var(--color-accent); color: #0a241d; }
     .app-button-primary:hover:not(:disabled) { background: #c4ffe4; }
     .app-button-secondary { background: #243c54; border-color: #7593ac; color: #f0f5ff; }

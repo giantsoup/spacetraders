@@ -7,6 +7,7 @@ export function useGuidedFlight(userId, context) {
     const now = ref(Date.now());
     const key = computed(() => guidedKey(userId(), context().agent));
     const step = computed(() => flightStep(session.value, context(), now.value));
+    const finished = computed(() => session.value?.phase === 'complete' && !session.value.active);
     let timer;
     function read() {
         try { session.value = restoreFlight(JSON.parse(window.localStorage.getItem(key.value))); }
@@ -39,6 +40,9 @@ export function useGuidedFlight(userId, context) {
     function start() { update(newFlight(context().agent.credits)); }
     function pause() { if (session.value) update({ ...session.value, active: false }); }
     function resume() { if (session.value) update({ ...session.value, active: true }); }
+    function finish() {
+        if (session.value?.phase === 'complete') update({ ...session.value, active: false });
+    }
     function advance() {
         if (step.value?.kind === 'plan') update({ ...session.value, plan: step.value.plan, reserveFloor: Math.max(session.value.reserveFloor || 0, step.value.plan.reserve), phase: 'briefing' });
         else if (step.value?.kind === 'read') update({ ...session.value, phase: step.value.next });
@@ -62,5 +66,5 @@ export function useGuidedFlight(userId, context) {
     function clearExpired() {
         if (step.value?.kind === 'expired') update({ ...session.value, pending: null });
     }
-    return { session, step, storageAvailable, active: computed(() => !!session.value?.active), start, pause, resume, advance, synchronized, trackApproval, clearExpired };
+    return { session, step, storageAvailable, finished, active: computed(() => !!session.value?.active), start, pause, resume, finish, advance, synchronized, trackApproval, clearExpired };
 }

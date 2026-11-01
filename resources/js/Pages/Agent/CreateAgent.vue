@@ -6,14 +6,22 @@ import PrimaryButton from '@/Components/PrimaryButton.vue';
 import TextInput from '@/Components/TextInput.vue';
 import GuidedFlight from '@/Components/GuidedFlight.vue';
 import GameConnection from '@/Components/GameConnection.vue';
-import { Head, Link, useForm } from '@inertiajs/vue3';
+import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
+import { assetName } from '@/dataPresentation.js';
+
+// https://github.com/SpaceTradersAPI/api-docs/blob/main/models/FactionSymbol.json
+const factions = [
+    'COSMIC', 'VOID', 'GALACTIC', 'QUANTUM', 'DOMINION', 'ASTRO', 'CORSAIRS',
+    'OBSIDIAN', 'AEGIS', 'UNITED', 'SOLITARY', 'COBALT', 'OMEGA', 'ECHO',
+    'LORDS', 'CULT', 'ANCIENTS', 'SHADOW', 'ETHEREAL',
+];
 
 const form = useForm({
     account_token: '',
     symbol: '',
     faction: '',
-    email: '',
+    email: usePage().props.auth.user.email,
 });
 
 const formExisting = useForm({
@@ -28,7 +36,7 @@ const setupStep = computed(() => {
         path: { target: 'setup-path', title: 'Choose your starting point', body: 'Choose I already have a SpaceTraders agent to import it, or I need a new SpaceTraders agent to register one. Your login to this client is already complete.', kind: 'select' },
         token: { target: showExistingForm.value ? 'agent-token' : 'account-token', title: showExistingForm.value ? 'Paste your agent token' : 'Paste your account token', body: showExistingForm.value ? 'Open the official dashboard, select your existing agent, and generate its agent token. Paste it in the highlighted Agent token field, then Continue. The token stays in this form only.' : 'In the official dashboard open Settings and generate an account token. Paste it in the highlighted Account token field, then Continue. Do not paste an agent token here.', kind: 'read', canContinue: (showExistingForm.value ? formExisting.token : form.account_token).trim().length > 0 },
         name: { target: 'agent-name', title: 'Choose your agent name', body: 'Enter a unique call sign of 3 to 14 characters in Agent name, then Continue. This will identify your fleet in SpaceTraders.', kind: 'read', canContinue: form.symbol.trim().length >= 3 && form.symbol.trim().length <= 14 },
-        faction: { target: 'agent-faction', title: 'Enter COSMIC as your faction', body: 'For this starting path, enter COSMIC in Faction, then Continue. The faction determines your starting location. Leave Email empty for this tutorial.', kind: 'read', canContinue: form.faction.trim().toUpperCase() === 'COSMIC' },
+        faction: { target: 'agent-faction', title: 'Select Cosmic as your faction', body: 'For this starting path, select Cosmic in Faction, then Continue. The faction determines your starting location. Email is filled from your client account; you can edit it or leave it blank.', kind: 'read', canContinue: form.faction === 'COSMIC' },
         submit: { target: showExistingForm.value ? 'save-agent' : 'register-agent', title: showExistingForm.value ? 'Save this existing agent' : 'Register this agent once', body: 'Review the filled form and click the highlighted submit button. A successful connection opens the flight deck and starts the guided trip. If the request reports an ambiguous registration failure, check the official dashboard before repeating it.', kind: 'submit' },
     };
     return definitions[setupStage.value];
@@ -166,15 +174,17 @@ function toggleForm() {
                     <div class="mt-4">
                         <InputLabel for="faction" value="Faction" />
 
-                        <TextInput
+                        <select
                             :aria-invalid="Boolean(form.errors.faction)"
                             :aria-describedby="form.errors.faction ? 'faction-error' : undefined"
                             id="faction" data-guide="agent-faction"
-                            type="text"
-                            class="mt-1 block w-full"
+                            class="app-input mt-1 block w-full appearance-auto"
                             v-model="form.faction"
                             required
-                        />
+                        >
+                            <option disabled value="">Select a faction</option>
+                            <option v-for="faction in factions" :key="faction" :value="faction">{{ assetName(faction) }}</option>
+                        </select>
 
                         <InputError id="faction-error" class="mt-2" :message="form.errors.faction" />
                     </div>
@@ -187,6 +197,7 @@ function toggleForm() {
                             :aria-describedby="form.errors.email ? 'email-error' : undefined"
                             id="email"
                             type="email"
+                            autocomplete="email"
                             class="mt-1 block w-full"
                             v-model="form.email"
                         />

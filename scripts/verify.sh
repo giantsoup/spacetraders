@@ -16,6 +16,7 @@ node --check scripts/verify-tutorial-browser.mjs
 node --check scripts/verify-guided-browser.mjs
 node --check scripts/verify-mvp-browser.mjs
 node --check scripts/verify-pages-browser.mjs
+node --check scripts/verify-presentation-browser.mjs
 node --check scripts/verify-agents-browser.mjs
 node --check scripts/verify-modal.mjs
 "$php_bin" scripts/verify-environment.php

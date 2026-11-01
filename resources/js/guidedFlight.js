@@ -110,7 +110,7 @@ const syncStep = body => ({ kind: 'sync', target: 'sync', title: 'Click Synchron
 
 export function flightStep(session, context, now = Date.now()) {
     if (!session) return null;
-    if (session.phase === 'complete') return { kind: 'complete', target: 'activity', title: 'Guided first trip complete', body: `${session.extracted} units extracted and ${session.sold} sold through ${session.receipts.length} confirmed commands. Your first manual trip is recorded. Pause guidance to keep playing on your own.` };
+    if (session.phase === 'complete') return { kind: 'complete', target: 'activity', title: 'Guided first trip complete', body: `${session.extracted} units extracted and ${session.sold} sold through ${session.receipts.length} confirmed commands. Your first manual trip is recorded. Choose Finish tutorial to close guidance and keep playing on your own.` };
     if (session.failure) return blocked(session.failure);
     const { agent, ships, actions, runs, form, selected, commandPreview } = context;
     const unresolved = actions.find(action => action.review_required || action.state === 'uncertain');

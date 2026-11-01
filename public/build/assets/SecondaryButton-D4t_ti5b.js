@@ -1,0 +1,1 @@
+import{E as e,O as t,b as n}from"./app-ZiZXcrk7.js";var r=[`type`],i={__name:`SecondaryButton`,props:{type:{type:String,default:`button`}},setup(i){return(a,o)=>(e(),n(`button`,{type:i.type,class:`app-button app-button-secondary`},[t(a.$slots,`default`)],8,r))}};export{i as t};

@@ -2,6 +2,7 @@
 import AppShell from '@/Layouts/AppShell.vue';
 import { Head, Link } from '@inertiajs/vue3';
 import GameConnection from '@/Components/GameConnection.vue';
+import { assetName } from '@/dataPresentation.js';
 import { formatLocalTime, localTimeZone } from '@/dateTime.js';
 import { computed } from 'vue';
 
@@ -71,7 +72,7 @@ const credits = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
                             <span class="status" :class="connection(agent).tone">{{ connection(agent).label }}</span>
                         </div>
                         <dl>
-                            <div><dt>Faction</dt><dd>{{ agent.faction || 'Unknown' }}</dd></div>
+                            <div><dt>Faction</dt><dd>{{ assetName(agent.faction) }}</dd></div>
                             <div><dt>Last saved balance</dt><dd class="balance">{{ agent.synced_at && agent.credits !== null ? `${credits.format(agent.credits)} CR` : 'Not synchronized' }}</dd></div>
                             <div><dt>World reset</dt><dd>{{ formatLocalTime(agent.reset_id, agent.reset_id || 'Unknown') }}</dd></div>
                             <div><dt>Last synchronized</dt><dd><time v-if="agent.synced_at" :datetime="agent.synced_at">{{ formatLocalTime(agent.synced_at) }}</time><span v-else>Never</span></dd></div>

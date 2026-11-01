@@ -19,7 +19,7 @@ export const lessons = [
         steps: [
             'Open the official SpaceTraders account dashboard and sign up or sign in. If you already have an agent, generate its agent token there.',
             'Open Register New Agent in this client. For an existing agent, choose Already have an Agent?, enter its agent token, and choose Save Existing Agent.',
-            'For a new agent, obtain an account token from Settings in the official dashboard. Enter that token, a unique 3–14 character agent name, and a valid faction symbol such as COSMIC. Email is optional. Choose Register New Agent once.',
+            'For a new agent, obtain an account token from Settings in the official dashboard. Enter that token and a unique 3–14 character agent name, then select a faction such as Cosmic. Email is filled from your client account and is optional. Choose Register New Agent once.',
             'Return to Agents and select your saved agent. Use the agent selector in this guide to keep the remaining lessons with that agent.',
         ],
         checkpoint: 'My agent is saved and I can open its flight deck.',
@@ -32,8 +32,8 @@ export const lessons = [
         steps: [
             'Choose Synchronize at the top of the flight deck. Wait for the fleet and local observations to load. Note your available credits.',
             'Select a ship in Fleet. Read its waypoint, fuel current/capacity, cargo units/capacity, flight mode, and cooldown.',
-            'Read its navigation state. DOCKED allows trading and refueling. IN_ORBIT allows travel and mining. IN_TRANSIT means wait until the displayed arrival, then Synchronize.',
-            'Look at Local waypoints for asteroid types, MARKETPLACE traits, and SHIPYARD traits. A discovered market may still have unknown prices until an owned ship observes it.',
+            'Read its navigation state. Docked allows trading and refueling. In Orbit allows travel and mining. In Transit means wait until the displayed arrival, then Synchronize.',
+            'Look at Local waypoints for asteroid types, Marketplace traits, and Shipyard traits. A discovered market may still have unknown prices until an owned ship observes it.',
         ],
         checkpoint: 'I can identify my ship, its location and status, and my available fuel, cargo space, and credits.',
         recovery: 'An empty fleet needs Synchronize, not another agent registration. A connection error or reset needs attention before gameplay. Discovery is bounded, so a single synchronization may not reveal every location.',
@@ -41,15 +41,15 @@ export const lessons = [
     {
         id: 'miner', title: 'Choose a working miner', label: '03 / Prepare', target: 'setup',
         goal: 'Select an operational mining ship without buying something you cannot use.',
-        explanation: 'A probe or command ship is not automatically a miner. This client requires a mining laser, mineral processor, cargo space, enough crew and power, and frame, reactor, and engine condition and integrity of at least 50%. Navigation also requires CRUISE mode.',
+        explanation: 'A probe or command ship is not automatically a miner. This client requires a mining laser, mineral processor, cargo space, enough crew and power, and frame, reactor, and engine condition and integrity of at least 50%. Navigation also requires Cruise mode.',
         steps: [
-            'Select each ship and read the capability message below its details. Use a ship showing Mining equipment operational and CRUISE flight mode.',
+            'Select each ship and read the capability message below its details. Use a ship showing Mining equipment operational and Cruise flight mode.',
             'If a working miner exists, skip the purchase. Do not buy another ship for this tutorial.',
             'If none exists, first read the route and travel lessons. Scout an observed shipyard with an owned ship, Synchronize there, and inspect a complete miner offer. A ship type name alone does not prove the equipment is usable.',
             'For the one-time setup, select Mining site and Sale and refueling market, then the Observed shipyard offer. In Manual commands set Maximum cost to cover the full ship price and Protected credits to preserve your fuel reserve. Preview one-time miner purchase, inspect the configuration and route, and approve only if affordable.',
             'Wait for the purchase to be confirmed, Synchronize, select the delivered miner, and check its equipment again.',
         ],
-        checkpoint: 'I have selected an operational miner in CRUISE mode.',
+        checkpoint: 'I have selected an operational miner in Cruise mode.',
         recovery: 'No affordable complete miner, missing equipment, or the wrong flight mode can block this path. General outfitting, repairs, and flight-mode changes are not supported here yet. Keep your credits and stop at that blocker rather than repeatedly buying ships.',
     },
     {
@@ -57,8 +57,8 @@ export const lessons = [
         goal: 'Choose a same-system asteroid and an observed buyer, with fuel and credits for the trip.',
         explanation: 'The route is your current location → mining site → buyer and fuel stop. The asteroid and market can be the same waypoint if it has both features. Mining yields vary, so a buyer may not accept everything you extract.',
         steps: [
-            'In Local waypoints choose an ASTEROID, ASTEROID_FIELD, or ENGINEERED_ASTEROID. Avoid uncharted, unstable, or debris-field sites. Stay in the selected ship’s system.',
-            'Find a MARKETPLACE with observed sell prices for likely ore and a FUEL purchase price. Scout it first if needed, using the travel lesson, then Synchronize while an owned ship is there.',
+            'In Local waypoints choose an Asteroid, Asteroid Field, or Engineered Asteroid. Avoid uncharted, unstable, or debris-field sites. Stay in the selected ship’s system.',
+            'Find a Marketplace with observed sell prices for likely ore and a Fuel purchase price. Scout it first if needed, using the travel lesson, then Synchronize while an owned ship is there.',
             'Check the distance and conservative fuel estimate in each navigation preview. Plan fuel for both reaching the site and reaching the buyer. Refuel before departure if the tank is too low.',
             'Choose Protected credits in Manual commands before spending. For example, keeping 2,000 CR protects that amount from locally approved spending. Choose an amount appropriate to your observed fuel costs and balance.',
             'Begin with cargo space available. For the optional automated trip later, cargo must be completely empty. Do not purchase speculative cargo for this first mining trip.',
@@ -71,10 +71,10 @@ export const lessons = [
         goal: 'Arrive at your chosen asteroid in orbit.',
         explanation: 'Movement is a sequence of separate commands. Each preview expires after two minutes and is checked again before execution. You approve each movement explicitly.',
         steps: [
-            'Select your miner in Fleet. If DOCKED, choose Preview orbit in Manual commands, review the ship and command, then Approve command. Wait for confirmed in Activity history.',
+            'Select your miner in Fleet. If Docked, choose Preview orbit in Manual commands, review the ship and command, then Approve command. Wait for confirmed in Activity history.',
             'Select the asteroid in Destination. You must choose a different waypoint in the same system. If already at your mining site, skip the navigation command.',
             'Choose Preview navigation. Review the destination and conservative fuel estimate. Choose Approve command only when the route fits your plan.',
-            'Wait for the arrival timestamp. A confirmed navigation command means travel was accepted, not that you have arrived. Choose Synchronize after arrival and check the waypoint and IN_ORBIT status.',
+            'Wait for the arrival timestamp. A confirmed navigation command means travel was accepted, not that you have arrived. Choose Synchronize after arrival and check the waypoint and In Orbit status.',
         ],
         checkpoint: 'My selected miner is at the mining site, in orbit, and no longer in transit.',
         recovery: 'Navigation is disabled while docked or without a different destination. An insufficient-fuel error needs a fuel stop before departure. If a preview expires, create a new one. If an action stays pending, check the worker.',
@@ -84,7 +84,7 @@ export const lessons = [
         goal: 'Perform one extraction and inspect what actually entered the hold.',
         explanation: 'Mining produces variable goods and starts a cooldown. There is no guaranteed yield or sale value. Learn with one extraction before repeating it.',
         steps: [
-            'Check that your miner is IN_ORBIT at the asteroid, its cooldown is Ready, and its hold has free space.',
+            'Check that your miner is In Orbit at the asteroid, its cooldown is Ready, and its hold has free space.',
             'Choose Preview mining. Inspect the selected ship, then Approve command. Wait for the mining action to be confirmed in Activity history.',
             'Synchronize and read Cargo and market. Note every cargo symbol and quantity aboard. Read the new cooldown timestamp in Fleet.',
             'Plan to sell this extraction before mining again. If it yielded nothing, inspect the result and site rather than repeatedly extracting.',
@@ -111,7 +111,7 @@ export const lessons = [
         goal: 'Leave your ship ready for another trip and understand the cost of the first one.',
         explanation: 'Refueling fills the tank rather than buying cargo. The quantity field means tank units for this command. Fuel is priced per 100 tank units, rounded up.',
         steps: [
-            'While DOCKED at a market selling FUEL, Synchronize and read the FUEL Buy price. Check current fuel and capacity in Fleet.',
+            'While Docked at a market selling Fuel, Synchronize and read the Fuel Buy price. Check current fuel and capacity in Fleet.',
             'Set Quantity / refuel tank units to the tank space you want to fill, no more than capacity minus current fuel. For example, 50 tank units cost one market fuel unit; 150 cost two.',
             'Set Maximum cost / minimum sale total to your maximum total fuel spending and keep Protected credits set. Choose Preview refueling and inspect Observed cost before approving.',
             'Wait for confirmed, Synchronize, and check fuel and credits. If your tank is already full, skip the purchase and check it is enough for the next planned route.',
@@ -126,7 +126,7 @@ export const lessons = [
         explanation: 'You now have the manual loop: observe → orbit → navigate → mine → navigate → dock → sell → refuel. Skip movement when the mine and buyer share a waypoint. Completing this checklist is your own learning record, not a server-verified achievement.',
         steps: [
             'Check that the actions you approved have settled, your reserve is intact, and you know what cargo remains. Repeat a small manual trip only when you can explain each step.',
-            'For optional automation, start with an empty operational miner in CRUISE mode and enough fuel. Choose Mining site, Sale and refueling market, Protected credit reserve, Maximum fuel spending, Maximum credit loss, a duration cap, and Trips = 1.',
+            'For optional automation, start with an empty operational miner in Cruise mode and enough fuel. Choose Mining site, Sale and refueling market, Protected credit reserve, Maximum fuel spending, Maximum credit loss, a duration cap, and Trips = 1.',
             'Choose Preview mining run and review the route, quotes, limits, and unknown yields. Start approved mining run is available only when automation is enabled locally. The worker and scheduler must be running. Manual basics do not require automation.',
             'Read Recorded outcomes after the run. Unknown cargo, zero yield, exceeded limits, uncertainty, or nonpositive observed cash contribution can stop it. Use Stop automation before taking manual control and wait for any in-flight action to settle.',
             'For an uncertain action, use Reconcile in Activity history and inspect the evidence. Do not resubmit the same purchase, sale, or extraction. Acknowledge only an outcome you have reviewed. Closing the browser does not stop workers.',
