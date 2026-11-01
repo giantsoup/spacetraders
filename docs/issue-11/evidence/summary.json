@@ -1,0 +1,18 @@
+{
+  "base": "5c1990696811554d03a752dae2cfec6259fcc36c",
+  "branch": "implement/issue-11-deployment-drain-20261101",
+  "php": "8.5.12",
+  "node": "26.13.0",
+  "pnpm": "12.16.1",
+  "tests": 332,
+  "assertions": 1760,
+  "process_checks": 23,
+  "controller_race": true,
+  "wall_timeout_checks": 4,
+  "timings": {
+    "stale_lock_seconds": 119.94619083404541,
+    "dispatch_seconds": 0.013424583,
+    "contended_50_intent_seconds": 1.446090542
+  },
+  "scope": "Offline owned fixtures only. No push, deployment, live gameplay or remote metadata change."
+}

@@ -1,0 +1,9 @@
+{"origin":"http://127.0.0.1:54460","ownedDirectory":"/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-fixture-048fdf5be212"}
+{
+  "checks": [
+    "Authenticated browser write receives 503 before approval; preview and queue remain unchanged.",
+    "Phone and desktop maintenance screens remain dark under a light OS preference and fit the viewport.",
+    "Reopen preserves the browser session and approval; paused real worker retains pending bytes, resumed worker confirms one fake mutation."
+  ],
+  "output": "/Users/Taylor/.t3/worktrees/spacetraders/implement-issue-11-depl-6e596e46f12515b5/storage/app/mvp-evidence/ops03/browser"
+}

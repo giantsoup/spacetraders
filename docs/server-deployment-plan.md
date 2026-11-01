@@ -42,6 +42,8 @@ Node is constrained to 26.13.x through the 26.x series and pnpm is pinned to 12.
 
 ## Runtime design
 
+OPS03 now implements the local deployment admission and drain contract. See its [operator runbook](issue-11/deployment-gates.md) and [offline evidence](issue-11/README.md). The remaining service, release-switch, backup and production acceptance steps below remain planned work.
+
 Proposed MVP storage: use SQLite for SpaceTraders, matching the current tests and single-user workload, with a persistent database outside releases. Verify concurrent web, worker and scheduler access, busy timeout/WAL behavior, durable queue retry semantics and transaction locks. If these checks fail, stop and revise the storage decision rather than silently switching to MariaDB. Existing apps retain MariaDB.
 
 Use a dedicated application Unix user, Nginx virtual host and FPM socket with one on-demand child initially. The worker and scheduler use the same explicit PHP binary. Run a single supervised database worker with a provisional PHP memory_limit of 128M, Laravel --memory=96 recycling, sleep 1, tries 1 and timeout 120 seconds, below the 180-second retry interval; confirm job-specific overrides. Supervise one `schedule:work` process with a provisional PHP memory_limit of 128M and prevent duplicate dispatchers. It spawns a schedule:run child, which can in turn spawn dispatch-due. Add shared-cache overlap protection to the five-second dispatch command and test its stale-lock recovery; keep per-agent HostLock protection. CLI timeout support and signal handling must be tested with the installed extensions. Keep application state and APP_KEY persistent across all releases.

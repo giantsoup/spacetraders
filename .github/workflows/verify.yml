@@ -57,11 +57,13 @@ jobs:
         run: |
           php scripts/verify-mvp-worker.php
           php scripts/verify-automation-worker.php
+          php scripts/verify-deployment.php
       - name: Browser journeys with fake provider and compiled assets
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node scripts/verify-presentation-browser.mjs
           node scripts/verify-tutorial-browser.mjs
+          node scripts/verify-deployment-browser.mjs
           for scenario in mining setup uncertain rejected recovery preparation; do
             QA_GUIDED_SCENARIO="$scenario" node scripts/verify-guided-browser.mjs
           done

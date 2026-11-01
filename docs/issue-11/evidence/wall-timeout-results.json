@@ -1,0 +1,10 @@
+{
+    "mode": "wall-timeout",
+    "checks": [
+        "real ten-minute controller aborts within measured tolerance",
+        "timeout restores admission and persistent pickup",
+        "timeout neither kills nor cancels the active web writer",
+        "active writer completes normally after abort"
+    ],
+    "owned_directory": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-deployment-ec16060d1549"
+}

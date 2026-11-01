@@ -1,0 +1,10 @@
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.5.12
+Configuration: /Users/Taylor/.t3/worktrees/spacetraders/implement-issue-11-depl-6e596e46f12515b5/phpunit.xml
+
+...........                                                       11 / 11 (100%)
+
+Time: 00:00.351, Memory: 65.00 MB
+
+OK (11 tests, 49 assertions)

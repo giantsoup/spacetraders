@@ -88,6 +88,8 @@ Run `PHP_BIN="$PWD/scripts/herd-php" PLAYWRIGHT_BROWSERS_PATH="$PWD/storage/app/
 
 ## Verify changes
 
+Deployment admission and drain control is available through `spacetraders:deployment close`, `open`, and `status`. Read the [OPS03 operator runbook](docs/issue-11/deployment-gates.md) before using it. Web, worker and scheduler processes must share persistent gate, lock, SQLite and file-cache paths. The [local evidence report](docs/issue-11/README.md) covers owned workers, browser checks, crash recovery and the ten-minute abort. This does not install or authorize deployment.
+
 With locked dependencies installed:
 
 ```bash

@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Gameplay\DeploymentGate;
 use App\Models\LocalEngine;
 use Illuminate\Console\Command;
 
@@ -22,8 +23,16 @@ class ScheduleLocalEngine extends Command
             $stop = true;
         });
         while (! $stop) {
-            if (LocalEngine::find(1)?->gate_open) {
-                $this->callSilent('spacetraders:dispatch-due');
+            $gate = app(DeploymentGate::class);
+            $id = $gate->begin('scheduler');
+            try {
+                if ($id !== null && LocalEngine::find(1)?->gate_open) {
+                    $this->callSilent('spacetraders:dispatch-due');
+                }
+            } finally {
+                if ($id !== null) {
+                    $gate->finish($id);
+                }
             }
             for ($i = 0; $i < 25 && ! $stop; $i++) {
                 usleep(200000);
