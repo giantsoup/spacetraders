@@ -1,0 +1,18 @@
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.4.27
+Configuration: <worktree>/storage/app/mvp-evidence/ops01-private/rollback-baseline/phpunit.xml
+
+.....FSSSS                                                        10 / 10 (100%)
+
+Time: 00:02.510, Memory: 77.00 MB
+
+There was 1 failure:
+
+1) Tests\Feature\OpportunityTest::test_local_mutation_invalidates_a_quote_without_renewing_its_age (repetition 6 of 10)
+Failed asserting that false is true.
+
+<worktree>/storage/app/mvp-evidence/ops01-private/rollback-baseline/tests/Feature/OpportunityTest.php:561
+
+FAILURES!
+Tests: 10, Assertions: 37, Failures: 1, Skipped: 4.

@@ -20,7 +20,7 @@ $result['absent_after_removal']=false; for($i=0;$i<60;$i++){ if(operation(['prin
     def record(kind, data): return struct.pack('!BBHHBB', 1, kind, 1, len(data), 0, 0) + data
     encoded = b''.join(length(len(k))+length(len(v))+k.encode()+v.encode() for k,v in params.items())
     client = socket.socket(socket.AF_UNIX); client.settimeout(15)
-    client.connect(os.path.expanduser('~/Library/Application Support/Herd/herd84.sock'))
+    client.connect(os.path.expanduser(os.environ.get('HERD_PHP_SOCKET', '~/Library/Application Support/Herd/herd85.sock')))
     client.sendall(record(1, struct.pack('!HB5x', 1, 0))+record(4,encoded)+record(4,b'')+record(5,b''))
     def receive(n):
         data=b''
@@ -37,5 +37,7 @@ $result['absent_after_removal']=false; for($i=0;$i<60;$i++){ if(operation(['prin
         if kind==3: break
     client.close()
     result=json.loads(output.split(b'\r\n\r\n',1)[1])
+    expected = (pathlib.Path(__file__).resolve().parent.parent / '.php-version').read_text().strip()
+    assert result['php'] == expected, f"Expected Herd FPM PHP {expected}, got {result['php']}"
     assert result['uid']==os.getuid() and all(result[k]==0 for k in ['bootstrap','kickstart','print','bootout']) and result['absent_after_removal'], result
     print(json.dumps({**result, 'temporary_service_removed': True}))

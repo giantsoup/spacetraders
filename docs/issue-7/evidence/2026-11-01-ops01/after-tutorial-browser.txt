@@ -1,0 +1,21 @@
+PASS login, normal guide entry, keyboard focus and preparation persistence
+node:internal/modules/run_main:111
+    triggerUncaughtException(
+    ^
+
+page.goto: net::ERR_ABORTED at http://127.0.0.1:56707/agents/1
+Call log:
+  - navigating to "http://127.0.0.1:56707/agents/1", waiting until "load"
+
+    at refreshDeck (<worktree>/scripts/verify-tutorial-browser.mjs:76:43)
+    at sync (<worktree>/scripts/verify-tutorial-browser.mjs:77:67)
+    at async file://<worktree>/scripts/verify-tutorial-browser.mjs:132:9
+    at async record (<worktree>/scripts/verify-tutorial-browser.mjs:57:40)
+    at async file://<worktree>/scripts/verify-tutorial-browser.mjs:103:5 {
+  log: [
+    '  - navigating to "http://127.0.0.1:56707/agents/1", waiting until "load"'
+  ],
+  name: 'Error'
+}
+
+Node.js v26.13.0

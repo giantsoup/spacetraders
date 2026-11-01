@@ -52,13 +52,14 @@ class LocalEngineManager
             throw new GameException('Engine installation requires macOS, local mode, an operator, SQLite and the local engine feature.');
         }
         $php = realpath(config('gameplay.php_binary'));
+        $version = trim(file_get_contents(base_path('.php-version')));
         if (! $php || ! is_executable($php)) {
-            throw new GameException('Configure an absolute executable PHP 8.4 path.');
+            throw new GameException('Configure an absolute executable PHP '.$version.' path.');
         }
-        $runtime = new Process([$php, '-r', 'exit(PHP_VERSION_ID >= 80401 && PHP_VERSION_ID < 80500 ? 0 : 1);']);
-        $runtime->run();
+        $runtime = new Process([$php, base_path('scripts/runtime-preflight.php')]);
+        $runtime->setTimeout(10)->run();
         if (! $runtime->isSuccessful()) {
-            throw new GameException('Configure an absolute PHP 8.4 executable.');
+            throw new GameException('Configure a PHP '.$version.' executable with the required worker extensions and matching Composer pins.');
         }
         $this->lock->run('engine-control', function () use ($php) {
             if ($this->launchctl(['print', $this->target()])->isSuccessful()) {

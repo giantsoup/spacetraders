@@ -1,0 +1,11 @@
+$ actionlint -version
+v1.7.12
+installed by building from source
+built with go1.26.1 compiler for darwin/arm64
+
+$ actionlint original-workflow.yml
+storage/app/mvp-evidence/ops01-private/invalid-workflow.yml:25:37: context "runner" is not allowed here. available contexts are "github", "inputs", "matrix", "needs", "secrets", "strategy", "vars". see https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability for more details [expression]
+original exit: 1
+
+$ actionlint .github/workflows/verify.yml
+corrected exit: 0

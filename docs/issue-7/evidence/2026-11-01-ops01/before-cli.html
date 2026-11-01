@@ -1,0 +1,11 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="color-scheme" content="dark"><title>OPS01 before CLI evidence</title>
+<style>*{box-sizing:border-box}body{margin:0;padding:32px;background:#0b1120;color:#e2e8f0;font:16px system-ui}h1{font-size:28px;margin:0 0 10px}p{color:#a8bbd4;margin:0 0 22px}pre{margin:0;padding:24px;background:#111d30;border:1px solid #334761;border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;font:16px/1.5 ui-monospace,monospace}footer{margin-top:18px;color:#a8bbd4;font-size:14px}</style>
+<h1>OPS01 / Before</h1><p>Rendered CLI transcript. Captured command output, not application UI.</p><pre>$ PHP_BIN=Herd/php85 bash -x scripts/verify.sh
++ 'Herd/bin/php85' -r 'exit(PHP_VERSION_ID &gt;= 80401 &amp;&amp; PHP_VERSION_ID &lt; 80500 ? 0 : 1);'
+exit: 1
+
+$ PHP_BIN=Herd/php84 ./scripts/verify.sh
+Runtime:       PHP 8.4.27
+OK (293 tests, 1528 assertions)
+verify.sh exit: 0
+</pre><footer>Owned offline fixtures · same verification suite · 1120 × 760 viewport<br>QA01 repeat failures are retained separately in both runtime evidence logs.</footer></html>

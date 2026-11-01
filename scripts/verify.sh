@@ -4,7 +4,9 @@ cd "$(dirname "$0")/.."
 
 php_bin="${PHP_BIN:-php}"
 pnpm_bin="${PNPM_BIN:-pnpm}"
-"$php_bin" -r 'exit(PHP_VERSION_ID >= 80401 && PHP_VERSION_ID < 80500 ? 0 : 1);'
+export PHP_BIN="$php_bin"
+"$php_bin" scripts/runtime-preflight.php
+python3 scripts/verify-runtime.py
 [[ "$("$pnpm_bin" --version)" == "12.16.1" ]]
 PNPM_BIN="$pnpm_bin" node scripts/verify-build-sources.mjs
 node scripts/verify-store.mjs
@@ -44,5 +46,5 @@ node --check scripts/verify-opportunities-browser.mjs
     database/migrations/2026_10_31_00000*_*.php database/migrations/2026_11_01_*.php \
     tests/Feature/GameplayTest.php tests/Feature/PlayerGuideTest.php tests/Feature/GameConnectionTest.php app/Http/Controllers/PlayerGuideController.php tests/Support tests/TestCase.php \
     tests/Feature/AgentArchiveTest.php tests/Feature/LocalAutomationTest.php tests/Feature/OpportunityTest.php tests/Feature/RequestBudgetTest.php tests/Feature/SQLiteConcurrencyTest.php tests/Feature/BudgetResponseTest.php \
-    scripts/mvp-fixture.php scripts/verify-mvp-worker.php scripts/verify-environment.php scripts/verify-local-engine.php scripts/verify-automation-worker.php
+    scripts/mvp-fixture.php scripts/verify-mvp-worker.php scripts/verify-environment.php scripts/verify-local-engine.php scripts/verify-automation-worker.php scripts/runtime-preflight.php
 git diff --check

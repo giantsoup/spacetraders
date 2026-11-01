@@ -1,0 +1,6 @@
+PASS guided mining: 44 explicit steps; <worktree>/storage/app/mvp-evidence/guided/mining
+PASS guided setup: 43 explicit steps; <worktree>/storage/app/mvp-evidence/guided/setup
+PASS guided uncertain: 17 explicit steps; <worktree>/storage/app/mvp-evidence/guided/uncertain
+PASS guided rejected: 17 explicit steps; <worktree>/storage/app/mvp-evidence/guided/rejected
+PASS guided recovery: 44 explicit steps; <worktree>/storage/app/mvp-evidence/guided/recovery
+PASS guided preparation: 46 explicit steps; <worktree>/storage/app/mvp-evidence/guided/preparation
