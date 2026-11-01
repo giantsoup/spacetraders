@@ -1,0 +1,41 @@
+{
+  "mode": "after",
+  "source": "docs/ios-app-plan.md",
+  "baseline": "f58177bab2cba7d5af69c8443fb6c72f26caa2ae",
+  "sourceSha256": "0856101928587c5cb44928f62495d4b68fb4b3a3ed328360c57a2d4d021f9ac2",
+  "renderedSources": {
+    "docs/ios-app-plan.md": "0856101928587c5cb44928f62495d4b68fb4b3a3ed328360c57a2d4d021f9ac2",
+    "docs/adr/0001-first-iphone-release.md": "c0de84d3444d63e67b0bf825d22b11326844e0cb58ceb9bd179ba6ba7f487049"
+  },
+  "browser": "156.0.8078.76",
+  "viewport": {
+    "width": 1120,
+    "height": 900
+  },
+  "deviceScaleFactor": 1,
+  "osPreference": "light",
+  "renderedTheme": "dark",
+  "externalRequests": [],
+  "errors": [],
+  "layouts": [
+    {
+      "kind": "focus",
+      "width": 1120,
+      "height": 900,
+      "scrollWidth": 1120
+    },
+    {
+      "kind": "context",
+      "width": 1120,
+      "height": 900,
+      "scrollWidth": 1120
+    },
+    {
+      "kind": "decision",
+      "width": 1120,
+      "height": 900,
+      "scrollWidth": 1120
+    }
+  ],
+  "verifiedLocalLinks": 52
+}

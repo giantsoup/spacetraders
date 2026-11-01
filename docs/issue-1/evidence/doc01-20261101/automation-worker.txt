@@ -1,0 +1,5 @@
+PASS complete; 28 checks. Owned offline evidence: <owned-disposable-fixture>
+PASS contract_accept; 14 checks. Owned offline evidence: <owned-disposable-fixture>
+PASS buy; 16 checks. Owned offline evidence: <owned-disposable-fixture>
+PASS contract_deliver; 28 checks. Owned offline evidence: <owned-disposable-fixture>
+PASS contract_fulfill; 30 checks. Owned offline evidence: <owned-disposable-fixture>

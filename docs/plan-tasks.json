@@ -1,0 +1,1424 @@
+{
+  "repository": "giantsoup/spacetraders",
+  "date": "2026-11-01",
+  "local_head": "221fbae7a1ecbdf5159211316039f016355c900e",
+  "remote_base": "98b8792ffc0ce36a50ba5b9149b3049f5bd1e6fb",
+  "tasks": [
+    {
+      "id": "DOC01",
+      "title": "Reconcile automation documentation and cooldown preview wording",
+      "kind": "documentation drift",
+      "sources": [
+        "docs/local-automation-data.md:3",
+        "docs/opus-qa-security-tasks.md:171",
+        "docs/native-ship-ui-implementation-prompt.md:23"
+      ],
+      "evidence": [
+        "AutomationRunner::start accepts plan versions 1, 2 and 3; the data contract incorrectly excludes version 3.",
+        "MiningPlanner::next departs before extraction cooldown when the approved departure limit is reached, but AutomationRunner preview wording still says to wait.",
+        "Historical unchecked T1-T6 and D3 were closed by later review rounds. Preserve those historical records and add a current status index.",
+        "The reviewed server deployment plan is committed locally but absent from origin/main. Publish that plan as a reference without claiming deployment."
+      ],
+      "acceptance": [
+        "Document version-3 scout/trade previews and preserve historical versions.",
+        "Make preview copy reflect cooldown/travel overlap without changing command rules.",
+        "Link every document family to current implementation status and task pairs; keep historical findings dated.",
+        "Include the existing reviewed server deployment plan as a reference; no server changes."
+      ],
+      "dependencies": [],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 1,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/1",
+      "pr_number": 2,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/2",
+      "branch": "plan/doc01-reconcile-automation-documentation-and-cooldown-preview-wording",
+      "audit_head_sha": null,
+      "audit_changed_files": [
+        "docs/plan-tasks/doc01-reconcile-automation-documentation-and-cooldown-preview-wording.md",
+        "docs/plan-implementation-audit.md",
+        "docs/plan-implementation-audit.html",
+        "docs/plan-tasks.json",
+        "docs/server-deployment-plan.md",
+        "docs/local-automation-data.md",
+        "scripts/verify-plan-tracking.py"
+      ],
+      "brief_path": "docs/plan-tasks/doc01-reconcile-automation-documentation-and-cooldown-preview-wording.md"
+    },
+    {
+      "id": "QA01",
+      "title": "Make market quote invalidation acceptance deterministic",
+      "kind": "confirmed test failure",
+      "sources": [
+        "docs/exploration-fuel-and-opportunity-recommendations.md:165",
+        "tests/Feature/OpportunityTest.php:555",
+        "app/Gameplay/AgentSynchronizer.php:141"
+      ],
+      "evidence": [
+        "The full suite failed at OpportunityTest.php:561: observed_at equality. Isolated --repeat 10 failed on repetition 3; remaining repetitions were skipped by PHPUnit.",
+        "The command helper performs preview, approval and execution. CommandRules refreshes market prices during preflight, so the earlier sync timestamp is not necessarily the last quote timestamp. invalidateMarket itself only updates data."
+      ],
+      "acceptance": [
+        "Separate a legitimate fresh price observation from mutation invalidation using a controlled clock.",
+        "Assert invalidation preserves the most recent actual price-observation timestamp across a deliberately crossed second boundary.",
+        "Cover the complete command path and the invalidation boundary without weakening price freshness or adding sleeps.",
+        "Pass repeated isolated checks and scripts/verify.sh."
+      ],
+      "dependencies": [],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 3,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/3",
+      "audit_head_sha": "c178f1b9404c30dafc74382c80d69c5c3c73ac13",
+      "audit_changed_files": [
+        "docs/plan-tasks/qa01-make-market-quote-invalidation-acceptance-deterministic.md"
+      ],
+      "branch": "plan/qa01-make-market-quote-invalidation-acceptance-deterministic",
+      "branch_created": true,
+      "pr_number": 4,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/4",
+      "brief_path": "docs/plan-tasks/qa01-make-market-quote-invalidation-acceptance-deterministic.md"
+    },
+    {
+      "id": "UI01",
+      "title": "Implement the approved native ship web experience",
+      "kind": "unimplemented feature",
+      "sources": [
+        "docs/native-ship-ui-implementation-prompt.md:1",
+        "docs/design-brief.md:1",
+        "docs/app-styling.md:3",
+        "docs/single-ship-mobile-research.md:85"
+      ],
+      "evidence": [
+        "Dashboard.vue remains the terminal panel dashboard. app-styling.md explicitly identifies Horizon/Logbook/Voyage as prototypes.",
+        "The design HTML and PNG references have no connected gameplay handlers. No native-ship-ui-implementation.md acceptance report exists."
+      ],
+      "acceptance": [
+        "Implement all workflows in prompt sections 1-5 with a capability-to-destination map, Horizon home/report, focused commands, activity/reconciliation, active-run Stop, Mining/Contracts staging and distinct engine controls.",
+        "Preserve guided flight, ownership, approval bounds, reset handling, uncertain writes, ship selection, UTC source values and local display.",
+        "Exercise the full state/action matrix and 320x667, 375x548, 390x844, landscape, wider and enlarged-text layouts; inspect real application screenshots, focus and reduced motion.",
+        "Keep production assets synchronized and deliver the requested implementation report with actual browser evidence."
+      ],
+      "dependencies": [],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 5,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/5",
+      "audit_head_sha": "4bf70d7ce98c340f3ded63666876d265bbb9b1a0",
+      "audit_changed_files": [
+        "docs/plan-tasks/ui01-implement-the-approved-native-ship-web-experience.md"
+      ],
+      "branch": "plan/ui01-implement-the-approved-native-ship-web-experience",
+      "branch_created": true,
+      "pr_number": 6,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/6",
+      "brief_path": "docs/plan-tasks/ui01-implement-the-approved-native-ship-web-experience.md"
+    },
+    {
+      "id": "OPS01",
+      "title": "Migrate the application and verification runtime to PHP 8.5",
+      "kind": "unimplemented runtime change",
+      "sources": [
+        "docs/server-deployment-plan.md:28",
+        "composer.json:9",
+        "scripts/verify.sh:7"
+      ],
+      "evidence": [
+        "The accepted deployment plan selects PHP 8.5; current Composer requires ~8.4.1, platform is 8.4.1, and verify.sh rejects PHP 8.5.",
+        "The historical Laravel 13/PHP 8.4 upgrade is complete. This is a new runtime requirement."
+      ],
+      "acceptance": [
+        "Verify the latest supported stable 8.5 patch and dependency compatibility at implementation time; pin the tested patch across Composer, CI and server preflight.",
+        "Use a verified project-specific Herd runtime without affecting unrelated sites; support a real executable PHP_BIN wrapper where required.",
+        "Resolve dependencies under the selected PHP without bypasses; run full verification, platform checks and affected browser/worker journeys.",
+        "Retain tested rollback instructions and review shared-host app compatibility before any server package change."
+      ],
+      "dependencies": [],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 7,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/7",
+      "audit_head_sha": "54e998d95ee02bb993c4de5d866c6fadf9cfcacf",
+      "audit_changed_files": [
+        "docs/plan-tasks/ops01-migrate-the-application-and-verification-runtime-to-php-8-5.md"
+      ],
+      "branch": "plan/ops01-migrate-the-application-and-verification-runtime-to-php-8-5",
+      "branch_created": true,
+      "pr_number": 8,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/8",
+      "brief_path": "docs/plan-tasks/ops01-migrate-the-application-and-verification-runtime-to-php-8-5.md"
+    },
+    {
+      "id": "OPS02",
+      "title": "Close public account routes and add secure operator provisioning",
+      "kind": "unimplemented deployment control",
+      "sources": [
+        "docs/server-deployment-plan.md:36",
+        "docs/server-deployment-plan.md:143",
+        "routes/auth.php:16"
+      ],
+      "evidence": [
+        "Public registration, guest password reset and verification routes remain enabled. Existing auth tests expect these flows.",
+        "No secure single-account provisioning/recovery Artisan command exists."
+      ],
+      "acceptance": [
+        "Disable direct and UI access to public registration, guest reset and email verification for private deployment. Preserve login throttling and authenticated password change.",
+        "Provide one-time secure account creation and password recovery with no secrets in arguments, logs or artifacts.",
+        "Use a non-delivering mail transport for this app; test direct requests, guests, foreign owners and existing sessions."
+      ],
+      "dependencies": [
+        "OPS01"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 9,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/9",
+      "audit_head_sha": "e8e4d71dad0b020a25a453a3a64acbeca02f067d",
+      "audit_changed_files": [
+        "docs/plan-tasks/ops02-close-public-account-routes-and-add-secure-operator-provisioning.md"
+      ],
+      "branch": "plan/ops02-close-public-account-routes-and-add-secure-operator-provisioning",
+      "branch_created": true,
+      "pr_number": 10,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/10",
+      "brief_path": "docs/plan-tasks/ops02-close-public-account-routes-and-add-secure-operator-provisioning.md"
+    },
+    {
+      "id": "OPS03",
+      "title": "Implement deployment drain gates and worker readiness acknowledgements",
+      "kind": "unimplemented deployment control",
+      "sources": [
+        "docs/server-deployment-plan.md:45",
+        "docs/server-deployment-plan.md:114",
+        "app/Console/Kernel.php:17",
+        "app/Gameplay/EngineGate.php:18"
+      ],
+      "evidence": [
+        "The current gate controls a local macOS engine session; it is not an application-wide deploy pause/drain protocol.",
+        "The five-second dispatch schedule has no withoutOverlapping protection. Existing heartbeats do not prove every worker and web writer has drained."
+      ],
+      "acceptance": [
+        "Add a versioned persistent close/open/status deployment contract that gates web writes, dispatch and new queue reservations while preserving queued intent.",
+        "Pause/resume database:spacetraders using shared persistent cache; require worker, scheduler-descendant and active-web-write acknowledgements.",
+        "Let reserved work finish; abort and unwind at ten minutes without SIGKILL, queue clearing or uncertain-action replay.",
+        "Add measured-expiry scheduler overlap locks and crash recovery. Test real SQLite workers, races, pending jobs, old/rollback releases and stale locks."
+      ],
+      "dependencies": [
+        "OPS01"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 11,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/11",
+      "audit_head_sha": "47146e524ceae77f410d5847d47efebda5b6c886",
+      "audit_changed_files": [
+        "docs/plan-tasks/ops03-implement-deployment-drain-gates-and-worker-readiness-acknowledgements.md"
+      ],
+      "branch": "plan/ops03-implement-deployment-drain-gates-and-worker-readiness-acknowledgements",
+      "branch_created": true,
+      "pr_number": 12,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/12",
+      "brief_path": "docs/plan-tasks/ops03-implement-deployment-drain-gates-and-worker-readiness-acknowledgements.md"
+    },
+    {
+      "id": "OPS04",
+      "title": "Add reproducible CI gates and immutable release artifacts",
+      "kind": "unimplemented CI",
+      "sources": [
+        "docs/server-deployment-plan.md:55",
+        "package.json:1",
+        "scripts/verify-mvp-browser.mjs:1"
+      ],
+      "evidence": [
+        "No .github workflow directory exists at the audited remote or local baseline. Playwright is dynamically imported rather than pinned in the app manifest."
+      ],
+      "acceptance": [
+        "Pin supported PHP, Composer, Node, pnpm, browser tooling and third-party action revisions; use least-privilege permissions and no deploy secrets on untrusted PRs.",
+        "Run locked installs, backend/frontend checks, production build, auth/ownership and fake-provider Start/Stop browser journeys.",
+        "Run real on-disk SQLite worker/scheduler and deployment-harness cases. Fix QA01 before requiring a green gate.",
+        "Build one tested SHA/checksummed artifact with production vendor/assets and no environment, credentials, fixtures, local DB or config caches."
+      ],
+      "dependencies": [
+        "OPS01",
+        "OPS02",
+        "OPS03",
+        "QA01",
+        "OPS05"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 13,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/13",
+      "audit_head_sha": "e3fb9bec67f09365261e6a1cb4255f85525d6da7",
+      "audit_changed_files": [
+        "docs/plan-tasks/ops04-add-reproducible-ci-gates-and-immutable-release-artifacts.md"
+      ],
+      "branch": "plan/ops04-add-reproducible-ci-gates-and-immutable-release-artifacts",
+      "branch_created": true,
+      "pr_number": 14,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/14",
+      "brief_path": "docs/plan-tasks/ops04-add-reproducible-ci-gates-and-immutable-release-artifacts.md"
+    },
+    {
+      "id": "OPS05",
+      "title": "Build the atomic deployment transaction and recovery harness",
+      "kind": "unimplemented deployment tooling",
+      "sources": [
+        "docs/server-deployment-plan.md:69",
+        "docs/server-deployment-plan.md:124",
+        "docs/server-deployment-plan.md:134"
+      ],
+      "evidence": [
+        "No release receiver, immutable release switch, deployment transaction, rollback or failure-injection harness exists.",
+        "The transaction harness can use a synthetic artifact before CI is wired; CI then runs the harness. This ordering avoids a dependency cycle."
+      ],
+      "acceptance": [
+        "Implement an SSH-disconnect-safe serialized state machine with monotonic sequence, SHA/checksum validation, newest-eligible-main selection and idempotent recovery.",
+        "Preflight upstream read-only availability; stage before outage, drain, quiesce, generate release caches, verify consistent pre-migration backup, apply backward-compatible migrations and atomically switch.",
+        "Require HTTPS/SHA/database and worker/scheduler readiness before reopening. Roll back code/processes on failure; never auto-restore DB or reverse migrations.",
+        "Fault-inject all plan stages, rollback failure and interrupted connections; test adjacent retained-release job/session/cache/schema compatibility and actual process signals."
+      ],
+      "dependencies": [
+        "OPS03",
+        "OPS06",
+        "OPS09"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 15,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/15",
+      "audit_head_sha": "cd935fb73550d7ce157352437eba24bbf519cf84",
+      "audit_changed_files": [
+        "docs/plan-tasks/ops05-build-the-atomic-deployment-transaction-and-recovery-harness.md"
+      ],
+      "branch": "plan/ops05-build-the-atomic-deployment-transaction-and-recovery-harness",
+      "branch_created": true,
+      "pr_number": 16,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/16",
+      "brief_path": "docs/plan-tasks/ops05-build-the-atomic-deployment-transaction-and-recovery-harness.md"
+    },
+    {
+      "id": "OPS06",
+      "title": "Prepare restricted Linux runtime and deployment configuration",
+      "kind": "unimplemented server configuration",
+      "sources": [
+        "docs/server-deployment-plan.md:40",
+        "docs/server-deployment-plan.md:124",
+        "app/Gameplay/LocalEngineManager.php:14",
+        "config/gameplay.php:7"
+      ],
+      "evidence": [
+        "The installed engine manager is launchd-specific and its UI endpoints require loopback/local host. It does not establish a remote supervised engine contract.",
+        "No versioned Nginx/FPM/Supervisor/sudoers templates, forced-command receiver or root-owned deploy helper exists."
+      ],
+      "acceptance": [
+        "Prepare reviewable dedicated-user, immutable releases/current/shared, Nginx realpath, FPM socket and single-worker/scheduler templates.",
+        "Define remote engine health/control behavior through existing gameplay services without opening local launchd controls to remote users.",
+        "Restrict artifact receiver paths, archive traversal, size, checksum, protocol, sequence and command execution. Keep root-owned deploy tooling outside mutable artifacts.",
+        "Specify persistent APP_KEY, environment, lock/budget paths and file-cache ownership; start automation disabled. Rehearse isolated process-tree recycling and clean stop.",
+        "Document installation and rollback; applying templates to the shared host is a later authorized operation."
+      ],
+      "dependencies": [
+        "OPS01",
+        "OPS03"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 17,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/17",
+      "audit_head_sha": "44e32784c7694d8ffb9a719a2fa36debcef0f0e6",
+      "audit_changed_files": [
+        "docs/plan-tasks/ops06-prepare-restricted-linux-runtime-and-deployment-configuration.md"
+      ],
+      "branch": "plan/ops06-prepare-restricted-linux-runtime-and-deployment-configuration",
+      "branch_created": true,
+      "pr_number": 18,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/18",
+      "brief_path": "docs/plan-tasks/ops06-prepare-restricted-linux-runtime-and-deployment-configuration.md"
+    },
+    {
+      "id": "OPS07",
+      "title": "Prepare shared-app queue scheduling changes with email priority",
+      "kind": "conditional shared-host work",
+      "sources": [
+        "docs/server-deployment-plan.md:83",
+        "docs/server-deployment-plan.md:151"
+      ],
+      "evidence": [
+        "The plan calls for portfolio and Print For Me minute-level email pickup and slower bulk drains. This repo contains no reviewed changes or current execution evidence for those apps."
+      ],
+      "acceptance": [
+        "Inventory actual queue/mail paths read-only before selecting minimal scheduled drains or separate priority/bulk queues.",
+        "Create reviewed changes in each owning repository, with non-overlap locks, bounded new reservations and graceful active-job completion.",
+        "Preserve FishCounts continuous processing, app users, durable jobs, retry/timeout contracts and existing deploy workflows.",
+        "Measure email pickup within one minute and bulk within the agreed cadence after each separately approved shared-host change."
+      ],
+      "dependencies": [
+        "OPS06"
+      ],
+      "boundary": "This is a cross-repository coordination task. Do not change other repositories or shared-host processes without explicit execution scope and current inspection.",
+      "issue_number": 19,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/19",
+      "audit_head_sha": "d0e6889b7bb46e1cc2cd073685aef53566697cc6",
+      "audit_changed_files": [
+        "docs/plan-tasks/ops07-prepare-shared-app-queue-scheduling-changes-with-email-priority.md"
+      ],
+      "branch": "plan/ops07-prepare-shared-app-queue-scheduling-changes-with-email-priority",
+      "branch_created": true,
+      "pr_number": 20,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/20",
+      "brief_path": "docs/plan-tasks/ops07-prepare-shared-app-queue-scheduling-changes-with-email-priority.md"
+    },
+    {
+      "id": "OPS08",
+      "title": "Prepare measured shared-server cache and journal adjustments",
+      "kind": "conditional shared-host work",
+      "sources": [
+        "docs/server-deployment-plan.md:87",
+        "docs/server-deployment-plan.md:136"
+      ],
+      "evidence": [
+        "The report contains historical capacity observations and tuning proposals, not proof those changes were applied."
+      ],
+      "acceptance": [
+        "Reinspect current capacity, MyISAM tables/import requirements and config rollback before proposing key_buffer_size=8 MiB. Leave Aria/InnoDB unchanged.",
+        "Prepare journal retention of 14 days capped at 512 MiB and separate bounded application-log rotation.",
+        "Apply each approved change separately, drain dependent workloads if required, smoke-test existing apps and measure actual memory savings without assuming allocated cache equals recovered RAM."
+      ],
+      "dependencies": [
+        "OPS06"
+      ],
+      "boundary": "Prepare and verify proposals first. Shared database/service changes require current execution authorization; no new resources or broad tuning.",
+      "issue_number": 21,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/21",
+      "audit_head_sha": "79b5b14e3a1e0398cde36e5b1c7c116de09225f8",
+      "audit_changed_files": [
+        "docs/plan-tasks/ops08-prepare-measured-shared-server-cache-and-journal-adjustments.md"
+      ],
+      "branch": "plan/ops08-prepare-measured-shared-server-cache-and-journal-adjustments",
+      "branch_created": true,
+      "pr_number": 22,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/22",
+      "brief_path": "docs/plan-tasks/ops08-prepare-measured-shared-server-cache-and-journal-adjustments.md"
+    },
+    {
+      "id": "OPS09",
+      "title": "Implement consistent backups, Mac retrieval and restore verification",
+      "kind": "unimplemented recovery tooling",
+      "sources": [
+        "docs/server-deployment-plan.md:91",
+        "docs/server-deployment-plan.md:143"
+      ],
+      "evidence": [
+        "No four-app backup manifest, consistent SQLite backup pipeline or verified manual Mac-download command exists in this repository. Historical server backups do not prove this plan implemented."
+      ],
+      "acceptance": [
+        "Retain existing working backup paths where suitable; add daily four-app DB sets and SpaceTraders pre-migration backups with protected credentials and consistent snapshots.",
+        "Retain seven verified daily and three verified migration sets per app, independently on server and Mac. Prune only after successful validation; use temporary files and atomic completion.",
+        "Provide manual restricted-SSH download with manifest/checksum, failure-safe retention and last-success reporting; no scheduled Mac job or notifications.",
+        "Restore each format in disposable environments and test token decryption with a securely supplied matching key. Escrow/retrieve secrets separately; never activate restored gameplay."
+      ],
+      "dependencies": [
+        "OPS06"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 23,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/23",
+      "audit_head_sha": "bc63a61ce731152424cebc58b4bfe88e3c05dbde",
+      "audit_changed_files": [
+        "docs/plan-tasks/ops09-implement-consistent-backups-mac-retrieval-and-restore-verification.md"
+      ],
+      "branch": "plan/ops09-implement-consistent-backups-mac-retrieval-and-restore-verification",
+      "branch_created": true,
+      "pr_number": 24,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/24",
+      "brief_path": "docs/plan-tasks/ops09-implement-consistent-backups-mac-retrieval-and-restore-verification.md"
+    },
+    {
+      "id": "OPS10",
+      "title": "Provision the private Linode application and first release",
+      "kind": "unverified live deployment",
+      "sources": [
+        "docs/server-deployment-plan.md:100",
+        "docs/ios-app-plan.md:44"
+      ],
+      "evidence": [
+        "Repository evidence establishes a deployment plan and a historical capacity assessment, not a deployed private SpaceTraders release. No live readiness verification was performed by this audit."
+      ],
+      "acceptance": [
+        "After review and explicit execution authorization, verify host identity, current capacity/DNS ownership/runtime and install restricted configs without disrupting existing apps.",
+        "Provision DNS/TLS with renewal, protected environment/key escrow, fresh DB and one private account; copy no local gameplay/test state.",
+        "Deploy through the same verified artifact pipeline used later; keep automation disabled until acceptance.",
+        "Record actual deployed SHA, HTTPS/private access, persistent storage and healthy worker/scheduler readiness; preserve rollback and baseline backup."
+      ],
+      "dependencies": [
+        "OPS02",
+        "OPS04",
+        "OPS05",
+        "OPS06",
+        "OPS07",
+        "OPS08",
+        "OPS09"
+      ],
+      "boundary": "Requires explicit live deployment, credential provisioning and shared-host execution authorization. Opening this draft does not deploy anything.",
+      "issue_number": 25,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/25",
+      "audit_head_sha": "314d522f09e441740ed69733df58a78e7123177a",
+      "audit_changed_files": [
+        "docs/plan-tasks/ops10-provision-the-private-linode-application-and-first-release.md"
+      ],
+      "branch": "plan/ops10-provision-the-private-linode-application-and-first-release",
+      "branch_created": true,
+      "pr_number": 26,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/26",
+      "brief_path": "docs/plan-tasks/ops10-provision-the-private-linode-application-and-first-release.md"
+    },
+    {
+      "id": "OPS11",
+      "title": "Prove deployment behavior, recovery and combined server capacity",
+      "kind": "unverified live acceptance",
+      "sources": [
+        "docs/server-deployment-plan.md:106",
+        "docs/server-deployment-plan.md:136",
+        "docs/ios-app-plan.md:50"
+      ],
+      "evidence": [
+        "The 961 MiB/350 MiB historical capacity snapshot is not added-runtime PSS, combined-load acceptance or deployment/recovery evidence."
+      ],
+      "acceptance": [
+        "Prove passing-main release delivery and failing-test exclusion; exercise drain, pending-job preservation, health rollback and interrupted recovery in synthetic isolated failure drills.",
+        "Verify current release/SHA, process supervision, backup restore and independent operation with a disconnected client.",
+        "Observe representative ordinary combined workload with at least 150 MiB available memory, no sustained swap churn/OOM, prompt scheduling and one-minute email pickup.",
+        "Record full process-tree/shared-memory measurements and unresolved limits. Do not conduct destructive production fault injection or load testing without separate authorization."
+      ],
+      "dependencies": [
+        "OPS10"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 27,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/27",
+      "audit_head_sha": "f12c59fb3763a22e6535b7af92380542b7f651c0",
+      "audit_changed_files": [
+        "docs/plan-tasks/ops11-prove-deployment-behavior-recovery-and-combined-server-capacity.md"
+      ],
+      "branch": "plan/ops11-prove-deployment-behavior-recovery-and-combined-server-capacity",
+      "branch_created": true,
+      "pr_number": 28,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/28",
+      "brief_path": "docs/plan-tasks/ops11-prove-deployment-behavior-recovery-and-combined-server-capacity.md"
+    },
+    {
+      "id": "MOB01",
+      "title": "Define the first iPhone release workflow and technical decisions",
+      "kind": "unimplemented mobile design",
+      "sources": [
+        "docs/ios-app-plan.md:36",
+        "docs/ios-app-plan.md:83"
+      ],
+      "evidence": [
+        "The iPhone plan explicitly leaves framework, auth/API, iOS minimum, navigation, repository layout and release tooling open. There is no mobile project."
+      ],
+      "acceptance": [
+        "Review current capabilities and choose one smallest complete manual-plus-automation workflow, including blocked and expired work.",
+        "Record framework/minimum iOS, endpoints/auth/revocation, refresh/compatibility, navigation, cached-state behavior, repository/signing/release choices.",
+        "Keep gameplay rules and credentials in Laravel and preserve current run limits; decisions do not authorize deployment or purchases."
+      ],
+      "dependencies": [],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 29,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/29",
+      "audit_head_sha": "f58177bab2cba7d5af69c8443fb6c72f26caa2ae",
+      "audit_changed_files": [
+        "docs/plan-tasks/mob01-define-the-first-iphone-release-workflow-and-technical-decisions.md"
+      ],
+      "branch": "plan/mob01-define-the-first-iphone-release-workflow-and-technical-decisions",
+      "branch_created": true,
+      "pr_number": 30,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/30",
+      "brief_path": "docs/plan-tasks/mob01-define-the-first-iphone-release-workflow-and-technical-decisions.md"
+    },
+    {
+      "id": "MOB02",
+      "title": "Expose a versioned authenticated mobile gameplay API",
+      "kind": "unimplemented mobile API",
+      "sources": [
+        "docs/ios-app-plan.md:54",
+        "routes/api.php:18",
+        "routes/web.php:1"
+      ],
+      "evidence": [
+        "The API route file exposes only /user. Gameplay routes currently serve the Inertia/session-based web client; no complete mobile contract is implemented."
+      ],
+      "acceptance": [
+        "Implement the agreed authentication/device revocation and versioned read/preview/approve/status/start/stop API using existing owner-scoped services.",
+        "Define idempotent request identities, queued versus upstream-completed status, refresh and error semantics, UTC payloads and compatibility with installed clients.",
+        "Test device expiry/revocation, foreign users, duplicates, stale previews, uncertain writes and simultaneous web/mobile ownership; expose no SpaceTraders credential."
+      ],
+      "dependencies": [
+        "MOB01",
+        "OPS02",
+        "OPS03"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 31,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/31",
+      "audit_head_sha": "516c8bdb61eded3e211ac4c367d27f38c51a1df8",
+      "audit_changed_files": [
+        "docs/plan-tasks/mob02-expose-a-versioned-authenticated-mobile-gameplay-api.md"
+      ],
+      "branch": "plan/mob02-expose-a-versioned-authenticated-mobile-gameplay-api",
+      "branch_created": true,
+      "pr_number": 32,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/32",
+      "brief_path": "docs/plan-tasks/mob02-expose-a-versioned-authenticated-mobile-gameplay-api.md"
+    },
+    {
+      "id": "MOB03",
+      "title": "Build the iPhone client against the shared Laravel engine",
+      "kind": "unimplemented mobile app",
+      "sources": [
+        "docs/ios-app-plan.md:62",
+        "docs/design-brief.md:5"
+      ],
+      "evidence": [
+        "No Xcode/Swift/mobile application project exists in the source tree. Web prototypes do not implement the iPhone app."
+      ],
+      "acceptance": [
+        "Implement secure engine connection, agent/ship choice, observed fleet/cargo/credits/travel/cooldown/activity and explicit manual/automation previews and controls.",
+        "Use dark readable touch controls, clear freshness/health and truthful request/command states; gameplay logic remains server-side.",
+        "Persist safe connection/request identity and recover after suspension/offline without replaying writes. Keep UTC in exchange/storage and show phone-local time.",
+        "Demonstrate the complete first workflow on a physical iPhone against an owned engine fixture before live use."
+      ],
+      "dependencies": [
+        "MOB01",
+        "MOB02"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 33,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/33",
+      "audit_head_sha": "40863ab756462ab23f3de1b1260d934caeb64f66",
+      "audit_changed_files": [
+        "docs/plan-tasks/mob03-build-the-iphone-client-against-the-shared-laravel-engine.md"
+      ],
+      "branch": "plan/mob03-build-the-iphone-client-against-the-shared-laravel-engine",
+      "branch_created": true,
+      "pr_number": 34,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/34",
+      "brief_path": "docs/plan-tasks/mob03-build-the-iphone-client-against-the-shared-laravel-engine.md"
+    },
+    {
+      "id": "MOB04",
+      "title": "Verify phone-to-engine recovery and distribute through TestFlight",
+      "kind": "unverified mobile release",
+      "sources": [
+        "docs/ios-app-plan.md:70",
+        "docs/ios-app-plan.md:100"
+      ],
+      "evidence": [
+        "No physical-phone acceptance, signing setup, TestFlight build or repeatable release evidence exists in the repository."
+      ],
+      "acceptance": [
+        "Verify duplicates, interrupted connections, expired access, stale approvals, uncertain outcomes, engine restart and concurrent web/mobile controls.",
+        "Prove approved bounded work continues while the phone is locked/disconnected and that reconnect recovers Stop and blocked states.",
+        "Check current Apple requirements, configure signing securely, and establish reproducible private replacement builds before beta expiry.",
+        "With explicit distribution authorization, install through TestFlight and record build/version, physical-device workflow and remaining limits."
+      ],
+      "dependencies": [
+        "MOB03",
+        "OPS11"
+      ],
+      "boundary": "Signing credentials, Apple setup, distribution and any live commands need explicit execution authorization. Use owned offline fixtures first.",
+      "issue_number": 35,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/35",
+      "audit_head_sha": "33092656213581d267fdb16f5a142388e9b87ce0",
+      "audit_changed_files": [
+        "docs/plan-tasks/mob04-verify-phone-to-engine-recovery-and-distribute-through-testflight.md"
+      ],
+      "branch": "plan/mob04-verify-phone-to-engine-recovery-and-distribute-through-testflight",
+      "branch_created": true,
+      "pr_number": 36,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/36",
+      "brief_path": "docs/plan-tasks/mob04-verify-phone-to-engine-recovery-and-distribute-through-testflight.md"
+    },
+    {
+      "id": "ADV01",
+      "title": "Add versioned adviser policy grants and deterministic activity selection",
+      "kind": "partially implemented foundation",
+      "sources": [
+        "docs/openai-automation-adviser-plan.md:17",
+        "docs/openai-automation-adviser-plan.md:46",
+        "docs/openai-automation-adviser-plan.md:75"
+      ],
+      "evidence": [
+        "OpportunityInvestigator and OpportunityEvaluator already support bounded Mining/Contracts candidates. The cross-activity adviser policy, immutable decision candidates, exploration allowance and deterministic selection history do not exist."
+      ],
+      "acceptance": [
+        "Reuse current discovery/evaluation; add versioned expiring policy grants for one ship and permitted cargo/system/activity bounds.",
+        "Represent feasible, missing-information, blocked and unsupported options, with stable IDs/hashes and named exploration questions. Include wait/read/refuel/sale/scout/mining where supported.",
+        "Implement reproducible income/exploration preference, capital/time tie breaks, no fabricated yields, and honest base/conservative inputs.",
+        "Expose dark policy/decision history with local display, UTC deadlines, separate Pause automatic decisions and Stop current activity. Record unresolved tuning choices before enabling."
+      ],
+      "dependencies": [],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 37,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/37",
+      "audit_head_sha": "35fad9d13334a164dd92f9cd3bce8386760447f6",
+      "audit_changed_files": [
+        "docs/plan-tasks/adv01-add-versioned-adviser-policy-grants-and-deterministic-activity-selection.md"
+      ],
+      "branch": "plan/adv01-add-versioned-adviser-policy-grants-and-deterministic-activity-selection",
+      "branch_created": true,
+      "pr_number": 38,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/38",
+      "brief_path": "docs/plan-tasks/adv01-add-versioned-adviser-policy-grants-and-deterministic-activity-selection.md"
+    },
+    {
+      "id": "ADV02",
+      "title": "Enforce the policy credit floor with durable agent-wide debit reservations",
+      "kind": "unimplemented adviser safeguard",
+      "sources": [
+        "docs/openai-automation-adviser-plan.md:94",
+        "app/Gameplay/CommandRules.php:55"
+      ],
+      "evidence": [
+        "Existing per-run reserve checks protect current approvals. There is no persisted policy-level 10,000-credit floor or outstanding worst-case debit-reservation ledger across all policy-controlled ships and uncertain actions."
+      ],
+      "acceptance": [
+        "Atomically require fresh confirmed balance minus unresolved maximum debits and proposed worst-case debit to meet the policy floor, with recovery costs included.",
+        "Keep pending/uncertain debit reservations until confirmed or reconciled; unconfirmed sales never finance purchases. Apply shared rules to manual spending while the policy is enabled.",
+        "Test exact-floor/over-floor/below-floor, zero-debit recovery sale, two ships, changed prices, external balance change and timeout retention.",
+        "Preserve the existing ShipAction ledger and document upstream/external-client limitations accurately."
+      ],
+      "dependencies": [
+        "ADV01"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 39,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/39",
+      "audit_head_sha": "b3a6938cedf4119eb727a63659491a5fadcf6c1d",
+      "audit_changed_files": [
+        "docs/plan-tasks/adv02-enforce-the-policy-credit-floor-with-durable-agent-wide-debit-reservations.md"
+      ],
+      "branch": "plan/adv02-enforce-the-policy-credit-floor-with-durable-agent-wide-debit-reservations",
+      "branch_created": true,
+      "pr_number": 40,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/40",
+      "brief_path": "docs/plan-tasks/adv02-enforce-the-policy-credit-floor-with-durable-agent-wide-debit-reservations.md"
+    },
+    {
+      "id": "ADV03",
+      "title": "Implement the adviser dollar-budget reservation ledger",
+      "kind": "unimplemented paid-API safeguard",
+      "sources": [
+        "docs/openai-automation-adviser-plan.md:142",
+        "docs/openai-automation-adviser-plan.md:250"
+      ],
+      "evidence": [
+        "There are no model-attempt, pricing, dollar-reservation or configured calendar-day budget tables/services. Game-credit accounting is a separate existing concern."
+      ],
+      "acceptance": [
+        "Use verified current pricing and bounded input/output/service tier to atomically reserve conservative maximum cost before every paid attempt.",
+        "Reconcile actual usage and retain timed-out/billing-unknown reservations, including ambiguous prior-period usage. Retries reserve independently.",
+        "Enforce $5 confirmed-plus-reserved cap, request/concurrency ceilings, and operator-confirmed Los Angeles day boundaries stored in UTC with DST tests.",
+        "At budget exhaustion suspend new model-dependent starts without silent deterministic fallback. Unknown/unbounded pricing blocks calls."
+      ],
+      "dependencies": [
+        "ADV01"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 41,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/41",
+      "audit_head_sha": "0e7ae106fda152325c0008a1b30b9832edf6252b",
+      "audit_changed_files": [
+        "docs/plan-tasks/adv03-implement-the-adviser-dollar-budget-reservation-ledger.md"
+      ],
+      "branch": "plan/adv03-implement-the-adviser-dollar-budget-reservation-ledger",
+      "branch_created": true,
+      "pr_number": 42,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/42",
+      "brief_path": "docs/plan-tasks/adv03-implement-the-adviser-dollar-budget-reservation-ledger.md"
+    },
+    {
+      "id": "ADV04",
+      "title": "Integrate the OpenAI adviser in observation mode and evaluate its value",
+      "kind": "unimplemented model integration",
+      "sources": [
+        "docs/openai-automation-adviser-plan.md:113",
+        "docs/openai-automation-adviser-plan.md:128",
+        "docs/openai-automation-adviser-plan.md:226"
+      ],
+      "evidence": [
+        "No OpenAI transport, strict answer parser, sanitized packet, model-attempt history or observation-mode comparison exists. The suggested model/access/pricing in the plan must be reverified at implementation."
+      ],
+      "acceptance": [
+        "Build an allowlisted immutable evidence packet with versions, timestamps, observation references, candidates and baseline selection; exclude credentials and arbitrary logs.",
+        "Use a narrow server-side adapter with current supported strict schema, store=false, bounded tokens and choose/abstain/request_refresh results; validate IDs, hashes and references locally.",
+        "Handle refusal, incomplete output, timeout, invalid schema, unavailable model/project and provider failure without executing gameplay. Use a separate queue and no held gameplay lock during model latency.",
+        "Evaluate synthetic/sanitized unsafe and deliberately misranked cases plus baseline-hidden cases, cost/latency/abstention and unsupported claims. Any paid experiment needs explicit authority and ADV03."
+      ],
+      "dependencies": [
+        "ADV01",
+        "ADV02",
+        "ADV03"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 43,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/43",
+      "audit_head_sha": "3636043b80b5494b00eb445712f33ab07bddd2d7",
+      "audit_changed_files": [
+        "docs/plan-tasks/adv04-integrate-the-openai-adviser-in-observation-mode-and-evaluate-its-value.md"
+      ],
+      "branch": "plan/adv04-integrate-the-openai-adviser-in-observation-mode-and-evaluate-its-value",
+      "branch_created": true,
+      "pr_number": 44,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/44",
+      "brief_path": "docs/plan-tasks/adv04-integrate-the-openai-adviser-in-observation-mode-and-evaluate-its-value.md"
+    },
+    {
+      "id": "ADV05",
+      "title": "Add policy-authorized one-time decision execution and trigger recovery",
+      "kind": "unimplemented automated decision lifecycle",
+      "sources": [
+        "docs/openai-automation-adviser-plan.md:156",
+        "docs/openai-automation-adviser-plan.md:177",
+        "docs/openai-automation-adviser-plan.md:228"
+      ],
+      "evidence": [
+        "No durable adviser decision service, semantic trigger deduplication, agreement gate or unique decision-to-run handoff exists. Existing deterministic runners must remain the only gameplay execution path."
+      ],
+      "acceptance": [
+        "Persist collecting/evaluating/model/review/approved/consumed/expired/cancelled/failed lifecycle with semantic fingerprints and bounded refresh.",
+        "Require exact candidate/hash agreement, enabled unexpired policy and fresh reset/ship/cargo/credits/price/fuel/ownership checks at automatic start.",
+        "Atomically claim one decision and hand off to existing preview/executor; recover duplicate jobs and crashes without duplicate writes.",
+        "Test late replies, Stop/policy disable/restart/reset, disagreement, unknown outcomes and active-run ownership. Neither model agreement nor a new decision clears reconciliation blocks."
+      ],
+      "dependencies": [
+        "ADV02",
+        "ADV03",
+        "ADV04"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 45,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/45",
+      "audit_head_sha": "5390fb23c75877f679c78b8afb94b196c63edf12",
+      "audit_changed_files": [
+        "docs/plan-tasks/adv05-add-policy-authorized-one-time-decision-execution-and-trigger-recovery.md"
+      ],
+      "branch": "plan/adv05-add-policy-authorized-one-time-decision-execution-and-trigger-recovery",
+      "branch_created": true,
+      "pr_number": 46,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/46",
+      "brief_path": "docs/plan-tasks/adv05-add-policy-authorized-one-time-decision-execution-and-trigger-recovery.md"
+    },
+    {
+      "id": "ADV06",
+      "title": "Run a bounded live adviser evaluation under an explicit policy",
+      "kind": "unverified paid/live acceptance",
+      "sources": [
+        "docs/openai-automation-adviser-plan.md:229",
+        "docs/openai-automation-adviser-plan.md:246"
+      ],
+      "evidence": [
+        "No paid API-project access, model quality, live operating-cost or adviser-controlled gameplay acceptance has been demonstrated. Coding-agent model availability does not establish API access."
+      ],
+      "acceptance": [
+        "Confirm project access/current pricing, exploration/spend/loss/time allowances, policy lifetime/day boundary and evidence retention before enabling.",
+        "Start with observation-only evaluation, then separately authorize bounded live use within the protected credit floor and $5 cap.",
+        "Record deterministic and model choices, disagreements/abstentions, confirmed receipts/costs/fuel/information gained, latency and actual usage.",
+        "Compare equivalent cases against the deterministic-only baseline and report shared-input failures and unverified outcomes without a profitability guarantee."
+      ],
+      "dependencies": [
+        "ADV05",
+        "LIVE03"
+      ],
+      "boundary": "Requires explicit paid API and live gameplay authorization under selected numeric bounds; no paid or game actions during audit or draft creation.",
+      "issue_number": 47,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/47",
+      "audit_head_sha": "ac8d1f9d6bdb5634696d1c7982370824a2d26513",
+      "audit_changed_files": [
+        "docs/plan-tasks/adv06-run-a-bounded-live-adviser-evaluation-under-an-explicit-policy.md"
+      ],
+      "branch": "plan/adv06-run-a-bounded-live-adviser-evaluation-under-an-explicit-policy",
+      "branch_created": true,
+      "pr_number": 48,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/48",
+      "brief_path": "docs/plan-tasks/adv06-run-a-bounded-live-adviser-evaluation-under-an-explicit-policy.md"
+    },
+    {
+      "id": "ADV07",
+      "title": "Add a sanitized Discord notification outbox",
+      "kind": "unimplemented later phase",
+      "sources": [
+        "docs/openai-automation-adviser-plan.md:209",
+        "docs/openai-automation-adviser-plan.md:230"
+      ],
+      "evidence": [
+        "No Discord webhook adapter, notification outbox, delivery record or alert/digest configuration exists."
+      ],
+      "acceptance": [
+        "Persist decision/event-deduplicated outbox after commit, send with wait=true, retain returned message ID, disable mentions and honor rate limits.",
+        "Include concise recommendations/reasons/protected balance/local time without credentials or full evidence packets; preserve dashboard authority.",
+        "Handle unknown delivery and possible duplicate retry, provider outages and digest policy without blocking safe gameplay.",
+        "Test fake webhook rate limits, unknown timeout, mentions and duplicates; verify actual delivery only after channel setup and explicit test-send authorization."
+      ],
+      "dependencies": [
+        "ADV04"
+      ],
+      "boundary": "No webhook secret, external message or Discord channel change is authorized by this issue or draft.",
+      "issue_number": 49,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/49",
+      "audit_head_sha": "54cdd1ee1950cdb19ac7dacc7410b53031374461",
+      "audit_changed_files": [
+        "docs/plan-tasks/adv07-add-a-sanitized-discord-notification-outbox.md"
+      ],
+      "branch": "plan/adv07-add-a-sanitized-discord-notification-outbox",
+      "branch_created": true,
+      "pr_number": 50,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/50",
+      "brief_path": "docs/plan-tasks/adv07-add-a-sanitized-discord-notification-outbox.md"
+    },
+    {
+      "id": "EXP01",
+      "title": "Add bounded scan and chart commands for hidden-trait evidence",
+      "kind": "deferred exploration capability",
+      "sources": [
+        "docs/exploration-fuel-and-opportunity-recommendations.md:21",
+        "docs/exploration-fuel-and-opportunity-recommendations.md:58",
+        "app/Gameplay/SpaceTradersApi.php:1"
+      ],
+      "evidence": [
+        "Listing/scan/chart observations are distinguished in storage, but named scan/chart commands and purpose-bounded scan discovery are absent."
+      ],
+      "acceptance": [
+        "Verify current endpoint/equipment/state contracts and add explicit owned previews/approvals through the shared durable executor.",
+        "Keep listing, scan and chart evidence distinct and reset-scoped; preserve unknown traits until observed.",
+        "Require a decision-changing question, bounded API/cooldown/travel/spend use and safe continuation.",
+        "Test partial coverage, capability failures, uncertain writes, Stop and reset; never claim a full catalogue reveals hidden traits."
+      ],
+      "dependencies": [],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 51,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/51",
+      "audit_head_sha": "ad2dae8602505843b91ce82c2c3379190e01965d",
+      "audit_changed_files": [
+        "docs/plan-tasks/exp01-add-bounded-scan-and-chart-commands-for-hidden-trait-evidence.md"
+      ],
+      "branch": "plan/exp01-add-bounded-scan-and-chart-commands-for-hidden-trait-evidence",
+      "branch_created": true,
+      "pr_number": 52,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/52",
+      "brief_path": "docs/plan-tasks/exp01-add-bounded-scan-and-chart-commands-for-hidden-trait-evidence.md"
+    },
+    {
+      "id": "EXP02",
+      "title": "Validate additional flight modes and unusual-ship fuel mechanics",
+      "kind": "deferred routing capability",
+      "sources": [
+        "docs/exploration-fuel-and-opportunity-recommendations.md:38",
+        "app/Gameplay/FuelPlanner.php:13",
+        "app/Gameplay/CommandRules.php:115"
+      ],
+      "evidence": [
+        "FuelPlanner rejects non-CRUISE and zero-capacity ships. Community formulas are provenance-tagged estimates, not validated general server mechanics."
+      ],
+      "acceptance": [
+        "Refresh primary API contracts and define supported mode/configuration combinations, including explicit unknown/unsupported behavior for zero-capacity ships.",
+        "Collect separately approved calibration before enabling a model; preserve exact reset/equipment/directed-edge provenance.",
+        "Add controlled mode-change/navigation support with continuation, reserve and elapsed-time checks through existing approvals.",
+        "Test stranding, rescue/replan loops, consumption discrepancy and unsupported ships; keep conservative CRUISE as default until justified."
+      ],
+      "dependencies": [],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 53,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/53",
+      "audit_head_sha": "64b560e060fdeaf9d35e06b858822d94bdaea210",
+      "audit_changed_files": [
+        "docs/plan-tasks/exp02-validate-additional-flight-modes-and-unusual-ship-fuel-mechanics.md"
+      ],
+      "branch": "plan/exp02-validate-additional-flight-modes-and-unusual-ship-fuel-mechanics",
+      "branch_created": true,
+      "pr_number": 54,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/54",
+      "brief_path": "docs/plan-tasks/exp02-validate-additional-flight-modes-and-unusual-ship-fuel-mechanics.md"
+    },
+    {
+      "id": "EXP03",
+      "title": "Validate and implement cargo-based refueling safely",
+      "kind": "deferred refueling capability",
+      "sources": [
+        "docs/exploration-fuel-and-opportunity-recommendations.md:38",
+        "docs/exploration-fuel-and-opportunity-research.md:124",
+        "app/Http/Requests/GameplayRequest.php:34"
+      ],
+      "evidence": [
+        "The current command boundary supports tank-unit market refueling, not fromCargo refueling or its validated location/state exceptions."
+      ],
+      "acceptance": [
+        "Verify current cargo-refuel endpoint/state rules and tank-versus-cargo rounding from primary contracts and separately approved evidence.",
+        "Add explicit from-cargo preview, protected cargo allocation, remaining tank/cargo bounds and safe continuation.",
+        "Use the existing intent/uncertainty/accounting path; test exact conversion, insufficient cargo, capacity, state restrictions, duplicate approvals and lost responses."
+      ],
+      "dependencies": [],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 55,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/55",
+      "audit_head_sha": "d0760503e60da61c9ca32641ddf674ec7dc902fa",
+      "audit_changed_files": [
+        "docs/plan-tasks/exp03-validate-and-implement-cargo-based-refueling-safely.md"
+      ],
+      "branch": "plan/exp03-validate-and-implement-cargo-based-refueling-safely",
+      "branch_created": true,
+      "pr_number": 56,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/56",
+      "brief_path": "docs/plan-tasks/exp03-validate-and-implement-cargo-based-refueling-safely.md"
+    },
+    {
+      "id": "EXP04",
+      "title": "Execute approved fuel-stop itineraries through the existing runner",
+      "kind": "deferred routing capability",
+      "sources": [
+        "docs/exploration-fuel-and-opportunity-recommendations.md:38",
+        "app/Gameplay/FuelPlanner.php:109"
+      ],
+      "evidence": [
+        "FuelPlanner compares direct and one-stop options read-only. OperationPlanner runs one direct out-and-back destination; automatic fuel-stop detour execution is absent."
+      ],
+      "acceptance": [
+        "Preview exact legs/refuel stops with fresh fuel listings/prices, tank and credit state, total cost/time and recovery reserves.",
+        "Bind itinerary hash and limits to the existing run; revalidate each transition and stop on unavailable fuel or changed bounds.",
+        "Test outbound-safe-but-stranded, detour overhead, empty return, Stop, restart, unknown write and no repeated rescue route."
+      ],
+      "dependencies": [],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 57,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/57",
+      "audit_head_sha": "5bc6f0dc51840448bd61b729162e3f372d5cd880",
+      "audit_changed_files": [
+        "docs/plan-tasks/exp04-execute-approved-fuel-stop-itineraries-through-the-existing-runner.md"
+      ],
+      "branch": "plan/exp04-execute-approved-fuel-stop-itineraries-through-the-existing-runner",
+      "branch_created": true,
+      "pr_number": 58,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/58",
+      "brief_path": "docs/plan-tasks/exp04-execute-approved-fuel-stop-itineraries-through-the-existing-runner.md"
+    },
+    {
+      "id": "EXP05",
+      "title": "Add purpose-bounded multi-market scouting tours",
+      "kind": "deferred scouting capability",
+      "sources": [
+        "docs/exploration-fuel-and-opportunity-recommendations.md:58",
+        "app/Gameplay/OperationPlanner.php:1"
+      ],
+      "evidence": [
+        "Scouting supports one market/question and a direct home return. Clustered multi-market tours and re-ranking after each useful observation are not implemented."
+      ],
+      "acceptance": [
+        "Generate a route from named missing facts and affected opportunities, with visit, API, fuel, spending and duration limits.",
+        "Re-evaluate after each observation and stop once answered or exhausted; preserve a fuel-safe continuation and separately bounded rerouting.",
+        "Disclose unknown information value/displaced earnings; no automatic all-waypoint scan.",
+        "Test missing prices, early completion, partial discovery, updated quotes, Stop and uncertain travel."
+      ],
+      "dependencies": [
+        "EXP04"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 59,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/59",
+      "audit_head_sha": "f5cb2be7e5ade217e6218ce96e4fd369204de2a6",
+      "audit_changed_files": [
+        "docs/plan-tasks/exp05-add-purpose-bounded-multi-market-scouting-tours.md"
+      ],
+      "branch": "plan/exp05-add-purpose-bounded-multi-market-scouting-tours",
+      "branch_created": true,
+      "pr_number": 60,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/60",
+      "brief_path": "docs/plan-tasks/exp05-add-purpose-bounded-multi-market-scouting-tours.md"
+    },
+    {
+      "id": "EXP06",
+      "title": "Evaluate probe placement and require a separate investment approval",
+      "kind": "conditional investment",
+      "sources": [
+        "docs/exploration-fuel-and-opportunity-recommendations.md:58",
+        "docs/exploration-implementation.md:97"
+      ],
+      "evidence": [
+        "No reset-horizon probe economics or approved placement planner exists. Current buy_ship is restricted to a one-time complete miner setup."
+      ],
+      "acceptance": [
+        "Compare observed probe purchase/deployment costs with avoided scouting and decision-changing quote freshness over the remaining reset.",
+        "Retain unknown benefit as unknown; compare the best use of existing ships and available capital.",
+        "Only after measured benefit passes, design a separate bounded purchase/placement approval with uncertainty recovery. Do not repurpose miner-setup approval."
+      ],
+      "dependencies": [
+        "EXP09",
+        "LIVE03"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 61,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/61",
+      "audit_head_sha": "8f9e2e86dd218d8d77f6c18ea99840d7074210a7",
+      "audit_changed_files": [
+        "docs/plan-tasks/exp06-evaluate-probe-placement-and-require-a-separate-investment-approval.md"
+      ],
+      "branch": "plan/exp06-evaluate-probe-placement-and-require-a-separate-investment-approval",
+      "branch_created": true,
+      "pr_number": 62,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/62",
+      "brief_path": "docs/plan-tasks/exp06-evaluate-probe-placement-and-require-a-separate-investment-approval.md"
+    },
+    {
+      "id": "EXP07",
+      "title": "Evaluate and orchestrate a dedicated surveyor only when justified",
+      "kind": "conditional fleet capability",
+      "sources": [
+        "docs/exploration-fuel-and-opportunity-recommendations.md:94",
+        "app/Gameplay/SurveyPool.php:1"
+      ],
+      "evidence": [
+        "Signed survey creation/use, expiry and exhaustion are implemented. A dedicated surveyor scheduling and incremental-cost/payback flow is absent."
+      ],
+      "acceptance": [
+        "Compare measured surveyed/unsurveyed complete cycles including creation cooldown, expiry, yield mix, sale proceeds and acquisition/positioning costs.",
+        "After evidence supports the role, coordinate a separately approved surveyor with shared exhaustion and request budgets without treating deposit duplicates as probabilities.",
+        "Preserve ownership, one-agent credit controls, Stop and unknown outcomes; keep purchase permission separate."
+      ],
+      "dependencies": [
+        "EXP09",
+        "LIVE03"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 63,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/63",
+      "audit_head_sha": "6b7b01d44827c369d149f868bdcbabbc86f73c5d",
+      "audit_changed_files": [
+        "docs/plan-tasks/exp07-evaluate-and-orchestrate-a-dedicated-surveyor-only-when-justified.md"
+      ],
+      "branch": "plan/exp07-evaluate-and-orchestrate-a-dedicated-surveyor-only-when-justified",
+      "branch_created": true,
+      "pr_number": 64,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/64",
+      "brief_path": "docs/plan-tasks/exp07-evaluate-and-orchestrate-a-dedicated-surveyor-only-when-justified.md"
+    },
+    {
+      "id": "EXP08",
+      "title": "Evaluate and orchestrate miner-hauler capacity and buyer throughput",
+      "kind": "conditional fleet capability",
+      "sources": [
+        "docs/exploration-fuel-and-opportunity-recommendations.md:94",
+        "app/Gameplay/CycleAccounting.php:35",
+        "app/Gameplay/CommandRules.php:176"
+      ],
+      "evidence": [
+        "Manual cargo transfer validates both ships and capacities. No multi-ship hauling run, production caller of fleetInvestment or complete incremental-capital planner exists."
+      ],
+      "acceptance": [
+        "Measure output during the complete hauling round trip, transfer/queue waits, free capacity, buyer batching and empty return.",
+        "Compare net fleet and ship-hour income and best existing alternative before recommending extra capital.",
+        "Only after justified, implement bounded coordination through shared intents with protected cargo and both ship states, Stop/timeout/reset recovery.",
+        "Test saturated buyer, slow hauler, full holds and cross-ship spending contention."
+      ],
+      "dependencies": [
+        "EXP09",
+        "LIVE03"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 65,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/65",
+      "audit_head_sha": "d068fbf66e99e9052fe008eb0eedc713ee253eeb",
+      "audit_changed_files": [
+        "docs/plan-tasks/exp08-evaluate-and-orchestrate-miner-hauler-capacity-and-buyer-throughput.md"
+      ],
+      "branch": "plan/exp08-evaluate-and-orchestrate-miner-hauler-capacity-and-buyer-throughput",
+      "branch_created": true,
+      "pr_number": 66,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/66",
+      "brief_path": "docs/plan-tasks/exp08-evaluate-and-orchestrate-miner-hauler-capacity-and-buyer-throughput.md"
+    },
+    {
+      "id": "EXP09",
+      "title": "Integrate comparable complete-cycle economics and conservative forecasts",
+      "kind": "partially implemented R07",
+      "sources": [
+        "docs/exploration-fuel-and-opportunity-recommendations.md:126",
+        "app/Gameplay/CycleAccounting.php:7",
+        "app/Gameplay/AutomationRunner.php:298"
+      ],
+      "evidence": [
+        "CycleAccounting detects unmatched position/fuel/inventory/wear and conservatively withholds comparable net/hour. Runner passes sales/fuel/goods only; measured wear, repairs, capital and fleet count are not integrated.",
+        "fleetInvestment has tests but no production caller. Trade has base cash/unsold downside output, but normalized net/hour fields remain null."
+      ],
+      "acceptance": [
+        "Integrate observed operating costs or an explicitly chosen wear allowance, normalized or clearly unresolved fuel/position/inventory and conservative reachable inventory value.",
+        "Show base/conservative estimates and realized/unresolved outcomes separately without fabricating unknown prices/yields or confidence.",
+        "Connect fleet capital, ship-hours, throughput and incremental payback against the best current-assets alternative.",
+        "Exercise the actual report/evaluator/runner path with closed/open cycles, overlapping waits, unsold cargo, unmatched fuel, capital and missing wear."
+      ],
+      "dependencies": [],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 67,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/67",
+      "audit_head_sha": "61e9f1242159b3e4509722d7da8a716bea44d81f",
+      "audit_changed_files": [
+        "docs/plan-tasks/exp09-integrate-comparable-complete-cycle-economics-and-conservative-forecasts.md"
+      ],
+      "branch": "plan/exp09-integrate-comparable-complete-cycle-economics-and-conservative-forecasts",
+      "branch_created": true,
+      "pr_number": 68,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/68",
+      "brief_path": "docs/plan-tasks/exp09-integrate-comparable-complete-cycle-economics-and-conservative-forecasts.md"
+    },
+    {
+      "id": "EXP10",
+      "title": "Assess refining and production support as separate investments",
+      "kind": "conditional strategy research",
+      "sources": [
+        "docs/exploration-fuel-and-opportunity-recommendations.md:120",
+        "docs/exploration-implementation.md:97"
+      ],
+      "evidence": [
+        "No refine command or production-support investment workflow exists; the accepted trader uses one bounded buy/sell cycle."
+      ],
+      "acceptance": [
+        "Compare raw-input sale value with supported refined output, equipment/cargo/cooldown requirements, fuel/time and conservative buyer capacity.",
+        "Separate production-chain effects from private realizable returns and compare the best existing opportunity.",
+        "Deliver a cited feasibility gate before any proposed command implementation or purchase; keep unsupported or unpriced routes blocked."
+      ],
+      "dependencies": [
+        "EXP09",
+        "LIVE03"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 69,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/69",
+      "audit_head_sha": "b141d0c87ffc10ecae5194cbfd8385f4bb6ccbed",
+      "audit_changed_files": [
+        "docs/plan-tasks/exp10-assess-refining-and-production-support-as-separate-investments.md"
+      ],
+      "branch": "plan/exp10-assess-refining-and-production-support-as-separate-investments",
+      "branch_created": true,
+      "pr_number": 70,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/70",
+      "brief_path": "docs/plan-tasks/exp10-assess-refining-and-production-support-as-separate-investments.md"
+    },
+    {
+      "id": "EXP11",
+      "title": "Assess wider exploration only after verified local opportunity limits",
+      "kind": "conditional strategy research",
+      "sources": [
+        "docs/exploration-fuel-and-opportunity-research.md:339",
+        "docs/exploration-implementation.md:97",
+        "docs/early-game-mvp-plan.md:226"
+      ],
+      "evidence": [
+        "Commands and planners restrict navigation to one system. Wider exploration and intersystem economics are conditional recommendations rather than supported execution."
+      ],
+      "acceptance": [
+        "Compare poor verified local opportunities against a specifically observed adjacent-system question, gate connections, access, fuel, jump/cooldown costs and recovery.",
+        "Record route mechanics, complete exploration cost and uncertainty; do not widen scope simply because local prices are missing.",
+        "Deliver a bounded future design with separate approvals and shared execution controls before enabling intersystem actions."
+      ],
+      "dependencies": [
+        "EXP09",
+        "LIVE03"
+      ],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 71,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/71",
+      "audit_head_sha": "10f07c2fec89bc5b66414b40b865b4592dea82eb",
+      "audit_changed_files": [
+        "docs/plan-tasks/exp11-assess-wider-exploration-only-after-verified-local-opportunity-limits.md"
+      ],
+      "branch": "plan/exp11-assess-wider-exploration-only-after-verified-local-opportunity-limits",
+      "branch_created": true,
+      "pr_number": 72,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/72",
+      "brief_path": "docs/plan-tasks/exp11-assess-wider-exploration-only-after-verified-local-opportunity-limits.md"
+    },
+    {
+      "id": "LIVE01",
+      "title": "Record live-local backup, restore and controlled cutover acceptance",
+      "kind": "unverified operating gate",
+      "sources": [
+        "docs/early-game-mvp-plan.md:201",
+        "docs/local-automation-implementation-plan.md:265",
+        "docs/exploration-implementation.md:91"
+      ],
+      "evidence": [
+        "Reports establish disposable migrations/conversion/recovery and explicitly defer the selected real environment cutover. This audit did not inspect or modify the live database."
+      ],
+      "acceptance": [
+        "Identify actual environment/active work read-only; retain matching key, verified backup and disposable restore/decryption proof before changing anything.",
+        "Under explicit cutover authority, stop and settle old work, convert plaintext credentials if present, apply required additive migrations and configure the owned engine.",
+        "Invalidate old approvals, retain uncertain history and require fresh previews; verify rollback with compatible code/database without implying restored DB reverses upstream actions."
+      ],
+      "dependencies": [
+        "QA01"
+      ],
+      "boundary": "Requires explicit selected-environment cutover authorization. No live database, APP_KEY, credential or service change during audit.",
+      "issue_number": 73,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/73",
+      "audit_head_sha": "75a29b10d6026af46057a12c562262d0573e1ef6",
+      "audit_changed_files": [
+        "docs/plan-tasks/live01-record-live-local-backup-restore-and-controlled-cutover-acceptance.md"
+      ],
+      "branch": "plan/live01-record-live-local-backup-restore-and-controlled-cutover-acceptance",
+      "branch_created": true,
+      "pr_number": 74,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/74",
+      "brief_path": "docs/plan-tasks/live01-record-live-local-backup-restore-and-controlled-cutover-acceptance.md"
+    },
+    {
+      "id": "LIVE02",
+      "title": "Rehearse real macOS sleep and wake with an owned offline engine",
+      "kind": "unverified native acceptance",
+      "sources": [
+        "docs/early-game-mvp-plan.md:173",
+        "docs/mvp-qa-followups.md:19",
+        "scripts/verify-local-engine.php:104"
+      ],
+      "evidence": [
+        "Tests simulate stale heartbeat/time gaps; the local report explicitly excludes an actual macOS sleep/wake trial."
+      ],
+      "acceptance": [
+        "Prepare a disposable fake-provider engine with no real credentials, record process/intent state, then perform a separately authorized real Mac sleep/resume.",
+        "Verify stale approvals cannot execute, owned process/heartbeat health is truthful and deadlines recalculate after wake.",
+        "Cover unsent and in-flight uncertainty safely, refresh/reapproval and Stop/session exit, and remove only the owned service/resources."
+      ],
+      "dependencies": [],
+      "boundary": "Requires permission for disruptive actual Mac sleep. Independent fixture preparation is safe; never put live gameplay at risk.",
+      "issue_number": 75,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/75",
+      "audit_head_sha": "f3584e7c1d2f614031d4762c42cdd3408b5c9699",
+      "audit_changed_files": [
+        "docs/plan-tasks/live02-rehearse-real-macos-sleep-and-wake-with-an-owned-offline-engine.md"
+      ],
+      "branch": "plan/live02-rehearse-real-macos-sleep-and-wake-with-an-owned-offline-engine",
+      "branch_created": true,
+      "pr_number": 76,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/76",
+      "brief_path": "docs/plan-tasks/live02-rehearse-real-macos-sleep-and-wake-with-an-owned-offline-engine.md"
+    },
+    {
+      "id": "LIVE03",
+      "title": "Record bounded live trip and comparable mining, survey and trade evidence",
+      "kind": "unverified gameplay acceptance",
+      "sources": [
+        "docs/early-game-mvp-plan.md:201",
+        "docs/exploration-fuel-and-opportunity-recommendations.md:89",
+        "docs/exploration-fuel-and-opportunity-recommendations.md:98",
+        "docs/exploration-implementation.md:113"
+      ],
+      "evidence": [
+        "Synthetic loops and telemetry exist, but reports do not establish actual first-trip sale/refuel outcome or improved live net returns from fuller loads, surveys or trading."
+      ],
+      "acceptance": [
+        "With a freshly synchronized owned ship, operator-chosen reserve/spend/loss/time limits and explicit live authority, complete one previewed mining trip and stop.",
+        "Record observed start/end credits, cargo, position/tank fuel, receipts, costs, deadlines, API version, failures/retained cargo and stop behavior.",
+        "Run separately approved matched calibration/load/survey/trade cases only when prerequisites and budgets permit. Include unsuccessful cycles and unknown wear.",
+        "Compare comparable complete cycles and retain conservative defaults unless measurements justify a change. Do not claim fixtures or cash contribution prove economic profit."
+      ],
+      "dependencies": [
+        "LIVE01",
+        "EXP09"
+      ],
+      "boundary": "Every live mutation and numeric experiment budget requires explicit approval. No agent registration, purchase, paid trial or autonomous spending during this audit.",
+      "issue_number": 77,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/77",
+      "audit_head_sha": "9dd115fee052b074ab017f0ad07eaaa7412ae5dd",
+      "audit_changed_files": [
+        "docs/plan-tasks/live03-record-bounded-live-trip-and-comparable-mining-survey-and-trade-evidence.md"
+      ],
+      "branch": "plan/live03-record-bounded-live-trip-and-comparable-mining-survey-and-trade-evidence",
+      "branch_created": true,
+      "pr_number": 78,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/78",
+      "brief_path": "docs/plan-tasks/live03-record-bounded-live-trip-and-comparable-mining-survey-and-trade-evidence.md"
+    },
+    {
+      "id": "OPT01",
+      "title": "Batch reset-scoped fuel-market listing queries",
+      "kind": "optional O2 optimization",
+      "sources": [
+        "docs/opus-qa-security-tasks.md:174",
+        "app/Gameplay/FuelPlanner.php:28"
+      ],
+      "evidence": [
+        "FuelPlanner::leg queries market_listing inside the fresh-market loop; OpportunityAssessor invokes it repeatedly. Accepted at current scale, unoptimized."
+      ],
+      "acceptance": [
+        "Load bounded agent/reset-scoped listings once per report/planning scope and reuse without refreshing quote age.",
+        "Preserve fuel-seller/freshness/affordability checks and route results; demonstrate query count scaling with a multi-market fixture.",
+        "Avoid a generic repository/cache layer or cross-request stale state."
+      ],
+      "dependencies": [],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 79,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/79",
+      "audit_head_sha": "27372602b2bffea48c0841955b7ca4aa20d6c320",
+      "audit_changed_files": [
+        "docs/plan-tasks/opt01-batch-reset-scoped-fuel-market-listing-queries.md"
+      ],
+      "branch": "plan/opt01-batch-reset-scoped-fuel-market-listing-queries",
+      "branch_created": true,
+      "pr_number": 80,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/80",
+      "brief_path": "docs/plan-tasks/opt01-batch-reset-scoped-fuel-market-listing-queries.md"
+    },
+    {
+      "id": "OPT02",
+      "title": "Remove owned temporary verification fixtures after successful runs",
+      "kind": "optional O3 cleanup",
+      "sources": [
+        "docs/opus-qa-security-tasks.md:175",
+        "scripts/verify-automation-browser.mjs:191",
+        "scripts/verify-opportunities-browser.mjs:146"
+      ],
+      "evidence": [
+        "Browser scripts stop their service/server/browser but retain temporary fixture directories on success."
+      ],
+      "acceptance": [
+        "After verified successful process/service shutdown, remove only the exact owned temporary directory.",
+        "Preserve durable screenshots/results outside the fixture and retain failed-run diagnostics with clear private paths.",
+        "Test safe path ownership, success/failure/partial setup and no orphan services; never recursively delete a user-supplied path."
+      ],
+      "dependencies": [],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 81,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/81",
+      "audit_head_sha": "159bc0758ac7b355bd874484b7858ad2aaa8153c",
+      "audit_changed_files": [
+        "docs/plan-tasks/opt02-remove-owned-temporary-verification-fixtures-after-successful-runs.md"
+      ],
+      "branch": "plan/opt02-remove-owned-temporary-verification-fixtures-after-successful-runs",
+      "branch_created": true,
+      "pr_number": 82,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/82",
+      "brief_path": "docs/plan-tasks/opt02-remove-owned-temporary-verification-fixtures-after-successful-runs.md"
+    },
+    {
+      "id": "OPT03",
+      "title": "Measure and reduce redundant upstream reads without stale preflight",
+      "kind": "optional O4 optimization",
+      "sources": [
+        "docs/opus-qa-security-tasks.md:366",
+        "app/Services/SpaceTradersClient.php:23",
+        "app/Gameplay/AutomationRunner.php:155"
+      ],
+      "evidence": [
+        "Two-second same-scope GET reuse is implemented and historical calls fell 236 to 227. Further reset/agent reads still occur across dispatches."
+      ],
+      "acceptance": [
+        "Profile exact request paths with synthetic call counts and establish an explicit correctness/freshness boundary before widening reuse.",
+        "Reduce only proven-redundant reads; maintain reset detection, balance/price/cargo refresh before writes, write invalidation and host/account priorities.",
+        "Report repeatable before/after counts and tests for reset, external balance change, unknown write and concurrent dispatch. Keep accepted conservative behavior if safe reduction is not supported."
+      ],
+      "dependencies": [],
+      "boundary": "Offline implementation and owned fixtures only. Live gameplay, paid calls, external messages, credential changes and deployment need explicit execution authorization.",
+      "issue_number": 83,
+      "issue_url": "https://github.com/giantsoup/spacetraders/issues/83",
+      "audit_head_sha": "96488b05aebd962e4bf4b05c9cc5846c16f22d68",
+      "audit_changed_files": [
+        "docs/plan-tasks/opt03-measure-and-reduce-redundant-upstream-reads-without-stale-preflight.md"
+      ],
+      "branch": "plan/opt03-measure-and-reduce-redundant-upstream-reads-without-stale-preflight",
+      "branch_created": true,
+      "pr_number": 84,
+      "pr_url": "https://github.com/giantsoup/spacetraders/pull/84",
+      "brief_path": "docs/plan-tasks/opt03-measure-and-reduce-redundant-upstream-reads-without-stale-preflight.md"
+    }
+  ],
+  "snapshot_note": "Original 2026-11-01 audit at local_head and remote_base. Evidence, audit_head_sha and audit_changed_files describe that dated snapshot, not current acceptance. See plan-implementation-audit.md for the current status index."
+}

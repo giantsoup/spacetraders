@@ -1,0 +1,11 @@
+test_duplicate_pair_and_cycle_fail (test_tracking.TrackingTest.test_duplicate_pair_and_cycle_fail) ... ok
+test_incomplete_pagination_fails (test_tracking.TrackingTest.test_incomplete_pagination_fails) ... ok
+test_original_snapshot_and_all_42_pairs (test_tracking.TrackingTest.test_original_snapshot_and_all_42_pairs) ... ok
+test_progress_and_removed_files_report_drift_without_claiming_acceptance (test_tracking.TrackingTest.test_progress_and_removed_files_report_drift_without_claiming_acceptance) ... ok
+test_ready_and_merged_lifecycle_are_trackable (test_tracking.TrackingTest.test_ready_and_merged_lifecycle_are_trackable) ... ok
+test_wrong_branch_closed_unmerged_and_missing_links_fail (test_tracking.TrackingTest.test_wrong_branch_closed_unmerged_and_missing_links_fail) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.146s
+
+OK

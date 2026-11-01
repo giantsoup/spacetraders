@@ -45,6 +45,8 @@ class SurveyPool
 
     public function assess(Agent $agent, array $signed, array $ship): array
     {
+        $fuel = app(FuelPlanner::class);
+        $listings = $fuel->listings($agent);
         $summary = $this->summary($signed);
         $values = [];
         foreach ($summary['deposit_counts'] as $symbol => $count) {
@@ -58,7 +60,7 @@ class SurveyPool
                     continue;
                 }
                 try {
-                    $route = app(FuelPlanner::class)->leg($agent, $ship, $market->symbol);
+                    $route = $fuel->leg($agent, $ship, $market->symbol, listings: $listings);
                     $buyers[] = ['market' => $market->symbol, 'sell_price' => $bid['sellPrice'], 'volume' => $bid['tradeVolume'], 'fuel_ceiling' => $route['refuel_ceiling'], 'quote_at' => $market->observed_at->toIso8601String()];
                 } catch (GameException) {
                 }

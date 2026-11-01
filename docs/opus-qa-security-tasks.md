@@ -1,5 +1,7 @@
 # Opus QA and security review: exploration, calibration, loads, scout/trade, surveys/transfers
 
+Current document/task mapping: [documentation status index](plan-implementation-audit.md#current-status-index). The dated rounds and original checkboxes below remain review history.
+
 Current status: **QA and security accepted** by Claude Opus 5.5 at `f9913c2b4137628241c7384af12533a1f5cf2a9c`. All blocking tasks T1–T6 are closed, and D3 is resolved within the captured-header/local-fixture scope. See [round 4](#round-4-independent-review-of-the-live-rate-header-follow-up). Earlier verdicts below are preserved as review history. The user separately authorized committing, merging into main and pushing main after verification; deployment and live gameplay remain outside that authorization.
 
 | Item | Value |

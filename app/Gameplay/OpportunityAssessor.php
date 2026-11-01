@@ -6,6 +6,7 @@ use App\Models\Agent;
 use App\Models\GameObservation;
 use App\Models\ObservationHistory;
 use App\Models\Ship;
+use Illuminate\Support\Collection;
 
 class OpportunityAssessor
 {
@@ -14,6 +15,7 @@ class OpportunityAssessor
     public function report(Agent $agent): array
     {
         $observations = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->get();
+        $listings = $observations->where('kind', 'market_listing')->keyBy('symbol');
         $points = $observations->where('kind', 'waypoint');
         $markets = $observations->where('kind', 'market_listing')->map(function ($listing) use ($observations) {
             $quote = $observations->first(fn ($row) => $row->kind === 'market' && $row->symbol === $listing->symbol && ! empty($row->data['tradeGoods']));
@@ -40,7 +42,7 @@ class OpportunityAssessor
 
                     continue;
                 }
-                $cargoOptions = array_merge($cargoOptions, $this->cargo($agent, $ship, $markets->all()));
+                $cargoOptions = array_merge($cargoOptions, $this->cargo($agent, $ship, $markets->all(), $listings));
                 foreach ($points->where('data.systemSymbol', $ship['nav']['systemSymbol']) as $point) {
                     if (in_array('UNCHARTED', array_column($point->data['traits'], 'symbol'), true)) {
                         $questions[] = ['ship' => $owned->symbol, 'destination' => $point->symbol, 'fact' => 'Hidden traits',
@@ -67,7 +69,7 @@ class OpportunityAssessor
                             'state' => 'unresolved', 'net_credits_per_hour' => null, 'conservative_net_per_hour' => null];
                         try {
                             $record['route'] = $this->mining->route($agent, $ship, $site->symbol, $market['symbol']);
-                            $record['continuation'] = $this->fuel->leg($agent, $ship, $site->symbol);
+                            $record['continuation'] = $this->fuel->leg($agent, $ship, $site->symbol, listings: $listings);
                             $samples = ObservationHistory::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'extraction')->where('symbol', $site->symbol)->get()
                                 ->filter(fn ($sample) => ($sample->data['configuration'] ?? null) === FuelPlanner::configuration($ship));
                             $record['samples'] = $samples->count();
@@ -87,7 +89,7 @@ class OpportunityAssessor
                             if (count($opportunities) >= config('gameplay.opportunity_limit')) {
                                 break 3;
                             }
-                            $opportunities[] = $this->trade($agent, $ship, $source, $buyer, $symbol);
+                            $opportunities[] = $this->trade($agent, $ship, $source, $buyer, $symbol, $listings);
                         }
                     }
                 }
@@ -96,7 +98,7 @@ class OpportunityAssessor
         usort($opportunities, fn ($a, $b) => [$a['strategy'], $a['ship'], $a['market']] <=> [$b['strategy'], $b['ship'], $b['market']]);
         $fleet = Ship::where('agent_id', $agent->id)->get()->keyBy('symbol');
         foreach ($questions as &$question) {
-            $question['route_options'] = $this->fuel->options($agent, $fleet[$question['ship']]->snapshot, $question['destination']);
+            $question['route_options'] = $this->fuel->options($agent, $fleet[$question['ship']]->snapshot, $question['destination'], listings: $listings);
             $question['ready_for_bounded_preview'] = $question['route_options'] !== [] && ! in_array($question['fact'], ['Hidden traits', 'Missing goods directory'], true);
             $question['api_estimate'] = 'One remote directory read before departure, a detailed read on arrival, and approximately 3-5 preflight reads per command. Shared throttling and actual waits still apply.';
         }
@@ -112,7 +114,7 @@ class OpportunityAssessor
             'fleet_gate' => 'Probes, surveys, hauling and refining require measured incremental benefit, loadouts and separate capital approval. Cargo refueling and other flight modes remain unvalidated.'];
     }
 
-    private function cargo(Agent $agent, array $ship, array $markets): array
+    private function cargo(Agent $agent, array $ship, array $markets, Collection $listings): array
     {
         $options = [];
         foreach (MiningPlanner::inventory($ship) as $symbol => $units) {
@@ -126,7 +128,7 @@ class OpportunityAssessor
                     continue;
                 }
                 try {
-                    $route = $this->fuel->leg($agent, $ship, $market['symbol']);
+                    $route = $this->fuel->leg($agent, $ship, $market['symbol'], listings: $listings);
                     $choices[] = ['action' => $ship['nav']['waypointSymbol'] === $market['symbol'] ? 'sell_locally' : 'travel_to_buyer', 'buyer' => $market['symbol'],
                         'batch_units' => min($units, $bid['tradeVolume']), 'estimated_proceeds' => $units * $bid['sellPrice'],
                         'remaining_fuel_ceiling' => $route['outbound_fuel'] > 0 ? $route['refuel_ceiling'] : 0, 'quote_at' => $market['price_at'],
@@ -140,7 +142,7 @@ class OpportunityAssessor
         return $options;
     }
 
-    private function trade(Agent $agent, array $ship, array $source, array $buyer, string $symbol): array
+    private function trade(Agent $agent, array $ship, array $source, array $buyer, string $symbol, Collection $listings): array
     {
         $record = ['strategy' => 'trade', 'ship' => $ship['symbol'], 'source' => $source['symbol'], 'market' => $buyer['symbol'], 'good' => $symbol,
             'source_at' => $source['price_at'], 'buyer_at' => $buyer['price_at'], 'state' => 'goods_match_only', 'net_credits_per_hour' => null, 'conservative_net_per_hour' => null];
@@ -153,15 +155,15 @@ class OpportunityAssessor
             return $record + ['reason' => 'Detailed price is missing.'];
         }
         try {
-            $positioning = $this->fuel->leg($agent, $ship, $source['symbol']);
+            $positioning = $this->fuel->leg($agent, $ship, $source['symbol'], listings: $listings);
             $atSource = $ship;
             $atSource['nav']['waypointSymbol'] = $source['symbol'];
             $atSource['fuel']['current'] -= $positioning['outbound_fuel'];
-            $outbound = $this->fuel->leg($agent, $atSource, $buyer['symbol']);
+            $outbound = $this->fuel->leg($agent, $atSource, $buyer['symbol'], listings: $listings);
             $atBuyer = $atSource;
             $atBuyer['nav']['waypointSymbol'] = $buyer['symbol'];
             $atBuyer['fuel']['current'] -= $outbound['outbound_fuel'];
-            $return = $this->fuel->leg($agent, $atBuyer, $source['symbol']);
+            $return = $this->fuel->leg($agent, $atBuyer, $source['symbol'], listings: $listings);
             $fuelCost = $positioning['refuel_ceiling'] + $outbound['refuel_ceiling'] + $return['refuel_ceiling'];
             $units = min($ship['cargo']['capacity'] - $ship['cargo']['units'], $ask['tradeVolume'], $bid['tradeVolume'], intdiv(max(0, $agent->credits - $fuelCost), $ask['purchasePrice']));
             $margin = $units * ($bid['sellPrice'] - $ask['purchasePrice']) - $fuelCost;

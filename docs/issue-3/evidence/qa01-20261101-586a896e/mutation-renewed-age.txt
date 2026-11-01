@@ -1,0 +1,38 @@
+Negative control: mutation-renewed-age
+Temporary mutation, restored after this run.
+
+diff --git a/app/Gameplay/AgentSynchronizer.php b/app/Gameplay/AgentSynchronizer.php
+index f46ea9e..0ebcd56 100644
+--- a/app/Gameplay/AgentSynchronizer.php
++++ b/app/Gameplay/AgentSynchronizer.php
+@@ -142,7 +142,7 @@ class AgentSynchronizer
+     {
+         $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $symbol)->first();
+         if ($quote) {
+-            $quote->update(['data' => array_merge($quote->data, ['invalidated_by_action' => $action])]);
++            $quote->update(['observed_at' => now(), 'data' => array_merge($quote->data, ['invalidated_by_action' => $action])]);
+         }
+     }
+
+
+$ php vendor/bin/phpunit --colors=never --filter test_local_mutation_invalidates_a_quote_without_renewing_its_age tests/Feature/OpportunityTest.php
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.4.27
+Configuration: <worktree>/phpunit.xml
+
+F                                                                   1 / 1 (100%)
+
+Time: 00:00.958, Memory: 65.00 MB
+
+There was 1 failure:
+
+1) Tests\Feature\OpportunityTest::test_local_mutation_invalidates_a_quote_without_renewing_its_age
+Failed asserting that false is true.
+
+<worktree>/tests/Feature/OpportunityTest.php:581
+
+FAILURES!
+Tests: 1, Assertions: 7, Failures: 1.
+
+Exit status: 1

@@ -17,11 +17,12 @@ class OperationPlanner
         if ($home === $destination) {
             throw new GameException('Choose a different same-system destination.');
         }
-        $outbound = $this->fuel->leg($agent, $ship, $destination, $limits['reserve']);
+        $listings = $this->fuel->listings($agent);
+        $outbound = $this->fuel->leg($agent, $ship, $destination, $limits['reserve'], listings: $listings);
         $returning = $ship;
         $returning['nav']['waypointSymbol'] = $destination;
         $returning['fuel']['current'] -= $outbound['outbound_fuel'];
-        $return = $this->fuel->leg($agent, $returning, $home, $limits['reserve']);
+        $return = $this->fuel->leg($agent, $returning, $home, $limits['reserve'], listings: $listings);
         $fuelUnits = $outbound['outbound_fuel'] + $return['outbound_fuel'];
         $fuelCeiling = $return['refuel_ceiling'];
         if ($return['continuation'] !== $home) {
@@ -36,7 +37,7 @@ class OperationPlanner
             if ($limits['max_loss'] < $fuelCeiling) {
                 throw new GameException('Observation trip refueling must fit the approved cash-loss bound.');
             }
-            $listing = $this->observation($agent, 'market_listing', $destination);
+            $listing = $listings->get($destination);
             if (! $listing) {
                 throw new GameException('Fetch the remote goods directory before approving a price-observation visit. Hidden traits require separately approved scanning/charting support.');
             }

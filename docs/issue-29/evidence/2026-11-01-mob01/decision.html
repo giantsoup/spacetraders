@@ -1,0 +1,303 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>First iPhone release decision</title><style>:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#070d17;color:#e8eef6;font:17px/1.6 -apple-system,BlinkMacSystemFont,Arial,sans-serif}main{max-width:1040px;margin:auto;padding:28px 36px}header{border-bottom:1px solid #34445b;padding-bottom:18px;margin-bottom:24px;color:#b1c0d3;font-size:14px}h1{font-size:30px;line-height:1.25}h2{font-size:24px;line-height:1.3;margin:28px 0 16px}h3{font-size:20px}a{color:#a6f3d0}code{font:14px/1.5 monospace;overflow-wrap:anywhere}pre{white-space:pre-wrap}table{border-collapse:collapse;width:100%;font-size:16px}th,td{padding:11px 14px;border:1px solid #34445b;text-align:left;vertical-align:top}th{background:#162337}li{margin:9px 0}#focus{padding:8px 20px 20px;background:#0d1524;border:1px solid #34445b;border-radius:12px}#focus h2{margin-top:16px}footer{color:#b1c0d3;font-size:14px;margin-top:24px}</style><main><header>MOB01 · AFTER · Rendered document evidence, not an iPhone app<br>docs/adr/0001-first-iphone-release.md · working document SHA-256 c0de84d3444d63e6</header><h1 id="first-iphone-release">First iPhone release</h1>
+<p>Date: November 1, 2026. Status: selected design, awaiting Taylor's review in <a href="https://github.com/giantsoup/spacetraders/pull/30">PR #30</a>. Scope: <a href="https://github.com/giantsoup/spacetraders/issues/29">MOB01 #29</a>, milestone M06. There are no hard prerequisites for this design issue.</p>
+<p>This record settles the choices left open by <a href="../../../ios-app-plan.md">the iPhone plan</a>. It specifies future work. No mobile API, Xcode project, deployment, Apple account, or TestFlight build is created by MOB01.</p>
+<h2 id="context-and-capability-review">Context and capability review</h2>
+<p>Inspected baseline <code>f58177bab2cba7d5af69c8443fb6c72f26caa2ae</code>, the designated PR head, against the issue's source references at <code>98b8792ffc0ce36a50ba5b9149b3049f5bd1e6fb</code>. Current source takes precedence over older implementation reports.</p>
+<table>
+<thead>
+<tr>
+<th>Existing capability</th>
+<th>Evidence at this baseline</th>
+<th>Consequence for release 1</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Laravel 13, Sanctum 4, Inertia 3, Vue 3, Pinia 4, Tailwind 4</td>
+<td><a href="../../../../composer.json">Composer</a>, <a href="../../../../package.json">frontend manifest</a>, <a href="../../../../app/Models/User.php">User</a></td>
+<td>Add a native presentation client. Keep the web runtime and gameplay services.</td>
+</tr>
+<tr>
+<td>Session-authenticated gameplay, one API user read</td>
+<td><a href="../../../../routes/web.php">Web routes</a>, <a href="../../../../routes/api.php">API routes</a>, <a href="../../../../app/Http/Requests/GameplayRequest.php">GameplayRequest</a></td>
+<td>Mobile endpoints and device access management are missing. Do not call web routes as a bearer-token shortcut.</td>
+</tr>
+<tr>
+<td>Owner-scoped, encrypted agent credential and reset archive</td>
+<td><a href="../../../../app/Models/Agent.php">Agent</a>, <a href="../../../../app/Gameplay/AgentSynchronizer.php">AgentSynchronizer</a></td>
+<td>Select existing owned agents. Never export agent or account tokens to the phone.</td>
+</tr>
+<tr>
+<td>Preview, durable intent, approval, execution, reconciliation</td>
+<td><a href="../../../../app/Gameplay/ShipCommandExecutor.php">ShipCommandExecutor</a>, <a href="../../../../app/Gameplay/CommandRules.php">CommandRules</a></td>
+<td>Every mobile mutation uses this executor and its agent lock.</td>
+</tr>
+<tr>
+<td>Investigate, classify, stage, versioned preview, bounded mining</td>
+<td><a href="../../../../app/Http/Controllers/LocalAutomationController.php">LocalAutomationController</a>, <a href="../../../../app/Gameplay/AutomationStaging.php">AutomationStaging</a>, <a href="../../../../app/Gameplay/AutomationRunner.php">AutomationRunner</a></td>
+<td>Use staged plan version 2 for Mining, not the historical direct mining shortcut.</td>
+</tr>
+<tr>
+<td>Local engine gate, session invalidation, heartbeat and process checks</td>
+<td><a href="../../../../app/Gameplay/EngineGate.php">EngineGate</a>, <a href="../../../../app/Gameplay/LocalEngineManager.php">LocalEngineManager</a></td>
+<td>Current control requires macOS, local mode, operator identity, and loopback. It is not a deployable Linode control API.</td>
+</tr>
+<tr>
+<td>Saved dashboard state, recent actions, runs, observations, runtime health</td>
+<td><a href="../../../../app/Http/Controllers/AgentDashboardController.php">AgentDashboardController</a></td>
+<td>Extract explicit mobile response fields. Add direct status lookup and pagination so old unresolved work never disappears behind the 40-action or 10-run windows.</td>
+</tr>
+</tbody>
+</table>
+<p>The source supports more commands than release 1 needs. It does not contain a mobile project. Existing regression targets include <a href="../../../../tests/Feature/GameplayTest.php">GameplayTest</a>, <a href="../../../../tests/Feature/LocalAutomationTest.php">LocalAutomationTest</a>, <a href="../../../../tests/Feature/AgentArchiveTest.php">AgentArchiveTest</a>, and <a href="../../../../tests/Feature/UpgradeCompatibilityTest.php">UpgradeCompatibilityTest</a>. Test presence establishes coverage intent, not a new passing run.</p>
+<h2 id="the-smallest-complete-workflow">The smallest complete workflow</h2>
+<p>Release 1 uses one already imported or registered agent and an existing, capable CRUISE miner. The web interface retains registration, credential repair, equipment/setup purchases, Contracts, and the broader command set. A missing prerequisite is a valid visible outcome, never permission to buy a ship or invent prices.</p>
+<ol>
+<li>Sign in to the approved personal engine and select an owned current agent, then a ship. Archived agents show history and a reset notice with gameplay disabled.</li>
+<li>Inspect credits, fuel, cargo, nav, cooldown, recent activity, observation age, and engine health. Synchronize explicitly before preparing gameplay.</li>
+<li>Complete manual preparation using separate previews and approvals for <code>orbit</code>, <code>dock</code>, <code>navigate</code>, <code>refuel</code>, <code>mine</code>, and <code>sell</code>. Navigation stays same-system CRUISE. Extraction is unsurveyed. Each sale names the commodity, units, minimum total, and reserve. Each refuel names units, maximum total, and reserve. Review queued, sending, and confirmed outcomes before the next action.</li>
+<li>Open Mining. Investigate one owned observed system, advance bounded reads, and choose a <code>ready</code> candidate with a capable miner, observed buyer and prices, and a fuel-safe route. Partial, stale, or blocked investigations show their reasons. They cannot be staged.</li>
+<li>Stage limits, then preview the exact draft revision as plan version 2. Show ordered actions, evidence age, expiry, reserve, spending ceiling, cash-loss ceiling, minutes, trips, extraction count, and the quote warning. Default to one trip and one extraction. Require Taylor's explicit numeric bounds. Do not prefill invented credit budgets.</li>
+<li>Approve that preview once. Laravel checks current state, draft revision, fingerprint, reset, engine session, and ownership. Inspect progress through travel, extraction, fresh-quote sale batches, and bounded refuel. Completion requires server outcomes. Show retained cargo and observed cash contribution separately from profit estimates.</li>
+<li>Record Stop at any time while connected. Show <code>stopping</code> until reserved work settles and Laravel reports <code>stopped</code>. Reopen after disconnection to recover the same run, intent, Stop, and blocker records. The phone performs no background gameplay.</li>
+</ol>
+<p>Manual preparation and the automated trip are one complete workflow. The six manual commands are the exact first release command set. Ship and cargo purchases, survey commands, transfers, Contracts, automated scouting/trading, push notifications, widgets, and overnight runs are deferred. Existing data remains visible even when the first mobile release cannot initiate its operation.</p>
+<h3 id="bounds-remain-in-laravel">Bounds remain in Laravel</h3>
+<p><a href="../../../../app/Http/Requests/GameplayRequest.php">GameplayRequest</a>, <a href="../../../../app/Http/Requests/LocalAutomationRequest.php">LocalAutomationRequest</a>, and <a href="../../../../config/gameplay.php">gameplay configuration</a> remain authoritative. Current previews expire after 120 seconds. Evidence freshness is 180 seconds where the services require it. Requests allow 1–60 minutes, 1–10 trips, and 1–10 extractions per load, with explicit headroom and site time for longer loads. Site time is at most 900 seconds. Preserve these ceilings even if release 1 offers fewer choices.</p>
+<p>The staged request also carries <code>delivery_limit</code> and <code>purchase_limit</code>; use the existing server schema even though release 1 selects Mining. Do not turn those fields into purchase or Contracts UI. Preserve integer amounts, server-enforced reserve, remaining spend and loss checks, attributable cargo, zero-yield blocking, and the stop after nonpositive observed cycle contribution. An unknown buyer retains cargo and blocks work.</p>
+<p>SpaceTraders has no guaranteed execution-price ceiling in this command path. Show the server's warning in approvals. A confirmed transaction outside its local quote bound stays confirmed with a review flag and blocks further work. Never claim a hard purchase guarantee or projected mining profit.</p>
+<h3 id="recovery-and-blocked-work">Recovery and blocked work</h3>
+<table>
+<thead>
+<tr>
+<th>Server or connection state</th>
+<th>Mobile behavior</th>
+<th>Next permitted step</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>preview</code>, before <code>expires_at</code></td>
+<td>Show the exact limits and server deadline.</td>
+<td>Explicit approval after server validation.</td>
+</tr>
+<tr>
+<td>Expired manual preview</td>
+<td>Show Expired even if the stored enum remains <code>preview</code>; this is a display condition.</td>
+<td>Request a fresh preview and approve separately. Never extend the old deadline.</td>
+</tr>
+<tr>
+<td>Expired or invalidated run preview</td>
+<td>Show the server reason. A rejected start can leave a stopped run record.</td>
+<td>Investigate again if evidence is stale, stage current limits, and preview again.</td>
+</tr>
+<tr>
+<td><code>pending</code> or <code>sending</code> action</td>
+<td>Show Queued or Sending, distinct from Confirmed.</td>
+<td>Read that action's status. Do not create a replacement action.</td>
+</tr>
+<tr>
+<td>Lost mobile response</td>
+<td>Retain the request identity as Submission outcome unknown.</td>
+<td>Resolve through the server request record before permitting another gameplay write.</td>
+</tr>
+<tr>
+<td><code>uncertain</code> action or <code>review_required</code></td>
+<td>Keep the warning on Home, Activity, and Mining. Block new gameplay writes; keep Stop and reconciliation available.</td>
+<td>Reconcile fresh evidence. If still unresolved, use explicit operator review in web. Never replay the intent.</td>
+</tr>
+<tr>
+<td><code>acknowledged</code> unresolved outcome</td>
+<td>Show Unresolved adjustment acknowledged. Do not label it confirmed.</td>
+<td>A new preview only after Laravel clears the ownership and review guards.</td>
+</tr>
+<tr>
+<td><code>waiting</code> run</td>
+<td>Show <code>next_action_at</code> and the server's reason.</td>
+<td>Read state. An elapsed phone countdown authorizes nothing.</td>
+</tr>
+<tr>
+<td><code>blocked</code> run</td>
+<td>Show <code>blocked_reason</code>, retained cargo, current limits, and Stop.</td>
+<td>Stop and settle, resolve prerequisites or review in web, then create a new preview. No automatic resume.</td>
+</tr>
+<tr>
+<td><code>stopping</code> run</td>
+<td>Show Stop requested; reserved upstream work may still complete.</td>
+<td>Keep reading until stopped or review is required. Stop cannot cancel a sending request.</td>
+</tr>
+<tr>
+<td>Run duration reached</td>
+<td>Show server <code>stopped</code> and duration reason when observed.</td>
+<td>New explicitly approved preview. No extension, rollover, or automatic repeat.</td>
+</tr>
+<tr>
+<td><code>completed</code>, <code>failed</code>, or <code>rejected</code></td>
+<td>Keep the actual state, outcome, and reason visible.</td>
+<td>Inspect and create a new preview only if the server permits it.</td>
+</tr>
+<tr>
+<td>Engine unhealthy, restarted, or gate closed</td>
+<td>Disable new approvals and show health as unknown or unhealthy.</td>
+<td>Restore operation through approved operator tooling; engine-session change requires new previews. Keep uncertain actions intact.</td>
+</tr>
+<tr>
+<td>Reset or archived agent</td>
+<td>Discard active selection and old previews for gameplay; retain history.</td>
+<td>Register/import current credentials through web, sync, and start with new previews. Never auto-register.</td>
+</tr>
+<tr>
+<td>Offline or access expired/revoked</td>
+<td>Show the last in-memory state and its timestamp as stale. Disable all server actions, including Stop.</td>
+<td>Reconnect or sign in, resolve requests, and reload current state. Explain that offline Stop has not reached Laravel.</td>
+</tr>
+</tbody>
+</table>
+<p>An online Stop persists even if workers are offline. Losing phone access does not revoke existing run approval. Revocation and Stop are separate actions. An unresolved operation can prevent takeover after Stop; preserve that warning rather than promising immediate manual control.</p>
+<h2 id="client-framework-and-navigation">Client framework and navigation</h2>
+<p>Choose native SwiftUI, Swift 6 language mode, Foundation <code>URLSession</code>, <code>Codable</code>, and Observation. Set the deployment target to iOS 17.0, iPhone only for release 1. Apple documents SwiftUI Observation from iOS 17 in <a href="https://developer.apple.com/documentation/swiftui/managing-model-data-in-your-app">Managing model data</a>. iPad-specific layouts, Android, Catalyst, and third-party mobile frameworks are outside scope.</p>
+<p>SwiftUI avoids another JavaScript bridge, native dependency manager, or web-session wrapper for a small personal iPhone client. Reusing Vue through a wrapper would reduce view rewriting, but would add cookie/bridge handling while still needing release signing and native lifecycle recovery. The web interface remains useful independently. The cost of this choice is a second presentation layer and Swift DTOs; it does not justify moving any gameplay planning to Swift.</p>
+<p>Use the approved <a href="../../../design-brief.md">Horizon design and interaction rules</a>. A <code>NavigationStack</code> starts on the selected ship Home. The identity control opens agent/ship selection. Ship art, Report, Fuel, and Cargo open one report sheet at the relevant section. Actions opens a pushed command list, then a parameter form and approval screen. Mining opens investigation, candidate, limits, preview, and active-run pages. Activity opens history and action details, including Reconcile. Keep Stop reachable from Home and the active run, and review warnings visible across those destinations.</p>
+<p>The secondary menu holds connection, device access, agent choice, web operator recovery, and sign out. Back returns to the previous step without submitting. Cancel dismisses a preview without approval. Do not put credentials or mutation arguments in web links. No bottom tab bar until separate useful destinations justify it.</p>
+<p>Force the product's dark theme. Support Dynamic Type, VoiceOver, reduced motion, safe areas, and 44-point touch targets. Ship artwork and animation are decorative. At arrival or cooldown zero, show Checking until Laravel confirms readiness. Keep UTC instants in DTOs and request tracking; format them in the phone's detected timezone and display its name.</p>
+<h2 id="authentication-and-device-access">Authentication and device access</h2>
+<p>Choose the existing Sanctum package's per-device personal access tokens, not OAuth infrastructure or copied browser cookies. Laravel's <a href="https://laravel.com/docs/13.x/sanctum#mobile-application-authentication">mobile authentication</a>, <a href="https://laravel.com/docs/13.x/sanctum#token-expiration">expiry</a>, and <a href="https://laravel.com/docs/13.x/sanctum#revoking-tokens">revocation</a> support this approach. The following policies are project decisions, not Sanctum defaults.</p>
+<ul>
+<li>Enter the existing Laravel account identity, password, and a recognizable device name at sign-in. Use a throttled HTTPS token endpoint with generic authentication errors. Keep the password transient and redact request logs. No sign-up, SpaceTraders token input, or credential replacement in mobile release 1.</li>
+<li>Issue a device token with <code>gameplay:read</code> and <code>gameplay:write</code> abilities and explicit 30-day expiry. Return its expiry and token identifier. Enforce abilities and owner scoping independently. New token issuance never renews old gameplay approvals.</li>
+<li>Store only the application token in Keychain using <code>kSecAttrAccessibleWhenUnlockedThisDeviceOnly</code>, with no synchronization. Apple's <a href="https://developer.apple.com/documentation/security/ksecattraccessiblewhenunlockedthisdeviceonly">Keychain accessibility documentation</a> describes unlock-only access and device-local migration behavior. Never store the password, agent token, or account token there.</li>
+<li>Use <code>Authorization: Bearer</code> for the mobile API. Require an actual personal access token on mobile routes; do not accept cookie-session fallback. Existing browser routes retain session auth, CSRF, and password confirmation. Token abilities never replace per-agent and per-child ownership checks.</li>
+<li>Provide online sign out that revokes the current token. Provide a CSRF-protected, password-confirmed device list/revoke screen in web for a lost phone, plus revoke-all on account deletion or password change. These controls are new MOB02 work. Do not expose another owner's token metadata.</li>
+<li>On offline sign out, remove local access and warn that server revocation is pending operator action through web. Do not claim revocation succeeded. On 401, purge the token and cached game state, sign in again, and resolve pending request identities before enabling actions. There is no refresh token or silent token renewal in release 1.</li>
+<li>Revoking device access prevents new requests. It does not undo an approved run or an in-flight upstream action. Offer web Stop independently and explain the distinction before revocation.</li>
+</ul>
+<p>Use one Taylor-approved HTTPS origin, system certificate validation, and ordinary application authentication. Do not provision a VPN, gateway account, or new service for this design. Pin the allowed origin in release configuration, and never forward credentials across a cross-origin redirect. Do not add production ATS exceptions or certificate pinning that blocks routine certificate rotation. Fixture HTTP exceptions, if needed, belong only in test builds. The final DNS name, private-access hardening, and controlled Mac-to-Linode authority handover require operations approval.</p>
+<h2 id="proposed-versioned-api">Proposed versioned API</h2>
+<p>All paths below are future <code>/api/mobile/v1</code> JSON endpoints. They are selected responsibilities for MOB02, not callable interfaces on this baseline. MOB02 must verify its own hard prerequisites and publish tested schemas before MOB03 uses them.</p>
+<table>
+<thead>
+<tr>
+<th>Method and path below the prefix</th>
+<th>Responsibility and existing service</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /auth/token</code></td>
+<td>Authenticate existing Laravel account and issue one device token. Only unauthenticated endpoint.</td>
+</tr>
+<tr>
+<td><code>DELETE /auth/token</code></td>
+<td>Revoke the token authenticating this request.</td>
+</tr>
+<tr>
+<td><code>GET /bootstrap</code></td>
+<td>Supported API/client versions, permitted commands/strategies, plan versions, feature flags, UTC server time, token expiry, engine health and its observation time. No process controls or private configuration.</td>
+</tr>
+<tr>
+<td><code>GET /agents</code></td>
+<td>Owned current and archived summaries, explicit reset identity. No credentials.</td>
+</tr>
+<tr>
+<td><code>GET /agents/{agent}/state</code></td>
+<td>Saved fleet, observations and freshness, credits, bounded recent activity, runs, review flags, and engine health. No upstream synchronization.</td>
+</tr>
+<tr>
+<td><code>POST /agents/{agent}/sync</code></td>
+<td>Explicit bounded <code>AgentSynchronizer</code> refresh through the executor lock.</td>
+</tr>
+<tr>
+<td><code>GET /agents/{agent}/actions</code> and <code>GET /agents/{agent}/runs</code></td>
+<td>Cursor-paginated saved history.</td>
+</tr>
+<tr>
+<td><code>GET /agents/{agent}/actions/{action}</code> and <code>GET /agents/{agent}/runs/{run}</code></td>
+<td>Exact persisted status, limits, deadlines, Stop, outcome, review and blocker details.</td>
+</tr>
+<tr>
+<td><code>GET /agents/{agent}/requests/{request_id}</code></td>
+<td>Resolve a mobile submission to its action, run, investigation or draft, or to its durable rejection.</td>
+</tr>
+<tr>
+<td><code>POST /agents/{agent}/commands/preview</code></td>
+<td>Allow the six selected manual commands only. Map <code>request_id</code> to the existing preview <code>key</code>; use <code>ShipCommandExecutor::preview</code>.</td>
+</tr>
+<tr>
+<td><code>POST /agents/{agent}/commands/{action}/approve</code> and <code>POST /agents/{agent}/commands/{action}/reconcile</code></td>
+<td>Approve or inspect the exact owned intent through <code>ShipCommandExecutor</code>. No arbitrary forwarder.</td>
+</tr>
+<tr>
+<td><code>POST /agents/{agent}/investigations</code></td>
+<td>Create a Mining-only investigation in one owned observed system through <code>OpportunityInvestigator</code>.</td>
+</tr>
+<tr>
+<td><code>GET /agents/{agent}/investigations/{investigation}</code></td>
+<td>Read progress, evidence age, candidates, prerequisites, and classification.</td>
+</tr>
+<tr>
+<td><code>POST /agents/{agent}/investigations/{investigation}/advance</code> and <code>POST /agents/{agent}/investigations/{investigation}/cancel</code></td>
+<td>Bounded observation progress or cancellation; no travel approval.</td>
+</tr>
+<tr>
+<td><code>POST /agents/{agent}/drafts</code>, <code>POST /agents/{agent}/drafts/{draft}/update</code>, and <code>GET /agents/{agent}/drafts/{draft}</code></td>
+<td>Stage a ready candidate, update integer limits at an exact revision, and retrieve it through <code>AutomationStaging</code>.</td>
+</tr>
+<tr>
+<td><code>POST /agents/{agent}/drafts/{draft}/preview</code></td>
+<td><code>AutomationRunner::previewDraft</code> at the exact draft revision, retaining plan version 2, fingerprint, reset, and engine session.</td>
+</tr>
+<tr>
+<td><code>POST /agents/{agent}/runs/{run}/start</code> and <code>POST /agents/{agent}/runs/{run}/stop</code></td>
+<td>Start that preview once or persist Stop through <code>AutomationRunner</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>No direct <code>/runs/preview</code> mining endpoint is included. No mobile process start, shutdown, force-stop, arbitrary upstream forwarding, review acknowledgement, or balance-adjustment endpoint is included. Web remains the operator recovery path, including the separate acknowledged unresolved adjustment.</p>
+<p>Use explicit allowlisted DTOs, never raw model dumps. Return <code>data</code> and <code>meta</code> with UTC <code>server_time</code>, reset identity, and observation timestamps where relevant. Credits, prices, units, and limits are integers. Missing observations remain null or Unknown. Do not include tokens, email, raw upstream request headers, private paths, PIDs, or exception traces in gameplay responses.</p>
+<p>Mutation responses return request identity, resource type/ID, current state, and relevant deadline. HTTP 202 means Laravel accepted or returned the local record; only a <code>confirmed</code> action establishes an upstream-confirmed outcome. A run's <code>completed</code> state describes its server-verified plan result. Reads return 200. Use 401 for expired/revoked access, 403 for denied ability, 404 for foreign or absent resources, 409 for request-identity or revision conflicts, 422 for validation/prerequisite/expiry rejection, 429 with retry guidance for throttling, and 503 for unavailable service. Include a stable error code and safe message. An upstream uncertainty is persisted and read as <code>uncertain</code>, never flattened into a generic retryable HTTP error.</p>
+<h3 id="request-identity-and-duplicate-safety">Request identity and duplicate safety</h3>
+<p>Before any authenticated mobile POST, persist a UUID plus origin, owner, agent, reset, operation, target resource, and eventual server ID. Persist no password, token, command arguments, cached approval, or unsent action. This is an outcome tracker, not an offline queue. Require one <code>request_id</code> per logical submission. Disable transport-level automatic write retries.</p>
+<p>MOB02 must reserve request identity durably before dispatch and map it atomically to the existing intent or operation result. Scope uniqueness to owner, agent, reset, and UUID across devices. Check operation and normalized payload hashes. Duplicate matching identity returns the same result without repeating work; conflicting payload returns 409. For manual preview, preserve the executor's existing key and comparison rules. Approval and start additionally target the same stored action/run, whose existing guards remain authoritative. Do not add a second gameplay executor.</p>
+<p>A response lost after Laravel accepted approval is different from an uncertain SpaceTraders write. Resolve the former through <code>/requests/{request_id}</code> and direct status reads. Reconcile the latter through the existing evidence path. If request lookup is unavailable or absent, keep Submission outcome unknown and disable new gameplay writes until the server can establish that no dispatch happened or an operator resolves it. Never create a new UUID to bypass an unknown result. A new sign-in or device token must still be able to resolve the same owner's retained identities.</p>
+<p>Stop is idempotent for the same run and stays available as a safety control even while another submission is unknown, provided the phone is online and authenticated. Retain its request identity too. Repeated Stop cannot start or replay work. Reads and explicit reconciliation remain available while ordinary gameplay approvals are blocked.</p>
+<h2 id="refresh-compatibility-and-cached-state">Refresh, compatibility, and cached state</h2>
+<p>Choose foreground polling rather than push or a socket service. Read saved Laravel state every five seconds while the relevant screen is visible. Use one in-flight poll, stop on suspension, and back off on failure up to 60 seconds, honoring longer <code>Retry-After</code> values. Pull to refresh explicitly synchronizes upstream; ordinary state reads never fan out to SpaceTraders. Do not infer upstream observation freshness from HTTP success.</p>
+<p>On foreground/resume or reconnect, read bootstrap and current state, resolve retained requests, and reload exact active action/run details before enabling approvals. Require server validation for every preview/approval regardless of local age. Show observation time separately from state-read time, health-heartbeat age, and phone connectivity. Stale worker/scheduler health disables new approval but leaves authenticated Stop available. Do not make health look healthy merely because Laravel answers HTTP.</p>
+<p>Keep game snapshots only in memory in release 1. When connectivity drops, the current process can show that snapshot with an Offline label and its actual observation time. After process termination, show an explicit no-cached-state view until connected. Persist only approved engine identity, selection scoped to owner/agent/reset, and unresolved request identifiers in protected local storage. Exclude that metadata from backup. Clear game state on sign out, owner/origin changes, revocation, or reset. Never put authenticated responses in URL caches or a disk-backed offline store; use an ephemeral network session and server <code>Cache-Control: no-store</code>.</p>
+<p>Keep <code>/v1</code> additive for installed clients. Ignore new optional fields. Preserve existing fields, meanings, and state strings. Bootstrap advertises the exact supported plan versions and mobile operations. Unknown states or plan versions display a safe unsupported state and disable new gameplay approval; preserve safe reads and Stop if bootstrap still advertises them. A breaking change requires <code>/v2</code> and a migration decision before <code>/v1</code> retirement, rather than silently reinterpreting approvals. Maintain <code>/v1</code> through the active TestFlight build lifetime and replacement window. A safety-critical minimum-client requirement can block gameplay, with an explicit update message and reachable web Stop/recovery. It must not silently replay or discard existing work.</p>
+<h2 id="repository-signing-and-replacement-builds">Repository, signing, and replacement builds</h2>
+<p>Choose one future <code>mobile/ios/SpaceTraders.xcodeproj</code> in this repository with a shared <code>SpaceTraders</code> scheme. Keep app sources, native unit/UI tests, fixture response samples, and an unsigned release configuration template there. Do not create the project in MOB01. Laravel routes, services, and tests stay in their current locations. <code>docs/adr/</code> holds this decision and <code>docs/issue-29/</code> holds its evidence. No new runtime dependencies are needed for the design.</p>
+<p>Use Xcode and <code>xcodebuild</code> directly, without Fastlane or paid build services for release 1. Pin the exact stable Xcode/Swift/SDK versions and simulator runtime in the eventual build record. Run native tests on iOS 17 and the current supported iOS runtime, plus a physical iPhone fixture journey. Apple's <a href="https://developer.apple.com/support/xcode/">Xcode compatibility matrix</a> and <a href="https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds">upload requirements</a> change independently of the deployment target. Recheck them at signing time. iOS 17 is a product minimum, not a claim that an old SDK remains uploadable.</p>
+<p>After separate authorization, use Taylor's approved Developer Program team and bundle ID, Xcode automatic signing, a local Release archive, and Xcode Organizer upload to App Store Connect. Membership enables TestFlight distribution according to <a href="https://developer.apple.com/programs/">Apple's program description</a>. Do not enroll, buy membership, create signing identities, or upload from this issue. Keep signing keys, profiles, account credentials, and any future App Store Connect API key out of Git. Start with Taylor as an internal tester if that role is available. External testing adds Apple's review requirements.</p>
+<p>Record source SHA, marketing version, monotonically increasing build number, Xcode/SDK versions, archive checksum, environment, test evidence, compatibility versions, and TestFlight expiry for every release. Reproducible here means repeatable inputs, commands, and attributable output, not byte-identical signed archives. Plan a monthly replacement build with an explicit reminder 30 days before expiry; this is a cadence decision, not a scheduled job created here. Apple limits beta availability to 90 days in its <a href="https://developer.apple.com/help/app-store-connect/test-a-beta-version/testflight-overview/">TestFlight overview</a>. No remote code updates or background client execution are needed. If a build expires, web remains the Stop and recovery interface.</p>
+<h2 id="acceptance-and-execution-gates">Acceptance and execution gates</h2>
+<p>MOB01's design acceptance is covered by the capability table, complete workflow/recovery matrix, technical choices, and unchanged gameplay constraints above. Taylor's acceptance of these decisions remains pending review. The following are future release gates, not reasons to claim the design implemented their dependencies.</p>
+<table>
+<thead>
+<tr>
+<th>Owner</th>
+<th>Required evidence before advancing</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Operations and <a href="https://github.com/giantsoup/spacetraders/issues/31">MOB02 #31</a> prerequisites</td>
+<td>Accept the issue's declared prerequisites before implementation. Prove HTTPS/private access, one engine authority, durable storage/backup restore, healthy supervised worker/scheduler, and engine-session invalidation on the target platform. Replace macOS-only control safely without disabling the gate.</td>
+</tr>
+<tr>
+<td>MOB02</td>
+<td>Test actual bearer tokens, abilities, expiry, single/all-device revocation, CSRF on web, foreign owner/child IDs, credential omission, duplicate identities and conflicting payloads, lost approval/start responses, stopped/expired drafts, reset, uncertain writes, and concurrent web/mobile locking. Publish fixtures and JSON schemas after tests pass.</td>
+</tr>
+<tr>
+<td><a href="https://github.com/giantsoup/spacetraders/issues/33">MOB03 #33</a></td>
+<td>Use accepted MOB02 schemas. Verify Home/report/actions/mining/activity, dark mode under light OS, enlarged text, VoiceOver, local time, in-memory stale state, no-cache restart, offline Stop wording, access expiry, and retained request recovery on a physical iPhone against owned fixtures.</td>
+</tr>
+<tr>
+<td><a href="https://github.com/giantsoup/spacetraders/issues/35">MOB04 #35</a></td>
+<td>Prove a full manual action and versioned mining trip, expiry/blocker/uncertainty recovery, concurrent web/mobile controls, engine restart, offline-worker Stop, and continued bounded execution while the phone locks/disconnects. Use owned deterministic fixtures first. Publish actual build and physical-device evidence after authorized TestFlight distribution.</td>
+</tr>
+</tbody>
+</table>
+<p>Only these inputs require Taylor before external execution: the production origin/host access and authority handover, approval of any hosting expense, Apple team/bundle identity and signing access, distribution authorization, a compatible physical iPhone, and separate live gameplay environment and numeric budget approvals. iOS 17 compatibility must be checked against the intended device before mobile acceptance; the device was not inspected here. This design authorizes none of those operations.</p>
+<p>Roll back the design by reverting its documentation commit before implementation. Later framework or authentication changes need a superseding decision and compatibility review once clients or tokens exist. The highest remaining risks are hosted engine lifecycle parity, uncertain-response recovery across devices, and keeping older TestFlight clients compatible. No dependency upgrade, gameplay limit change, live migration, purchase, or deployment is included.</p>
+<footer>Offline document rendering. No mobile client, engine deployment, or gameplay is represented.</footer></main></html>
