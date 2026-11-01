@@ -1,6 +1,6 @@
 # Make market quote invalidation acceptance deterministic
 
-Plan audit task **QA01**. Status: confirmed test failure. Audited local source `221fbae7a1ecbdf5159211316039f016355c900e` and remote base `98b8792ffc0ce36a50ba5b9149b3049f5bd1e6fb` on 2026-11-01.
+Plan audit task **QA01**. Status: offline acceptance verified. Audited local source `221fbae7a1ecbdf5159211316039f016355c900e` and remote base `98b8792ffc0ce36a50ba5b9149b3049f5bd1e6fb` on 2026-11-01.
 
 ## Source requirements
 
@@ -15,10 +15,10 @@ Plan audit task **QA01**. Status: confirmed test failure. Audited local source `
 
 ## Acceptance
 
-- [ ] Separate a legitimate fresh price observation from mutation invalidation using a controlled clock.
-- [ ] Assert invalidation preserves the most recent actual price-observation timestamp across a deliberately crossed second boundary.
-- [ ] Cover the complete command path and the invalidation boundary without weakening price freshness or adding sleeps.
-- [ ] Pass repeated isolated checks and scripts/verify.sh.
+- [x] Separate a legitimate fresh price observation from mutation invalidation using a controlled clock.
+- [x] Assert invalidation preserves the most recent actual price-observation timestamp across a deliberately crossed second boundary.
+- [x] Cover the complete command path and the invalidation boundary without weakening price freshness or adding sleeps.
+- [x] Pass repeated isolated checks and scripts/verify.sh.
 
 ## Dependencies
 
@@ -30,6 +30,10 @@ Offline implementation and owned fixtures only. Live gameplay, paid calls, exter
 
 Keep Laravel gameplay rules, owner scoping, CSRF or the agreed mobile authentication boundary, durable intent/reconciliation, integer amounts and UTC deadlines. Use the locked stack and focused regression checks. Saved reports and UI remain dark.
 
-## Draft handoff
+## Implementation handoff
 
-This branch starts with an implementation brief. The planned feature or acceptance work remains open until the requirements above are implemented and verified. This document is not evidence of deployment, live gameplay, paid API access or external delivery.
+The regression now freezes UTC time for the initial sync, advances one second for the full preview/approval/execution path, captures the final price observation immediately before the fake purchase request, and advances another second before invalidation. It asserts that the latest real price observation is newer than the initial sync and that invalidation preserves that timestamp and the price-history count. The confirmed purchase, stale market classification, and existing travel assertions remain covered. Production freshness rules are unchanged.
+
+[Verification and before/after evidence](../issue-3/evidence/qa01-20261101-586a896e/README.md) records the reproduced baseline failure, 25 passing isolated repetitions, 293 passing backend tests through `scripts/verify.sh`, the offline browser journey, finite worker checks, and two deliberately failing negative controls.
+
+PR #4 remains draft for Taylor's review. There is no unresolved offline acceptance gate. No live gameplay, deployment, primary environment migration, or paid API access was performed. Revert the implementation commit to restore the previous test; no data migration is needed.
