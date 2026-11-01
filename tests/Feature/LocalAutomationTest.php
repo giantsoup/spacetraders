@@ -26,6 +26,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use Inertia\ResponseFactory;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\FakeSpaceTraders;
 use Tests\TestCase;
@@ -61,7 +62,7 @@ class LocalAutomationTest extends TestCase
 
     private function engine(): void
     {
-        LocalEngine::updateOrCreate(['id' => 1], ['state' => 'running', 'session_id' => (string) Str::uuid(), 'gate_open' => true, 'heartbeat_at' => now(), 'processes' => ['supervisor' => getmypid()]]);
+        LocalEngine::updateOrCreate(['id' => 1], ['state' => 'running', 'session_id' => (string) Str::uuid(), 'gate_open' => true, 'heartbeat_at' => now(), 'processes' => ['supervisor' => getmypid(), 'worker' => getmypid(), 'scheduler' => getmypid()]]);
     }
 
     private function world(?callable $edit = null): array
@@ -335,6 +336,9 @@ class LocalAutomationTest extends TestCase
         $this->assertSame([], $this->world()['writes']);
         app(AutomationRunner::class)->advance($run->id);
         $this->assertNull($run->fresh()->active_agent_id);
+        $this->assertSame(0, $run->fresh()->totals['cash_contribution']);
+        $this->assertIsInt($run->fresh()->totals['elapsed_seconds']);
+        $this->assertSame(100, $run->fresh()->totals['ending_fuel']);
         $manual = app(ShipCommandExecutor::class)->preview($this->agent, 'LOCAL-1', 'orbit', [], (string) Str::uuid());
         app(ShipCommandExecutor::class)->approve($this->agent, $manual);
         app(EngineGate::class)->begin();
@@ -456,5 +460,126 @@ class LocalAutomationTest extends TestCase
         } finally {
             $this->assertSame([], $this->world()['writes']);
         }
+    }
+
+    public function test_dead_processes_close_permission_even_with_a_fresh_heartbeat(): void
+    {
+        $run = $this->preview();
+        app(AutomationRunner::class)->start($this->agent, $run, true);
+        app(AutomationRunner::class)->advance($run->id);
+        $action = ShipAction::where('state', 'pending')->firstOrFail();
+        LocalEngine::whereKey(1)->update(['processes' => json_encode(['supervisor' => 2147483647, 'worker' => getmypid(), 'scheduler' => getmypid()])]);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertSame('rejected', $action->fresh()->state->value);
+        $this->assertFalse(LocalEngine::find(1)->gate_open);
+        $this->assertSame([], $this->world()['writes']);
+    }
+
+    public function test_elapsed_bounds_and_stale_observations_never_produce_a_ready_recommendation(): void
+    {
+        $investigator = app(OpportunityInvestigator::class);
+        $record = $investigator->create($this->agent, 'contracts', 'X1-TEST');
+        $record->update(['created_at' => now()->subSeconds(46)]);
+        $before = count($this->world()['calls']);
+        $investigator->advance($this->agent, $record);
+        $this->assertSame('partial', $record->fresh()->status);
+        $this->assertSame($before, count($this->world()['calls']));
+        $complete = $this->investigation();
+        $observations = $complete->observations;
+        $observations['observed_at'] = now()->subMinutes(4)->toIso8601String();
+        $candidates = app(OpportunityEvaluator::class)->evaluate($observations, 'contracts', CarbonImmutable::now(), true);
+        $this->assertFalse(collect($candidates)->contains('classification', 'ready'));
+        $this->assertFalse(collect($candidates)->contains('recommended', true));
+    }
+
+    public function test_ranking_uses_unpaid_receipts_and_known_inputs_and_keeps_blocked_candidates(): void
+    {
+        $this->world(function (&$w) {
+            $better = FakeSpaceTraders::contract('better-contract');
+            $better['accepted'] = true;
+            $better['terms']['payment']['onAccepted'] = 999999;
+            $better['terms']['payment']['onFulfilled'] = 2000;
+            $w['contracts'][] = $better;
+        });
+        $record = $this->investigation();
+        $ranked = $record->candidates;
+        $this->assertSame('better-contract', $ranked[0]['contract_id']);
+        $this->assertSame(2000, $ranked[0]['contract_plan']['future_receipts']);
+        $this->assertTrue($ranked[0]['recommended']);
+        $this->assertTrue(collect($ranked)->contains(fn ($c) => $c['classification'] !== 'ready'));
+    }
+
+    public function test_pending_contract_steps_reject_external_location_and_fuel_changes_before_send(): void
+    {
+        $run = $this->preview();
+        app(AutomationRunner::class)->start($this->agent, $run, true);
+        app(AutomationRunner::class)->advance($run->id);
+        $pending = ShipAction::where('state', 'pending')->firstOrFail();
+        $this->world(function (&$w) {
+            $w['ships'][0]['nav']['waypointSymbol'] = 'X1-TEST-PORT';
+            $w['ships'][0]['fuel']['current'] -= 5;
+        });
+        app(ShipCommandExecutor::class)->execute($pending->id);
+        $this->assertSame('rejected', $pending->fresh()->state->value);
+        $this->assertSame([], $this->world()['writes']);
+    }
+
+    public function test_new_responses_and_jobs_do_not_contain_credentials_or_process_identifiers(): void
+    {
+        $draft = $this->draft();
+        $response = $this->postJson('/agents/'.$this->agent->id.'/drafts/'.$draft->id.'/preview', ['revision' => 1])->assertAccepted();
+        $this->assertStringNotContainsString('synthetic-only', $response->getContent());
+        $this->assertStringNotContainsString(config('app.key'), $response->getContent());
+        $dashboard = $this->get('/agents/'.$this->agent->id, ['X-Inertia' => 'true', 'X-Inertia-Version' => app(ResponseFactory::class)->getVersion()])->assertOk();
+        $this->assertStringNotContainsString('synthetic-only', $dashboard->getContent());
+        $this->assertStringNotContainsString(config('app.key'), $dashboard->getContent());
+        $this->assertArrayNotHasKey('processes', $dashboard->json('props.engine'));
+    }
+
+    public function test_engine_endpoint_denies_a_wrong_host_or_non_loopback_client_even_for_operator(): void
+    {
+        $this->withHeader('Sec-Fetch-Site', 'same-origin');
+        $this->app->detectEnvironment(fn () => 'local');
+        config(['gameplay.operator_id' => $this->agent->user_id, 'gameplay.local_host' => 'spacetraders.test']);
+        $this->postJson('http://wrong.test/agents/'.$this->agent->id.'/engine/end')->assertForbidden();
+        $this->withServerVariables(['REMOTE_ADDR' => '192.0.2.10'])->postJson('http://spacetraders.test/agents/'.$this->agent->id.'/engine/end')->assertForbidden();
+        $this->assertTrue(LocalEngine::find(1)->gate_open);
+    }
+
+    public function test_same_owner_cannot_reuse_another_agents_or_resets_draft_and_investigation(): void
+    {
+        $draft = $this->draft();
+        $sibling = $this->agent->user->agents()->create(['name' => 'OTHER', 'token' => 'synthetic-other', 'account_id' => 'synthetic', 'faction' => 'COSMIC', 'reset_id' => $this->agent->reset_id, 'canonical_identity' => AgentSynchronizer::identity($this->agent->reset_id, 'OTHER')]);
+        foreach (['investigations/'.$draft->investigation_id.'/advance', 'investigations/'.$draft->investigation_id.'/cancel'] as $path) {
+            $this->postJson('/agents/'.$sibling->id.'/'.$path)->assertNotFound();
+        }
+        $this->postJson('/agents/'.$sibling->id.'/drafts/'.$draft->id.'/preview', ['revision' => 1])->assertNotFound();
+        $this->agent->update(['reset_id' => 'another-world']);
+        $this->postJson('/agents/'.$this->agent->id.'/drafts/'.$draft->id.'/preview', ['revision' => 1])->assertNotFound();
+        $this->postJson('/agents/'.$this->agent->id.'/investigations/'.$draft->investigation_id.'/advance')->assertNotFound();
+    }
+
+    public function test_contract_writes_cannot_be_requested_as_arbitrary_manual_commands(): void
+    {
+        $before = count($this->world()['calls']);
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'contract_accept', 'arguments' => ['contractId' => 'contract-1']])->assertUnprocessable();
+        $this->assertSame($before, count($this->world()['calls']));
+        $this->assertSame([], $this->world()['writes']);
+    }
+
+    public function test_delivery_extra_fields_cannot_invent_a_payment_or_change_fuel(): void
+    {
+        $this->world(function (&$w) {
+            $w['extra_delivery_payment'] = true;
+        });
+        $run = $this->preview();
+        app(AutomationRunner::class)->start($this->agent, $run, true);
+        $this->drain($run);
+        $this->assertSame(RunState::Completed, $run->fresh()->state, $run->fresh()->blocked_reason ?? '');
+        $this->assertSame(1600, $run->fresh()->totals['receipts']);
+        $this->assertSame(1300, $run->fresh()->totals['cash_contribution']);
+        $delivery = ShipAction::where('command', 'contract_deliver')->firstOrFail();
+        $this->assertSame(0, $delivery->outcome['credit_delta']);
+        $this->assertSame(0, $delivery->outcome['transaction_total']);
     }
 }

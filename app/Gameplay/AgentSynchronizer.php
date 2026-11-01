@@ -54,7 +54,7 @@ class AgentSynchronizer
     }
 
     // Caller holds the agent lock; keep snapshots and intentions as historical records.
-    private function archiveForReset(Agent $agent, string $reset): bool
+    public function archiveForReset(Agent $agent, string $reset): bool
     {
         if ($agent->reset_id === null || $agent->reset_id === $reset) {
             return false;

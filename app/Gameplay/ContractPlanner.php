@@ -24,6 +24,9 @@ class ContractPlanner
             throw new GameException('Insufficient crew.');
         }
         $terms = $contract['terms']['deliver'];
+        if ($terms === []) {
+            throw new GameException('Unsupported: no delivery terms are present.');
+        }
         $keys = array_map(fn ($t) => $t['tradeSymbol'].'|'.$t['destinationSymbol'], $terms);
         if (count(array_unique($keys)) !== count($keys)) {
             throw new GameException('Duplicate delivery terms are unsupported.');
@@ -106,6 +109,9 @@ class ContractPlanner
                 $inventory[$good] -= $included;
                 $remaining -= $included;
                 $deliveries++;
+                if ($deliveries > 10) {
+                    throw new GameException('Unsupported: more than ten deliveries are required.');
+                }
                 $quote = $markets[$source]['tradeGoods'] ?? [];
                 $sale = collect($quote)->firstWhere('symbol', $good)['sellPrice'] ?? null;
                 $directSaleKnown = $directSaleKnown && is_int($sale);
@@ -130,6 +136,9 @@ class ContractPlanner
                     $price = $batch * $quote['purchasePrice'];
                     $append('buy', ['symbol' => $good, 'units' => $batch, 'maxTotal' => $price]);
                     $cost += $price;
+                    if ($cost > 1000000000) {
+                        throw new GameException('Unsupported: acquisition cost exceeds the supported credit limit.');
+                    }
                     $inventory[$good] = ($inventory[$good] ?? 0) + $batch;
                     $left -= $batch;
                     $purchases++;

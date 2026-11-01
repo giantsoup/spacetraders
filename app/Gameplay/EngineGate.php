@@ -21,7 +21,7 @@ class EngineGate
             return null;
         }
         $engine = LocalEngine::find(1);
-        if (! $engine || ! $engine->gate_open || $engine->state !== 'running' || ! $engine->heartbeat_at || $engine->heartbeat_at->lt(now()->subSeconds(15))) {
+        if (! $engine || ! $engine->gate_open || $engine->state !== 'running' || ! $engine->heartbeat_at || $engine->heartbeat_at->lt(now()->subSeconds(15)) || ! $this->processesAlive($engine)) {
             throw new GameException('Local engine is not healthy. Start the engine and create a fresh preview.');
         }
 
@@ -34,9 +34,26 @@ class EngineGate
         if (! $this->enabled()) {
             return;
         }
+        $engine = LocalEngine::find(1);
+        if (! $engine || ! $this->processesAlive($engine)) {
+            $this->close('faulted', 'Owned engine processes are no longer alive. Fresh session and preview required.');
+            throw new GameException('Owned engine processes are not alive.');
+        }
         if (! $session || ! LocalEngine::whereKey(1)->where('session_id', $session)->where('state', 'running')->where('gate_open', true)->where('heartbeat_at', '>=', now()->subSeconds(15))->update(['updated_at' => now()])) {
             throw new GameException('Engine session closed or changed. Refresh state and approve a new preview.');
         }
+    }
+
+    private function processesAlive(LocalEngine $engine): bool
+    {
+        foreach (['supervisor', 'worker', 'scheduler'] as $name) {
+            $pid = $engine->processes[$name] ?? null;
+            if (! is_int($pid) || $pid < 1 || ! posix_kill($pid, 0)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public function begin(): LocalEngine

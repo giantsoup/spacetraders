@@ -11,8 +11,9 @@ with tempfile.TemporaryDirectory(prefix='st-herd-launchd-') as directory:
     script.write_text('''<?php
 $label = %s; $file = %s; $domain = 'gui/'.posix_geteuid();
 function operation(array $args): int { $p=proc_open(array_merge(['/bin/launchctl'], $args), [0=>['file','/dev/null','r'],1=>['file','/dev/null','w'],2=>['file','/dev/null','w']], $pipes); return proc_close($p); }
-try { $bootstrap=operation(['bootstrap',$domain,$file]); $start=operation(['kickstart',$domain.'/'.$label]); $print=operation(['print',$domain.'/'.$label]); echo json_encode(['uid'=>posix_geteuid(),'php'=>PHP_VERSION,'bootstrap'=>$bootstrap,'kickstart'=>$start,'print'=>$print]); }
-finally { operation(['bootout',$domain.'/'.$label]); }
+try { $bootstrap=operation(['bootstrap',$domain,$file]); $start=operation(['kickstart',$domain.'/'.$label]); $print=operation(['print',$domain.'/'.$label]); $result=['uid'=>posix_geteuid(),'php'=>PHP_VERSION,'bootstrap'=>$bootstrap,'kickstart'=>$start,'print'=>$print]; }
+finally { $result['bootout']=operation(['bootout',$domain.'/'.$label]); }
+$result['absent_after_removal']=false; for($i=0;$i<60;$i++){ if(operation(['print',$domain.'/'.$label]) !== 0){ $result['absent_after_removal']=true; break; } usleep(50000); } echo json_encode($result);
 ''' % (json.dumps(label), json.dumps(str(plist))))
     params = {'SCRIPT_FILENAME': str(script), 'SCRIPT_NAME': '/probe.php', 'REQUEST_METHOD': 'GET', 'SERVER_PROTOCOL': 'HTTP/1.1', 'CONTENT_LENGTH': '0'}
     def length(n): return bytes([n]) if n < 128 else struct.pack('!I', n | 0x80000000)
@@ -36,5 +37,5 @@ finally { operation(['bootout',$domain.'/'.$label]); }
         if kind==3: break
     client.close()
     result=json.loads(output.split(b'\r\n\r\n',1)[1])
-    assert result['uid']==os.getuid() and all(result[k]==0 for k in ['bootstrap','kickstart','print']), result
+    assert result['uid']==os.getuid() and all(result[k]==0 for k in ['bootstrap','kickstart','print','bootout']) and result['absent_after_removal'], result
     print(json.dumps({**result, 'temporary_service_removed': True}))

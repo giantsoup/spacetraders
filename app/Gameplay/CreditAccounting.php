@@ -31,6 +31,7 @@ class CreditAccounting
         $totals['credit_delta'] += $delta;
         $totals['agent_balance_delta'] = $action->before_state['credits'] + $delta - $run->plan['initial_credits'];
         $totals['unsold'] = MiningPlanner::inventory($ship);
+        $totals['expected_state'] = ['waypoint' => $ship['nav']['waypointSymbol'], 'status' => $ship['nav']['status'], 'fuel' => $ship['fuel']['current']];
         $totals['receipts'] = ($totals['receipts'] ?? 0) + max(0, $delta);
         $totals['spending'] = ($totals['spending'] ?? 0) + max(0, -$delta);
         $totals['cash_contribution'] = $totals['receipts'] - $totals['spending'];

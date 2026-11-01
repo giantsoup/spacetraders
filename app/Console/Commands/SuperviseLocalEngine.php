@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Gameplay\AutomationRunner;
 use App\Gameplay\EngineGate;
 use App\Gameplay\HostLock;
 use App\Gameplay\LocalEngineManager;
@@ -25,6 +26,7 @@ class SuperviseLocalEngine extends Command
 
         return $lock->run('engine-instance', function () use ($gate) {
             $engine = $gate->begin();
+            $engine->update(['processes' => ['supervisor' => getmypid()]]);
             pcntl_async_signals(true);
             $stop = fn () => $gate->close();
             pcntl_signal(SIGTERM, $stop);
@@ -43,6 +45,7 @@ class SuperviseLocalEngine extends Command
                 if (! $children['worker']->isRunning() || ! $children['scheduler']->isRunning()) {
                     throw new \RuntimeException('Owned child failed to start.');
                 }
+                $engine->update(['processes' => ['supervisor' => getmypid(), 'worker' => $children['worker']->getPid(), 'scheduler' => $children['scheduler']->getPid()]]);
                 LocalEngine::whereKey(1)->where('session_id', $engine->session_id)->whereNull('stop_requested_at')->update(['state' => 'running', 'gate_open' => true, 'heartbeat_at' => now(), 'processes' => json_encode(['supervisor' => getmypid(), 'worker' => $children['worker']->getPid(), 'scheduler' => $children['scheduler']->getPid()]), 'message' => 'Worker and scheduler alive. Awaiting new approvals.']);
                 $last = microtime(true);
                 $shutdown = null;
@@ -73,7 +76,7 @@ class SuperviseLocalEngine extends Command
                         if (! $children['worker']->isRunning() && ! $children['scheduler']->isRunning()) {
                             foreach (AutomationRun::whereNotNull('active_agent_id')->whereNotNull('stop_requested_at')->get() as $run) {
                                 if (! ShipAction::where('agent_id', $run->agent_id)->where(fn ($q) => $q->whereIn('state', ['sending', 'uncertain'])->orWhere('review_required', true))->exists()) {
-                                    $run->update(['state' => 'stopped', 'active_agent_id' => null]);
+                                    app(AutomationRunner::class)->finishStop($run, 'Session ended. Reserved work settled; new preview required.');
                                 }
                             }
                             $engine->update(['state' => $engine->state === 'faulted' ? 'faulted' : 'off', 'gate_open' => false, 'message' => 'Owned processes exited. Any uncertain action still requires reconciliation.']);

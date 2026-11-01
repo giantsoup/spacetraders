@@ -58,7 +58,7 @@ function checkAutomation(bool $value, string $message): void
 }
 function pulse(): void
 {
-    LocalEngine::whereKey(1)->update(['state' => 'running', 'gate_open' => true, 'heartbeat_at' => now()]);
+    LocalEngine::whereKey(1)->update(['state' => 'running', 'gate_open' => true, 'heartbeat_at' => now(), 'processes' => json_encode(['supervisor' => getmypid(), 'worker' => getmypid(), 'scheduler' => getmypid()])]);
 }
 function finiteWorkers(): void
 {

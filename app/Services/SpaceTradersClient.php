@@ -14,13 +14,17 @@ class SpaceTradersClient
 {
     public const BASE_URL = 'https://api.spacetraders.io/v2';
 
-    public function request(string $method, string $path, array $data = [], ?string $token = null): Response
+    public function request(string $method, string $path, array $data = [], ?string $token = null, ?float $deadline = null): Response
     {
         app(RequestBudget::class)->reserve();
+        $timeout = $deadline === null ? 30 : min(30, $deadline - microtime(true));
+        if ($timeout < 0.1) {
+            throw new GameException('Investigation elapsed-time limit reached before transport.');
+        }
         $request = Http::baseUrl(self::BASE_URL)
             ->acceptJson()
-            ->connectTimeout(10)
-            ->timeout(30)
+            ->connectTimeout(min(10, $timeout))
+            ->timeout($timeout)
             ->withoutRedirecting();
 
         if ($token !== null) {

@@ -4,6 +4,7 @@ namespace App\Gameplay;
 
 use App\Models\LocalEngine;
 use Illuminate\Http\Request;
+use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
 
 class LocalEngineManager
@@ -36,7 +37,11 @@ class LocalEngineManager
     private function launchctl(array $arguments): Process
     {
         $process = new Process(array_merge(['/bin/launchctl'], $arguments));
-        $process->setTimeout(10)->run();
+        try {
+            $process->setTimeout(10)->run();
+        } catch (ProcessTimedOutException) {
+            throw new GameException('Timed out waiting for the owned launchd operation. Inspect engine state before retrying.');
+        }
 
         return $process;
     }
@@ -47,7 +52,10 @@ class LocalEngineManager
             throw new GameException('Engine installation requires macOS, local mode, an operator, SQLite and the local engine feature.');
         }
         $php = realpath(config('gameplay.php_binary'));
-        $runtime = new Process([$php ?: '', '-r', 'exit(PHP_VERSION_ID >= 80401 && PHP_VERSION_ID < 80500 ? 0 : 1);']);
+        if (! $php || ! is_executable($php)) {
+            throw new GameException('Configure an absolute executable PHP 8.4 path.');
+        }
+        $runtime = new Process([$php, '-r', 'exit(PHP_VERSION_ID >= 80401 && PHP_VERSION_ID < 80500 ? 0 : 1);']);
         $runtime->run();
         if (! $runtime->isSuccessful()) {
             throw new GameException('Configure an absolute PHP 8.4 executable.');
@@ -79,7 +87,7 @@ class LocalEngineManager
             foreach ($env as $key => $value) {
                 $plist .= '<key>'.$xml($key).'</key><string>'.$xml($value).'</string>';
             }
-            $plist .= '</dict><key>RunAtLoad</key><false/><key>KeepAlive</key><false/><key>ExitTimeOut</key><integer>45</integer>'
+            $plist .= '</dict><key>RunAtLoad</key><false/><key>KeepAlive</key><false/><key>ExitTimeOut</key><integer>45</integer><key>ThrottleInterval</key><integer>1</integer>'
                 .'<key>StandardOutPath</key><string>'.$xml($directory.'/supervisor.log').'</string><key>StandardErrorPath</key><string>'.$xml($directory.'/supervisor.log').'</string></dict></plist>';
             file_put_contents($directory.'/service.plist', $plist, LOCK_EX);
             chmod($directory.'/service.plist', 0600);
@@ -97,6 +105,9 @@ class LocalEngineManager
             $status = $this->status();
             if (in_array($status['state'], ['running', 'starting', 'stopping'], true)) {
                 return $status;
+            }
+            if ($this->alive(LocalEngine::find(1)?->processes['supervisor'] ?? null)) {
+                throw new GameException('The previous owned supervisor is still exiting. Wait for shutdown or review the force-stop control.');
             }
             if (! is_file($this->directory().'/service.plist') || ! $this->launchctl(['print', $this->target()])->isSuccessful()) {
                 throw new GameException('Install this checkout’s owned engine service from the CLI first.');
@@ -120,10 +131,13 @@ class LocalEngineManager
     public function forceStop(): array
     {
         $engine = LocalEngine::find(1);
-        if (! $engine || $engine->state !== 'faulted' || ! $engine->stop_requested_at) {
-            throw new GameException('Force stop is available only after a failed graceful shutdown.');
+        if (! $engine || $engine->state !== 'faulted' || ! $engine->stop_requested_at || $engine->stop_requested_at->gt(now()->subSeconds(40))) {
+            throw new GameException('Force stop is available only after the 40-second graceful shutdown allowance.');
         }
         $this->gate->close('faulted', 'Force stop requested. Interrupted writes require reconciliation.');
+        if (! $this->launchctl(['kill', 'SIGKILL', $this->target()])->isSuccessful()) {
+            throw new GameException('Could not force-stop the fixed owned supervisor. Inspect its state locally.');
+        }
         if (! $this->launchctl(['bootout', $this->target()])->isSuccessful()) {
             throw new GameException('Could not confirm removal of the owned service. Inspect its process state locally.');
         }
@@ -157,7 +171,7 @@ class LocalEngineManager
         }
         if (in_array($engine->state, ['starting', 'running', 'stopping'], true)
             && ! ($engine->state === 'starting' && $engine->updated_at->gt(now()->subSeconds(5)))
-            && (! $this->alive($engine->processes['supervisor'] ?? null) || $engine->heartbeat_at?->lt(now()->subSeconds(15)))) {
+            && (! $this->alive($engine->processes['supervisor'] ?? null) || ($engine->state === 'running' && (! $this->alive($engine->processes['worker'] ?? null) || ! $this->alive($engine->processes['scheduler'] ?? null))) || $engine->heartbeat_at?->lt(now()->subSeconds(15)))) {
             $this->gate->close('faulted', 'Engine heartbeat or supervisor lost. Old approvals are closed.');
             $engine->refresh();
         }

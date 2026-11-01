@@ -168,7 +168,16 @@ class SpaceTradersApi
             }
         }
 
-        return Arr::only($data, ['contract', 'nav', 'fuel', 'cargo', 'cooldown', 'extraction', 'agent', 'transaction', 'ship']);
+        return Arr::only($data, match ($command) {
+            'contract_accept', 'contract_fulfill' => ['contract', 'agent'],
+            'contract_deliver' => ['contract', 'cargo'],
+            'orbit', 'dock' => ['nav'],
+            'navigate' => ['nav', 'fuel'],
+            'mine' => ['cargo', 'cooldown', 'extraction'],
+            'buy_ship' => ['ship', 'agent', 'transaction'],
+            'refuel' => ['fuel', 'agent', 'transaction'],
+            'buy', 'sell' => ['cargo', 'agent', 'transaction'],
+        });
     }
 
     public function shipData(array $data): array
@@ -229,14 +238,15 @@ class SpaceTradersApi
 
     private function call(string $method, string $path, array $body = [], ?Agent $agent = null): array
     {
+        $deadline = null;
         if ($this->readGuard) {
             if ($method !== 'get') {
                 throw new GameException('Investigation forbids game mutations.');
             }
-            ($this->readGuard)();
+            $deadline = ($this->readGuard)();
         }
         try {
-            $response = $this->client->request($method, $path, $body, $agent?->credential());
+            $response = $this->client->request($method, $path, $body, $agent?->credential(), $deadline);
         } catch (ConnectionException) {
             throw new GameException('SpaceTraders connection failed.', uncertain: $method !== 'get', retryAfter: 10);
         }

@@ -73,6 +73,10 @@ final class FakeSpaceTraders
             try {
                 $world = json_decode(stream_get_contents($handle), true, flags: JSON_THROW_ON_ERROR);
                 [$body, $status] = self::respond($world, $request);
+                if ($request->method() === 'POST' && str_ends_with($request->url(), '/deliver') && ($world['extra_delivery_payment'] ?? false)) {
+                    $body['data']['agent'] = ['credits' => 999999999];
+                    $body['data']['transaction'] = ['totalPrice' => 123456];
+                }
                 if ($request->method() === 'POST' && ($world['verify_worker_storage'] ?? false)) {
                     $world['worker_storage'] = ['pid' => getmypid(), 'synchronous' => (int) DB::selectOne('PRAGMA synchronous')->synchronous, 'fullfsync' => (int) DB::selectOne('PRAGMA fullfsync')->fullfsync];
                 }

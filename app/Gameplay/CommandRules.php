@@ -28,6 +28,26 @@ class CommandRules
             throw new GameException('Stop automation and settle its action before manual takeover.');
         }
         if ($run) {
+            foreach (['frame', 'engine', 'reactor'] as $part) {
+                if ($ship[$part]['condition'] < 0.5 || $ship[$part]['integrity'] < 0.5) {
+                    throw new GameException('Ship condition or integrity fell below the operating floor.');
+                }
+            }
+            if ($ship['crew']['current'] < $ship['crew']['required'] || $ship['nav']['flightMode'] !== 'CRUISE') {
+                throw new GameException('Crew or flight mode changed outside the approved run.');
+            }
+            $expected = $run->totals['expected_state'] ?? ['waypoint' => $run->plan['initial_waypoint'], 'status' => $run->plan['initial_status'], 'fuel' => $run->plan['initial_fuel']];
+            $expectedStatus = $expected['status'] === 'IN_TRANSIT' ? 'IN_ORBIT' : $expected['status'];
+            if ($ship['nav']['waypointSymbol'] !== $expected['waypoint'] || $ship['nav']['status'] !== $expectedStatus || $ship['fuel']['current'] !== $expected['fuel'] || (isset($run->plan['equipment']) && OpportunityEvaluator::equipment($ship) !== $run->plan['equipment'])) {
+                throw new GameException('Ship location, fuel or equipment changed outside confirmed run actions. Fresh preview required.');
+            }
+            $expectedInventory = $run->totals['unsold'] ?? $run->plan['initial_inventory'];
+            ksort($expectedInventory);
+            $actualInventory = MiningPlanner::inventory($ship);
+            ksort($actualInventory);
+            if ($expectedInventory !== $actualInventory) {
+                throw new GameException('Cargo changed outside this run. Reconcile protected inventory before continuing.');
+            }
             $manual = (int) ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereNull('automation_run_id')->where('state', 'confirmed')->get()->sum(fn ($a) => $a->outcome['credit_delta'] ?? 0);
             if ($agent->credits !== $run->plan['initial_credits'] + $run->totals['credit_delta'] + $manual - ($run->plan['initial_manual_credit_delta'] ?? 0)) {
                 throw new GameException('Unexplained balance change before reservation. Review before a fresh approval.');

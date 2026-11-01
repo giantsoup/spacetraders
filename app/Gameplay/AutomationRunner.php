@@ -138,7 +138,7 @@ class AutomationRunner
                 return;
             }
             if ($run->stop_requested_at || $run->expires_at->isPast() || ! config('gameplay.enabled')) {
-                $run->update(['state' => RunState::Stopped, 'active_agent_id' => null, 'blocked_reason' => $run->stop_requested_at ? 'Stop acknowledged. Manual control is available after transit.' : 'Duration reached or automation disabled.']);
+                $this->finishStop($run, $run->stop_requested_at ? 'Stop acknowledged. Manual control is available after transit.' : 'Duration reached or automation disabled.');
 
                 return;
             }
@@ -284,7 +284,7 @@ class AutomationRunner
         }
         $plan = array_merge($limits, ['initial_credits' => $agent->credits, 'initial_inventory' => MiningPlanner::inventory($ship), 'initial_fuel' => $ship['fuel']['current'],
             'initial_waypoint' => $ship['nav']['waypointSymbol'], 'initial_status' => $ship['nav']['status'], 'site' => $candidate['site'], 'market' => $candidate['market'],
-            'equipment' => OpportunityEvaluator::equipment($ship), 'setup_cost' => 0]);
+            'equipment' => OpportunityEvaluator::equipment($ship), 'market_quote_signature' => OpportunityEvaluator::quoteSignature($market), 'setup_cost' => 0]);
         if ($candidate['strategy'] === 'mining') {
             if ($ship['cargo']['units'] !== 0 || $ship['nav']['status'] === 'IN_TRANSIT') {
                 throw new GameException('Mining requires stationary empty cargo.');
@@ -294,8 +294,9 @@ class AutomationRunner
                 throw new GameException('Mining reserve or fuel spending ceiling is below the verified route requirement.');
             }
             $plan['ordered_actions'] = ['Orbit and travel to the selected extraction site if needed', 'One extraction per trip', 'Wait for server cooldown and travel to the approved buyer', 'Dock and sell only attributable yields in fresh-quote batches', 'Refuel within approved bounds; check each cycle contribution before any approved repeat'];
-            $plan['estimated_net'] = $candidate['estimated_net'];
-            $plan['trial_required'] = $candidate['trial_required'];
+            $sameQuote = ($candidate['quote_signature'] ?? null) === $plan['market_quote_signature'];
+            $plan['estimated_net'] = $sameQuote ? $candidate['estimated_net'] : null;
+            $plan['trial_required'] = ! $sameQuote || $candidate['trial_required'];
         } else {
             $contract = $this->api->contract($agent, $candidate['contract_id']);
             $this->sync->observe($agent, 'contract', $contract['id'], $contract);
@@ -362,6 +363,19 @@ class AutomationRunner
         $totals['unsold'] = MiningPlanner::inventory($ship);
         $totals['elapsed_seconds'] = (int) $run->started_at->diffInSeconds(now());
         $run->update(['state' => RunState::Completed, 'active_agent_id' => null, 'next_action_at' => null, 'totals' => $totals]);
+    }
+
+    public function finishStop(AutomationRun $run, string $reason): void
+    {
+        $run->refresh();
+        $ship = Ship::where('agent_id', $run->agent_id)->where('symbol', $run->ship_symbol)->first()?->snapshot;
+        $totals = $run->totals;
+        $totals['elapsed_seconds'] = $run->started_at ? (int) $run->started_at->diffInSeconds(now()) : 0;
+        $totals['cash_contribution'] = $totals['credit_delta'];
+        $totals['ending_fuel'] = $ship['fuel']['current'] ?? null;
+        $totals['unsold'] = $ship ? MiningPlanner::inventory($ship) : null;
+        $totals['stopped_at'] = now()->toIso8601String();
+        $run->update(['state' => RunState::Stopped, 'active_agent_id' => null, 'next_action_at' => null, 'totals' => $totals, 'blocked_reason' => $reason]);
     }
 
     private function rejectPreview(AutomationRun $run, string $reason): never

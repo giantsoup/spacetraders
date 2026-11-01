@@ -10,11 +10,25 @@ class OpportunityEvaluator
 
     public static function equipment(array $ship): string
     {
-        return hash('sha256', json_encode([$ship['frame'], $ship['engine'], $ship['reactor'], $ship['mounts'], $ship['modules']]));
+        $parts = [$ship['frame'], $ship['engine'], $ship['reactor'], $ship['mounts'], $ship['modules']];
+        foreach ($parts as &$part) {
+            unset($part['condition'], $part['integrity']);
+        }
+
+        return hash('sha256', json_encode($parts));
+    }
+
+    public static function quoteSignature(array $market): string
+    {
+        $quotes = array_map(fn ($q) => array_intersect_key($q, array_flip(['symbol', 'purchasePrice', 'sellPrice', 'tradeVolume'])), $market['tradeGoods'] ?? []);
+        usort($quotes, fn ($a, $b) => $a['symbol'] <=> $b['symbol']);
+
+        return hash('sha256', json_encode($quotes));
     }
 
     public function evaluate(array $observations, string $strategy, CarbonImmutable $now, bool $complete): array
     {
+        $complete = $complete && isset($observations['observed_at']) && CarbonImmutable::parse($observations['observed_at'])->gte($now->subSeconds(180));
         $candidates = [];
         $points = $observations['waypoints'] ?? [];
         $markets = $observations['markets'] ?? [];
@@ -44,6 +58,9 @@ class OpportunityEvaluator
                                 $candidate['reasons'][] = $e->getMessage();
                             }
                             $candidates[] = $this->finish($candidate, $complete);
+                            if (count($candidates) >= 200) {
+                                break 3;
+                            }
                         }
                     }
                 }
@@ -57,12 +74,13 @@ class OpportunityEvaluator
                                 throw new GameException('Needs preparation. Mining requires stationary empty cargo.');
                             }
                             $route = $this->mining->evaluateRoute($ship, $site['symbol'], $market, $points, $quote, isset($observations['market_times'][$market]) ? CarbonImmutable::parse($observations['market_times'][$market]) : null, $credits ?? 0, $now);
+                            $candidate['quote_signature'] = self::quoteSignature($quote);
                             $candidate['route'] = $route;
                             $candidate['working_capital'] = $route['fuel_ceiling'];
                             $candidate['fuel_estimate'] = $route['fuel_estimate'];
                             $candidate['minimum_reserve'] = $route['minimum_reserve'];
                             $candidate['reasons'][] = 'Trial required. One extraction per trip; unknown yields and duration do not establish an earnings estimate.';
-                            $samples = array_values(array_filter($observations['history'] ?? [], fn ($h) => $h['site'] === $site['symbol'] && $h['market'] === $market && $h['equipment'] === self::equipment($ship) && CarbonImmutable::parse($h['at'])->gte($now->subDays(7))));
+                            $samples = array_values(array_filter($observations['history'] ?? [], fn ($h) => $h['site'] === $site['symbol'] && $h['market'] === $market && $h['equipment'] === self::equipment($ship) && ($h['quote_signature'] ?? null) === self::quoteSignature($quote) && ($h['initial_waypoint'] ?? null) === $ship['nav']['waypointSymbol'] && ($h['initial_fuel'] ?? null) === $ship['fuel']['current'] && CarbonImmutable::parse($h['at'])->gte($now->subDays(7))));
                             $candidate['yield_history'] = ['site' => $site['symbol'], 'equipment' => self::equipment($ship), 'sample_count' => count($samples), 'oldest_at' => $samples ? min(array_column($samples, 'at')) : null];
                             if (count($samples) >= 3 && array_sum(array_column($samples, 'seconds')) > 0) {
                                 $candidate['trial_required'] = false;
@@ -76,6 +94,9 @@ class OpportunityEvaluator
                             $candidate['reasons'][] = $e->getMessage();
                         }
                         $candidates[] = $this->finish($candidate, $complete);
+                        if (count($candidates) >= 200) {
+                            break 2;
+                        }
                     }
                 }
             }
@@ -87,7 +108,8 @@ class OpportunityEvaluator
             <=> [($b['classification'] === 'ready' ? 0 : 1), $b['estimated_per_hour'] === null ? 1 : 0, -($b['estimated_per_hour'] ?? 0), $b['working_capital'] ?? PHP_INT_MAX, $b['duration_seconds'] ?? PHP_INT_MAX, $b['id']]);
         $recommended = false;
         foreach ($candidates as &$candidate) {
-            $candidate['recommended'] = ! $recommended && $candidate['classification'] === 'ready';
+            $candidate['recommended'] = ! $recommended && $candidate['classification'] === 'ready' && $candidate['estimated_per_hour'] !== null;
+            $candidate['suggested_trial'] = ! $recommended && $candidate['classification'] === 'ready' && $candidate['strategy'] === 'mining' && ($candidate['trial_required'] ?? false);
             $recommended = $recommended || $candidate['recommended'];
         }
 
@@ -115,6 +137,7 @@ class OpportunityEvaluator
     private function classification(string $reason): string
     {
         return match (true) {
+            str_contains($reason, 'Missing mining laser'), str_contains($reason, 'Missing mineral processor') => 'needs_preparation',
             str_contains(strtolower($reason), 'unsupported'), str_contains($reason, 'Only unfulfilled'), str_contains($reason, 'same-system'), str_contains($reason, 'selected system') => 'unsupported',
             str_contains(strtolower($reason), 'unknown'), str_contains(strtolower($reason), 'scouting'), str_contains(strtolower($reason), 'missing'), str_contains(strtolower($reason), 'stale') => 'needs_information',
             default => 'needs_preparation',
