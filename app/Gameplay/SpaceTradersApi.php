@@ -18,7 +18,7 @@ class SpaceTradersApi
     {
         $this->readGuard = $guard;
         try {
-            return $work();
+            return $this->client->scope($work, 'discovery');
         } finally {
             $this->readGuard = null;
         }
@@ -307,7 +307,7 @@ class SpaceTradersApi
             $deadline = ($this->readGuard)();
         }
         try {
-            $response = $this->client->request($method, $path, $body, $agent?->credential(), $deadline);
+            $response = $this->client->request($method, $path, $body, $agent?->credential(), $deadline, $agent?->account_id);
         } catch (ConnectionException) {
             throw new GameException('SpaceTraders connection failed.', uncertain: $method !== 'get', retryAfter: 10);
         }

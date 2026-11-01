@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Gameplay\SpaceTradersApi;
+use App\Services\SpaceTradersClient;
 use Illuminate\Database\Events\ConnectionEstablished;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
@@ -14,7 +16,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->scoped(SpaceTradersClient::class);
+        $this->app->scoped(SpaceTradersApi::class);
     }
 
     /**

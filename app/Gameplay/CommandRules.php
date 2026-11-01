@@ -125,7 +125,9 @@ class CommandRules
                 if (in_array('MARKETPLACE', array_column($from['traits'], 'symbol'), true)) {
                     $this->sync->observe($agent, 'market', $from['symbol'], $this->api->market($agent, $from['symbol']));
                 }
-                $estimate['route'] = app(FuelPlanner::class)->leg($agent, $ship, $target['symbol'], $floor, policy: $run ? null : 'conservative');
+                $estimate['route'] = $run?->strategy === 'mining'
+                    ? app(FuelPlanner::class)->miningLeg($agent, $ship, $target['symbol'], $run->plan)
+                    : app(FuelPlanner::class)->leg($agent, $ship, $target['symbol'], $floor, policy: $run ? null : 'conservative');
                 $estimate['fuel_estimate'] = $estimate['route']['outbound_fuel'];
                 if ($run && isset($run->plan['max_fuel']) && ($run->totals['travel_fuel'] ?? 0) + $estimate['fuel_estimate'] > $run->plan['max_fuel']) {
                     throw new GameException('Navigation exceeds the remaining approved travel-fuel budget. Replan; do not repeat a failed rescue route.');
@@ -144,7 +146,10 @@ class CommandRules
                     throw new GameException($reason);
                 }
                 if ($run) {
-                    $this->planner->route($agent, $ship, $run->plan['site'], $run->plan['market']);
+                    app(FuelPlanner::class)->miningLeg($agent, $ship, $run->plan['market'], $run->plan);
+                    if ($ship['cargo']['capacity'] - $ship['cargo']['units'] < ($run->plan['extraction_headroom'] ?? $ship['cargo']['capacity'])) {
+                        throw new GameException('Approved extraction headroom is unavailable. Cargo retained.');
+                    }
                 }
                 if (now()->lt($ship['cooldown']['expiration']) || $ship['cargo']['units'] >= $ship['cargo']['capacity']) {
                     throw new GameException('Extraction requires an expired cooldown and free cargo.');

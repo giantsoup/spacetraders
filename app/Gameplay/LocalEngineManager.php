@@ -75,6 +75,7 @@ class LocalEngineManager
                 'DB_CONNECTION' => 'sqlite', 'DB_DATABASE' => config('database.connections.sqlite.database'), 'DATABASE_URL' => '',
                 'QUEUE_CONNECTION' => 'database', 'CACHE_STORE' => 'array', 'CACHE_DRIVER' => 'array', 'LOG_CHANNEL' => 'stderr',
                 'SPACETRADERS_LOCK_PATH' => config('gameplay.lock_path'), 'SPACETRADERS_FIXTURE_PATH' => config('gameplay.fixture_path') ?: '',
+                'SPACETRADERS_REQUEST_BUDGET_PATH' => config('gameplay.request_budget_path'),
                 'SPACETRADERS_AUTOMATION_ENABLED' => config('gameplay.enabled') ? 'true' : 'false',
                 'SPACETRADERS_LOCAL_ENGINE_ENABLED' => 'true', 'SPACETRADERS_OPERATOR_ID' => (string) config('gameplay.operator_id'),
                 'SPACETRADERS_LOCAL_HOST' => config('gameplay.local_host'), 'SPACETRADERS_PHP_BINARY' => $php,

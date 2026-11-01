@@ -27,6 +27,10 @@ function download() {
         <p>{{ evidence.policy }}</p>
         <p>{{ evidence.travel_samples_in_window }} of {{ evidence.total_travel_samples }} travel samples and {{ evidence.mining_runs_in_window }} of {{ evidence.total_mining_runs }} mining runs are in this analysis window. Older raw evidence remains saved.</p>
         <SecondaryButton @click="download">Download evidence summary</SecondaryButton>
+        <details v-if="evidence.request_usage"><summary>API request usage</summary>
+            <p>Host and account budgets share a conservative 1.9 requests per second with a 10-request burst. Server headers can lower these limits. Writes and their preflight reads have reserved capacity ahead of discovery. Counts include manual and automated requests from cooperating local checkouts; other devices remain outside this budget.</p>
+            <DataDetails :value="evidence.request_usage" />
+        </details>
         <details><summary>Travel calibration · {{ evidence.travel.length }} route/configuration groups</summary>
             <p>{{ evidence.travel_limits }}</p>
             <p v-if="!routes.length">No confirmed travel samples yet. Approved manual and automated travel will collect them.</p>

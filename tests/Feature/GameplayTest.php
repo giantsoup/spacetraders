@@ -9,7 +9,9 @@ use App\Gameplay\AutomationRunner;
 use App\Gameplay\GameException;
 use App\Gameplay\HostLock;
 use App\Gameplay\MiningPlanner;
+use App\Gameplay\RequestBudget;
 use App\Gameplay\ShipCommandExecutor;
+use App\Jobs\AdvanceAutomationRun;
 use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
 use App\Models\AutomationRun;
@@ -417,7 +419,7 @@ class GameplayTest extends TestCase
         $this->world(fn (&$w) => $w['failure'] = '429');
         app(ShipCommandExecutor::class)->execute($action->id);
         $this->assertSame(ActionState::Uncertain, $action->fresh()->state);
-        $this->assertGreaterThan(microtime(true), (float) json_decode(DB::table('game_runtime')->where('key', 'request_at')->value('value')));
+        $this->assertGreaterThan(microtime(true), app(RequestBudget::class)->usage()['host']['blocked_until']);
         $this->assertSame(429, $action->fresh()->api_code);
         app(ShipCommandExecutor::class)->execute($action->id);
         $this->assertCount(0, $this->world()['writes']);
@@ -707,7 +709,7 @@ class GameplayTest extends TestCase
         $held = null;
         Http::globalRequestMiddleware(function ($request) use (&$held) {
             if ($request->getMethod() === 'GET' && str_ends_with((string) $request->getUri(), '/my/ships/LOCAL-1') && ! $held) {
-                $held = fopen(config('gameplay.lock_path').'/'.hash('sha256', 'upstream-budget').'.lock', 'c');
+                $held = fopen(config('gameplay.request_budget_path').'/budget.lock', 'c');
                 flock($held, LOCK_EX | LOCK_NB);
             }
 
@@ -828,7 +830,7 @@ class GameplayTest extends TestCase
         app(AutomationRunner::class)->advance($run->id);
         $this->assertSame(RunState::Blocked, $run->fresh()->state);
         $this->assertCount(0, $this->world()['writes']);
-        $this->assertGreaterThan(microtime(true), (float) json_decode(DB::table('game_runtime')->where('key', 'request_at')->value('value')));
+        $this->assertGreaterThan(microtime(true), app(RequestBudget::class)->usage()['host']['blocked_until']);
         $count = count($this->world()['calls']);
         app(AutomationRunner::class)->advance($run->id);
         $this->assertCount($count, $this->world()['calls']);
@@ -971,5 +973,19 @@ class GameplayTest extends TestCase
             Carbon::setTestNow();
             CarbonImmutable::setTestNow();
         }
+    }
+
+    public function test_simultaneous_first_worker_heartbeats_do_not_fail_a_queue_job(): void
+    {
+        DB::table('game_runtime')->where('key', 'worker')->delete();
+        $inserted = false;
+        DB::listen(function ($query) use (&$inserted) {
+            if (! $inserted && str_starts_with($query->sql, 'select exists(select * from "game_runtime"')) {
+                $inserted = true;
+                DB::table('game_runtime')->insert(['key' => 'worker', 'value' => json_encode(now()->toIso8601String())]);
+            }
+        });
+        (new AdvanceAutomationRun(PHP_INT_MAX))->handle(app(AutomationRunner::class));
+        $this->assertSame(1, DB::table('game_runtime')->where('key', 'worker')->count());
     }
 }

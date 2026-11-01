@@ -120,6 +120,11 @@ try {
     const evidence = JSON.parse(await fs.readFile(path.join(output, 'evidence-summary.json'), 'utf8'));
     assert.ok(evidence.total_travel_samples >= 4);
     assert.ok(evidence.travel.every(row => row.mode === 'CRUISE' && row.distance === 5 && row.sample_count > 0));
+    assert.ok(evidence.request_usage.account.requests > 0);
+    assert.ok(evidence.request_usage.host.requests >= evidence.request_usage.account.requests);
+    assert.equal(evidence.request_usage.account.rate_limits, 0);
+    await page.getByText('API request usage', { exact: true }).click();
+    await page.getByText(/Host and account budgets share/).waitFor();
     steps.push('Travel inputs, error analysis and summary export render without changing the conservative route policy.');
 
     for (const width of [1440, 390]) {
@@ -132,6 +137,9 @@ try {
         await page.screenshot({ path: path.join(output, `operations-${width}.png`), animations: 'disabled' });
         await page.getByRole('heading', { name: 'Our travel and mining evidence' }).scrollIntoViewIfNeeded();
         await page.screenshot({ path: path.join(output, `evidence-${width}.png`), animations: 'disabled' });
+        await page.getByText('API request usage', { exact: true }).scrollIntoViewIfNeeded();
+        await page.screenshot({ path: path.join(output, `api-usage-${width}.png`), animations: 'disabled' });
+        await page.getByText('API request usage', { exact: true }).locator('..').screenshot({ path: path.join(output, `api-usage-panel-${width}.png`), animations: 'disabled' });
 
     }
     assert.deepEqual(errors, []);

@@ -14,9 +14,39 @@ class SpaceTradersClient
 {
     public const BASE_URL = 'https://api.spacetraders.io/v2';
 
-    public function request(string $method, string $path, array $data = [], ?string $token = null, ?float $deadline = null): Response
+    private int $scopeDepth = 0;
+
+    private string $priority = 'discovery';
+
+    private array $reads = [];
+
+    public function scope(callable $work, string $priority = 'critical'): mixed
     {
-        app(RequestBudget::class)->reserve();
+        $previous = $this->priority;
+        $this->priority = $priority;
+        $this->scopeDepth++;
+        try {
+            return $work();
+        } finally {
+            $this->priority = $previous;
+            if (--$this->scopeDepth === 0) {
+                $this->reads = [];
+            }
+        }
+    }
+
+    public function request(string $method, string $path, array $data = [], ?string $token = null, ?float $deadline = null, ?string $account = null): Response
+    {
+        $read = strtolower($method) === 'get';
+        $key = hash('sha256', json_encode([$path, $data, $token]));
+        if ($read && $this->scopeDepth > 0 && isset($this->reads[$key]) && microtime(true) - $this->reads[$key]['at'] < 2) {
+            return $this->reads[$key]['response'];
+        }
+        if (! $read) {
+            // Even rejected or ambiguous writes invalidate every read in this preflight scope.
+            $this->reads = [];
+        }
+        app(RequestBudget::class)->reserve($token, $account, strtolower($method) === 'get' ? $this->priority : 'write');
         $timeout = $deadline === null ? 30 : min(30, $deadline - microtime(true));
         if ($timeout < 0.1) {
             throw new GameException('Investigation elapsed-time limit reached before transport.');
@@ -34,23 +64,14 @@ class SpaceTradersClient
         $response = $request->send(strtoupper($method), $path, $data === [] ? [] : [
             strtolower($method) === 'get' ? 'query' : 'json' => $data,
         ]);
-        $exhausted = $response->header('X-RateLimit-Remaining') === '0';
-        if ($response->status() === 429 || $response->serverError() || $exhausted) {
-            $header = $response->header('Retry-After');
-            $delay = is_numeric($header) ? (int) $header : (strtotime($header ?: '') ?: time()) - time();
-            if ($exhausted) {
-                $reset = $response->header('X-RateLimit-Reset');
-                // Accept an absolute Unix timestamp or HTTP date; ambiguous units fall back to backoff.
-                $resetAt = is_numeric($reset) && (float) $reset >= 1000000000 && (float) $reset < 10000000000 ? (int) $reset : (is_numeric($reset) ? null : strtotime($reset ?: ''));
-                if ($resetAt) {
-                    $delay = max($delay, $resetAt - time());
-                }
-            }
-            try {
-                app(RequestBudget::class)->defer(max($response->status() === 502 ? 180 : 5, min(3600, $delay)) + random_int(0, 2));
-            } catch (GameException) {
-                throw new GameException('Could not save upstream backoff. Reconcile before another write.', uncertain: strtolower($method) !== 'get', retryAfter: 10);
-            }
+        try {
+            app(RequestBudget::class)->observe($response, $token, $account);
+        } catch (GameException) {
+            throw new GameException('Could not save upstream budget. Reconcile before another write.', uncertain: strtolower($method) !== 'get', retryAfter: 10);
+        }
+
+        if ($read && $this->scopeDepth > 0 && $response->successful()) {
+            $this->reads[$key] = ['response' => $response, 'at' => microtime(true)];
         }
 
         return $response;

@@ -74,6 +74,38 @@ class FuelPlanner
         return $speed > 0 ? (int) round(round(max(1, hypot($from['x'] - $to['x'], $from['y'] - $to['y']))) * 25 / $speed + 15) : null;
     }
 
+    public function miningLeg(Agent $agent, array $ship, string $destination, array $plan): array
+    {
+        // The approval established a fuel seller and ceiling. Transit cannot renew that quote.
+        // Recheck physical return feasibility here; sale/refuel still require fresh executable prices.
+        if ($ship['nav']['flightMode'] !== 'CRUISE' || $ship['fuel']['capacity'] < 1 || ! in_array($destination, [$plan['site'], $plan['market']], true)) {
+            throw new GameException('Mining continuation differs from the approved CRUISE route.');
+        }
+        $points = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->get()->keyBy('symbol');
+        $from = $points->get($ship['nav']['waypointSymbol'])?->data;
+        $to = $points->get($destination)?->data;
+        $buyer = $points->get($plan['market'])?->data;
+        if (! $from || ! $to || ! $buyer || $from['systemSymbol'] !== $to['systemSymbol'] || $buyer['systemSymbol'] !== $to['systemSymbol'] || $to['systemSymbol'] !== $ship['nav']['systemSymbol']) {
+            throw new GameException('Mining continuation requires the approved same-system waypoints.');
+        }
+        $outbound = $this->units($agent, $ship, $from, $to);
+        $continuation = $this->units($agent, $ship, $to, $buyer);
+        $required = $outbound + $continuation + config('gameplay.fuel_reserve_units');
+        $ceiling = $plan['route']['fuel_ceiling'];
+        if ($required > min($ship['fuel']['current'], $ship['fuel']['capacity']) || $agent->credits < $plan['reserve'] + $ceiling) {
+            throw new GameException('Insufficient fuel or protected credits for the approved mining continuation.');
+        }
+
+        return ['destination' => $destination, 'continuation' => $plan['market'], 'outbound_fuel' => $outbound,
+            'continuation_fuel' => $continuation, 'required_fuel' => $required, 'refuel_ceiling' => $ceiling,
+            'uncertainty_reserve' => config('gameplay.fuel_reserve_units'), 'fuel_price_at' => $plan['route']['quote_at'],
+            'price_policy' => 'Approval evidence only; refresh prices at the buyer before sale or refuel.',
+            'evidence_policy' => config('gameplay.route_evidence'), 'model' => config('gameplay.route_evidence') === 'conservative' ? self::MODEL : 'Largest valid observed consumption on this directed edge and configuration, plus a separate reserve.',
+            'estimated_seconds' => $this->seconds($from, $to, $ship), 'distance' => hypot($from['x'] - $to['x'], $from['y'] - $to['y']),
+            'from_coordinates' => ['x' => $from['x'], 'y' => $from['y']], 'to_coordinates' => ['x' => $to['x'], 'y' => $to['y']],
+            'configuration' => self::configuration($ship)];
+    }
+
     public function options(Agent $agent, array $ship, string $destination, int $reserve = 0): array
     {
         $options = [];
@@ -121,12 +153,23 @@ class FuelPlanner
         }
         $maximum = ObservationHistory::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'travel')
             ->where('data->configuration', self::configuration($ship))->where('data->from', $from['symbol'])->where('data->to', $to['symbol'])
-            ->where('data->actual_fuel', '>=', 0)->max('data->actual_fuel');
+            ->get()->filter(fn ($sample) => self::validSample($sample->data))->max('data.actual_fuel');
         if ($maximum === null) {
             throw new GameException('Measured fuel evidence for this configuration and route is missing.');
         }
 
         return (int) $maximum;
+    }
+
+    public static function validSample(array $data): bool
+    {
+        $actual = $data['actual_fuel'] ?? null;
+        if (! is_int($actual) || $actual < (($data['from'] ?? null) === ($data['to'] ?? null) ? 0 : 1)) {
+            return false;
+        }
+        $reported = $data['reported_consumed'] ?? null;
+
+        return $reported === null || (is_array($reported) && ($reported['amount'] ?? null) === $actual);
     }
 
     public static function configuration(array $ship): string

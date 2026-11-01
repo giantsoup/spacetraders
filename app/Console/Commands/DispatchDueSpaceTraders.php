@@ -21,7 +21,7 @@ class DispatchDueSpaceTraders extends Command
 
     public function handle(ShipCommandExecutor $executor): int
     {
-        DB::table('game_runtime')->updateOrInsert(['key' => 'scheduler'], ['value' => json_encode(now()->toIso8601String())]);
+        DB::table('game_runtime')->upsert([['key' => 'scheduler', 'value' => json_encode(now()->toIso8601String())]], ['key'], ['value']);
         foreach (ShipAction::where('state', 'sending')->where('sent_at', '<', now()->subSeconds(180))->limit(50)->get() as $action) {
             try {
                 $executor->locked(Agent::findOrFail($action->agent_id), function () use ($action) {

@@ -248,6 +248,7 @@ function distance(point) {
                             </div>
                         </template>
                         <template v-else>
+                            <p class="warning">Mining continues within the approved extraction bounds when buyer prices age during travel. Sale and refuel require fresh prices at the buyer; cargo is retained if the sale is blocked.</p>
                             <p>{{ runPreview.ship_symbol }} · {{ runPreview.plan.route.site }} → {{ runPreview.plan.route.market }}</p>
                             <dl><dt>Trips / duration cap</dt><dd>{{ runPreview.plan.cycles }} / {{ runPreview.plan.minutes }} min</dd><dt>Credit reserve</dt><dd>{{ cash(runPreview.plan.reserve) }}</dd><dt>Maximum fuel spend</dt><dd>{{ cash(runPreview.plan.max_spend) }}</dd><dt>Maximum loss</dt><dd>{{ cash(runPreview.plan.max_loss) }}</dd><dt>Fuel estimate / refuel ceiling</dt><dd>{{ runPreview.plan.route.fuel_estimate }} tank units / {{ cash(runPreview.plan.route.fuel_ceiling) }} CR</dd><dt>Starting fuel</dt><dd>{{ runPreview.plan.initial_fuel }}</dd><dt>Quote timestamp</dt><dd><time :datetime="runPreview.plan.route.quote_at">{{ formatLocalTime(runPreview.plan.route.quote_at) }}</time></dd><dt>Known buyers for</dt><dd>{{ runPreview.plan.route.known_buyers.map(assetName).join(', ') }}</dd><dt>Unknown yields</dt><dd>{{ runPreview.plan.route.unknown_yields.map(assetName).join(', ') || 'None observed' }}</dd></dl>
                             <DataDetails :value="runPreview.plan" />

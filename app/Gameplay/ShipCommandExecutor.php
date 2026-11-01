@@ -9,8 +9,10 @@ use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\LocalEngine;
 use App\Models\ShipAction;
+use App\Services\SpaceTradersClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class ShipCommandExecutor
 {
@@ -18,7 +20,7 @@ class ShipCommandExecutor
 
     public function locked(Agent $agent, callable $work): mixed
     {
-        return $this->lock->run('agent-'.$agent->id, $work);
+        return $this->lock->run('agent-'.$agent->id, fn () => app(SpaceTradersClient::class)->scope($work));
     }
 
     public function preview(Agent $agent, string $ship, string $command, array $arguments, string $key): ShipAction
@@ -144,7 +146,11 @@ class ShipCommandExecutor
                 if ($run) {
                     $this->block($run, $e->getMessage());
                 }
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
+                Log::build(['driver' => 'single', 'path' => storage_path('logs/gameplay.log'), 'permission' => 0600])->error('Ship command local execution failed.', [
+                    'action_id' => $action->id, 'exception_class' => get_class($e),
+                    'source' => str_replace(base_path().'/', '', $e->getFile()), 'line' => $e->getLine(),
+                ]);
                 $action->refresh();
                 $action->update(['state' => $action->state === ActionState::Sending ? ActionState::Uncertain : ActionState::Rejected,
                     'message' => 'Local execution failed. Reconcile before further commands.', 'settled_at' => now()]);

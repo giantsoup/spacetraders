@@ -218,8 +218,8 @@ class AutomationRunner
         $limits['max_extractions'] ??= 1;
         $limits['extraction_headroom'] ??= $ship['cargo']['capacity'];
         $limits['site_seconds'] ??= 300;
-        if ($limits['max_extractions'] > 1 && ($limits['extraction_headroom'] < 1 || $limits['extraction_headroom'] > $ship['cargo']['capacity'])) {
-            throw new GameException('Longer loads require an explicit extraction headroom within cargo capacity.');
+        if ($limits['extraction_headroom'] < 1 || $limits['extraction_headroom'] > $ship['cargo']['capacity']) {
+            throw new GameException('Extraction headroom must be within cargo capacity.');
         }
         if (! empty($limits['survey_signature'])) {
             app(SurveyPool::class)->usable($agent, $limits['survey_signature'], $limits['site']);
@@ -353,8 +353,8 @@ class AutomationRunner
         $limits = $draft->limits;
         if ($candidate['strategy'] === 'mining') {
             $limits += ['max_extractions' => 1, 'extraction_headroom' => $ship['cargo']['capacity'], 'site_seconds' => 300];
-            if ($limits['extraction_headroom'] > $ship['cargo']['capacity']) {
-                throw new GameException('Extraction headroom exceeds cargo capacity.');
+            if ($limits['extraction_headroom'] < 1 || $limits['extraction_headroom'] > $ship['cargo']['capacity']) {
+                throw new GameException('Extraction headroom must be within cargo capacity.');
             }
             if (! empty($limits['survey_signature'])) {
                 app(SurveyPool::class)->usable($agent, $limits['survey_signature'], $candidate['site']);

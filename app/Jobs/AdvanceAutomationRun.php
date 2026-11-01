@@ -23,7 +23,7 @@ class AdvanceAutomationRun implements ShouldQueue
 
     public function handle(AutomationRunner $runner): void
     {
-        DB::table('game_runtime')->updateOrInsert(['key' => 'worker'], ['value' => json_encode(now()->toIso8601String())]);
+        DB::table('game_runtime')->upsert([['key' => 'worker', 'value' => json_encode(now()->toIso8601String())]], ['key'], ['value']);
         try {
             $runner->advance($this->runId);
         } catch (GameException) {

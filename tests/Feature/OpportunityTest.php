@@ -30,6 +30,7 @@ use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\FakeSpaceTraders;
 use Tests\TestCase;
 
@@ -757,5 +758,97 @@ class OpportunityTest extends TestCase
         $this->expectException(GameException::class);
         $this->expectExceptionMessage('Measured fuel evidence');
         app(FuelPlanner::class)->leg($this->agent->fresh(), $ship, 'X1-TEST-PORT');
+    }
+
+    public static function remoteMiningPolicies(): array
+    {
+        return [[false, 1], [false, 3], [true, 1], [true, 3]];
+    }
+
+    #[DataProvider('remoteMiningPolicies')]
+    public function test_remote_buyer_mining_completes_after_quote_ages_during_travel_and_cooldowns(bool $staged, int $extractions): void
+    {
+        $this->world(function (&$world) {
+            $world['ships'][0]['nav']['waypointSymbol'] = 'X1-TEST-PORT';
+            $world['cooldown_seconds'] = 80;
+            $world['travel_seconds'] = 181;
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $limits = ['reserve' => 1000, 'max_spend' => 1000, 'max_loss' => 1000, 'minutes' => 60, 'cycles' => 1,
+            'site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-PORT', 'max_extractions' => $extractions, 'extraction_headroom' => 1, 'site_seconds' => 900,
+            'purchase_limit' => 40, 'delivery_limit' => 10];
+        config(['gameplay.enabled' => true]);
+        $runner = app(AutomationRunner::class);
+        if ($staged) {
+            $investigator = app(OpportunityInvestigator::class);
+            $investigation = $investigator->create($this->agent->fresh(), 'mining', 'X1-TEST');
+            for ($step = 0; $step < 20 && $investigation->status === 'investigating'; $step++) {
+                $investigation = $investigator->advance($this->agent->fresh(), $investigation);
+            }
+            $candidate = collect($investigation->candidates)->first(fn ($candidate) => $candidate['classification'] === 'ready' && $candidate['market'] === 'X1-TEST-PORT' && $candidate['site'] === 'X1-TEST-ROCK');
+            $this->assertNotNull($candidate);
+            $draft = app(AutomationStaging::class)->save($this->agent->fresh(), $investigation, $candidate['id'], $limits);
+            $run = $runner->previewDraft($this->agent->fresh(), $draft);
+            $this->assertSame(2, $run->plan_version);
+        } else {
+            $run = $runner->preview($this->agent->fresh(), 'LOCAL-1', $limits);
+        }
+        $runner->start($this->agent->fresh(), $run);
+        for ($step = 0; $step < 35 && $run->fresh()->active_agent_id && $run->fresh()->state->value !== 'blocked'; $step++) {
+            $this->advance($run);
+            $this->travel(81)->seconds();
+        }
+        $run->refresh();
+        $this->assertSame('completed', $run->state->value, $run->blocked_reason ?? '');
+        $this->assertSame($extractions, $run->totals['attempts']);
+        $this->assertSame($run->totals['extracted'], $run->totals['sold']);
+        $this->assertSame(2, ShipAction::where('command', 'navigate')->where('state', 'confirmed')->count());
+    }
+
+    public function test_single_extraction_preview_rejects_headroom_above_the_hold(): void
+    {
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $this->expectException(GameException::class);
+        $this->expectExceptionMessage('headroom');
+        $this->boundedRun('mining', ['market' => 'X1-TEST-ROCK', 'extraction_headroom' => 500]);
+    }
+
+    public function test_staged_single_extraction_preview_rejects_headroom_above_the_hold(): void
+    {
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $investigator = app(OpportunityInvestigator::class);
+        $investigation = $investigator->create($this->agent->fresh(), 'mining', 'X1-TEST');
+        for ($step = 0; $step < 20 && $investigation->status === 'investigating'; $step++) {
+            $investigation = $investigator->advance($this->agent->fresh(), $investigation);
+        }
+        $candidate = collect($investigation->candidates)->firstWhere('classification', 'ready');
+        $draft = app(AutomationStaging::class)->save($this->agent->fresh(), $investigation, $candidate['id'], [
+            'reserve' => 1000, 'max_spend' => 100, 'max_loss' => 100, 'minutes' => 60, 'cycles' => 1,
+            'purchase_limit' => 40, 'delivery_limit' => 10, 'max_extractions' => 1, 'extraction_headroom' => 500, 'site_seconds' => 300]);
+        $this->expectException(GameException::class);
+        $this->expectExceptionMessage('headroom');
+        app(AutomationRunner::class)->previewDraft($this->agent->fresh(), $draft);
+    }
+
+    public static function invalidTravelEvidence(): array
+    {
+        return [[0, null], [5, ['amount' => 0]], [5, ['amount' => 8]], [5, ['bad' => 5]], [-1, null]];
+    }
+
+    #[DataProvider('invalidTravelEvidence')]
+    public function test_zero_or_inconsistent_travel_evidence_is_excluded_from_measured_routing(int $actual, ?array $reported): void
+    {
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $ship = FakeSpaceTraders::ship();
+        app(AgentSynchronizer::class)->observe($this->agent, 'travel', 'LOCAL-1', ['configuration' => FuelPlanner::configuration($ship), 'from' => 'X1-TEST-ROCK', 'to' => 'X1-TEST-PORT',
+            'actual_fuel' => $actual, 'reported_consumed' => $reported, 'flight_mode' => 'CRUISE'], 'navigation', 'LOCAL-1');
+        $report = app(EvidenceAnalysis::class)->report($this->agent);
+        $this->assertSame(1, $report['travel'][0]['invalid_fuel_samples']);
+        $this->assertNull($report['travel'][0]['actual_fuel_mean']);
+        $this->assertSame(1, ObservationHistory::where('kind', 'travel')->count());
+        $this->expectException(GameException::class);
+        $this->expectExceptionMessage('Measured fuel evidence');
+        $points = GameObservation::where('kind', 'waypoint')->get()->keyBy('symbol');
+        app(FuelPlanner::class)->units($this->agent, $ship, $points['X1-TEST-ROCK']->data, $points['X1-TEST-PORT']->data, 'measured');
     }
 }

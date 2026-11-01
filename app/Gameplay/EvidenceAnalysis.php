@@ -18,7 +18,7 @@ class EvidenceAnalysis
         foreach ($groups as $samples) {
             $first = $samples->first();
             $data = $first->data;
-            $valid = $samples->filter(fn ($sample) => $sample->data['actual_fuel'] >= 0);
+            $valid = $samples->filter(fn ($sample) => FuelPlanner::validSample($sample->data));
             $fuel = $valid->map(fn ($sample) => $sample->data['actual_fuel']);
             $errors = $valid->filter(fn ($sample) => isset($sample->data['prediction']))->map(fn ($sample) => $sample->data['actual_fuel'] - $sample->data['prediction']);
             $duration = $samples->map(fn ($sample) => $sample->data['server_duration_seconds'] ?? null)->filter(fn ($value) => $value !== null);
@@ -55,7 +55,13 @@ class EvidenceAnalysis
                 'first_at' => $first->started_at->toIso8601String(), 'last_at' => $group->last()->updated_at->toIso8601String()];
         }
 
-        return ['reset_id' => $agent->reset_id, 'travel' => $routes, 'mining_loads' => $loads,
+        try {
+            $usage = app(RequestBudget::class)->usage($agent->credential(), $agent->account_id);
+        } catch (GameException) {
+            $usage = ['unavailable' => 'Host request-budget storage is unavailable. Gameplay waits until it is restored.'];
+        }
+
+        return ['reset_id' => $agent->reset_id, 'travel' => $routes, 'mining_loads' => $loads, 'request_usage' => $usage,
             'travel_samples_in_window' => $travel->count(), 'total_travel_samples' => $totalTravel, 'mining_runs_in_window' => $runs->count(), 'total_mining_runs' => $totalRuns,
             'policy' => 'Conservative CRUISE stays the default. Samples do not automatically fit or promote a fuel formula or change a departure policy. Review representative configurations and distances before opting into measured edges.',
             'travel_limits' => 'Fuel comes from confirmed tank changes. Duration uses server departure/arrival timestamps when supplied, not delayed polling time. Legacy samples without inputs remain visibly unknown.',

@@ -231,3 +231,5 @@ The script runs the full verification entry point, Composer validation/platform 
 For focused checks, use `php scripts/verify-automation-worker.php`, `php scripts/verify-local-engine.php`, or `node scripts/verify-automation-browser.mjs`. Browser results and desktop, 390px and 320px screenshots are in `storage/app/mvp-evidence/local-automation`. Worker and lifecycle scripts print their owned evidence directories. These synthetic results do not establish live acceptance or profitability.
 
 A code rollback after version 2 data requires a compatible code/database pair. Drain old serialized mining jobs before cutover. Never delete uncertain action history to unblock work, and never assume restoring an older database undoes upstream game actions.
+
+API budgets now share private host-wide state across cooperating local checkouts, with separate hashed account buckets and header-driven pauses. The evidence panel shows request usage. See [budget configuration and review corrections](docs/exploration-implementation.md#shared-api-budgets) before configuring another worker or checkout.
