@@ -1,6 +1,6 @@
 # OPS01 verification evidence
 
-Captured November 1, 2026 in the designated issue worktree. Before is the untouched PR baseline `54e998d95ee02bb993c4de5d866c6fadf9cfcacf`; after uses the final implementation. Both execute the same fixture definitions with newly owned in-memory or file-backed SQLite databases, keys, locks, storage and fake worlds. No primary environment, game history or live credentials were read. Machine paths are sanitized. Native service and fixture metadata remain private.
+Captured November 1, 2026 in the designated issue worktree. Before is the untouched PR baseline `54e998d95ee02bb993c4de5d866c6fadf9cfcacf`; after uses the final implementation. Both execute the same fixture definitions with newly owned in-memory or file-backed SQLite databases, keys, locks, storage and fake worlds. No primary environment, game history or live credentials were read. Machine paths are sanitized and trailing CLI table padding is removed. Native service and fixture metadata remain private.
 
 The two PNG files are dark screenshots of rendered, captured CLI transcripts. They are not application screenshots or a UI redesign. Both use a 1120 by 760 viewport and identical 1120 by 500 crop. Their text summaries and full relevant logs are retained beside them. The renderer rejects overflow rather than clipping command output.
 
