@@ -7,6 +7,7 @@ use App\Jobs\AdvanceMiningRun;
 use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
 use App\Models\AutomationRun;
+use App\Models\LocalEngine;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use Illuminate\Support\Facades\DB;
@@ -14,7 +15,7 @@ use Illuminate\Support\Str;
 
 class MiningRunner
 {
-    public function __construct(private ShipCommandExecutor $executor, private AgentSynchronizer $sync, private MiningPlanner $planner, private SpaceTradersApi $api) {}
+    public function __construct(private ShipCommandExecutor $executor, private AgentSynchronizer $sync, private MiningPlanner $planner, private SpaceTradersApi $api, private EngineGate $gate) {}
 
     public function preview(Agent $agent, string $symbol, array $limits): AutomationRun
     {
@@ -35,6 +36,7 @@ class MiningRunner
             }
 
             return AutomationRun::create([
+                'engine_session_id' => $this->gate->enabled() ? LocalEngine::find(1)?->session_id : null,
                 'agent_id' => $agent->id, 'reset_id' => $agent->reset_id, 'ship_symbol' => $symbol, 'state' => RunState::Preview,
                 'expires_at' => now()->addSeconds(config('gameplay.preview_seconds')),
                 'plan' => array_merge($limits, ['route' => $route, 'initial_inventory' => MiningPlanner::inventory($ship), 'initial_credits' => $agent->credits,
@@ -54,6 +56,7 @@ class MiningRunner
             if (! config('gameplay.enabled')) {
                 throw new GameException('Automation is disabled. Enable it only after local migration, backup and credential checks.');
             }
+            $this->gate->check($run->engine_session_id);
             $this->executor->clear($agent);
             if ($run->expires_at->isPast() || $run->reset_id !== $agent->reset_id || AutomationRun::where('active_agent_id', $agent->id)->exists()) {
                 throw new GameException('Preview expired or another run already owns this agent.');
@@ -109,6 +112,7 @@ class MiningRunner
                 return;
             }
             try {
+                $this->gate->check($run->engine_session_id);
                 $this->sync->guardReset($agent);
                 $ship = $this->sync->refreshShip($agent, $run->ship_symbol)->snapshot;
                 $credits = $this->api->agent($agent)['credits'];
@@ -160,13 +164,15 @@ class MiningRunner
         }
     }
 
-    private function enqueue(AutomationRun $run, MiningStep $step): void
+    private function enqueue(AutomationRun $run, AutomationStep $step): void
     {
         DB::transaction(function () use ($run, $step) {
+            $this->gate->check($run->engine_session_id);
             if (! AutomationRun::whereKey($run->id)->whereNull('stop_requested_at')->whereNotNull('active_agent_id')->where('expires_at', '>', now())->update(['state' => 'running', 'next_action_at' => now()->addSeconds(5)])) {
                 return;
             }
             $action = ShipAction::create([
+                'engine_session_id' => $run->engine_session_id,
                 'agent_id' => $run->agent_id, 'automation_run_id' => $run->id, 'key' => (string) Str::uuid(),
                 'reset_id' => $run->reset_id, 'ship_symbol' => $run->ship_symbol, 'origin' => 'automation',
                 'command' => $step->command, 'arguments' => array_merge($step->arguments, ['reserve' => $run->plan['reserve']]),

@@ -7,12 +7,13 @@ use App\Enums\RunState;
 use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
 use App\Models\AutomationRun;
+use App\Models\LocalEngine;
 use App\Models\ShipAction;
 use Illuminate\Support\Facades\DB;
 
 class ShipCommandExecutor
 {
-    public function __construct(private HostLock $lock, private CommandRules $rules, private SpaceTradersApi $api, private AgentSynchronizer $sync) {}
+    public function __construct(private HostLock $lock, private CommandRules $rules, private SpaceTradersApi $api, private AgentSynchronizer $sync, private EngineGate $gate) {}
 
     public function locked(Agent $agent, callable $work): mixed
     {
@@ -35,6 +36,7 @@ class ShipCommandExecutor
 
             return ShipAction::create([
                 'agent_id' => $agent->id, 'key' => $key, 'reset_id' => $agent->reset_id, 'ship_symbol' => $ship,
+                'engine_session_id' => $this->gate->enabled() ? LocalEngine::find(1)?->session_id : null,
                 'origin' => 'manual', 'command' => $command, 'arguments' => $arguments, 'before_state' => $before,
                 'state' => ActionState::Preview, 'expires_at' => now()->addSeconds(config('gameplay.preview_seconds')),
             ]);
@@ -53,7 +55,10 @@ class ShipCommandExecutor
                 throw new GameException('Preview expired. Create a fresh preview.');
             }
             $this->rules->inspect($agent, $action->ship_symbol, $action->command, $action->arguments);
-            $action->update(['state' => ActionState::Pending, 'last_dispatched_at' => now()]);
+            DB::transaction(function () use ($action) {
+                $this->gate->check($action->engine_session_id);
+                $action->update(['state' => ActionState::Pending, 'last_dispatched_at' => now()]);
+            });
             ExecuteShipCommand::dispatch($action->id)->afterCommit();
 
             return $action;
@@ -88,6 +93,7 @@ class ShipCommandExecutor
             $run = $action->automation_run_id ? AutomationRun::find($action->automation_run_id) : null;
             $received = false;
             try {
+                $this->gate->check($action->engine_session_id);
                 $this->clear($agent, $action->id);
                 if ($action->reset_id !== $agent->reset_id || $action->expires_at->isPast() || ($run && ($run->stop_requested_at || $run->expires_at->isPast() || ! $run->active_agent_id))) {
                     throw new GameException('Intent expired, reset or stopped before execution.');
@@ -95,6 +101,7 @@ class ShipCommandExecutor
                 $before = $this->rules->inspect($agent, $action->ship_symbol, $action->command, $action->arguments, $run);
                 // Stop and reservation contend on a database transaction, independently of the host lock.
                 DB::transaction(function () use ($action, $run, $before) {
+                    $this->gate->check($action->engine_session_id);
                     if ($action->expires_at->isPast()) {
                         throw new GameException('Intent expired during preflight. Create a fresh preview.');
                     }

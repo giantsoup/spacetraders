@@ -42,27 +42,33 @@ class MiningPlanner
 
     public function route(Agent $agent, array $ship, string $site, string $market): array
     {
+        $points = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->get()->mapWithKeys(fn ($o) => [$o->symbol => $o->data])->all();
+        $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $market)->first();
+
+        return $this->evaluateRoute($ship, $site, $market, $points, $quote?->data ?? [], $quote?->observed_at, $agent->credits, CarbonImmutable::now());
+    }
+
+    public function evaluateRoute(array $ship, string $site, string $market, array $points, array $quote, ?CarbonImmutable $observedAt, int $credits, CarbonImmutable $now): array
+    {
         if ($reason = $this->capability($ship)) {
             throw new GameException($reason);
         }
         if ($ship['nav']['flightMode'] !== 'CRUISE') {
             throw new GameException('Select a ship already in CRUISE mode. Flight-mode management is outside this MVP.');
         }
-        $waypoints = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->get()->keyBy('symbol');
-        $start = $waypoints->get($ship['nav']['waypointSymbol'])?->data;
-        $mine = $waypoints->get($site)?->data;
-        $buyer = $waypoints->get($market)?->data;
+        $start = $points[$ship['nav']['waypointSymbol']] ?? null;
+        $mine = $points[$site] ?? null;
+        $buyer = $points[$market] ?? null;
         if (! $start || ! $mine || ! $buyer || $mine['systemSymbol'] !== $ship['nav']['systemSymbol'] || $buyer['systemSymbol'] !== $mine['systemSymbol']) {
             throw new GameException('Discover a complete same-system route first.');
         }
         if (! in_array($mine['type'], ['ASTEROID', 'ASTEROID_FIELD', 'ENGINEERED_ASTEROID'], true) || array_intersect(array_column($mine['traits'], 'symbol'), ['UNCHARTED', 'UNSTABLE', 'DEBRIS_FIELD'])) {
             throw new GameException('Mining site is unverified, unstable or inaccessible.');
         }
-        $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $market)->first();
-        if (! $quote || $quote->observed_at->lt(now()->subSeconds(config('gameplay.snapshot_seconds'))) || empty($quote->data['tradeGoods'])) {
+        if (! $observedAt || $observedAt->lt($now->subSeconds(180)) || empty($quote['tradeGoods'])) {
             throw new GameException('Buyer prices are unknown or stale. Synchronize at that market; approve a manual scouting navigation first if no ship is there.');
         }
-        $goods = collect($quote->data['tradeGoods'])->keyBy('symbol');
+        $goods = collect($quote['tradeGoods'])->keyBy('symbol');
         $deposits = array_unique(array_merge(...array_map(fn ($m) => ! empty($m['deposits']) ? $m['deposits'] : json_decode(file_get_contents(resource_path('data/mining-yields.json')), true, flags: JSON_THROW_ON_ERROR), array_filter($ship['mounts'], fn ($m) => str_starts_with($m['symbol'], 'MOUNT_MINING_LASER_')))));
         if ($deposits === [] || ! collect($deposits)->contains(fn ($symbol) => isset($goods[$symbol]) && $goods[$symbol]['sellPrice'] > 0)) {
             throw new GameException('No verified buyer for this laser\'s possible yields.');
@@ -82,23 +88,23 @@ class MiningPlanner
             'site' => $site, 'market' => $market, 'possible_yields' => $deposits,
             'known_buyers' => array_values(array_intersect($deposits, array_keys($goods->all()))),
             'unknown_yields' => array_values(array_diff($deposits, array_keys($goods->all()))),
-            'fuel_estimate' => $initial, 'fuel_ceiling' => $fuelCeiling, 'minimum_reserve' => max($fuelCeiling, (int) ceil($agent->credits * 0.01)),
-            'quote_at' => $quote->observed_at->toIso8601String(),
+            'fuel_estimate' => $initial, 'fuel_ceiling' => $fuelCeiling, 'minimum_reserve' => max($fuelCeiling, (int) ceil($credits * 0.01)),
+            'quote_at' => $observedAt->toIso8601String(),
         ];
     }
 
-    public function next(array $ship, array $plan, array $totals, array $market, CarbonImmutable $now): MiningStep
+    public function next(array $ship, array $plan, array $totals, array $market, CarbonImmutable $now): AutomationStep
     {
         if ($reason = $this->capability($ship)) {
-            return MiningStep::blocked($reason);
+            return AutomationStep::blocked($reason);
         }
         if ($ship['nav']['status'] === 'IN_TRANSIT') {
             $arrival = CarbonImmutable::parse($ship['nav']['route']['arrival']);
 
-            return MiningStep::wait($arrival->greaterThan($now) ? $arrival : $now->addSeconds(5));
+            return AutomationStep::wait($arrival->greaterThan($now) ? $arrival : $now->addSeconds(5));
         }
         if ($totals['no_progress'] >= 1) {
-            return MiningStep::blocked('Extraction produced no usable cargo. No further attempts are approved.');
+            return AutomationStep::blocked('Extraction produced no usable cargo. No further attempts are approved.');
         }
         $inventory = self::inventory($ship);
         $expected = $plan['initial_inventory'];
@@ -109,29 +115,29 @@ class MiningPlanner
         ksort($expected);
         ksort($inventory);
         if ($expected !== $inventory) {
-            return MiningStep::blocked('Cargo changed outside this run. Reconcile retained inventory before continuing.');
+            return AutomationStep::blocked('Cargo changed outside this run. Reconcile retained inventory before continuing.');
         }
         $destination = $totals['phase'] === 'mine' ? $plan['route']['site'] : $plan['route']['market'];
         if ($ship['nav']['waypointSymbol'] !== $destination) {
-            return $ship['nav']['status'] === 'DOCKED' ? MiningStep::act('orbit') : MiningStep::act('navigate', ['waypointSymbol' => $destination]);
+            return $ship['nav']['status'] === 'DOCKED' ? AutomationStep::act('orbit') : AutomationStep::act('navigate', ['waypointSymbol' => $destination]);
         }
         if ($totals['phase'] === 'mine') {
             if ($ship['nav']['status'] === 'DOCKED') {
-                return MiningStep::act('orbit');
+                return AutomationStep::act('orbit');
             }
             $ready = CarbonImmutable::parse($ship['cooldown']['expiration']);
             if ($ready->greaterThan($now)) {
-                return MiningStep::wait($ready);
+                return AutomationStep::wait($ready);
             }
             // One extraction per trip bounds unknown yield sizes and time at the site.
             if ($ship['cargo']['units'] !== 0) {
-                return MiningStep::blocked('Mining starts with empty cargo to reserve full capacity for an unknown yield. Sell or move existing cargo manually.');
+                return AutomationStep::blocked('Mining starts with empty cargo to reserve full capacity for an unknown yield. Sell or move existing cargo manually.');
             }
 
-            return MiningStep::act('mine');
+            return AutomationStep::act('mine');
         }
         if ($ship['nav']['status'] !== 'DOCKED') {
-            return MiningStep::act('dock');
+            return AutomationStep::act('dock');
         }
         $quotes = collect($market['tradeGoods'] ?? [])->keyBy('symbol');
         foreach ($totals['extracted'] as $symbol => $units) {
@@ -139,29 +145,29 @@ class MiningPlanner
             if ($remaining > 0) {
                 $quote = $quotes[$symbol] ?? null;
                 if (! $quote || $quote['sellPrice'] < 1) {
-                    return MiningStep::blocked('No verified buyer for '.$symbol.'. Cargo retained.');
+                    return AutomationStep::blocked('No verified buyer for '.$symbol.'. Cargo retained.');
                 }
                 $units = min($remaining, $quote['tradeVolume']);
 
-                return MiningStep::act('sell', ['symbol' => $symbol, 'units' => $units, 'minTotal' => $units * $quote['sellPrice']]);
+                return AutomationStep::act('sell', ['symbol' => $symbol, 'units' => $units, 'minTotal' => $units * $quote['sellPrice']]);
             }
         }
         $missingFuel = $ship['fuel']['capacity'] - $ship['fuel']['current'];
         if ($missingFuel > 0) {
             $fuel = $quotes['FUEL'] ?? null;
             if (! $fuel) {
-                return MiningStep::blocked('Refueling quote is unavailable.');
+                return AutomationStep::blocked('Refueling quote is unavailable.');
             }
             $units = min($missingFuel, $fuel['tradeVolume'] * 100);
             $ceiling = min($plan['route']['fuel_ceiling'], $plan['max_spend'] - $totals['fuel_cost']);
             if ((int) ceil($units / 100) * $fuel['purchasePrice'] > $ceiling) {
-                return MiningStep::blocked('Refueling exceeds the approved remaining spending ceiling.');
+                return AutomationStep::blocked('Refueling exceeds the approved remaining spending ceiling.');
             }
 
-            return MiningStep::act('refuel', ['units' => $units, 'maxTotal' => $ceiling, 'reserve' => $plan['reserve']]);
+            return AutomationStep::act('refuel', ['units' => $units, 'maxTotal' => $ceiling, 'reserve' => $plan['reserve']]);
         }
 
-        return MiningStep::trip();
+        return AutomationStep::trip();
     }
 
     public static function fuelEstimate(array $from, array $to): int

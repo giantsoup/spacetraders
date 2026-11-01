@@ -82,6 +82,7 @@ class AgentSynchronizer
             Ship::where('agent_id', $agent->id)->whereNotIn('symbol', array_column($fleet, 'symbol'))->delete();
             $agent->update(['credits' => $balance['credits'], 'connection_state' => 'connected', 'synced_at' => now()]);
         });
+        app(CreditAccounting::class)->baseline($agent);
         if (! $discover) {
             return;
         }

@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Gameplay\EngineGate;
 use App\Gameplay\GameException;
 use App\Gameplay\ShipCommandExecutor;
 use App\Jobs\AdvanceMiningRun;
@@ -28,6 +29,13 @@ class DispatchDueSpaceTraders extends Command
                 });
             } catch (GameException) {
                 // The sender still holds its OS lock. Do not steal command ownership.
+            }
+        }
+        if (app(EngineGate::class)->enabled()) {
+            try {
+                app(EngineGate::class)->session();
+            } catch (GameException) {
+                return self::SUCCESS;
             }
         }
         foreach (ShipAction::where('state', 'pending')->where(function ($q) {

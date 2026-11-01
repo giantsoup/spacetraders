@@ -4,7 +4,7 @@ namespace App\Gameplay;
 
 use Carbon\CarbonImmutable;
 
-final readonly class MiningStep
+final readonly class AutomationStep
 {
     private function __construct(public string $kind, public ?string $command = null, public array $arguments = [], public ?CarbonImmutable $until = null, public ?string $reason = null) {}
 
