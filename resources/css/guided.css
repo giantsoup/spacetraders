@@ -1,0 +1,8 @@
+.guided-target {
+    outline: 3px solid #ffe09a !important;
+    outline-offset: 5px;
+    box-shadow: 0 0 0 8px #ffe09a26 !important;
+    scroll-margin-top: var(--guide-offset, 240px);
+}
+.bridge.guiding .control-strip { position: static; }
+.bridge.guiding .approval { scroll-margin-top: var(--guide-offset, 240px); }

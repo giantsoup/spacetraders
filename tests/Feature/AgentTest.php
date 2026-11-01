@@ -23,6 +23,24 @@ class AgentTest extends TestCase
         Http::fake(['https://api.spacetraders.io/v2/' => Http::response(['version' => 'v2.3.0', 'resetDate' => '2026-10-25'])]);
     }
 
+    public function test_guided_registration_and_import_open_the_exact_saved_agent(): void
+    {
+        $user = User::factory()->create();
+        Http::fake([
+            'api.spacetraders.io/v2/register' => Http::response(['data' => ['token' => 'new-agent-token', 'agent' => $this->agent()]], 201),
+            'api.spacetraders.io/v2/my/agent' => Http::response(['data' => $this->agent()]),
+        ]);
+        $registration = $this->actingAs($user)->post(route('agents.store', ['guided' => 1]), [
+            'account_token' => 'account-token', 'symbol' => 'TEST_AGENT', 'faction' => 'COSMIC',
+        ]);
+        $saved = $user->agents()->firstOrFail();
+        $registration->assertSessionHasNoErrors()->assertRedirect(route('agents.show', ['agent' => $saved->id, 'guided' => 1]));
+        $this->post(route('agents.storeExisting', ['guided' => 1]), ['token' => 'replacement-agent-token'])
+            ->assertSessionHasNoErrors()->assertRedirect(route('agents.show', ['agent' => $saved->id, 'guided' => 1]));
+        $this->assertSame(1, $user->agents()->count());
+        Http::assertSentCount(4);
+    }
+
     public function test_registration_uses_an_account_token_and_saves_the_returned_agent_token(): void
     {
         $user = User::factory()->create();

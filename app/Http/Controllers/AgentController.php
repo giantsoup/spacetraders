@@ -47,9 +47,9 @@ class AgentController extends Controller
             'email' => $data['email'] ?? null,
         ], fn ($value) => $value !== null), $data['account_token']);
 
-        $this->save($request, $payload['agent'], $payload['token'], $reset, $data['email'] ?? null);
+        $saved = $this->save($request, $payload['agent'], $payload['token'], $reset, $data['email'] ?? null);
 
-        return redirect()->route('agents.index');
+        return $request->boolean('guided') ? redirect()->route('agents.show', ['agent' => $saved->id, 'guided' => 1]) : redirect()->route('agents.index');
     }
 
     public function storeExisting(Request $request, SpaceTradersClient $client): RedirectResponse
@@ -61,9 +61,9 @@ class AgentController extends Controller
         $reset = $this->reset();
         $agent = $client->agent($data['token']);
 
-        $this->save($request, $agent, $data['token'], $reset);
+        $saved = $this->save($request, $agent, $data['token'], $reset);
 
-        return redirect()->route('agents.index');
+        return $request->boolean('guided') ? redirect()->route('agents.show', ['agent' => $saved->id, 'guided' => 1]) : redirect()->route('agents.index');
     }
 
     private function reset(): string
@@ -75,10 +75,10 @@ class AgentController extends Controller
         }
     }
 
-    private function save(Request $request, array $payload, string $token, string $reset, ?string $email = null): void
+    private function save(Request $request, array $payload, string $token, string $reset, ?string $email = null): Agent
     {
         try {
-            app(HostLock::class)->run('imports', function () use ($request, $payload, $token, $reset, $email) {
+            return app(HostLock::class)->run('imports', function () use ($request, $payload, $token, $reset, $email) {
                 $identity = AgentSynchronizer::identity($reset, $payload['symbol']);
                 $existing = Agent::where('canonical_identity', $identity)->first();
                 if (($existing && $existing->user_id !== $request->user()->id) || Agent::where('name', $payload['symbol'])->whereNull('reset_id')->where('user_id', '!=', $request->user()->id)->exists()) {
@@ -97,8 +97,10 @@ class AgentController extends Controller
                         }
                         $existing->update($attributes);
                     });
+
+                    return $existing;
                 } else {
-                    $request->user()->agents()->create($attributes);
+                    return $request->user()->agents()->create($attributes);
                 }
             });
         } catch (GameException $e) {

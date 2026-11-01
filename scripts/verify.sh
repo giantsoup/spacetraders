@@ -10,7 +10,9 @@ PNPM_BIN="$pnpm_bin" node scripts/verify-build-sources.mjs
 node scripts/verify-store.mjs
 node scripts/verify-gameplay.mjs
 node scripts/verify-tutorial.mjs
+node scripts/verify-guided-flight.mjs
 node --check scripts/verify-tutorial-browser.mjs
+node --check scripts/verify-guided-browser.mjs
 node --check scripts/verify-mvp-browser.mjs
 "$php_bin" scripts/verify-environment.php
 "$php_bin" vendor/bin/phpunit --display-all-issues

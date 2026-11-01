@@ -23,11 +23,15 @@ class AgentDashboardController extends Controller
     {
         abort_unless($agent->user_id === $request->user()->id, 404);
         $ships = Ship::where('agent_id', $agent->id)->get();
+        $observations = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->get();
 
         return Inertia::render('Agent/Dashboard', [
             'agent' => $agent, 'ships' => $ships,
             'capabilities' => $ships->mapWithKeys(fn ($s) => [$s->symbol => $planner->capability($s->snapshot)]),
-            'observations' => GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->get(),
+            'observations' => $observations,
+            'guidedOffers' => $observations->where('kind', 'shipyard')->flatMap(fn ($yard) => collect($yard->data['ships'] ?? [])
+                ->filter(fn ($offer) => $planner->capability($offer, true) === null)
+                ->map(fn ($offer) => ['yard' => $yard->symbol, 'configuration' => $offer]))->values(),
             'actions' => ShipAction::where('agent_id', $agent->id)->latest('id')->limit(40)->get(),
             'runs' => AutomationRun::where('agent_id', $agent->id)->latest('id')->limit(10)->get(),
             'health' => collect(['scheduler', 'worker'])->mapWithKeys(fn ($key) => [$key => json_decode(DB::table('game_runtime')->where('key', $key)->value('value') ?? 'null', true)]),

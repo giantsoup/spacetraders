@@ -6,8 +6,10 @@ import PrimaryButton from '@/Components/PrimaryButton.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
 import DangerButton from '@/Components/DangerButton.vue';
 import TutorialCourse from '@/Components/TutorialCourse.vue';
+import GuidedFlight from '@/Components/GuidedFlight.vue';
+import { useGuidedFlight } from '@/Composables/useGuidedFlight.js';
 
-const props = defineProps({ agent: Object, ships: Array, capabilities: Object, observations: Array, actions: Array, runs: Array, health: Object, automationEnabled: Boolean, synthetic: Boolean });
+const props = defineProps({ agent: Object, ships: Array, capabilities: Object, observations: Array, actions: Array, runs: Array, health: Object, automationEnabled: Boolean, synthetic: Boolean, guidedOffers: { type: Array, default: () => [] } });
 const selected = ref(props.ships[0]?.symbol || '');
 const page = usePage();
 const selectionKey = computed(() => `spacetraders:ship:${page.props.auth.user.id}:${props.agent.id}:${props.agent.reset_id || 'unknown'}`);
@@ -64,8 +66,17 @@ const cash = value => value === null || value === undefined ? 'Unknown' : Number
 const age = value => value ? `${Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 1000))}s ago` : 'Never observed';
 const healthy = value => value && Date.now() - Date.parse(value) < 90000;
 const url = suffix => `/agents/${props.agent.id}/${suffix}`;
-const reload = () => router.reload({ only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health'] });
-usePoll(5000, { only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health'] });
+const reload = () => new Promise(resolve => router.reload({ only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers'], onFinish: resolve }));
+usePoll(5000, { only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers'] });
+const guided = useGuidedFlight(() => page.props.auth.user.id, () => ({
+    ...props, selected: selected.value, offers: offers.value, commandPreview: commandPreview.value,
+    form: { destination: destination.value, good: good.value, quantity: quantity.value, priceBound: priceBound.value, reserve: reserve.value, site: site.value, buyer: buyer.value, offerIndex: offerIndex.value },
+}));
+const { session: guidedSession, step: guidedStep, active: guiding, storageAvailable: guidedStorage } = guided;
+const guideAllows = command => !guiding.value || (guidedStep.value?.kind === 'preview' && guidedStep.value.intent.command === command);
+async function synchronize() {
+    if (await post('sync')) guided.synchronized();
+}
 
 async function post(path, payload = {}, allowBusy = false) {
     if (busy.value && !allowBusy) return null;
@@ -75,12 +86,13 @@ async function post(path, payload = {}, allowBusy = false) {
     try {
         const result = await window.axios.post(url(path), payload, { headers: { Accept: 'application/json' } });
         notice.value = result.data.message || 'Intent saved. Follow its status in Activity history.';
-        reload();
+        await reload();
         return result.data;
     } catch (failure) {
         error.value = true;
         const validation = failure.response?.data?.errors;
         notice.value = validation ? Object.values(validation).flat().join(' ') : failure.response?.data?.message || 'Local request failed. Refresh local state before retrying.';
+        await reload();
         return null;
     } finally {
         if (!allowBusy) busy.value = false;
@@ -109,6 +121,8 @@ async function preview(command) {
 }
 async function approveCommand() {
     if (!commandPreview.value) return;
+    const intent = guiding.value && guidedStep.value?.kind === 'approve' ? guidedStep.value.intent : null;
+    guided.trackApproval(commandPreview.value, intent);
     const action = await post(`commands/${commandPreview.value.id}/approve`);
     if (action) commandPreview.value = null;
 }
@@ -130,7 +144,7 @@ function distance(point) {
 
 <template>
     <Head :title="`${agent.name} · Flight deck`" />
-    <div class="bridge">
+    <div class="bridge" :class="{ guiding }">
         <a href="#manual" class="skip">Skip to command controls</a>
         <header class="topbar">
             <div><Link :href="route('agents.index')" class="brand">ST // FLIGHT DECK</Link><span class="muted"> LOCAL COMMAND TERMINAL</span></div>
@@ -141,24 +155,25 @@ function distance(point) {
             <section class="agent-heading" aria-labelledby="agent-heading">
                 <div><p class="eyebrow">AGENT ONLINE RECORD</p><h1 id="agent-heading">{{ agent.name }}</h1><p class="muted">Reset {{ agent.reset_id || 'unknown' }} · {{ agent.connection_state }} · Snapshot {{ age(agent.synced_at) }}</p></div>
                 <div class="balance"><span class="muted">AVAILABLE CREDITS</span><strong>{{ cash(agent.credits) }} <small>CR</small></strong></div>
-                <SecondaryButton :disabled="busy" @click="post('sync')">Synchronize</SecondaryButton>
+                <SecondaryButton data-guide="sync" :disabled="busy || (guiding && guidedStep?.kind !== 'sync' && !guidedStep?.canSync && !(guidedStep?.kind === 'blocked' && guidedStep?.target === 'sync'))" @click="synchronize">Synchronize</SecondaryButton>
             </section>
 
             <div class="control-strip" aria-live="polite">
                 <div><strong>{{ ship?.symbol || 'No ship selected' }}</strong> · {{ ship?.nav.status || 'Synchronize to discover fleet' }} <span v-if="controlled">· AUTOMATION OWNS SHIP</span><span v-if="pending"> · {{ pending.command }} {{ pending.review_required ? 'review required' : pending.state }}</span></div>
-                <DangerButton v-if="activeRun" @click="post(`runs/${activeRun.id}/stop`, {}, true)">Stop automation</DangerButton>
+                <DangerButton v-if="activeRun" data-guide="stop" @click="post(`runs/${activeRun.id}/stop`, {}, true)">Stop automation</DangerButton>
                 <span v-else class="lamp">Manual control</span>
             </div>
             <p v-if="notice" :role="error ? 'alert' : 'status'" class="notice" :class="{ fault: error }">{{ notice }}</p>
             <p class="health">Worker: {{ healthy(health.worker) ? 'recent step' : 'idle or offline' }} · last {{ age(health.worker) }}. Scheduler: {{ healthy(health.scheduler) ? 'recent pass' : 'stale or offline' }} · last {{ age(health.scheduler) }}. Closing this page does not stop the worker. Mac sleep pauses execution.</p>
 
-            <TutorialCourse :agent="agent" compact />
+            <GuidedFlight :session="guidedSession" :step="guidedStep" :storage-available="guidedStorage" :busy="busy" @start="guided.start" @pause="guided.pause" @resume="guided.resume" @advance="guided.advance" @sync="synchronize" @recover="commandPreview = actions.find(action => action.id === guidedSession.pending.id && action.state === 'preview')" @clear-expired="guided.clearExpired(); commandPreview = null" />
+            <TutorialCourse v-if="!guiding" :agent="agent" compact />
 
             <div class="deck-grid">
-                <aside id="fleet" class="panel fleet" aria-labelledby="fleet-heading">
+                <aside id="fleet" data-guide="fleet" class="panel fleet" aria-labelledby="fleet-heading">
                     <h2 id="fleet-heading">01 / Fleet</h2>
                     <p v-if="ships.length === 0">No saved fleet. Synchronize to discover ships and local waypoints.</p>
-                    <button v-for="entry in ships" :key="entry.symbol" class="ship-choice" :class="{ selected: selected === entry.symbol }" :aria-pressed="selected === entry.symbol" @click="selected = entry.symbol; destination = ''; commandPreview = null; runPreview = null">
+                    <button v-for="entry in ships" :key="entry.symbol" :data-guide="`ship:${entry.symbol}`" :disabled="guiding && entry.symbol !== guidedSession?.plan?.ship" class="ship-choice" :class="{ selected: selected === entry.symbol }" :aria-pressed="selected === entry.symbol" @click="selected = entry.symbol; destination = ''; commandPreview = null; runPreview = null">
                         <strong>{{ entry.symbol }}</strong><span>{{ entry.snapshot.registration?.role || 'SHIP' }}</span><span>{{ entry.snapshot.nav.waypointSymbol }}</span><span>{{ entry.snapshot.nav.status }} · Cargo {{ entry.snapshot.cargo.units }}/{{ entry.snapshot.cargo.capacity }}</span>
                     </button>
                     <template v-if="ship">
@@ -180,14 +195,14 @@ function distance(point) {
                             <p v-if="commandPreview.before_state.estimate.fuel_estimate">Conservative fuel estimate: {{ commandPreview.before_state.estimate.fuel_estimate }}. Arrival comes from the navigation response.</p>
                             <details v-if="commandPreview.before_state.estimate.configuration"><summary>Complete offered configuration and route</summary><pre>{{ JSON.stringify(commandPreview.before_state.estimate, null, 2) }}</pre></details>
                             <p class="warning">{{ commandPreview.before_state.estimate.quote_limit_warning }} Scouting movement also requires this explicit approval.</p>
-                            <PrimaryButton :disabled="busy" @click="approveCommand">Approve {{ commandPreview.command === 'buy_ship' ? 'one-time purchase' : 'command' }}</PrimaryButton>
-                            <SecondaryButton @click="commandPreview = null">Cancel preview</SecondaryButton>
+                            <PrimaryButton data-guide="approve" :disabled="busy || (guiding && guidedStep?.kind !== 'approve')" @click="approveCommand">Approve {{ commandPreview.command === 'buy_ship' ? 'one-time purchase' : 'command' }}</PrimaryButton>
+                            <SecondaryButton data-guide="cancel-preview" @click="commandPreview = null">Cancel preview</SecondaryButton>
                         </template>
                         <template v-else>
                             <p>{{ runPreview.ship_symbol }} · {{ runPreview.plan.route.site }} → {{ runPreview.plan.route.market }}</p>
                             <dl><dt>Trips / duration cap</dt><dd>{{ runPreview.plan.cycles }} / {{ runPreview.plan.minutes }} min</dd><dt>Credit reserve</dt><dd>{{ cash(runPreview.plan.reserve) }}</dd><dt>Maximum fuel spend</dt><dd>{{ cash(runPreview.plan.max_spend) }}</dd><dt>Maximum loss</dt><dd>{{ cash(runPreview.plan.max_loss) }}</dd><dt>Fuel estimate / refuel ceiling</dt><dd>{{ runPreview.plan.route.fuel_estimate }} tank units / {{ cash(runPreview.plan.route.fuel_ceiling) }} CR</dd><dt>Starting fuel</dt><dd>{{ runPreview.plan.initial_fuel }}</dd><dt>Quote timestamp</dt><dd>{{ runPreview.plan.route.quote_at }}</dd><dt>Known buyers for</dt><dd>{{ runPreview.plan.route.known_buyers.join(', ') }}</dd><dt>Unknown yields</dt><dd>{{ runPreview.plan.route.unknown_yields.join(', ') || 'None observed' }}</dd></dl>
                             <p class="warning">One extraction per trip. Unknown cargo stays aboard and blocks the run. No guaranteed execution price or profitability. Stop on reserve, spending, loss, duration, condition, reset, uncertain write or no progress. The first trip stops unless you explicitly preview more trips.</p>
-                            <PrimaryButton :disabled="busy || !automationEnabled" @click="startRun">Start approved mining run</PrimaryButton><SecondaryButton @click="runPreview = null">Cancel preview</SecondaryButton>
+                            <PrimaryButton :disabled="busy || !automationEnabled || guiding" @click="startRun">Start approved mining run</PrimaryButton><SecondaryButton @click="runPreview = null">Cancel preview</SecondaryButton>
                         </template>
                     </section>
                     <section id="manual" class="panel" aria-labelledby="manual-heading">
@@ -195,14 +210,14 @@ function distance(point) {
                         <p v-if="controlled || pending" class="warning">{{ controlled ? 'Stop automation, then wait for the reserved action to settle before takeover.' : pending?.review_required ? 'A confirmed transaction needs price review before another command.' : 'An action is pending or uncertain. Settle it before another command.' }}</p>
                         <fieldset :disabled="busy || !ship || controlled || !!pending">
                             <legend class="sr-only">Ship commands</legend>
-                            <div class="button-row"><SecondaryButton @click="preview('orbit')">Preview orbit</SecondaryButton><SecondaryButton @click="preview('dock')">Preview docking</SecondaryButton><SecondaryButton @click="preview('mine')">Preview mining</SecondaryButton></div>
+                            <div class="button-row"><SecondaryButton :disabled="!guideAllows('orbit')" data-guide="preview-orbit" @click="preview('orbit')">Preview orbit</SecondaryButton><SecondaryButton :disabled="!guideAllows('dock')" data-guide="preview-dock" @click="preview('dock')">Preview docking</SecondaryButton><SecondaryButton :disabled="!guideAllows('mine')" data-guide="preview-mine" @click="preview('mine')">Preview mining</SecondaryButton></div>
                             <div class="form-grid">
-                                <label>Destination<select v-model="destination" aria-label="Destination" aria-describedby="navigation-help"><option value="">Select waypoint</option><option v-for="point in waypoints" :key="point.id" :value="point.symbol" :disabled="point.symbol === ship?.nav.waypointSymbol">{{ point.symbol }} · {{ point.data.type }}{{ point.symbol === ship?.nav.waypointSymbol ? ' · current location' : '' }}</option></select></label>
-                                <div class="field-action"><p id="navigation-help" class="muted" aria-live="polite">{{ navigationHelp || `${distance(selectedWaypoint.data)} units away. The server checks fuel and route before approval.` }}</p><SecondaryButton :disabled="!!navigationHelp" aria-describedby="navigation-help" @click="preview('navigate')">Preview navigation</SecondaryButton></div>
+                                <label>Destination<select v-model="destination" data-guide="destination" :disabled="guiding && guidedStep?.target !== 'destination'" aria-label="Destination" aria-describedby="navigation-help"><option value="">Select waypoint</option><option v-for="point in waypoints" :key="point.id" :value="point.symbol" :disabled="point.symbol === ship?.nav.waypointSymbol">{{ point.symbol }} · {{ point.data.type }}{{ point.symbol === ship?.nav.waypointSymbol ? ' · current location' : '' }}</option></select></label>
+                                <div class="field-action"><p id="navigation-help" class="muted" aria-live="polite">{{ navigationHelp || `${distance(selectedWaypoint.data)} units away. The server checks fuel and route before approval.` }}</p><SecondaryButton :disabled="!!navigationHelp || !guideAllows('navigate')" aria-describedby="navigation-help" data-guide="preview-navigate" @click="preview('navigate')">Preview navigation</SecondaryButton></div>
                             </div>
-                            <div class="form-grid"><label>Trade good<select v-model="good" aria-label="Trade good"><option value="">Select good</option><option v-for="quote in market?.data.tradeGoods || []" :key="quote.symbol" :value="quote.symbol">{{ quote.symbol }}</option></select></label><label>Quantity / refuel tank units<input v-model="quantity" type="number" min="1" max="100000" step="1"></label><label>Maximum cost / minimum sale total<input v-model="priceBound" type="number" min="0" step="1"></label><label>Protected credits<input v-model="reserve" type="number" min="0" step="1"></label></div>
+                            <div class="form-grid"><label>Trade good<select v-model="good" data-guide="good" :disabled="guiding && guidedStep?.target !== 'good'" aria-label="Trade good"><option value="">Select good</option><option v-for="quote in market?.data.tradeGoods || []" :key="quote.symbol" :value="quote.symbol">{{ quote.symbol }}</option></select></label><label>Quantity / refuel tank units<input v-model="quantity" data-guide="quantity" :disabled="guiding && guidedStep?.target !== 'quantity'" type="number" min="1" max="100000" step="1"></label><label>Maximum cost / minimum sale total<input v-model="priceBound" data-guide="price" :disabled="guiding && guidedStep?.target !== 'price'" type="number" min="0" step="1"></label><label>Protected credits<input v-model="reserve" data-guide="reserve" :disabled="guiding && guidedStep?.target !== 'reserve'" type="number" min="0" step="1"></label></div>
                             <p v-if="selectedQuote" class="muted">Observed buy {{ selectedQuote.purchasePrice }} · sell {{ selectedQuote.sellPrice }} · transaction volume {{ selectedQuote.tradeVolume }}. Quote {{ age(market.observed_at) }}. Refuel: 100 tank units per market unit, rounded up.</p>
-                            <div class="button-row"><SecondaryButton @click="preview('buy')">Preview cargo purchase</SecondaryButton><SecondaryButton @click="preview('sell')">Preview cargo sale</SecondaryButton><SecondaryButton @click="preview('refuel')">Preview refueling</SecondaryButton></div>
+                            <div class="button-row"><SecondaryButton :disabled="!guideAllows('buy')" data-guide="preview-buy" @click="preview('buy')">Preview cargo purchase</SecondaryButton><SecondaryButton :disabled="!guideAllows('sell')" data-guide="preview-sell" @click="preview('sell')">Preview cargo sale</SecondaryButton><SecondaryButton :disabled="!guideAllows('refuel')" data-guide="preview-refuel" @click="preview('refuel')">Preview refueling</SecondaryButton></div>
                         </fieldset>
                         <p class="muted">Every command is checked again by the server. Transit, cargo, cooldown, ownership and spending failures appear before send where known.</p>
                     </section>
@@ -213,21 +228,21 @@ function distance(point) {
                         <p v-if="latestRun">Run #{{ latestRun.id }} · {{ latestRun.state }} · Next due {{ latestRun.next_action_at || 'none' }} · Last step {{ age(latestRun.heartbeat_at) }}</p>
                         <p v-if="latestRun?.blocked_reason" class="warning">{{ latestRun.blocked_reason }}</p>
                         <fieldset :disabled="busy || !ship || !!activeRun || !!pending"><legend>Bounded trip limits</legend>
-                            <div class="form-grid"><label>Mining site<select v-model="site" aria-label="Mining site"><option value="">Select site</option><option v-for="point in waypoints.filter(p => ['ASTEROID', 'ASTEROID_FIELD', 'ENGINEERED_ASTEROID'].includes(p.data.type))" :key="point.id" :value="point.symbol">{{ point.symbol }}</option></select></label><label>Sale and refueling market<select v-model="buyer" aria-label="Sale and refueling market"><option value="">Select buyer</option><option v-for="point in markets" :key="point.id" :value="point.symbol">{{ point.symbol }} · {{ point.data.tradeGoods ? 'observed quotes' : 'prices unknown' }}</option></select></label><label>Protected credit reserve<input v-model="reserve" type="number" min="1" step="1"></label><label>Maximum fuel spending<input v-model="spend" type="number" min="1" step="1"></label><label>Maximum credit loss<input v-model="loss" type="number" min="0" step="1"></label><label>Trip count<input v-model="cycles" type="number" min="1" max="10" step="1"></label><label>Duration cap in minutes<input v-model="minutes" type="number" min="1" max="60" step="1"></label></div>
-                            <PrimaryButton @click="previewRun">Preview mining run</PrimaryButton>
+                            <div class="form-grid"><label>Mining site<select v-model="site" data-guide="site" :disabled="guiding && guidedStep?.target !== 'site'" aria-label="Mining site"><option value="">Select site</option><option v-for="point in waypoints.filter(p => ['ASTEROID', 'ASTEROID_FIELD', 'ENGINEERED_ASTEROID'].includes(p.data.type))" :key="point.id" :value="point.symbol">{{ point.symbol }}</option></select></label><label>Sale and refueling market<select v-model="buyer" data-guide="buyer" :disabled="guiding && guidedStep?.target !== 'buyer'" aria-label="Sale and refueling market"><option value="">Select buyer</option><option v-for="point in markets" :key="point.id" :value="point.symbol">{{ point.symbol }} · {{ point.data.tradeGoods ? 'observed quotes' : 'prices unknown' }}</option></select></label><label>Protected credit reserve<input v-model="reserve" data-guide="reserve" :disabled="guiding && guidedStep?.target !== 'reserve'" type="number" min="1" step="1"></label><label>Maximum fuel spending<input v-model="spend" type="number" min="1" step="1"></label><label>Maximum credit loss<input v-model="loss" type="number" min="0" step="1"></label><label>Trip count<input v-model="cycles" type="number" min="1" max="10" step="1"></label><label>Duration cap in minutes<input v-model="minutes" type="number" min="1" max="60" step="1"></label></div>
+                            <PrimaryButton :disabled="guiding" @click="previewRun">Preview mining run</PrimaryButton>
                         </fieldset>
                         <p class="muted">Enter explicit credit bounds. Preview computes the minimum reserve from observed fuel quotes and current credits. Unknown prices require an approved scouting navigation and synchronization. One extraction uses the empty cargo hold; the bot never buys cargo or jettisons goods.</p>
                         <div v-if="latestRun" class="outcomes"><h3>Recorded outcomes</h3><dl><dt>Completed trips</dt><dd>{{ latestRun.totals.cycles }}</dd><dt>Run credit contribution</dt><dd>{{ cash(latestRun.totals.credit_delta) }} CR</dd><dt>Agent balance change</dt><dd>{{ cash(latestRun.totals.agent_balance_delta ?? latestRun.totals.credit_delta) }} CR</dd><dt>Other local commands</dt><dd>{{ cash(latestRun.totals.other_credit_delta ?? 0) }} CR</dd><dt>Sale proceeds</dt><dd>{{ cash(latestRun.totals.sale_proceeds) }} CR</dd><dt>Fuel purchased</dt><dd>{{ latestRun.totals.fuel_units }} tank units / {{ cash(latestRun.totals.fuel_cost) }} CR</dd><dt>Trip cash contribution</dt><dd>{{ cash(latestRun.totals.cash_contribution) }} CR</dd><dt>Starting / ending fuel</dt><dd>{{ latestRun.plan.initial_fuel }} / {{ latestRun.totals.ending_fuel ?? 'pending' }}</dd><dt>Elapsed time</dt><dd>{{ latestRun.totals.elapsed_seconds ?? 'pending' }} seconds</dd></dl><p>Extracted {{ JSON.stringify(latestRun.totals.extracted) }} · Sold {{ JSON.stringify(latestRun.totals.sold) }} · Unsold {{ JSON.stringify(latestRun.totals.unsold || {}) }}</p><p class="muted">Cash contribution is proceeds minus purchased fuel. Existing fuel and retained inventory prevent treating it as economic profit.</p></div>
                     </section>
 
-                    <section id="setup" class="panel" aria-labelledby="setup-heading">
+                    <section data-guide="setup" id="setup" class="panel" aria-labelledby="setup-heading">
                         <h2 id="setup-heading">04 / One-time mining setup</h2>
                         <p v-if="Object.values(capabilities).includes(null)" class="good">An operational miner is already available. Setup purchase is skipped.</p>
-                        <template v-else><p>Buy a complete verified miner only. Select a site and buyer above. Approve scouting navigation to the shipyard first. Outfitting is a separate follow-up when no affordable complete miner exists.</p><label>Observed shipyard offer<select v-model="offerIndex" aria-label="Observed shipyard offer"><option value="">Select offer</option><option v-for="(offer, index) in offers" :key="`${offer.yard}-${offer.type}`" :value="String(index)">{{ offer.type }} · {{ offer.yard }} · {{ cash(offer.purchasePrice) }} CR</option></select></label><p>Use the maximum-cost and protected-credit fields in Manual commands. Approval is separate from starting automation.</p><SecondaryButton :disabled="busy || !ship || !!pending || !!activeRun" @click="preview('buy_ship')">Preview one-time miner purchase</SecondaryButton></template>
+                        <template v-else><p>Buy a complete verified miner only. Select a site and buyer above. Approve scouting navigation to the shipyard first. Outfitting is a separate follow-up when no affordable complete miner exists.</p><label>Observed shipyard offer<select v-model="offerIndex" data-guide="offer" :disabled="guiding && guidedStep?.target !== 'offer'" aria-label="Observed shipyard offer"><option value="">Select offer</option><option v-for="(offer, index) in offers" :key="`${offer.yard}-${offer.type}`" :value="String(index)">{{ offer.type }} · {{ offer.yard }} · {{ cash(offer.purchasePrice) }} CR</option></select></label><p>Use the maximum-cost and protected-credit fields in Manual commands. Approval is separate from starting automation.</p><SecondaryButton :disabled="busy || !ship || !!pending || !!activeRun || !guideAllows('buy_ship')" data-guide="preview-buy_ship" @click="preview('buy_ship')">Preview one-time miner purchase</SecondaryButton></template>
                     </section>
                     <section id="waypoints" class="panel" aria-labelledby="map-heading"><h2 id="map-heading">05 / Local waypoints</h2><div class="table-scroll"><table><caption class="sr-only">Known same-system waypoints</caption><thead><tr><th>Waypoint</th><th>Type / traits</th><th>Coordinates</th><th>Distance</th></tr></thead><tbody><tr v-for="point in waypoints" :key="point.id"><td><button class="text-button" @click="destination = point.symbol">{{ point.symbol }}</button></td><td>{{ point.data.type }}<br><span class="muted">{{ point.data.traits.map(t => t.symbol).join(', ') }}</span></td><td>{{ point.data.x }}, {{ point.data.y }}</td><td>{{ distance(point.data) }}</td></tr></tbody></table></div></section>
-                    <section id="market" class="panel" aria-labelledby="market-heading"><h2 id="market-heading">06 / Cargo and market</h2><p>Market {{ ship?.nav.waypointSymbol || 'unknown' }} · Quote {{ age(market?.observed_at) }}. Missing prices are unknown.</p><div class="table-scroll"><table><caption class="sr-only">Cargo and local market prices</caption><thead><tr><th>Good</th><th>Aboard</th><th>Buy</th><th>Sell</th><th>Volume</th></tr></thead><tbody><tr v-for="quote in market?.data.tradeGoods || []" :key="quote.symbol"><td>{{ quote.symbol }}</td><td>{{ ship?.cargo.inventory.find(i => i.symbol === quote.symbol)?.units || 0 }}</td><td>{{ cash(quote.purchasePrice) }}</td><td>{{ cash(quote.sellPrice) }}</td><td>{{ quote.tradeVolume }}</td></tr><tr v-for="item in ship?.cargo.inventory.filter(i => !market?.data.tradeGoods?.some(g => g.symbol === i.symbol)) || []" :key="item.symbol"><td>{{ item.symbol }}</td><td>{{ item.units }}</td><td colspan="3">Unknown</td></tr></tbody></table></div></section>
-                    <section id="activity" class="panel" aria-labelledby="activity-heading"><h2 id="activity-heading">07 / Activity history</h2><p v-if="!actions.length">No commands recorded. Preview a command to begin.</p><ol class="activity"><li v-for="action in actions" :key="action.id"><div><strong>#{{ action.id }} {{ action.command }}</strong> <span>{{ action.state }}{{ action.review_required ? ' · Review required' : '' }} · {{ action.origin }} · {{ action.ship_symbol }}</span></div><p>{{ action.message || 'Awaiting approval' }} <span v-if="action.api_code">API {{ action.api_code }}</span><span v-if="action.outcome?.credit_delta !== undefined"> · {{ cash(action.outcome.credit_delta) }} CR</span></p><small class="muted">{{ action.created_at }}</small><div v-if="action.state === 'uncertain' || action.review_required"><SecondaryButton :disabled="busy" @click="reconcile(action)">Reconcile #{{ action.id }}</SecondaryButton><details v-if="action.outcome"><summary>Inspect reconciliation evidence</summary><pre>{{ JSON.stringify(action.outcome, null, 2) }}</pre></details><div v-if="action.outcome?.reconciled_at"><label>Operator reconciliation note<input v-model="note" minlength="10" maxlength="500"></label><DangerButton :disabled="busy || note.length < 10" @click="post(`commands/${action.id}/acknowledge`, { acknowledge: true, note })">Acknowledge reviewed outcome and end run</DangerButton><p class="warning">Confirmed transactions keep their result. Unproven outcomes stay labeled as unresolved adjustments. Neither is replayed; review releases manual control.</p></div></div></li></ol><pre v-if="reconciliation" class="sr-only">{{ reconciliation.message }}</pre></section>
+                    <section data-guide="market" id="market" class="panel" aria-labelledby="market-heading"><h2 id="market-heading">06 / Cargo and market</h2><p>Market {{ ship?.nav.waypointSymbol || 'unknown' }} · Quote {{ age(market?.observed_at) }}. Missing prices are unknown.</p><div class="table-scroll"><table><caption class="sr-only">Cargo and local market prices</caption><thead><tr><th>Good</th><th>Aboard</th><th>Buy</th><th>Sell</th><th>Volume</th></tr></thead><tbody><tr v-for="quote in market?.data.tradeGoods || []" :key="quote.symbol"><td>{{ quote.symbol }}</td><td>{{ ship?.cargo.inventory.find(i => i.symbol === quote.symbol)?.units || 0 }}</td><td>{{ cash(quote.purchasePrice) }}</td><td>{{ cash(quote.sellPrice) }}</td><td>{{ quote.tradeVolume }}</td></tr><tr v-for="item in ship?.cargo.inventory.filter(i => !market?.data.tradeGoods?.some(g => g.symbol === i.symbol)) || []" :key="item.symbol"><td>{{ item.symbol }}</td><td>{{ item.units }}</td><td colspan="3">Unknown</td></tr></tbody></table></div></section>
+                    <section data-guide="activity" id="activity" class="panel" aria-labelledby="activity-heading"><h2 id="activity-heading">07 / Activity history</h2><p v-if="!actions.length">No commands recorded. Preview a command to begin.</p><ol class="activity"><li v-for="action in actions" :key="action.id"><div><strong>#{{ action.id }} {{ action.command }}</strong> <span>{{ action.state }}{{ action.review_required ? ' · Review required' : '' }} · {{ action.origin }} · {{ action.ship_symbol }}</span></div><p>{{ action.message || 'Awaiting approval' }} <span v-if="action.api_code">API {{ action.api_code }}</span><span v-if="action.outcome?.credit_delta !== undefined"> · {{ cash(action.outcome.credit_delta) }} CR</span></p><small class="muted">{{ action.created_at }}</small><div v-if="action.state === 'uncertain' || action.review_required"><SecondaryButton :disabled="busy" @click="reconcile(action)">Reconcile #{{ action.id }}</SecondaryButton><details v-if="action.outcome"><summary>Inspect reconciliation evidence</summary><pre>{{ JSON.stringify(action.outcome, null, 2) }}</pre></details><div v-if="action.outcome?.reconciled_at"><label>Operator reconciliation note<input v-model="note" minlength="10" maxlength="500"></label><DangerButton :disabled="busy || note.length < 10" @click="post(`commands/${action.id}/acknowledge`, { acknowledge: true, note })">Acknowledge reviewed outcome and end run</DangerButton><p class="warning">Confirmed transactions keep their result. Unproven outcomes stay labeled as unresolved adjustments. Neither is replayed; review releases manual control.</p></div></div></li></ol><pre v-if="reconciliation" class="sr-only">{{ reconciliation.message }}</pre></section>
                 </div>
             </div>
             <footer>LOCAL MVP · Game state is controlled by Laravel · No automatic registration or restart</footer>
