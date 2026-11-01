@@ -1,0 +1,9 @@
+{"origin":"http://127.0.0.1:61109","ownedDirectory":"/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-ouauclmw/spacetraders-fixture-fc4c504c6991"}
+{
+  "checks": [
+    "Authenticated browser write receives 503 before approval; preview and queue remain unchanged.",
+    "Phone and desktop maintenance screens remain dark under a light OS preference and fit the viewport.",
+    "Reopen preserves the browser session and approval; paused real worker retains pending bytes, resumed worker confirms one fake mutation."
+  ],
+  "output": "/Users/Taylor/.t3/worktrees/spacetraders/integrate-completed-batch2-20261101/storage/app/integration-evidence/deployment-browser"
+}

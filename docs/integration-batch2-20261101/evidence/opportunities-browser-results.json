@@ -1,0 +1,26 @@
+{
+  "processes": {
+    "browser": 22673,
+    "server": 22677
+  },
+  "steps": [
+    "Coverage and independently dated market evidence rendered.",
+    "One purposeful scout visit collected prices, returned home, refueled and ended through real workers.",
+    "Trade bought and sold 4/4/2 batches, returned home, and deducted acquisition and fuel.",
+    "Missing wear stays unresolved; entered wear reaches real workers, report and download. Fleet comparison uses incremental gain and withholds payback when buyer throughput is insufficient.",
+    "Travel inputs, error analysis and summary export render without changing the conservative route policy."
+  ],
+  "errors": [],
+  "browser": "156.0.8078.4",
+  "evidence": "/Users/Taylor/.t3/worktrees/spacetraders/integrate-completed-batch2-20261101/storage/app/integration-evidence/opportunities-browser",
+  "passed": true,
+  "shutdown": {
+    "server": "verified",
+    "browserConnection": "verified",
+    "browser": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-maktl7hw/spacetraders-verification-WCukzM",
+  "fixtureRemoved": true,
+  "diagnostics": null,
+  "failures": []
+}

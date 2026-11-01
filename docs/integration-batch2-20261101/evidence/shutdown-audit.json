@@ -1,0 +1,99 @@
+[
+  {
+    "result": "automation-browser/result.json",
+    "fixtureAbsent": true,
+    "shutdown": {
+      "service": "verified",
+      "server": "verified",
+      "browserConnection": "verified",
+      "browser": "verified"
+    },
+    "processes": [
+      {
+        "pid": 1664,
+        "alive": false
+      },
+      {
+        "pid": 21415,
+        "alive": false
+      },
+      {
+        "pid": 21416,
+        "alive": false
+      },
+      {
+        "pid": 21262,
+        "alive": false
+      },
+      {
+        "pid": 1653,
+        "alive": false
+      }
+    ],
+    "serviceLabel": "io.spacetraders.engine.1a99c014c4f68a9c6bc69e9a",
+    "serviceAbsent": true
+  },
+  {
+    "result": "opportunities-browser/results.json",
+    "fixtureAbsent": true,
+    "shutdown": {
+      "server": "verified",
+      "browserConnection": "verified",
+      "browser": "verified"
+    },
+    "processes": [
+      {
+        "pid": 22673,
+        "alive": false
+      },
+      {
+        "pid": 22677,
+        "alive": false
+      }
+    ],
+    "serviceLabel": null,
+    "serviceAbsent": null
+  },
+  {
+    "result": "combined-browser/results.json",
+    "fixtureAbsent": true,
+    "shutdown": {
+      "server": "verified",
+      "browserConnection": "verified",
+      "browser": "verified"
+    },
+    "processes": [
+      {
+        "pid": 27251,
+        "alive": false
+      },
+      {
+        "pid": 27215,
+        "alive": false
+      }
+    ],
+    "serviceLabel": null,
+    "serviceAbsent": null
+  },
+  {
+    "result": "shared-preview/results.json",
+    "fixtureAbsent": true,
+    "shutdown": {
+      "server": "verified",
+      "browserConnection": "verified",
+      "browser": "verified"
+    },
+    "processes": [
+      {
+        "pid": 82569,
+        "alive": false
+      },
+      {
+        "pid": 82742,
+        "alive": false
+      }
+    ],
+    "serviceLabel": null,
+    "serviceAbsent": null
+  }
+]

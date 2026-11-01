@@ -1,0 +1,19 @@
+{
+  "result": "pass",
+  "steps": [
+    "Saved preview stopped through CSRF-protected HTTP; real worker sent nothing.",
+    "Approved pending scan stopped before worker reservation; queued job sent nothing.",
+    "Question, limits and continuation approved on mobile; separate worker stored scan traits and source evidence.",
+    "Empty scan coverage leaves target unresolved and authorizes no follow-up.",
+    "Chart at current location stores separate chart evidence and the synthetic reward.",
+    "Lost chart response remains uncertain after read-only reconciliation, without replay.",
+    "World reset rejects pending chart before POST and archives the agent."
+  ],
+  "errors": [],
+  "fixture": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-j5erfp5v/spacetraders-fixture-f8a9fea5afd7",
+  "origin": "http://127.0.0.1:61447",
+  "evidence": "/Users/Taylor/.t3/worktrees/spacetraders/integrate-completed-batch2-20261101/storage/app/integration-evidence/exploration-browser",
+  "browser": "156.0.8078.4",
+  "timezone": "America/Los_Angeles",
+  "colorScheme": "light OS preference, dark app"
+}

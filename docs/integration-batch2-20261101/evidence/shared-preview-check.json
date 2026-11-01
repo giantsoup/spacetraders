@@ -1,0 +1,9 @@
+{
+  "origin": "http://127.0.0.1:60655",
+  "page": "Deployment in progress",
+  "colorScheme": "dark",
+  "overflow": false,
+  "tabClosedBeforeFixtureRelease": true,
+  "transport": "T3 shared preview",
+  "preliminaryOpenError": "about:blank was rejected as an invalid preview URL; retried the owned HTTP URL"
+}

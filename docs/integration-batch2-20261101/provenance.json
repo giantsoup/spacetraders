@@ -1,0 +1,89 @@
+{
+  "base": "d16e9fe51e2e6e6512466f7182fddfcb6ce0cda4",
+  "branch": "integrate/completed-batch2-20261101",
+  "implementation_head": "a903845aaf9a2b40c87f02e8abd683a24d75ba02",
+  "source_branches": [
+    {
+      "issue": 9,
+      "branch": "implement/issue-9-private-account-access-20261101",
+      "head": "f74e3888c8112b423885f144fd32806f11e351f3",
+      "commits": [
+        {
+          "sha": "f74e3888c8112b423885f144fd32806f11e351f3",
+          "subject": "Close public account flows and add secure operator provisioning"
+        }
+      ],
+      "historical_report_unchanged": true
+    },
+    {
+      "issue": 11,
+      "branch": "implement/issue-11-deployment-drain-20261101",
+      "head": "a87518a96586a1e3be952a0d15e8ade8ef1e027a",
+      "commits": [
+        {
+          "sha": "a87518a96586a1e3be952a0d15e8ade8ef1e027a",
+          "subject": "Add persistent deployment admission and drain gates"
+        }
+      ],
+      "historical_report_unchanged": true
+    },
+    {
+      "issue": 37,
+      "branch": "implement/issue-37-adviser-policy-20261101",
+      "head": "8b58a5dca55f678603760b441e1425507f06063f",
+      "commits": [
+        {
+          "sha": "8b58a5dca55f678603760b441e1425507f06063f",
+          "subject": "Add expiring adviser grants and deterministic review decisions"
+        }
+      ],
+      "historical_report_unchanged": true
+    },
+    {
+      "issue": 67,
+      "branch": "implement/issue-67-cycle-economics-20261101",
+      "head": "9a68a1a12e29566c708c6d596a4449843eeb206b",
+      "commits": [
+        {
+          "sha": "a91d749c4166db0bb86f9e6894815355ba58c066",
+          "subject": "Integrate complete-cycle economics and conservative forecasts"
+        },
+        {
+          "sha": "9a68a1a12e29566c708c6d596a4449843eeb206b",
+          "subject": "Record EXP09 local verification and PR integration guidance"
+        }
+      ],
+      "historical_report_unchanged": true
+    },
+    {
+      "issue": 51,
+      "branch": "implement/issue-51-scan-chart-commands-20261101",
+      "head": "360e4c658ae10636eb399da09795d0856d7c04f5",
+      "commits": [
+        {
+          "sha": "2fe309c07f02e9102c5cea390479b73bf9747059",
+          "subject": "Add bounded waypoint scan and chart approvals"
+        },
+        {
+          "sha": "360e4c658ae10636eb399da09795d0856d7c04f5",
+          "subject": "Record EXP01 fixture verification and integration guidance"
+        }
+      ],
+      "historical_report_unchanged": true
+    },
+    {
+      "issue": 81,
+      "branch": "implement/issue-81-fixture-cleanup-20261101",
+      "head": "8e12b91e8bebbe9396941a9c89b8296248eaf7ae",
+      "commits": [
+        {
+          "sha": "8e12b91e8bebbe9396941a9c89b8296248eaf7ae",
+          "subject": "Clean owned browser fixtures after verified shutdown"
+        }
+      ],
+      "historical_report_unchanged": true
+    }
+  ],
+  "main_briefs_unchanged": true,
+  "dependency_locks_and_manifests_unchanged": true
+}

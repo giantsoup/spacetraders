@@ -1,0 +1,38 @@
+{
+  "processes": {
+    "browser": 1653,
+    "server": 1664
+  },
+  "steps": [
+    "Engine-off read-only mining investigation, trial explanation, staging and reload recovery",
+    "Start authorizes no gameplay and changed-price approval is rejected",
+    "Complete mining trial through actual owned engine; one extraction, confirmed contribution and keyboard review",
+    "Complete offered contract with explicit acceptance, three purchase batches, delivery, fulfillment and separate confirmed accounting",
+    "Server validation is readable, focuses the error and marks invalid fields",
+    "End session cancels an unsent manual preview; restart replays no approval",
+    "Visible Stop prevents further run reservations while the engine remains available for manual commands"
+  ],
+  "errors": [],
+  "browser": "156.0.8078.4",
+  "evidence": "/Users/Taylor/.t3/worktrees/spacetraders/integrate-completed-batch2-20261101/storage/app/integration-evidence/automation-browser",
+  "engineShutdown": {
+    "processesExited": [
+      21262,
+      21415,
+      21416
+    ],
+    "serviceRemoved": true,
+    "serviceLabel": "io.spacetraders.engine.1a99c014c4f68a9c6bc69e9a"
+  },
+  "passed": true,
+  "shutdown": {
+    "service": "verified",
+    "server": "verified",
+    "browserConnection": "verified",
+    "browser": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-lchxi8mt/spacetraders-verification-QjO30W",
+  "fixtureRemoved": true,
+  "diagnostics": null,
+  "failures": []
+}

@@ -1,0 +1,25 @@
+Owned evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-ddp3doei/spacetraders-deployment-bae76e7a69b7
+PASS close waits for an actually reserved gameplay job
+PASS close includes the real HTTP-kernel writer
+PASS closed dispatch preserves delayed queue bytes and attempts
+PASS active writer remains alive during drain
+PASS active web writer acknowledges after finishing its database write
+PASS pre-close schedule:run descendant exits before drain succeeds
+PASS reserved work finishes exactly one fake upstream mutation
+PASS both real workers leave pending delayed intent untouched while closed
+PASS resumed duplicate delivery does not replay confirmed work
+PASS old controller cannot reopen the next release
+PASS frozen rollback release reads the shared version 1 contract and existing SQLite schema
+PASS rollback artifact worker observes persistent pause without reserving
+PASS abrupt process exit leaves the scheduler cache lock behind
+PASS stale scheduler overlap lock suppresses a second pass before expiry
+PASS live OS dispatcher ownership prevents overlap even if cache lock is cleared
+PASS owned lock holder exits normally
+PASS real stale-lock expiry recovers dispatch after 120 seconds with measured bounded pass
+PASS close waits outside the actual SQLite reservation critical section
+PASS pre-close reservation finishes; missing continuous readiness is reported honestly
+PASS reservation after close cannot change SQL attempts, even without Laravel pause polling
+PASS 50-intent dispatcher pass survives real SQLite writer contention within its budget
+PASS races and dispatcher stress never replay the confirmed fake mutation
+PASS superseded waiting controller fails without opening its successor
+PASS owned SQLite run has no failed jobs
