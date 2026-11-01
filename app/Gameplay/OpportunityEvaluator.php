@@ -105,7 +105,7 @@ class OpportunityEvaluator
                             $candidate['fuel_estimate'] = $route['fuel_estimate'];
                             $candidate['minimum_reserve'] = $route['minimum_reserve'];
                             $candidate['reasons'][] = 'Trial required. One extraction per trip; unknown yields and duration do not establish an earnings estimate.';
-                            $samples = array_values(array_filter($observations['history'] ?? [], fn ($h) => $h['site'] === $site['symbol'] && $h['market'] === $market && $h['equipment'] === self::equipment($ship) && ($h['quote_signature'] ?? null) === self::quoteSignature($quote) && ($h['initial_waypoint'] ?? null) === $ship['nav']['waypointSymbol'] && ($h['initial_fuel'] ?? null) === $ship['fuel']['current'] && CarbonImmutable::parse($h['at'])->gte($now->subDays(7))));
+                            $samples = array_values(array_filter($observations['history'] ?? [], fn ($h) => $h['site'] === $site['symbol'] && $h['market'] === $market && $h['equipment'] === self::equipment($ship) && ($h['quote_signature'] ?? null) === self::quoteSignature($quote) && ($h['initial_waypoint'] ?? null) === $ship['nav']['waypointSymbol'] && ($h['initial_fuel'] ?? null) === $ship['fuel']['current'] && CarbonImmutable::parse($h['at'])->betweenIncluded($now->subDays(7), $now)));
                             $candidate['yield_history'] = ['site' => $site['symbol'], 'equipment' => self::equipment($ship), 'sample_count' => count($samples), 'oldest_at' => $samples ? min(array_column($samples, 'at')) : null];
                             $candidate['estimates'] = app(CycleAccounting::class)->forecast($samples);
                             if ($candidate['estimates']['state'] === 'estimate') {

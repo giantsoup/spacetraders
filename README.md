@@ -2,6 +2,8 @@
 
 A Laravel 13, Inertia 3, Vue 3, and Pinia 4 client for SpaceTraders. Register or import an agent, then open its flight deck. The flight deck provides previewed manual commands and opt-in local Mining and Contracts automation.
 
+The [local batch-two integration report](docs/integration-batch2-20261101/README.md) records the combined OPS02, OPS03, ADV01, EXP01, EXP09 and OPT02 implementation and verification. The original six PRs merged only briefs. Their dated branch reports remain historical evidence; their old instructions to update those PRs are superseded by this integration report. Publication and issue acceptance remain pending.
+
 ## Design direction
 
 Use the [design brief](docs/design-brief.md) for new UI work. It records the approved dark, phone-first screen family, shared visual rules, ship-report interactions, and gameplay safeguards. The [interactive redesign report](docs/single-ship-redesigns.html) and screenshots in `docs/design-reference/` provide the visual references. Horizon is the recommended starting point, with Logbook and Voyage retained as alternatives. These are design references; the current app styling is described in [app-styling.md](docs/app-styling.md).
@@ -250,7 +252,7 @@ Confirmed receipts, acquisitions, fuel spending and operating cash contribution 
 
 ### Prepare a later local cutover
 
-These are instructions for a separately authorized installation, not changes made by verification. Keep Herd as the HTTP server. Stop and settle earlier terminal workers before cutover. Back up SQLite with its matching application key and verify restoration on a disposable copy. Apply both additive `2026_11_01` migrations to the chosen database. Do not change the existing key.
+These are instructions for a separately authorized installation, not changes made by verification. Keep Herd as the HTTP server. Stop and settle earlier terminal workers before cutover. Back up SQLite with its matching application key and verify restoration on a disposable copy. Review and apply the pending additive `2026_11_01` migrations to the chosen database, including adviser policies. Do not change the existing key.
 
 Configure the verified PHP 8.5.12 executable, exact Herd host, local operator user ID and an absolute SQLite path. Obtain the native path with `"$PHP_BIN" -r 'echo PHP_BINARY, PHP_EOL;'`. Installation runs the same exact-patch preflight before registering this checkout's service. Set `SPACETRADERS_LOCAL_ENGINE_ENABLED=true`; set `SPACETRADERS_AUTOMATION_ENABLED=true` only when run approval should be available. The same database and private lock directory must be used by web and worker processes. Retain empty `SPACETRADERS_FIXTURE_PATH` only for a separately approved live environment.
 

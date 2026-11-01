@@ -34,6 +34,7 @@ node --check scripts/verify-opportunities-browser.mjs
 node --check scripts/verify-deployment-browser.mjs
 node --check scripts/verify-adviser-browser.mjs
 node --check scripts/verify-exploration-browser.mjs
+node --check scripts/verify-batch2-browser.mjs
 "$php_bin" scripts/verify-environment.php
 "$php_bin" vendor/bin/phpunit --display-all-issues
 "$php_bin" vendor/bin/pint --test \

@@ -283,13 +283,34 @@ class AdviserTest extends TestCase
             'initial_waypoint' => $ship['nav']['waypointSymbol'], 'initial_fuel' => $ship['fuel']['current'], 'at' => now()->toIso8601String()];
         $input['history'] = [array_merge($sample, ['contribution' => 90, 'seconds' => 100]), array_merge($sample, ['contribution' => 60, 'seconds' => 200]), array_merge($sample, ['contribution' => 120, 'seconds' => 150])];
         $record->update(['observations' => $input]);
+        $legacy = $this->assess($policy, $record->fresh());
+        foreach ($this->candidates($legacy, 'mining') as $candidate) {
+            $this->assertNull($candidate['base_net'], 'Cash-only history cannot establish comparable cycle income');
+            $this->assertNull($candidate['conservative_net']);
+        }
+        foreach ($input['history'] as &$entry) {
+            $entry['accounting'] = ['state' => 'estimated_comparable', 'net_after_wear' => $entry['contribution'] - 10];
+        }
+        unset($entry);
+        $record->update(['observations' => $input]);
         $decision = $this->assess($policy, $record->fresh());
         $mining = collect($this->candidates($decision, 'mining'))->firstWhere('classification', 'feasible');
-        $this->assertSame(90, $mining['base_net']);
-        $this->assertSame(60, $mining['conservative_net']);
+        $this->assertSame(80, $mining['base_net']);
+        $this->assertSame(50, $mining['conservative_net']);
         $this->assertSame(200, $mining['conservative_seconds']);
         $this->assertSame('historical_conservative_income_rate', $decision->selection['rule']);
-        $input['history'][0]['contribution'] = -5;
+        $comparable = $input;
+        $input['history'][0]['at'] = now()->addHour()->toIso8601String();
+        $record->update(['observations' => $input]);
+        $future = $this->assess($policy, $record->fresh());
+        $this->assertEmpty(array_filter($this->candidates($future, 'mining'), fn ($c) => $c['classification'] === 'feasible'));
+        $input = $comparable;
+        $input['history'][0]['accounting']['state'] = 'unresolved';
+        $record->update(['observations' => $input]);
+        $incomplete = $this->assess($policy, $record->fresh());
+        $this->assertEmpty(array_filter($this->candidates($incomplete, 'mining'), fn ($c) => $c['classification'] === 'feasible'));
+        $input = $comparable;
+        $input['history'][0]['accounting']['net_after_wear'] = -5;
         $record->update(['observations' => $input]);
         $decision = $this->assess($policy, $record->fresh());
         $this->assertEmpty(array_filter($this->candidates($decision, 'mining'), fn ($c) => $c['classification'] === 'feasible'));

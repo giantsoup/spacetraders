@@ -6,7 +6,7 @@ use Carbon\CarbonImmutable;
 
 class AdviserSelector
 {
-    public const VERSION = 1;
+    public const VERSION = 2;
 
     public static function hash(array $value): string
     {
@@ -89,7 +89,6 @@ class AdviserSelector
 
         $investigation = $evidence['investigation'];
         if ($evidence['mining_candidates'] !== null) {
-            $input = $investigation['observations'];
             foreach ($evidence['mining_candidates'] as $source) {
                 $mining = $make('mining', ['site' => $source['site'], 'market' => $source['market'], 'extractions' => 1, 'cycles' => 1]);
                 $mining['classification'] = match ($source['classification']) {
@@ -104,15 +103,15 @@ class AdviserSelector
                 $mining['duration_seconds'] = $source['duration_seconds'];
                 $mining['trial'] = $source['trial_required'] ?? true;
                 if (! $mining['trial']) {
-                    $samples = $this->samples($source, $input, $ship, $now);
-                    if (count($samples) >= 3) {
-                        $mining['conservative_net'] = min(array_column($samples, 'contribution'));
-                        $mining['conservative_seconds'] = max(array_column($samples, 'seconds'));
-                        $mining['reasons'][] = 'Conservative comparison uses the lowest observed cash contribution and longest observed comparable trip. Historical bounds are not guarantees; wear remains excluded.';
+                    $forecast = $source['estimates'];
+                    if ($forecast['sample_count'] >= 3) {
+                        $mining['conservative_net'] = $forecast['conservative']['net'];
+                        $mining['conservative_seconds'] = $forecast['conservative']['seconds'];
+                        $mining['reasons'][] = 'Conservative comparison uses comparable closed-cycle net after wear. Historical bounds are estimates, not guarantees.';
                     }
                     if ($mining['conservative_net'] === null || $mining['conservative_net'] <= 0) {
                         $mining['classification'] = 'blocked';
-                        $mining['reasons'][] = 'Comparable history does not support positive conservative cash contribution. Refresh or review before another trial.';
+                        $mining['reasons'][] = 'At least three comparable closed cycles with positive conservative net after wear are required. Refresh or review the evidence.';
                     }
                 } elseif (! $terms['allow_trial']) {
                     $mining['classification'] = 'blocked';
@@ -296,13 +295,5 @@ class AdviserSelector
         sort($dates);
 
         return $dates[0] ?? null;
-    }
-
-    private function samples(array $source, array $input, array $ship, CarbonImmutable $now): array
-    {
-        return array_values(array_filter($input['history'] ?? [], fn ($h) => $h['site'] === $source['site'] && $h['market'] === $source['market']
-            && $h['equipment'] === OpportunityEvaluator::equipment($ship) && ($h['quote_signature'] ?? null) === ($source['quote_signature'] ?? null)
-            && ($h['initial_waypoint'] ?? null) === $ship['nav']['waypointSymbol'] && ($h['initial_fuel'] ?? null) === $ship['fuel']['current']
-            && $h['seconds'] > 0 && CarbonImmutable::parse($h['at'])->betweenIncluded($now->subDays(7), $now)));
     }
 }

@@ -176,7 +176,7 @@ async function older() {
                     <h5>{{ readableLabel(candidate.activity) }} · {{ readableLabel(candidate.classification) }}{{ candidate.id === decision.selection.candidate_id ? ' · Selected for review' : '' }}</h5>
                     <p v-if="candidate.question">{{ candidate.question }}</p>
                     <p v-for="reason in candidate.reasons" :key="reason">{{ reason }}</p>
-                    <dl><dt>Base cash contribution</dt><dd>{{ credit(candidate.base_net) }}</dd><dt>Conservative cash contribution</dt><dd>{{ credit(candidate.conservative_net) }}</dd><dt>Maximum debit / committed capital</dt><dd>{{ credit(candidate.max_debit) }}</dd><dt>Estimated time</dt><dd>{{ candidate.duration_seconds === null ? 'Unknown' : `${candidate.duration_seconds}s` }}</dd><dt>Hard activity limit</dt><dd>{{ candidate.max_seconds }}s</dd></dl>
+                    <dl><dt>Base net or recovery receipts</dt><dd>{{ credit(candidate.base_net) }}</dd><dt>Conservative cycle net</dt><dd>{{ credit(candidate.conservative_net) }}</dd><dt>Maximum debit / committed capital</dt><dd>{{ credit(candidate.max_debit) }}</dd><dt>Estimated time</dt><dd>{{ candidate.duration_seconds === null ? 'Unknown' : `${candidate.duration_seconds}s` }}</dd><dt>Hard activity limit</dt><dd>{{ candidate.max_seconds }}s</dd></dl>
                     <details><summary>Stable ID, plan hash and exact bounds</summary><DataDetails :value="candidate" /></details>
                 </article>
             </details>

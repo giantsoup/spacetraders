@@ -6,7 +6,7 @@ import { once } from 'node:events';
 import path from 'node:path';
 import { stopOwnedProcess, waitUntil, withOwnedVerification } from './verification-lifecycle.mjs';
 
-export async function withBrowserVerification({ root, php, output, engine = false, resultFile }, journey) {
+export async function withBrowserVerification({ root, php, output, engine = false, persistentCache = false, resultFile }, journey) {
     return withOwnedVerification({ output, resultFile }, async run => {
         const storage = path.join(run.directory, 'storage');
         for (const child of ['framework/sessions', 'framework/views', 'framework/cache/data', 'logs']) {
@@ -46,7 +46,8 @@ export async function withBrowserVerification({ root, php, output, engine = fals
         await new Promise((resolve, reject) => socket.close(error => error ? reject(error) : resolve()));
         const origin = `http://127.0.0.1:${port}`;
         const env = { ...isolated, ...parsed, APP_URL: origin, SESSION_COOKIE: `verification_${port}`,
-            CACHE_DRIVER: 'array', CACHE_STORE: 'array', SESSION_DRIVER: 'file', LOG_CHANNEL: 'stderr',
+            CACHE_DRIVER: persistentCache ? 'file' : 'array', CACHE_STORE: persistentCache ? 'file' : 'array',
+            CACHE_PATH: `${storage}/framework/cache/data`, SESSION_DRIVER: 'file', LOG_CHANNEL: 'stderr',
             SPACETRADERS_LOCAL_ENGINE_ENABLED: engine ? 'true' : 'false', SPACETRADERS_LOCAL_HOST: '127.0.0.1',
             SPACETRADERS_OPERATOR_ID: '1', SPACETRADERS_PHP_BINARY: execute(['-r', 'echo PHP_BINARY;']) };
         const cli = code => JSON.parse(execute(['-r', `require 'vendor/autoload.php'; $app=require 'bootstrap/app.php'; $app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap(); ${code}`], env));
