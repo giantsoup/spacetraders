@@ -1,0 +1,69 @@
+NULL	101	NULL
+Aria	25	0.34
+CSV	2	0.00
+InnoDB	88	88.11
+Key_blocks_used	0
+Key_read_requests	0
+Key_reads	0
+aria_pagecache_buffer_size	134217728
+slow_query_log	OFF
+opcache.enable_cli => Off => Off
+opcache.jit => disable => disable
+/var/log/sysstat/sa01
+Average:        all      1.41      0.00      0.59      0.02      0.03     97.94
+Average:       178009    345980    391604     39.77     21445    284749   1451916     40.45    359410    255449       445
+Average:         0.55      0.74
+/var/log/sysstat/sa24
+Average:        all      1.37      0.00      0.56      0.02      0.05     97.99
+Average:       161782    337255    409359     41.58     31793    289150   1259558     35.09    343987    300217       344
+Average:         0.17      0.49
+/var/log/sysstat/sa25
+Average:        all      1.38      0.00      0.57      0.02      0.04     97.99
+Average:       158598    360692    392221     39.84     36462    304963   1269162     35.36    361324    286868       323
+Average:         0.25      0.37
+/var/log/sysstat/sa26
+Average:        all      1.38      0.00      0.56      0.01      0.04     98.01
+Average:       169336    366215    389766     39.59     32393    303284   1382514     38.51    329235    310459       284
+Average:         0.38      0.20
+/var/log/sysstat/sa27
+Average:        all      1.34      0.00      0.56      0.01      0.04     98.04
+Average:       174505    364994    390054     39.62     31397    298845   1449791     40.39    333881    301087       329
+Average:         0.22      0.25
+/var/log/sysstat/sa28
+Average:        all      1.59      0.01      0.62      0.02      0.04     97.72
+Average:       181600    319190    409797     41.62     28617    263440   1427136     39.76    361009    259531       601
+Average:         0.78      1.08
+/var/log/sysstat/sa29
+Average:        all      1.60      0.00      0.63      0.02      0.04     97.71
+Average:       161499    345264    387816     39.39     15692    255272   1448418     40.35    306517    270743       277
+Average:         0.44      0.45
+/var/log/sysstat/sa30
+Average:        all      1.48      0.00      0.60      0.02      0.04     97.86
+Average:       173379    314429    373452     37.93     16727    257920   1453652     40.50    351614    218242       318
+Average:         0.52      0.50
+/var/log/sysstat/sa31
+Average:        all      1.46      0.00      0.60      0.01      0.04     97.88
+Average:       179081    339685    384883     39.09     30569    263944   1456948     40.59    380450    218898       329
+Average:         0.39      0.46
+PID=353067
+Pss:               11807 kB
+Swap:              27788 kB
+SwapPss:           27788 kB
+PID=358969
+Pss:               44627 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+PID=359376
+Pss:               38859 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+PID=360242
+Pss:               39755 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+PID=47773
+Pss:               56421 kB
+Swap:             182588 kB
+SwapPss:          182588 kB
+/var/spool/cron/crontabs/deploy:* * * * * if [ -f /var/www/webportfolio/current/artisan ]; then cd /var/www/webportfolio/current && php artisan schedule:run >> /dev/null 2>&1; fi
+/var/spool/cron/crontabs/root:0 3 * * * mysqldump -u webportfolio -p[REDACTED] webportfolio | gzip > /var/backups/webportfolio/webportfolio-$(date +\%F).sql.gz
