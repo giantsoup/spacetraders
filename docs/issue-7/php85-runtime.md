@@ -52,7 +52,7 @@ The FPM probe uses Herd's existing `herd85.sock`, checks the same exact patch, c
 
 `PHP_BIN` is one executable path. `scripts/herd-php` uses Herd's installed `php85`; it accepts quoted arguments and paths containing spaces. `scripts/composer` invokes the Composer PHAR with that same PHP. Set `COMPOSER_BIN` for a nonstandard PHAR location or `HERD_PHP85_BIN` for a nonstandard Herd binary. Do not pass the string `herd php` as an executable name. The runtime regression check tests real execution, stale lock rejection, patch mismatch, argument preservation and a missing binary.
 
-The Ubuntu and macOS CI jobs use read-only repository permissions, immutable action commits, isolated fake-provider resources and the same PHP patch. macOS also runs native engine and Start/Stop browser checks. They do not deploy or receive application credentials. CI execution on hosted runners must be checked independently of local results.
+The Ubuntu and macOS CI jobs use read-only repository permissions, immutable action commits, isolated fake-provider resources and the same PHP patch. macOS also runs native engine and Start/Stop browser checks. They do not deploy or receive application credentials. CI execution on hosted runners must be checked independently of local results. The first workflow failed validation because `runner.temp` is unavailable in job-level environment expressions. The corrected browser path uses `github.workspace`; actionlint 1.7.12 reproduces the original error and passes the correction.
 
 ## Read-only server preflight
 
