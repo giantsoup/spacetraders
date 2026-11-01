@@ -64,6 +64,14 @@ The approved scope and acceptance requirements are in [the migration plan](docs/
 
 ## Early-game MVP
 
+### New player guide
+
+After signing in, open **Player guide** in navigation or **Start the new player guide** on Agents. The ten lessons cover connecting an agent, observing the fleet, choosing a miner, planning fuel and a buyer, travel, extraction, sales, refueling, and reviewing outcomes. The last lesson introduces optional bounded automation and recovery. Mid-game and late-game courses remain future work.
+
+Select an agent in the guide to use its checklist. The flight deck has a collapsible lesson card with the same progress and links to the relevant controls. Checkpoints are player-confirmed learning notes, saved in browser storage per signed-in user, agent, and observed world reset. Preparation has its own checklist. These notes do not run commands or certify gameplay completion. Ship selection stays with the agent in the current browser tab when moving between the guide and flight deck.
+
+Run `node scripts/verify-tutorial.mjs` for progress and course checks. Run `node scripts/verify-tutorial-browser.mjs` with an existing Playwright module via `PLAYWRIGHT_MODULE` and, if needed, `PLAYWRIGHT_EXECUTABLE` or `PLAYWRIGHT_BROWSERS_PATH`. The browser check creates a fresh private offline fixture and a temporary loopback PHP server, uses finite queue-worker sessions, and closes its server and browser afterward. It does not change the checkout’s `.env`, connect to the live API, or spend real credits. It retains its synthetic fixture and writes results and screenshots under `storage/app/mvp-evidence/tutorial` or `QA_ARTIFACT_DIR`.
+
 Open a saved agent to use the responsive dark flight deck. Synchronize explicitly to observe the reset, credits, fleet, waypoints, markets and shipyards. Polling refreshes saved local state only. Discovery is limited to 10 pages per collection, three fleet systems and 24 market/yard reads per synchronization. Unknown prices stay unknown. If a market or yard needs an observer, approve manual orbit and navigation commands to scout it, then synchronize there.
 
 Manual orbit, dock, navigate, refuel, mine, cargo purchase and cargo sale all use expiring previews. Enter a total maximum cost for purchases/refueling, a minimum sale total for sales, and a protected-credit floor. Limits are checked against fresh quotes before execution. SpaceTraders provides no upstream limit-price parameter, so these are estimates rather than guaranteed execution ceilings. Unsupported hard guarantees block spending. Trade-volume, cargo, credits, transit, cooldown and equipment checks run on the server.

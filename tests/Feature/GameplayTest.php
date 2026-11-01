@@ -174,6 +174,25 @@ class GameplayTest extends TestCase
         $this->assertSame(['2026-10-25'], GameObservation::query()->distinct()->pluck('reset_id')->all());
     }
 
+    public function test_synchronizing_observes_arrival_only_after_the_upstream_travel_time(): void
+    {
+        $this->world(function (&$world) {
+            $world['travel_seconds'] = 3600;
+        });
+        $this->command('orbit');
+        $this->command('navigate', ['waypointSymbol' => 'X1-TEST-PORT']);
+        app(AgentSynchronizer::class)->sync($this->agent->fresh());
+        $this->assertSame('IN_TRANSIT', Ship::where('agent_id', $this->agent->id)->first()->snapshot['nav']['status']);
+
+        $this->world(function (&$world) {
+            $world['ships'][0]['nav']['route']['arrival'] = '2020-01-01T00:00:00Z';
+        });
+        app(AgentSynchronizer::class)->sync($this->agent->fresh());
+        $ship = Ship::where('agent_id', $this->agent->id)->first()->snapshot;
+        $this->assertSame('IN_ORBIT', $ship['nav']['status']);
+        $this->assertSame('X1-TEST-PORT', $ship['nav']['waypointSymbol']);
+    }
+
     public function test_manual_endpoints_and_persistent_cargo_credit_outcomes(): void
     {
         $this->assertSame(ActionState::Confirmed, $this->command('buy', ['symbol' => 'IRON_ORE', 'units' => 4, 'maxTotal' => 120, 'reserve' => 1000])->state);

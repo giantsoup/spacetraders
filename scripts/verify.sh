@@ -9,6 +9,8 @@ pnpm_bin="${PNPM_BIN:-pnpm}"
 PNPM_BIN="$pnpm_bin" node scripts/verify-build-sources.mjs
 node scripts/verify-store.mjs
 node scripts/verify-gameplay.mjs
+node scripts/verify-tutorial.mjs
+node --check scripts/verify-tutorial-browser.mjs
 node --check scripts/verify-mvp-browser.mjs
 "$php_bin" scripts/verify-environment.php
 "$php_bin" vendor/bin/phpunit --display-all-issues
@@ -27,6 +29,6 @@ node --check scripts/verify-mvp-browser.mjs
     app/Http/Controllers/ProfileController.php app/Http/Controllers/AutomationRunController.php app/Models app/Providers/AppServiceProvider.php app/Providers/RouteServiceProvider.php \
     config/gameplay.php config/database.php config/queue.php \
     database/migrations/2026_10_31_00000*_*.php \
-    tests/Feature/GameplayTest.php tests/Support tests/TestCase.php \
+    tests/Feature/GameplayTest.php tests/Feature/PlayerGuideTest.php app/Http/Controllers/PlayerGuideController.php tests/Support tests/TestCase.php \
     scripts/mvp-fixture.php scripts/verify-mvp-worker.php scripts/verify-environment.php
 git diff --check

@@ -15,6 +15,13 @@ const props = defineProps(['agents']);
         <div class="py-12">
             <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
 
+                <section class="mb-8 rounded-lg border border-slate-600 bg-slate-900 p-6 text-slate-100" aria-labelledby="new-player-heading">
+                    <p class="text-xs font-semibold tracking-widest text-emerald-300">FLIGHT SCHOOL</p>
+                    <h1 id="new-player-heading" class="mt-2 text-2xl font-semibold">New to SpaceTraders?</h1>
+                    <p class="mt-2 max-w-2xl text-slate-300">Learn how to connect an agent, fly a mining ship, sell your first cargo, and refuel. Follow the tutorial at your own pace alongside the flight deck.</p>
+                    <Link :href="route('guide')" class="mt-4 inline-flex min-h-11 items-center rounded-sm bg-emerald-200 px-4 py-2 font-semibold text-slate-950 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-amber-200">Start the new player guide →</Link>
+                </section>
+
                 <div class="agents-wrapper overflow-hidden shadow-xs sm:rounded-lg">
 
                     <Link :href="route('agents.show', agent.id)" v-for="agent in agents" :key="agent.id"

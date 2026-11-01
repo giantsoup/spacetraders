@@ -5,6 +5,7 @@ use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AgentDashboardController;
 use App\Http\Controllers\AutomationRunController;
 use App\Http\Controllers\ForwarderController;
+use App\Http\Controllers\PlayerGuideController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -32,6 +33,9 @@ Route::get('/', function () {
 });
 
 Route::middleware('auth')->group(function () {
+    Route::get('/guide', [PlayerGuideController::class, 'show'])->name('guide');
+    Route::get('/agents/{agent}/guide', [PlayerGuideController::class, 'show'])->name('agents.guide');
+
     // Only whitelisted public reads remain on the legacy forwarder.
     Route::match(['get', 'post'], '/forward', [ForwarderController::class, 'forward'])->name('forward');
 

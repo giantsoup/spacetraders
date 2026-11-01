@@ -101,6 +101,12 @@ final class FakeSpaceTraders
         $args = $request->data();
         $world['calls'][] = ['method' => $request->method(), 'path' => $path];
         if ($request->method() === 'GET') {
+            foreach ($world['ships'] as &$arriving) {
+                if ($arriving['nav']['status'] === 'IN_TRANSIT' && strtotime($arriving['nav']['route']['arrival']) <= time()) {
+                    $arriving['nav']['status'] = 'IN_ORBIT';
+                }
+            }
+            unset($arriving);
             if ($path === '/') {
                 return [['version' => 'v2.3.0', 'resetDate' => $world['reset']], 200];
             }
@@ -134,10 +140,6 @@ final class FakeSpaceTraders
             if (preg_match('~^/my/ships/([^/]+)$~', $path, $matches)) {
                 foreach ($world['ships'] as &$ship) {
                     if ($ship['symbol'] === $matches[1]) {
-                        if ($ship['nav']['status'] === 'IN_TRANSIT' && strtotime($ship['nav']['route']['arrival']) <= time()) {
-                            $ship['nav']['status'] = 'IN_ORBIT';
-                        }
-
                         return [['data' => $ship], 200];
                     }
                 }

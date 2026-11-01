@@ -30,9 +30,9 @@ defineProps({
             <div v-if="canLogin" class="mt-10 p-6 flex justify-center">
                 <Link
                     v-if="$page.props.auth.user"
-                    :href="route('dashboard')"
+                    :href="route('agents.index')"
                     class="font-semibold text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white focus:outline focus:outline-2 focus:rounded-xs focus:outline-red-500"
-                >Dashboard</Link
+                >Agents</Link
                 >
 
                 <template v-else>
@@ -49,6 +49,11 @@ defineProps({
                     >Register</Link
                     >
                 </template>
+            </div>
+            <div class="mt-6 rounded-lg border border-slate-600 bg-slate-900 p-6 text-center text-slate-100">
+                <h2 class="text-xl font-semibold">Start with your first flight</h2>
+                <p class="mt-2 text-slate-300">Create a client login or sign in, then follow the new player guide from connecting an agent to selling your first cargo.</p>
+                <Link :href="route('guide')" class="mt-4 inline-flex min-h-11 items-center rounded-sm bg-emerald-200 px-4 py-2 font-semibold text-slate-950 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-amber-200">New player guide →</Link>
             </div>
             <div class="mt-16 px-6">
                 <div class="text-center text-sm text-gray-500 dark:text-gray-400">

@@ -4,7 +4,7 @@ import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import TextInput from '@/Components/TextInput.vue';
-import { Head, useForm } from '@inertiajs/vue3';
+import { Head, Link, useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
 
 const form = useForm({
@@ -53,6 +53,11 @@ function toggleForm() {
 
         <div class="py-12">
             <div class="max-w-xl mx-auto sm:px-6 lg:px-8">
+                <aside class="mb-8 rounded-lg border border-slate-600 bg-slate-900 p-5 text-slate-100">
+                    <h1 class="font-semibold">Your client login and game agent are separate</h1>
+                    <p class="mt-2 text-sm text-slate-300">Use an account token to register a new agent, or import an existing agent with its agent token.</p>
+                    <Link :href="route('guide')" class="mt-3 inline-flex min-h-11 items-center text-emerald-200 underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-amber-200">Read the step-by-step player guide →</Link>
+                </aside>
                 <form v-if="showExistingForm" @submit.prevent="fetchAndSaveAgent">
                     <div>
                         <InputLabel for="token" value="Agent token" />

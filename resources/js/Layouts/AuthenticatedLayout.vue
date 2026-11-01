@@ -32,6 +32,9 @@ const showingNavigationDropdown = ref(false);
                                 <NavLink :href="route('agents.index')" :active="route().current('agents.index')">
                                     Agents
                                 </NavLink>
+                                <NavLink :href="route('guide')" :active="route().current('guide') || route().current('agents.guide')">
+                                    Player guide
+                                </NavLink>
                             </div>
                         </div>
 
@@ -76,7 +79,11 @@ const showingNavigationDropdown = ref(false);
                         <!-- Hamburger -->
                         <div class="-mr-2 flex items-center sm:hidden">
                             <button
+                                type="button"
                                 @click="showingNavigationDropdown = !showingNavigationDropdown"
+                                :aria-expanded="showingNavigationDropdown"
+                                aria-controls="account-navigation"
+                                aria-label="Toggle navigation"
                                 class="inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-hidden focus:bg-gray-100 focus:text-gray-500 transition duration-150 ease-in-out"
                             >
                                 <svg class="h-6 w-6" stroke="currentColor" fill="none" viewBox="0 0 24 24">
@@ -108,12 +115,16 @@ const showingNavigationDropdown = ref(false);
 
                 <!-- Responsive Navigation Menu -->
                 <div
+                    id="account-navigation"
                     :class="{ block: showingNavigationDropdown, hidden: !showingNavigationDropdown }"
                     class="sm:hidden"
                 >
                     <div class="pt-2 pb-3 space-y-1">
                         <ResponsiveNavLink :href="route('agents.index')" :active="route().current('agents.index')">
                             Agents
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink :href="route('guide')" :active="route().current('guide') || route().current('agents.guide')">
+                            Player guide
                         </ResponsiveNavLink>
                     </div>
 
