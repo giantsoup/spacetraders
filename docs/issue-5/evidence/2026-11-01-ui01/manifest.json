@@ -1,0 +1,104 @@
+{
+  "baseline": "4bf70d7ce98c340f3ded63666876d265bbb9b1a0",
+  "reusedImplementation": "da1da847e6c2234331317b98ced76afe0bc2b745",
+  "runtime": {
+    "php": "8.4.27",
+    "node": "26.13.0",
+    "pnpm": "12.16.1",
+    "chrome": "156.0.8078.76"
+  },
+  "comparison": {
+    "origin": "http://127.0.0.1:49766/agents/1",
+    "sameOwnedFixture": true,
+    "ship": "LOCAL-1",
+    "state": "IN_TRANSIT",
+    "fuel": [
+      100,
+      100
+    ],
+    "cargo": [
+      0,
+      40
+    ],
+    "arrivalUtc": "2026-11-01T23:00:00Z",
+    "viewports": [
+      [
+        375,
+        548
+      ],
+      [
+        390,
+        844
+      ]
+    ],
+    "source": "T3 preview PNGs, captured before integration and after the final application code"
+  },
+  "backend": {
+    "baselineTests": 293,
+    "baselinePassed": true,
+    "currentTests": 296,
+    "currentAssertions": 1557,
+    "currentFailures": 1,
+    "unresolvedGate": "QA01 OpportunityTest.php:561"
+  },
+  "files": {
+    "action-uncertain.png": "395486a1b0d917ec7330dde04809bf9759463b1fc3ad5104668d91e6d933e91d",
+    "after-report-systems-390x844.png": "325c3581d878310e725929ac7e10db9f79226d0d7433224264683df48acfd8c2",
+    "after-transit-375x548.png": "ca765987c8120bce9bd204e28e9498263f4c0be93d7b8d928e7180d793086d7f",
+    "after-transit-390x844.png": "423ab8878471d4a7044013e2a2856cfc098b9e3588582e56cb7ec5d069de679c",
+    "agents-results.json": "b06b8dc3d377f5a65fcee39e08d92ffd00613652f1ac722d092e3b9bccabf24c",
+    "agents.log": "d9f28cc78576e893305e1e37d99894bdfea9a3217a58307abc15f8829120d976",
+    "arrival-due.png": "dc662d9a29bf0d50cb5b2a7fa530d7f654e7a9f999dd61d1ce329b87711f54f2",
+    "automation-results.json": "d55babe47129a4b7b57c00b9b03aa29d6ae93a1f7649a8922aa770c40404a6fb",
+    "automation.log": "714e85ec089a628c9dfce39a835341ae1328381c4405166a152fd0a20f0db923",
+    "baseline-tests.log": "cf940dc4bec60c5564d139f8b04e0b903dc7230f573ce3567cffb080fecfdaff",
+    "before-transit-375x548.png": "a0e3a5eeb37c6b5295563357922d24c0341d624012b41fa92caef268b948e77e",
+    "before-transit-390x844.png": "a6a10c70274b13cc4d6346563c352090382f0eaf775ba6aa0c12ed1c4d2bf9de",
+    "command-approval.png": "8ac4671a4ae69edfe8bf415fa565be48d2acf60c374fcd02c7f8cf6ad3bee036",
+    "composer-validate.log": "43add299dc97ecbd90ec2dc456ef5a0bd824bb9abdae2a3d7cdb520e21f8e86d",
+    "enlarged-text.png": "e671674f9bd545d6b2c0ac823793a5d2d6dc93db2fbe02c13322ed5f380d94de",
+    "guided-mining-results.json": "516bb7c0ac7a8d10c4bcadf73439ef4d7dea18273c8673e6f80af9874fa679e9",
+    "guided-mobile.png": "ba0bd3c7c8169310127674682edbdbe9388252cf021fe55e17b002fcb3b908a1",
+    "guided-preparation-results.json": "71ec81b0f60b362d43e22abdc28682d6d9e29631b6f3b947759aaebf695962f0",
+    "guided-preparation.log": "b4f84bb0e37a64aff1213eaad052fa543bd04f19f77d02e485b611b4d4582c10",
+    "guided-recovery-results.json": "d8109bf0f85abf31fbb26b8f00aab8ddd82e02347d2839c74a01f214c3b973dd",
+    "guided-recovery.log": "00509d9f6556cac271c5132d623336ea19a6ab89762d7064009c754c399c3d55",
+    "guided-rejected-results.json": "e1ca09f30a6dddb9ccca3b77ff8fb5a3aea0471e8e8e6b8c350a90fb3325ca0b",
+    "guided-rejected.log": "f73eb3da1c145e2c12eb06706662022a31519d8c9573dd8e82f05ba61d9f875e",
+    "guided-scroll-results.json": "345c2e648d5ff5c6b2618feb622cdf12778b6750d66b293c2f6d50142bedebc2",
+    "guided-scroll.log": "d7bc00e58e79c3251f042409c51a7d43279f1e0aa8b15ce93f2a63b388e2352a",
+    "guided-setup-results.json": "38d501274338734cccb77027be8d21843e6f0c7059ca0c240416925c2389002e",
+    "guided-setup.log": "ead531f193dd33189843359cf640c747aeed5228b8eb3e021ef39bc91a6ddd9b",
+    "guided-uncertain-results.json": "285433c86632d1abc1e1cea3b6f4939cbf06044368b7bf23f59897b5f45559a8",
+    "guided-uncertain.log": "f0ed69f1f1bb9aac40ec4f79afae4f65788501df2d2f4100780bb74a2359a32e",
+    "guided.log": "ccbc93867237becc40de136f4f69f072c3e33452943c522f69c4fc0f44ee7db3",
+    "https-results.json": "d6ee5375a5652e40559fea4d5b7946de2af70526106d48fac668b5dffd20ace8",
+    "https.log": "84896db079190157ac1d8a9765a0f07f9920b334c6bcded42e7a36c5b95b1a8e",
+    "long-844.png": "bfe827e4873b91dc1a0f547a55c1392f22c310185bee81df8960bf617ce70cff",
+    "missing-fields.png": "56ceddebb823959ef6840a65a77c5845688278e150d7e566be3f488813d52fca",
+    "mvp-worker.log": "0731fc067b7485d9ba14b6b4ad51828da2fbef3a21cd621aa4edd30d58cc4fce",
+    "native-browser-initial-failure.log": "5a7c016a0046022b724fff4397e61da35b3c2ea11cf1f578d109e619a13621bc",
+    "native-browser-results.json": "3c4fbfa4bca0e0e1aeb0a7514f5a43a693432c77c6dda3d8e37ee1536026316c",
+    "opportunities-results.json": "8145a01fcb902f6d8ecaf06add5e527f425b91844e2096b4a077004331a4fe12",
+    "opportunities.log": "c2de053373047a08166952896a99c367889afff72a34ec24d9527f766b9390ed",
+    "pages-results.json": "a209a79f9260cd82bceba0a4ef3fa27dbca842f9ab7dc81082b7260d0cce67c4",
+    "pages.log": "b6000e5c84da56305382a71173c69182623350c0dd8309b42065fb9d5b7499fa",
+    "pint.log": "9fa3c401d4d7dcf9d616a4e847f09d73bafe2397e5f1b5b77531e2516436ed5a",
+    "platform.log": "b0d8c8c509a88a87f40ca13b4e81e7f769f78766170c68cd8efd9f36383e3af6",
+    "presentation-results.json": "43fbfde3a38f96907a3d4889783a2305cb51689af453f48b2468e18d9911c61f",
+    "presentation.log": "34a6c19217207a46550d66bc13c9c47d0daa73b79c5b6cfe3422e1cdeadd2ec9",
+    "qa01-baseline-focused.log": "ab0594198ad485ef81e54b7d04a183e392a724acb1edac862bcc9015f6d8161e",
+    "qa01-baseline-repeated.log": "63b15612ada545cd506b0d59b9757f4b25c263b54f2151e26cb4a91b88efa85d",
+    "qa01-focused.log": "00cd12b5a6b9f72db109d78bc191736efb2943fce1cfaa1928ecc58410ed9012",
+    "qa01-reproduction.txt": "b9f74b70e6b7f7f0791c25727f1ad1ac8c334bf178a09da43fe6484108756e40",
+    "report-cargo.png": "a6ed5e6f7883e1efd19f91ec7d6482c7289bf35fb9286bd5177a232f55a9592a",
+    "run-stop-requested.png": "f8f36d78921a8f9d3dbe625ad27ec614ce686b2088bca90112f343bae38cd074",
+    "transit-320x667.png": "d69db3456e4dda9abf3da05b3731dfbe9809c5fbba6a3bada83e2d14be124071",
+    "tutorial-initial-failure.log": "26c1e7dcd3c9dc2666e0a62e2b3e41697e7a5994f80c76d5c2ed90f4dd452030",
+    "tutorial-results.json": "3017181bae6f1d221ab62cda63f5e8a3f07d6cfc09c01a1b2235a0086ca31fb8",
+    "tutorial.log": "fecb7526793468e97bf7a580efb1ab513e8c8a74670b8ec0a6e2b98aedcc3582",
+    "verify.log": "1435258dc0a30250744a9cec0536621d24c29126b5e7b01f6b890e9692b26203",
+    "workers.log": "a93760f161e5740c1a5bb2531eb3ad19085ed8c2083b79b44ee1c0dbbb89cda3"
+  },
+  "sourceAndBuildDiffSha256": "e33df7c7c3ad996f23b335eecad6fba3f11dee7b6c3b04e1d3b9b071dc6a475f"
+}

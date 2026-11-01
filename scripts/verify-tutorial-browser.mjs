@@ -238,6 +238,7 @@ try {
         await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Player guide', exact: true }).click();
         await page.waitForURL('**/guide');
         await page.getByRole('navigation', { name: 'Tutorial agent' }).getByRole('link', { name: 'LOCAL', exact: true }).click();
+        await page.waitForURL(agentGuide);
         await choose('sell');
         assert.equal(await page.locator('.guide-page').evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(7, 13, 23)');
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);

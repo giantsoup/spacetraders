@@ -1,0 +1,33 @@
+{
+  "status": "pass",
+  "scenario": "scroll",
+  "steps": [
+    {
+      "kind": "read",
+      "title": "Your guided first trip",
+      "phase": "welcome"
+    },
+    {
+      "kind": "sync",
+      "title": "Click Synchronize",
+      "phase": "sync"
+    },
+    {
+      "scenario": "free scroll across timer ticks and fleet polling",
+      "width": 1440,
+      "position": 0
+    },
+    {
+      "scenario": "free scroll across timer ticks and fleet polling",
+      "width": 390,
+      "position": 93
+    },
+    {
+      "scenario": "New instruction still highlights and explicit show control remains available"
+    }
+  ],
+  "errors": [],
+  "responses": [],
+  "browser": "156.0.8078.76",
+  "failure": null
+}

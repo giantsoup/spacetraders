@@ -1,0 +1,13 @@
+{
+  "passed": false,
+  "steps": [],
+  "layouts": 3,
+  "errors": [
+    "500 /agents/1"
+  ],
+  "failure": "locator.waitFor: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('#ship-title') to be visible\u001b[22m\n\n    at update ([workspace]/scripts/verify-native-ship-browser.mjs:68:66)\n    at async file://[workspace]/scripts/verify-native-ship-browser.mjs:86:9",
+  "browser": "156.0.8078.76",
+  "origin": "http://127.0.0.1:50315",
+  "fixture": "[owned-temporary-fixture]",
+  "output": "[workspace]/storage/app/mvp-evidence/native-ui/browser"
+}

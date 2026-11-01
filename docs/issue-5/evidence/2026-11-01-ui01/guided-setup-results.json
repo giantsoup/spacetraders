@@ -1,0 +1,223 @@
+{
+  "status": "pass",
+  "scenario": "setup",
+  "steps": [
+    {
+      "kind": "read",
+      "title": "Your guided first trip",
+      "phase": "welcome"
+    },
+    {
+      "kind": "sync",
+      "title": "Click Synchronize",
+      "phase": "sync"
+    },
+    {
+      "kind": "plan",
+      "title": "Review your exact route",
+      "phase": "plan"
+    },
+    {
+      "kind": "read",
+      "title": "Inspect LOCAL-1",
+      "phase": "briefing"
+    },
+    {
+      "kind": "field",
+      "title": "Set Protected credits to 1000",
+      "phase": "outbound"
+    },
+    {
+      "kind": "field",
+      "title": "Set Mining site to X1-TEST-ROCK",
+      "phase": "outbound"
+    },
+    {
+      "kind": "field",
+      "title": "Set Sale and refueling market to X1-TEST-ROCK",
+      "phase": "outbound"
+    },
+    {
+      "kind": "field",
+      "title": "Set Observed shipyard offer to 0",
+      "phase": "outbound"
+    },
+    {
+      "kind": "field",
+      "title": "Set Maximum cost / minimum sale total to 20000",
+      "phase": "outbound"
+    },
+    {
+      "kind": "preview",
+      "title": "Click Preview one-time miner purchase",
+      "phase": "outbound"
+    },
+    {
+      "kind": "approve",
+      "title": "Review and approve buy_ship",
+      "phase": "outbound"
+    },
+    {
+      "kind": "sync",
+      "title": "Click Synchronize",
+      "phase": "sync"
+    },
+    {
+      "kind": "plan",
+      "title": "Review your exact route",
+      "phase": "plan"
+    },
+    {
+      "kind": "select",
+      "title": "Select LOCAL-2",
+      "phase": "briefing"
+    },
+    {
+      "kind": "read",
+      "title": "Inspect LOCAL-2",
+      "phase": "briefing"
+    },
+    {
+      "kind": "read",
+      "title": "Mining site reached",
+      "phase": "outbound"
+    },
+    {
+      "kind": "field",
+      "title": "Set Protected credits to 1000",
+      "phase": "extract"
+    },
+    {
+      "kind": "preview",
+      "title": "Click Preview orbit",
+      "phase": "extract"
+    },
+    {
+      "kind": "approve",
+      "title": "Review and approve orbit",
+      "phase": "extract"
+    },
+    {
+      "kind": "field",
+      "title": "Set Protected credits to 1000",
+      "phase": "extract"
+    },
+    {
+      "kind": "preview",
+      "title": "Click Preview mining",
+      "phase": "extract"
+    },
+    {
+      "kind": "approve",
+      "title": "Review and approve mine",
+      "phase": "extract"
+    },
+    {
+      "kind": "field",
+      "title": "Set Protected credits to 1000",
+      "phase": "inbound"
+    },
+    {
+      "kind": "preview",
+      "title": "Click Preview docking",
+      "phase": "inbound"
+    },
+    {
+      "kind": "approve",
+      "title": "Review and approve dock",
+      "phase": "inbound"
+    },
+    {
+      "kind": "sync",
+      "title": "Click Synchronize",
+      "phase": "marketSync"
+    },
+    {
+      "kind": "field",
+      "title": "Set Protected credits to 1000",
+      "phase": "sell"
+    },
+    {
+      "kind": "field",
+      "title": "Set Trade good to Copper Ore",
+      "phase": "sell"
+    },
+    {
+      "kind": "field",
+      "title": "Set Quantity / refuel tank units to 4",
+      "phase": "sell"
+    },
+    {
+      "kind": "field",
+      "title": "Set Maximum cost / minimum sale total to 120",
+      "phase": "sell"
+    },
+    {
+      "kind": "preview",
+      "title": "Click Preview cargo sale",
+      "phase": "sell"
+    },
+    {
+      "kind": "approve",
+      "title": "Review and approve sell",
+      "phase": "sell"
+    },
+    {
+      "kind": "field",
+      "title": "Set Protected credits to 1000",
+      "phase": "sell"
+    },
+    {
+      "kind": "field",
+      "title": "Set Trade good to Copper Ore",
+      "phase": "sell"
+    },
+    {
+      "kind": "field",
+      "title": "Set Quantity / refuel tank units to 4",
+      "phase": "sell"
+    },
+    {
+      "kind": "field",
+      "title": "Set Maximum cost / minimum sale total to 120",
+      "phase": "sell"
+    },
+    {
+      "kind": "preview",
+      "title": "Click Preview cargo sale",
+      "phase": "sell"
+    },
+    {
+      "kind": "approve",
+      "title": "Review and approve sell",
+      "phase": "sell"
+    },
+    {
+      "kind": "read",
+      "title": "All extracted cargo sold",
+      "phase": "sell"
+    },
+    {
+      "kind": "read",
+      "title": "Fuel tank ready",
+      "phase": "refuel"
+    },
+    {
+      "kind": "read",
+      "title": "Review your confirmed results",
+      "phase": "review"
+    },
+    {
+      "kind": "complete",
+      "title": "Guided first trip complete",
+      "phase": "complete"
+    },
+    {
+      "scenario": "Finish tutorial dismisses banners, restores controls and preserves completed history after reload"
+    }
+  ],
+  "errors": [],
+  "responses": [],
+  "browser": "156.0.8078.76",
+  "failure": null
+}

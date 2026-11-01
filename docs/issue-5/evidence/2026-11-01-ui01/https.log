@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "steps": [
+    "Login, Agents to ship, Report, CSRF-protected manual preview, shared Menu to guide and all build assets use forwarded HTTPS on an owned loopback TLS proxy."
+  ],
+  "errors": [],
+  "browser": "156.0.8078.76",
+  "fixture": "[owned-temporary-fixture]",
+  "output": "[workspace]/storage/app/mvp-evidence/native-ui/https"
+}

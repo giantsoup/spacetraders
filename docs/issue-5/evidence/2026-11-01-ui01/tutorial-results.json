@@ -1,0 +1,15 @@
+{
+  "status": "pass",
+  "results": [
+    "login, normal guide entry, keyboard focus and preparation persistence",
+    "agent-scoped progress, lesson links, flight-deck checklist and real manual mining loop",
+    "complete, undo, resume, reset cancellation and confirmed checklist reset",
+    "agent/reset boundaries, malformed and unavailable storage, cross-tab updates",
+    "dark appearance, mobile reflow, reference keyboard interaction and narrow flight deck"
+  ],
+  "errors": [],
+  "badResponses": [],
+  "browser": "Chromium 156.0.8078.76",
+  "provider": "Owned offline FakeSpaceTraders",
+  "failure": null
+}

@@ -67,7 +67,7 @@ try {
         cli(`$ship=App\\Models\\Ship::first(); $ship->update(['snapshot'=>json_decode(base64_decode('${encoded}'),true),'symbol'=>json_decode(base64_decode('${encoded}'),true)['symbol'],'observed_at'=>now()->subSeconds(${age})]); App\\Models\\Agent::first()->update(['connection_state'=>'${connection}']); echo '{}';`);
         await page.goto(deck); await page.locator('#ship-title').waitFor();
     };
-    const capture = async name => { await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))); await page.screenshot({ path: path.join(output, `${name}.png`), animations: 'disabled' }); };
+    const capture = async (name, fullPage = false) => { await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))); await page.screenshot({ path: path.join(output, `${name}.png`), animations: 'disabled', fullPage }); };
     const fit = async (state, width, height) => {
         await page.setViewportSize({ width, height });
         const boxes = await page.locator('.resource-row:not(.systems-row), .home-action > button, .ship-identity').evaluateAll(elements => elements.map(el => {
@@ -170,10 +170,10 @@ try {
     await capture('zero-fuel-capacity');
     const long = structuredClone(initial); long.symbol = 'LOCAL_WITH_A_VERY_LONG_SHIP_SYMBOL-123456789'; long.nav.waypointSymbol = 'X1-VERY-LONG-WAYPOINT-SYMBOL-123456789'; await update(long);
     for (const [width,height] of [[844,390],[1440,1000],[320,667]]) {
-        await page.setViewportSize({width,height}); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),true); await page.locator('.cargo-row').scrollIntoViewIfNeeded(); await capture(`long-${width}`);
+        await page.setViewportSize({width,height}); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),true); await page.locator('.cargo-row').scrollIntoViewIfNeeded(); await capture(`long-${width}`, true);
     }
     await page.addStyleTag({content: 'html { font-size: 24px; } .app-shell, .app-button, .resource-row, .home-link { font-size: 24px; }'});
-    await page.locator('.cargo-row').scrollIntoViewIfNeeded(); await page.locator('.cargo-row').click(); await button('Done').click(); await capture('enlarged-text');
+    await page.locator('.cargo-row').scrollIntoViewIfNeeded(); await page.locator('.cargo-row').click(); await button('Done').click(); await capture('enlarged-text', true);
     cli("App\\Models\\Ship::query()->delete(); echo '{}';"); await page.goto(deck); await page.getByText('No ship observed', {exact:true}).waitFor(); await button('Refresh observations').waitFor(); await capture('no-ship');
     cli("App\\Models\\Agent::first()->update(['connection_state'=>'reset']); echo '{}';"); await page.reload(); await page.getByText('Archived agent · World reset.', {exact:false}).waitFor(); await shipView(page,'commands'); assert.equal(await page.locator('#manual fieldset').evaluate(el=>el.disabled),true); await capture('archived');
     steps.push('Missing fields, zero-capacity fuel, long symbols, landscape/wide/enlarged text scrolling, no-ship and archive states verified.');
