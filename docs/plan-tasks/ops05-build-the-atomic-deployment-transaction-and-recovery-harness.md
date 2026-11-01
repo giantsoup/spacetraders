@@ -4,13 +4,14 @@ Plan audit task **OPS05**. Status: unimplemented deployment tooling. Audited loc
 
 ## Source requirements
 
-- `docs/server-deployment-plan.md:69`, reviewed local plan published with DOC01.
-- `docs/server-deployment-plan.md:124`, reviewed local plan published with DOC01.
-- `docs/server-deployment-plan.md:134`, reviewed local plan published with DOC01.
+- [docs/server-deployment-plan.md:69](https://github.com/giantsoup/spacetraders/blob/plan/doc01-reconcile-automation-documentation-and-cooldown-preview-wording/docs/server-deployment-plan.md#L69)
+- [docs/server-deployment-plan.md:124](https://github.com/giantsoup/spacetraders/blob/plan/doc01-reconcile-automation-documentation-and-cooldown-preview-wording/docs/server-deployment-plan.md#L124)
+- [docs/server-deployment-plan.md:134](https://github.com/giantsoup/spacetraders/blob/plan/doc01-reconcile-automation-documentation-and-cooldown-preview-wording/docs/server-deployment-plan.md#L134)
 
 ## Verified gap
 
 - No release receiver, immutable release switch, deployment transaction, rollback or failure-injection harness exists.
+- The transaction harness can use a synthetic artifact before CI is wired; CI then runs the harness. This ordering avoids a dependency cycle.
 
 ## Acceptance
 
@@ -21,7 +22,7 @@ Plan audit task **OPS05**. Status: unimplemented deployment tooling. Audited loc
 
 ## Dependencies
 
-OPS03, OPS04, OPS06, OPS09
+[OPS03](https://github.com/giantsoup/spacetraders/issues/11), [OPS06](https://github.com/giantsoup/spacetraders/issues/17), [OPS09](https://github.com/giantsoup/spacetraders/issues/23)
 
 ## Execution boundary
 
