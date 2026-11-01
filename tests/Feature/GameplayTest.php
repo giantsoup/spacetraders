@@ -5,10 +5,10 @@ namespace Tests\Feature;
 use App\Enums\ActionState;
 use App\Enums\RunState;
 use App\Gameplay\AgentSynchronizer;
+use App\Gameplay\AutomationRunner;
 use App\Gameplay\GameException;
 use App\Gameplay\HostLock;
 use App\Gameplay\MiningPlanner;
-use App\Gameplay\MiningRunner;
 use App\Gameplay\ShipCommandExecutor;
 use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
@@ -100,18 +100,18 @@ class GameplayTest extends TestCase
 
     private function miningRun(array $overrides = []): AutomationRun
     {
-        $run = app(MiningRunner::class)->preview($this->agent->fresh(), 'LOCAL-1', array_merge([
+        $run = app(AutomationRunner::class)->preview($this->agent->fresh(), 'LOCAL-1', array_merge([
             'site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-ROCK', 'reserve' => 1000,
             'max_spend' => 100, 'max_loss' => 100, 'minutes' => 60, 'cycles' => 1,
         ], $overrides));
-        app(MiningRunner::class)->start($this->agent->fresh(), $run);
+        app(AutomationRunner::class)->start($this->agent->fresh(), $run);
 
         return $run->fresh();
     }
 
     private function advance(AutomationRun $run): void
     {
-        app(MiningRunner::class)->advance($run->id);
+        app(AutomationRunner::class)->advance($run->id);
         foreach (ShipAction::where('state', 'pending')->get() as $action) {
             app(ShipCommandExecutor::class)->execute($action->id);
         }
@@ -337,7 +337,7 @@ class GameplayTest extends TestCase
     public function test_stop_offline_and_pending_action_prevent_mutation_then_allow_takeover(): void
     {
         $run = $this->miningRun();
-        app(MiningRunner::class)->advance($run->id); // reserved pending orbit
+        app(AutomationRunner::class)->advance($run->id); // reserved pending orbit
         $action = ShipAction::where('state', 'pending')->firstOrFail();
         $this->postJson(route('game.runs.stop', ['agent' => $this->agent->id, 'run' => $run->id]))->assertAccepted();
         $this->assertNotNull($run->fresh()->stop_requested_at);
@@ -487,7 +487,7 @@ class GameplayTest extends TestCase
     public function test_single_active_run_stale_preview_and_default_disabled_starts(): void
     {
         $run = $this->miningRun();
-        $this->assertSame($run->id, app(MiningRunner::class)->start($this->agent, $run)->id);
+        $this->assertSame($run->id, app(AutomationRunner::class)->start($this->agent, $run)->id);
         $this->assertSame(1, AutomationRun::whereNotNull('active_agent_id')->count());
         $this->expectException(UniqueConstraintViolationException::class);
         AutomationRun::create(array_merge($run->getAttributes(), ['id' => null]));
@@ -645,7 +645,7 @@ class GameplayTest extends TestCase
         $found = false;
         for ($i = 0; $i < 15; $i++) {
             $run->update(['next_action_at' => now()]);
-            app(MiningRunner::class)->advance($run->id);
+            app(AutomationRunner::class)->advance($run->id);
             $action = ShipAction::where('state', 'pending')->first();
             if ($action) {
                 if ($action->command === 'refuel') {
@@ -702,7 +702,7 @@ class GameplayTest extends TestCase
     public function test_budget_contention_before_transport_retains_pending_without_blocking_run(): void
     {
         $run = $this->miningRun();
-        app(MiningRunner::class)->advance($run->id);
+        app(AutomationRunner::class)->advance($run->id);
         $action = ShipAction::where('state', 'pending')->firstOrFail();
         $held = null;
         Http::globalRequestMiddleware(function ($request) use (&$held) {
@@ -734,7 +734,7 @@ class GameplayTest extends TestCase
             'ship_symbol' => 'LOCAL-1', 'site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-ROCK',
             'reserve' => 1, 'max_spend' => 1, 'max_loss' => 1, 'minutes' => 60, 'cycles' => 1,
         ])->assertUnprocessable()->assertJsonPath('message', 'This route requires a reserve of at least 1000 CR and a fuel spending ceiling of at least 10 CR. Their sum must fit the available 100000 CR.');
-        $runner = app(MiningRunner::class);
+        $runner = app(AutomationRunner::class);
         $run = $runner->preview($this->agent, 'LOCAL-1', ['site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-ROCK', 'reserve' => 2000, 'max_spend' => 100, 'max_loss' => 100, 'minutes' => 60, 'cycles' => 1]);
         GameObservation::where('kind', 'market')->update(['observed_at' => now()->subSeconds(200)]);
         $runner->start($this->agent, $run);
@@ -773,7 +773,7 @@ class GameplayTest extends TestCase
     {
         $run = $this->miningRun();
         $this->world(fn (&$w) => $w['ships'][0]['cooldown']['expiration'] = 'not-a-date');
-        app(MiningRunner::class)->advance($run->id);
+        app(AutomationRunner::class)->advance($run->id);
         $this->assertSame(RunState::Blocked, $run->fresh()->state);
         $this->assertStringContainsString('incompatible', $run->fresh()->blocked_reason);
         $this->assertCount(0, $this->world()['writes']);
@@ -825,12 +825,12 @@ class GameplayTest extends TestCase
     {
         $run = $this->miningRun();
         $this->world(fn (&$w) => $w['failure'] = 'read_'.$status);
-        app(MiningRunner::class)->advance($run->id);
+        app(AutomationRunner::class)->advance($run->id);
         $this->assertSame(RunState::Blocked, $run->fresh()->state);
         $this->assertCount(0, $this->world()['writes']);
         $this->assertGreaterThan(microtime(true), (float) json_decode(DB::table('game_runtime')->where('key', 'request_at')->value('value')));
         $count = count($this->world()['calls']);
-        app(MiningRunner::class)->advance($run->id);
+        app(AutomationRunner::class)->advance($run->id);
         $this->assertCount($count, $this->world()['calls']);
     }
 
@@ -842,13 +842,13 @@ class GameplayTest extends TestCase
     public function test_stop_arriving_while_an_upstream_action_settles_allows_no_next_action(): void
     {
         $run = $this->miningRun();
-        app(MiningRunner::class)->advance($run->id);
+        app(AutomationRunner::class)->advance($run->id);
         $action = ShipAction::where('state', 'pending')->firstOrFail();
         $this->world(fn (&$w) => $w['write_stop_run_id'] = $run->id);
         app(ShipCommandExecutor::class)->execute($action->id);
         $this->assertSame(ActionState::Confirmed, $action->fresh()->state);
         $this->assertNotNull($run->fresh()->stop_requested_at);
-        app(MiningRunner::class)->advance($run->id);
+        app(AutomationRunner::class)->advance($run->id);
         $this->assertSame(RunState::Stopped, $run->fresh()->state);
         $this->assertCount(1, $this->world()['writes']);
     }
@@ -946,7 +946,7 @@ class GameplayTest extends TestCase
     public function test_run_expiring_during_preflight_cannot_reserve_a_write(): void
     {
         $run = $this->miningRun();
-        app(MiningRunner::class)->advance($run->id);
+        app(AutomationRunner::class)->advance($run->id);
         $action = ShipAction::where('state', 'pending')->firstOrFail();
         $run->update(['expires_at' => now()->addSecond()]);
         $action->update(['expires_at' => now()->addMinute()]);
@@ -964,7 +964,7 @@ class GameplayTest extends TestCase
         try {
             app(ShipCommandExecutor::class)->execute($action->id);
             $this->assertSame(ActionState::Rejected, $action->fresh()->state);
-            app(MiningRunner::class)->advance($run->id);
+            app(AutomationRunner::class)->advance($run->id);
             $this->assertSame(RunState::Stopped, $run->fresh()->state);
             $this->assertCount(0, $this->world()['writes']);
         } finally {

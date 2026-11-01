@@ -54,6 +54,9 @@ class GameplayRequest extends FormRequest
                 'minutes' => ['required', 'integer', 'between:1,60'], 'cycles' => ['required', 'integer', 'between:1,10'],
             ];
         }
+        if ($name === 'game.runs.start') {
+            return ['accept_contract' => ['sometimes', 'boolean']];
+        }
         if ($name === 'game.commands.acknowledge') {
             return ['acknowledge' => ['accepted'], 'note' => ['required', 'string', 'min:10', 'max:500']];
         }

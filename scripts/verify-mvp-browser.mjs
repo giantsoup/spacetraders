@@ -223,7 +223,7 @@ try {
 } finally {
     let cleanupError;
     try {
-        const cleanup = cli(`$runs=App\\Models\\AutomationRun::where('agent_id',${auth.agent_id})->whereNotNull('active_agent_id')->get(); foreach($runs as $run){app(App\\Gameplay\\MiningRunner::class)->stop($run);} echo json_encode(['stop_requested_for'=>$runs->modelKeys()]);`);
+        const cleanup = cli(`$runs=App\\Models\\AutomationRun::where('agent_id',${auth.agent_id})->whereNotNull('active_agent_id')->get(); foreach($runs as $run){app(App\\Gameplay\\AutomationRunner::class)->stop($run);} echo json_encode(['stop_requested_for'=>$runs->modelKeys()]);`);
         if (cleanup.stop_requested_for.length) {
             execFileSync(php, ['artisan', 'spacetraders:dispatch-due'], { cwd: root, stdio: 'pipe' });
             execFileSync(php, ['artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, stdio: 'pipe' });

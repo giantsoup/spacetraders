@@ -72,10 +72,37 @@ class CreditAccounting
         $baseline = DB::table('agent_credit_baselines')->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->first();
         $entries = DB::table('confirmed_credit_entries')->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id);
         $confirmed = (int) (clone $entries)->when($baseline, fn ($q) => $q->where('confirmed_at', '>=', $baseline->observed_at))->sum('credits');
-        $change = $baseline && $agent->credits !== null ? $agent->credits - $baseline->credits : null;
+        $change = $baseline && $agent->credits !== null ? $agent->credits - ($baseline->user_starting_credits ?? $baseline->credits) : null;
 
-        return ['baseline' => $baseline ? ['credits' => $baseline->credits, 'source' => $baseline->source, 'observed_at' => $baseline->observed_at] : null,
+        $reviewed = (int) DB::table('agent_balance_reviews')->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->sum('adjustment');
+
+        return ['reviewed_adjustments' => $reviewed, 'baseline' => $baseline ? ['credits' => $baseline->credits, 'source' => $baseline->source, 'user_starting_credits' => $baseline->user_starting_credits, 'user_starting_at' => $baseline->user_starting_at, 'observed_at' => $baseline->observed_at] : null,
             'total_balance_change' => $change, 'confirmed_change' => $confirmed, 'manual_change' => (int) (clone $entries)->whereNull('automation_run_id')->sum('credits'),
-            'unexplained_change' => $change === null ? null : $change - $confirmed];
+            'unexplained_change' => $change === null ? null : $agent->credits - $baseline->credits - $confirmed - $reviewed];
+    }
+
+    public function review(Agent $agent, int $observedBalance, string $note, ?int $startingBalance): array
+    {
+        return app(ShipCommandExecutor::class)->locked($agent, function () use ($agent, $observedBalance, $note, $startingBalance) {
+            app(ShipCommandExecutor::class)->clear($agent);
+            if (AutomationRun::where('agent_id', $agent->id)->whereNotNull('active_agent_id')->exists()) {
+                throw new GameException('Stop and settle the active run before reviewing balance attribution.');
+            }
+            app(AgentSynchronizer::class)->sync($agent, false);
+            if ($agent->credits !== $observedBalance) {
+                throw new GameException('Balance changed since review. Refresh and review again.');
+            }
+            $summary = $this->summary($agent);
+            DB::transaction(function () use ($agent, $observedBalance, $note, $startingBalance, $summary) {
+                if ($startingBalance !== null) {
+                    DB::table('agent_credit_baselines')->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->update(['user_starting_credits' => $startingBalance, 'user_starting_at' => now()]);
+                }
+                if (($summary['unexplained_change'] ?? 0) !== 0) {
+                    DB::table('agent_balance_reviews')->insert(['agent_id' => $agent->id, 'reset_id' => $agent->reset_id, 'adjustment' => $summary['unexplained_change'], 'observed_balance' => $observedBalance, 'note' => $note, 'reviewed_at' => now()]);
+                }
+            });
+
+            return $this->summary($agent);
+        });
     }
 }

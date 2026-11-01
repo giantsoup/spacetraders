@@ -2,7 +2,7 @@
 
 namespace Tests\Support;
 
-use App\Gameplay\MiningRunner;
+use App\Gameplay\AutomationRunner;
 use App\Models\AutomationRun;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
@@ -21,11 +21,19 @@ final class FakeSpaceTraders
             'fuel' => ['current' => 100, 'capacity' => 100], 'cargo' => ['capacity' => 40, 'units' => 0, 'inventory' => []],
             'cooldown' => ['remainingSeconds' => 0, 'expiration' => '2020-01-01T00:00:00Z'],
             'frame' => $part + ['symbol' => 'FRAME_MINER', 'fuelCapacity' => 100, 'moduleSlots' => 5, 'mountingPoints' => 3],
-            'reactor' => $part + ['symbol' => 'REACTOR_FUSION_I', 'powerOutput' => 20], 'engine' => $part + ['symbol' => 'ENGINE_ION_DRIVE_I'],
+            'reactor' => $part + ['symbol' => 'REACTOR_FUSION_I', 'powerOutput' => 20], 'engine' => $part + ['symbol' => 'ENGINE_ION_DRIVE_I', 'speed' => 30],
             'crew' => ['current' => 20, 'capacity' => 20, 'required' => 5],
             'mounts' => [['symbol' => 'MOUNT_MINING_LASER_I', 'strength' => 10, 'deposits' => ['IRON_ORE', 'COPPER_ORE'], 'requirements' => ['power' => 1, 'crew' => 1]]],
             'modules' => [['symbol' => 'MODULE_MINERAL_PROCESSOR_I', 'requirements' => ['power' => 1, 'crew' => 1]], ['symbol' => 'MODULE_CARGO_HOLD_I', 'capacity' => 40, 'requirements' => []]],
         ];
+    }
+
+    public static function contract(string $id = 'contract-1'): array
+    {
+        return ['id' => $id, 'type' => 'PROCUREMENT', 'accepted' => false, 'fulfilled' => false,
+            'expiration' => now()->addHour()->toIso8601String(), 'deadlineToAccept' => now()->addHour()->toIso8601String(),
+            'terms' => ['deadline' => now()->addDay()->toIso8601String(), 'payment' => ['onAccepted' => 100, 'onFulfilled' => 1500],
+                'deliver' => [['tradeSymbol' => 'IRON_ORE', 'destinationSymbol' => 'X1-TEST-PORT', 'unitsRequired' => 10, 'unitsFulfilled' => 0]]]];
     }
 
     public static function world(): array
@@ -45,7 +53,7 @@ final class FakeSpaceTraders
                 ['symbol' => 'X1-TEST-ROCK', 'systemSymbol' => 'X1-TEST', 'type' => 'ASTEROID_FIELD', 'x' => 0, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE'], ['symbol' => 'SHIPYARD']]],
                 ['symbol' => 'X1-TEST-PORT', 'systemSymbol' => 'X1-TEST', 'type' => 'PLANET', 'x' => 3, 'y' => 4, 'traits' => [['symbol' => 'MARKETPLACE']]],
             ],
-            'goods' => $goods, 'offer' => $offer, 'transactions' => [], 'calls' => [], 'writes' => [], 'yields' => [['symbol' => 'IRON_ORE', 'units' => 10], ['symbol' => 'COPPER_ORE', 'units' => 8]],
+            'contracts' => [self::contract()], 'goods' => $goods, 'offer' => $offer, 'transactions' => [], 'calls' => [], 'writes' => [], 'yields' => [['symbol' => 'IRON_ORE', 'units' => 10], ['symbol' => 'COPPER_ORE', 'units' => 8]],
             'travel_seconds' => 0, 'cooldown_seconds' => 0, 'page_size' => 20, 'failure' => null,
         ];
     }
@@ -69,7 +77,7 @@ final class FakeSpaceTraders
                     $world['worker_storage'] = ['pid' => getmypid(), 'synchronous' => (int) DB::selectOne('PRAGMA synchronous')->synchronous, 'fullfsync' => (int) DB::selectOne('PRAGMA fullfsync')->fullfsync];
                 }
                 if ($request->method() === 'POST' && isset($world['write_stop_run_id'])) {
-                    app(MiningRunner::class)->stop(AutomationRun::findOrFail($world['write_stop_run_id']));
+                    app(AutomationRunner::class)->stop(AutomationRun::findOrFail($world['write_stop_run_id']));
                 }
                 $pause = $request->method() === 'POST' && $world['failure'] === 'pause_after';
                 $timeout = $request->method() === 'POST' && $world['failure'] === 'timeout_after';
@@ -118,13 +126,20 @@ final class FakeSpaceTraders
             if ($path === '/my/agent') {
                 return [['data' => ['symbol' => $world['symbol'], 'credits' => $world['credits'], 'accountId' => 'synthetic-account', 'startingFaction' => 'COSMIC']], 200];
             }
-            if ($path === '/my/ships' || preg_match('~/waypoints$~', $path)) {
-                $rows = $path === '/my/ships' ? $world['ships'] : $world['waypoints'];
+            if ($path === '/my/ships' || $path === '/my/contracts' || preg_match('~/waypoints$~', $path)) {
+                $rows = match ($path) {
+                    '/my/ships' => $world['ships'], '/my/contracts' => $world['contracts'], default => $world['waypoints']
+                };
                 $page = (int) ($args['page'] ?? 1);
                 // Deliberately small pages exercise pagination even with few fixtures.
                 $size = $world['page_size'];
 
                 return [['data' => array_slice($rows, ($page - 1) * $size, $size), 'meta' => ['total' => count($rows), 'page' => $page, 'limit' => 20]], 200];
+            }
+            if (preg_match('~^/my/contracts/([^/]+)$~', $path, $m)) {
+                $contract = collect($world['contracts'])->firstWhere('id', $m[1]);
+
+                return $contract ? [['data' => $contract], 200] : [['error' => ['code' => 404]], 404];
             }
             if (str_ends_with($path, '/market')) {
                 $symbol = explode('/', $path)[4];
@@ -153,6 +168,48 @@ final class FakeSpaceTraders
             return [['error' => ['code' => $code, 'message' => 'Never expose raw synthetic error']], $code];
         }
         $world['writes'][] = ['path' => $path, 'arguments' => $args];
+        if (preg_match('~^/my/contracts/([^/]+)/(accept|deliver|fulfill)$~', $path, $m)) {
+            foreach ($world['contracts'] as &$contract) {
+                if ($contract['id'] !== $m[1]) {
+                    continue;
+                }
+                if ($m[2] === 'accept') {
+                    if ($contract['accepted']) {
+                        return [['error' => ['code' => 4500]], 400];
+                    }
+                    $contract['accepted'] = true;
+                    $world['credits'] += $contract['terms']['payment']['onAccepted'];
+                } elseif ($m[2] === 'fulfill') {
+                    if ($contract['fulfilled'] || ! $contract['accepted'] || collect($contract['terms']['deliver'])->contains(fn ($t) => $t['unitsRequired'] !== $t['unitsFulfilled'])) {
+                        return [['error' => ['code' => 4501]], 400];
+                    }
+                    $contract['fulfilled'] = true;
+                    $world['credits'] += $contract['terms']['payment']['onFulfilled'];
+                } else {
+                    foreach ($world['ships'] as &$ship) {
+                        if ($ship['symbol'] !== $args['shipSymbol']) {
+                            continue;
+                        }
+                        foreach ($contract['terms']['deliver'] as &$term) {
+                            if ($term['tradeSymbol'] === $args['tradeSymbol'] && $term['destinationSymbol'] === $ship['nav']['waypointSymbol']) {
+                                $owned = array_column($ship['cargo']['inventory'], 'units', 'symbol')[$args['tradeSymbol']] ?? 0;
+                                if (! $contract['accepted'] || $ship['nav']['status'] !== 'DOCKED' || $args['units'] > min($owned, $term['unitsRequired'] - $term['unitsFulfilled'])) {
+                                    return [['error' => ['code' => 4502]], 400];
+                                }
+                                self::cargo($ship, $args['tradeSymbol'], -$args['units']);
+                                $term['unitsFulfilled'] += $args['units'];
+
+                                return [['data' => ['contract' => $contract, 'cargo' => $ship['cargo']]], 200];
+                            }
+                        }
+                    }
+
+                    return [['error' => ['code' => 4503]], 400];
+                }
+
+                return [['data' => ['contract' => $contract, 'agent' => ['credits' => $world['credits']]]], 200];
+            }
+        }
         if ($path === '/my/ships') {
             $ship = self::ship('LOCAL-'.(count($world['ships']) + 1), $args['waypointSymbol']);
             $world['ships'][] = $ship;

@@ -5,6 +5,7 @@ use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AgentDashboardController;
 use App\Http\Controllers\AutomationRunController;
 use App\Http\Controllers\ForwarderController;
+use App\Http\Controllers\LocalAutomationController;
 use App\Http\Controllers\PlayerGuideController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
@@ -48,6 +49,16 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/agents/{agent}', [AgentDashboardController::class, 'show'])->name('agents.show');
     Route::middleware('throttle:60,1')->group(function () {
+        Route::post('/agents/{agent}/accounting/review', [LocalAutomationController::class, 'reviewBalance'])->name('game.accounting.review');
+        Route::post('/agents/{agent}/investigations', [LocalAutomationController::class, 'investigate'])->name('game.investigations.create');
+        Route::post('/agents/{agent}/investigations/{investigation}/advance', [LocalAutomationController::class, 'advance'])->name('game.investigations.advance');
+        Route::post('/agents/{agent}/investigations/{investigation}/cancel', [LocalAutomationController::class, 'cancel'])->name('game.investigations.cancel');
+        Route::post('/agents/{agent}/drafts', [LocalAutomationController::class, 'stage'])->name('game.drafts.create');
+        Route::post('/agents/{agent}/drafts/{draft}/update', [LocalAutomationController::class, 'stage'])->name('game.drafts.update');
+        Route::post('/agents/{agent}/drafts/{draft}/preview', [LocalAutomationController::class, 'preview'])->name('game.drafts.preview');
+        Route::post('/agents/{agent}/engine/start', [LocalAutomationController::class, 'engineStart'])->name('game.engine.start');
+        Route::post('/agents/{agent}/engine/end', [LocalAutomationController::class, 'engineEnd'])->name('game.engine.end');
+        Route::post('/agents/{agent}/engine/force-stop', [LocalAutomationController::class, 'engineForceStop'])->name('game.engine.force-stop');
         Route::post('/agents/{agent}/sync', [AgentDashboardController::class, 'sync'])->name('game.sync');
         Route::post('/agents/{agent}/commands/preview', [AgentCommandController::class, 'preview'])->name('game.commands.preview');
         Route::post('/agents/{agent}/commands/{action}/approve', [AgentCommandController::class, 'approve'])->name('game.commands.approve');

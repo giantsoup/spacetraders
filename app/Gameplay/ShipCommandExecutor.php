@@ -163,11 +163,11 @@ class ShipCommandExecutor
             $ship['cooldown']['expiration'] = now()->addSeconds($data['cooldown']['remainingSeconds'])->toIso8601String();
         }
         $actualShip = $action->command === 'buy_ship' ? $this->api->shipData($data['ship']) : $this->api->shipData($ship);
-        if (in_array($action->command, ['mine', 'buy', 'sell'], true)) {
+        if (in_array($action->command, ['mine', 'buy', 'sell', 'contract_deliver'], true)) {
             $expected = MiningPlanner::inventory($before['ship']);
             $symbol = $action->command === 'mine' ? $data['extraction']['yield']['symbol'] : $action->arguments['symbol'];
             $units = $action->command === 'mine' ? $data['extraction']['yield']['units'] : $action->arguments['units'];
-            $expected[$symbol] = ($expected[$symbol] ?? 0) + ($action->command === 'sell' ? -$units : $units);
+            $expected[$symbol] = ($expected[$symbol] ?? 0) + (in_array($action->command, ['sell', 'contract_deliver'], true) ? -$units : $units);
             $expected = array_filter($expected);
             $observed = MiningPlanner::inventory($actualShip);
             ksort($expected);
@@ -179,6 +179,17 @@ class ShipCommandExecutor
         if ($action->command === 'navigate' && ($actualShip['nav']['waypointSymbol'] !== $action->arguments['waypointSymbol'] || $actualShip['nav']['systemSymbol'] !== $before['ship']['nav']['systemSymbol'])) {
             throw new GameException('Navigation response does not match the approved destination.', uncertain: true);
         }
+        if (str_starts_with($action->command, 'contract_')) {
+            $expectedContract = $before['contract'];
+            match ($action->command) {
+                'contract_accept' => $expectedContract['accepted'] = true,
+                'contract_fulfill' => $expectedContract['fulfilled'] = true,
+                'contract_deliver' => $expectedContract['terms']['deliver'][$action->arguments['term_index']]['unitsFulfilled'] += $action->arguments['units'],
+            };
+            if ($expectedContract !== $data['contract']) {
+                throw new GameException('Contract response does not match the exact reserved transition.', uncertain: true);
+            }
+        }
         $configurationMismatch = $action->command === 'buy_ship' && $this->configuration($actualShip) !== $this->configuration($before['estimate']['configuration']);
         $credits = $data['agent']['credits'] ?? $before['credits'];
         $price = $data['transaction']['totalPrice'] ?? $data['transaction']['price'] ?? 0;
@@ -186,6 +197,10 @@ class ShipCommandExecutor
         $discrepancy = in_array($action->command, ['buy', 'buy_ship', 'refuel'], true)
             ? $price > ($action->arguments['maxTotal'] ?? 0) || $credits < $before['estimate']['reserve'] || $delta !== -$price
             : ($action->command === 'sell' && ($price < ($action->arguments['minTotal'] ?? 0) || $delta !== $price));
+        if (in_array($action->command, ['contract_accept', 'contract_fulfill'], true)) {
+            $payment = $before['contract']['terms']['payment'][$action->command === 'contract_accept' ? 'onAccepted' : 'onFulfilled'];
+            $discrepancy = $delta !== $payment || $credits < $before['estimate']['reserve'];
+        }
         $discrepancy = $discrepancy || ($action->command === 'refuel' && $actualShip['fuel']['current'] <= $before['ship']['fuel']['current']);
         if (in_array($action->command, ['buy', 'sell'], true) && (($data['transaction']['units'] ?? null) !== $action->arguments['units'] || ($data['transaction']['tradeSymbol'] ?? null) !== $action->arguments['symbol'])) {
             throw new GameException('Trade response does not match the reserved intent.', uncertain: true);
@@ -193,34 +208,15 @@ class ShipCommandExecutor
         DB::transaction(function () use ($agent, $action, $data, $actualShip, $credits, $price, $delta, $discrepancy, $configurationMismatch, $run) {
             $this->sync->saveShip($agent, $actualShip);
             $agent->update(['credits' => $credits, 'synced_at' => now()]);
-            $outcome = ['credit_delta' => $delta, 'transaction_total' => $price, 'yield' => $data['extraction']['yield'] ?? null,
+            $outcome = ['contract' => $data['contract'] ?? null, 'credit_delta' => $delta, 'transaction_total' => $price, 'yield' => $data['extraction']['yield'] ?? null,
                 'units' => $data['transaction']['units'] ?? null, 'price_discrepancy' => $discrepancy, 'delivered_ship' => $data['ship']['symbol'] ?? null, 'configuration_mismatch' => $configurationMismatch];
             $action->update(['state' => ActionState::Confirmed, 'review_required' => $discrepancy, 'outcome' => $outcome, 'settled_at' => now(), 'message' => $discrepancy ? 'Execution differed from approved quote or reserve. Further work is paused.' : 'Confirmed by SpaceTraders.']);
+            app(CreditAccounting::class)->record($agent, $action, $delta);
+            if (isset($data['contract'])) {
+                $this->sync->observe($agent, 'contract', $data['contract']['id'], $data['contract']);
+            }
             if ($run) {
-                $totals = $run->fresh()->totals;
-                $totals['credit_delta'] += $delta;
-                $totals['agent_balance_delta'] = $credits - $run->plan['initial_credits'];
-                $totals['unsold'] = MiningPlanner::inventory($actualShip);
-                if ($action->command === 'mine') {
-                    $yield = $outcome['yield'];
-                    $totals['extracted'][$yield['symbol']] = ($totals['extracted'][$yield['symbol']] ?? 0) + $yield['units'];
-                    $totals['attempts']++;
-                    $totals['phase'] = 'sell';
-                    $totals['no_progress'] = $yield['units'] === 0 ? $totals['no_progress'] + 1 : 0;
-                }
-                if ($action->command === 'sell') {
-                    $symbol = $action->arguments['symbol'];
-                    $totals['sold'][$symbol] = ($totals['sold'][$symbol] ?? 0) + $action->arguments['units'];
-                    $totals['sale_proceeds'] += $price;
-                }
-                if ($action->command === 'refuel') {
-                    $totals['fuel_cost'] += $price;
-                    $totals['fuel_units'] += max(0, $actualShip['fuel']['current'] - $action->before_state['ship']['fuel']['current']);
-                }
-                $run->update(['totals' => $totals, 'next_action_at' => now(), 'heartbeat_at' => now(), 'last_dispatched_at' => null]);
-                if ($discrepancy || $totals['fuel_cost'] > $run->plan['max_spend'] || $totals['no_progress'] >= 1) {
-                    $this->block($run, 'Execution price, spending or no-progress limit reached.');
-                }
+                app(CreditAccounting::class)->apply($run, $action, $actualShip, $outcome, $delta, $price);
             }
         });
         if ($action->command === 'buy_ship' && ($configurationMismatch || app(MiningPlanner::class)->capability($actualShip) !== null)) {
@@ -256,6 +252,10 @@ class ShipCommandExecutor
                 'ship' => $ship, 'fleet' => $this->api->ships($agent), 'transactions' => []];
             if (in_array($action->command, ['sell', 'buy', 'refuel'], true)) {
                 $evidence['transactions'] = $this->api->market($agent, $ship['nav']['waypointSymbol'])['transactions'] ?? [];
+            }
+            $contractId = $action->arguments['contractId'] ?? ($action->automation_run_id ? AutomationRun::find($action->automation_run_id)?->plan['contract_plan']['contract']['id'] ?? null : null);
+            if ($contractId) {
+                $evidence['contract'] = $this->api->contract($agent, $contractId);
             }
             if ($action->command === 'buy_ship') {
                 $evidence['transactions'] = $this->api->shipyard($agent, $action->arguments['waypointSymbol'])['transactions'] ?? [];

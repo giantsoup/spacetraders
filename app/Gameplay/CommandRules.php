@@ -27,13 +27,71 @@ class CommandRules
         if ($active && $active->ship_symbol === $symbol && $active->id !== $run?->id) {
             throw new GameException('Stop automation and settle its action before manual takeover.');
         }
+        if ($run) {
+            $manual = (int) ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereNull('automation_run_id')->where('state', 'confirmed')->get()->sum(fn ($a) => $a->outcome['credit_delta'] ?? 0);
+            if ($agent->credits !== $run->plan['initial_credits'] + $run->totals['credit_delta'] + $manual - ($run->plan['initial_manual_credit_delta'] ?? 0)) {
+                throw new GameException('Unexplained balance change before reservation. Review before a fresh approval.');
+            }
+        }
         $floor = max($arguments['reserve'] ?? 0, $active?->plan['reserve'] ?? 0);
+        if ($active && ! $run) {
+            $floor = max($floor, $active->plan['reserve'] + max(0, $active->plan['max_spend'] - ($active->totals['spending'] ?? $active->totals['fuel_cost'] ?? 0)));
+        }
+        $contract = null;
+        if ($run?->strategy === 'contracts') {
+            $step = $run->plan['contract_plan']['actions'][$run->totals['step_index']] ?? null;
+            $approved = $step['arguments'] ?? [];
+            $given = $arguments;
+            unset($given['reserve']);
+            if (! $step || $step['command'] !== $command || $given !== $approved) {
+                throw new GameException('Command differs from the exact approved contract step.');
+            }
+            $expectedCargo = $run->plan['initial_inventory'];
+            foreach (array_slice($run->plan['contract_plan']['actions'], 0, $run->totals['step_index']) as $prior) {
+                if (in_array($prior['command'], ['buy', 'contract_deliver'], true)) {
+                    $good = $prior['arguments']['symbol'];
+                    $expectedCargo[$good] = ($expectedCargo[$good] ?? 0) + ($prior['command'] === 'buy' ? 1 : -1) * $prior['arguments']['units'];
+                }
+            }
+            $expectedCargo = array_filter($expectedCargo);
+            ksort($expectedCargo);
+            $actualCargo = MiningPlanner::inventory($ship);
+            ksort($actualCargo);
+            if ($expectedCargo !== $actualCargo) {
+                throw new GameException('Contract cargo changed outside approved actions.');
+            }
+            $contract = $this->api->contract($agent, $run->plan['contract_plan']['contract']['id']);
+            if ($contract !== $step['contract_before'] || $contract !== $run->totals['contract']) {
+                throw new GameException('Contract terms or progress changed. Fresh approval required.');
+            }
+            if (now()->addSeconds(120)->gte($contract['terms']['deadline']) || (! $contract['accepted'] && now()->gte($contract['deadlineToAccept'] ?? $contract['expiration']))) {
+                throw new GameException('Contract timing allowance or acceptance deadline reached.');
+            }
+        } elseif (str_starts_with($command, 'contract_')) {
+            throw new GameException('Contract operations require an exact approved contract run.');
+        }
         $cost = 0;
         $estimate = ['credits' => $agent->credits, 'reserve' => $floor, 'cargo_free' => $ship['cargo']['capacity'] - $ship['cargo']['units'], 'quote_limit_warning' => 'Local quotes are estimates. SpaceTraders has no execution-price limit. A changed execution price pauses further work.'];
         if (($arguments['require_guaranteed_price'] ?? false)) {
             throw new GameException('A guaranteed upstream execution-price ceiling is unsupported.');
         }
         switch ($command) {
+            case 'contract_accept':
+                if ($contract['accepted'] || $contract['fulfilled']) {
+                    throw new GameException('Contract is already accepted or fulfilled.');
+                }
+                break;
+            case 'contract_deliver':
+                $term = $contract['terms']['deliver'][$arguments['term_index']] ?? null;
+                if (! $term || ! $contract['accepted'] || $contract['fulfilled'] || $ship['nav']['status'] !== 'DOCKED' || $ship['nav']['waypointSymbol'] !== $term['destinationSymbol'] || $arguments['symbol'] !== $term['tradeSymbol'] || $arguments['units'] > min($term['unitsRequired'] - $term['unitsFulfilled'], MiningPlanner::inventory($ship)[$arguments['symbol']] ?? 0)) {
+                    throw new GameException('Delivery does not fit the approved ship, cargo, destination or remaining requirement.');
+                }
+                break;
+            case 'contract_fulfill':
+                if (! $contract['accepted'] || $contract['fulfilled'] || collect($contract['terms']['deliver'])->contains(fn ($t) => $t['unitsFulfilled'] !== $t['unitsRequired'])) {
+                    throw new GameException('Contract cannot be fulfilled before every delivery is confirmed.');
+                }
+                break;
             case 'navigate':
                 $this->orbit($ship);
                 $target = $this->waypoint($agent, $arguments['waypointSymbol']);
@@ -141,7 +199,11 @@ class CommandRules
             throw new GameException('The quote exceeds the approved spending ceiling or protected reserve.');
         }
 
-        return ['ship' => $ship, 'credits' => $agent->credits, 'estimate' => $estimate];
+        if ($run && $cost > $run->plan['max_spend'] - ($run->totals['spending'] ?? $run->totals['fuel_cost'] ?? 0)) {
+            throw new GameException('Remaining approved spending is insufficient.');
+        }
+
+        return ['contract' => $contract, 'ship' => $ship, 'credits' => $agent->credits, 'estimate' => $estimate];
     }
 
     private function waypoint(Agent $agent, string $symbol): array

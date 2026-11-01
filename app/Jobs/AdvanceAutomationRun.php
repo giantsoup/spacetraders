@@ -2,13 +2,13 @@
 
 namespace App\Jobs;
 
+use App\Gameplay\AutomationRunner;
 use App\Gameplay\GameException;
-use App\Gameplay\MiningRunner;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
 
-class AdvanceMiningRun implements ShouldQueue
+class AdvanceAutomationRun implements ShouldQueue
 {
     use Queueable;
 
@@ -21,7 +21,7 @@ class AdvanceMiningRun implements ShouldQueue
         $this->onConnection('database')->onQueue('spacetraders');
     }
 
-    public function handle(MiningRunner $runner): void
+    public function handle(AutomationRunner $runner): void
     {
         DB::table('game_runtime')->updateOrInsert(['key' => 'worker'], ['value' => json_encode(now()->toIso8601String())]);
         try {

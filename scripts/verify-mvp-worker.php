@@ -5,7 +5,7 @@ require __DIR__.'/../vendor/autoload.php';
 use App\Enums\ActionState;
 use App\Enums\RunState;
 use App\Gameplay\AgentSynchronizer;
-use App\Gameplay\MiningRunner;
+use App\Gameplay\AutomationRunner;
 use App\Gameplay\ShipCommandExecutor;
 use App\Jobs\ExecuteShipCommand;
 use App\Models\AutomationRun;
@@ -72,8 +72,8 @@ $workerStorage = json_decode(file_get_contents($file), true)['worker_storage'];
 check($workerStorage['pid'] !== getmypid() && $workerStorage['synchronous'] === 2 && $workerStorage['fullfsync'] === 1, 'separate queue worker uses FULL and macOS fullfsync');
 check($action->fresh()->state === ActionState::Confirmed, 'persisted manual intent confirmed by a default-queue worker without an explicit queue flag');
 check(count(json_decode(file_get_contents($file), true)['writes']) === 1, 'two workers plus duplicate delivery caused exactly one simulated mutation');
-$run = app(MiningRunner::class)->preview($agent->fresh(), 'LOCAL-1', ['site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-ROCK', 'reserve' => 2000, 'max_spend' => 100, 'max_loss' => 100, 'minutes' => 60, 'cycles' => 1]);
-app(MiningRunner::class)->start($agent, $run);
+$run = app(AutomationRunner::class)->preview($agent->fresh(), 'LOCAL-1', ['site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-ROCK', 'reserve' => 2000, 'max_spend' => 100, 'max_loss' => 100, 'minutes' => 60, 'cycles' => 1]);
+app(AutomationRunner::class)->start($agent, $run);
 for ($i = 0; $i < 12 && $run->fresh()->active_agent_id; $i++) {
     AutomationRun::whereKey($run->id)->update(['next_action_at' => now(), 'last_dispatched_at' => null]);
     Artisan::call('spacetraders:dispatch-due');
@@ -127,9 +127,9 @@ check(count(json_decode(file_get_contents($file), true)['writes']) === $before, 
 $executor->reconcile($agent, $dead);
 $dead->update(['state' => 'rejected', 'message' => 'Synthetic operator acknowledged unresolved sender.']);
 // Durable Stop with no running worker.
-$stopped = app(MiningRunner::class)->preview($agent->fresh(), 'LOCAL-1', ['site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-ROCK', 'reserve' => 2000, 'max_spend' => 100, 'max_loss' => 100, 'minutes' => 60, 'cycles' => 1]);
-app(MiningRunner::class)->start($agent, $stopped);
-app(MiningRunner::class)->stop($stopped);
+$stopped = app(AutomationRunner::class)->preview($agent->fresh(), 'LOCAL-1', ['site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-ROCK', 'reserve' => 2000, 'max_spend' => 100, 'max_loss' => 100, 'minutes' => 60, 'cycles' => 1]);
+app(AutomationRunner::class)->start($agent, $stopped);
+app(AutomationRunner::class)->stop($stopped);
 workers($root, $env, $directory);
 check($stopped->fresh()->state === RunState::Stopped, 'offline Stop survives until the next real worker starts');
 check(count(json_decode(file_get_contents($file), true)['writes']) === $before, 'offline Stop starts no additional mutation');

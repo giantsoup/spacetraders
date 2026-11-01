@@ -3,13 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Gameplay\AgentSynchronizer;
+use App\Gameplay\CreditAccounting;
 use App\Gameplay\GameException;
+use App\Gameplay\LocalEngineManager;
 use App\Gameplay\MiningPlanner;
 use App\Gameplay\ShipCommandExecutor;
 use App\Http\Requests\GameplayRequest;
 use App\Models\Agent;
+use App\Models\AutomationDraft;
 use App\Models\AutomationRun;
 use App\Models\GameObservation;
+use App\Models\OpportunityInvestigation;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use Illuminate\Http\Request;
@@ -36,6 +40,12 @@ class AgentDashboardController extends Controller
             'runs' => AutomationRun::where('agent_id', $agent->id)->latest('id')->limit(10)->get(),
             'health' => collect(['scheduler', 'worker'])->mapWithKeys(fn ($key) => [$key => json_decode(DB::table('game_runtime')->where('key', $key)->value('value') ?? 'null', true)]),
             'automationEnabled' => (bool) config('gameplay.enabled'),
+            'localAutomation' => (bool) config('gameplay.local_engine_enabled'),
+            'engine' => config('gameplay.local_engine_enabled') ? app(LocalEngineManager::class)->status() : null,
+            'engineOperator' => (string) $request->user()->id === (string) config('gameplay.operator_id'),
+            'investigations' => OpportunityInvestigation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->latest('id')->limit(5)->get(),
+            'drafts' => AutomationDraft::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->latest('id')->limit(10)->get(),
+            'accounting' => app(CreditAccounting::class)->summary($agent),
             'synthetic' => (bool) config('gameplay.fixture_path'),
         ]);
     }

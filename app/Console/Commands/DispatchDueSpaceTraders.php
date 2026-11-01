@@ -5,7 +5,7 @@ namespace App\Console\Commands;
 use App\Gameplay\EngineGate;
 use App\Gameplay\GameException;
 use App\Gameplay\ShipCommandExecutor;
-use App\Jobs\AdvanceMiningRun;
+use App\Jobs\AdvanceAutomationRun;
 use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
 use App\Models\AutomationRun;
@@ -55,7 +55,7 @@ class DispatchDueSpaceTraders extends Command
             if (AutomationRun::whereKey($run->id)->where(function ($q) {
                 $q->whereNull('last_dispatched_at')->orWhere('last_dispatched_at', '<=', now()->subSeconds(30));
             })->update(['last_dispatched_at' => now()])) {
-                AdvanceMiningRun::dispatch($run->id);
+                AdvanceAutomationRun::dispatch($run->id);
             }
         }
 

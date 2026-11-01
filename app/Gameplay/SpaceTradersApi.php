@@ -12,6 +12,55 @@ class SpaceTradersApi
 {
     public function __construct(private SpaceTradersClient $client) {}
 
+    private ?\Closure $readGuard = null;
+
+    public function readOnly(\Closure $guard, callable $work): mixed
+    {
+        $this->readGuard = $guard;
+        try {
+            return $work();
+        } finally {
+            $this->readGuard = null;
+        }
+    }
+
+    public function contracts(Agent $agent): array
+    {
+        return array_map($this->contractData(...), $this->pages('/my/contracts', $agent, 'id'));
+    }
+
+    public function contract(Agent $agent, string $id): array
+    {
+        $data = $this->contractData($this->payload($this->call('get', '/my/contracts/'.$id, [], $agent)));
+        if ($data['id'] !== $id) {
+            throw new GameException('Contract identity mismatch.');
+        }
+
+        return $data;
+    }
+
+    public function contractData(array $data, bool $uncertain = false): array
+    {
+        $this->validate($data, [
+            'id' => 'required|string|max:80|regex:/^[a-zA-Z0-9_-]+$/', 'type' => 'required|string|max:80',
+            'accepted' => 'required|boolean', 'fulfilled' => 'required|boolean',
+            'deadlineToAccept' => 'sometimes|nullable|date', 'expiration' => 'required|date',
+            'terms.deadline' => 'required|date', 'terms.payment.onAccepted' => 'required|integer|between:0,1000000000',
+            'terms.payment.onFulfilled' => 'required|integer|between:0,1000000000', 'terms.deliver' => 'present|array|max:20',
+            'terms.deliver.*.tradeSymbol' => 'required|string|max:80|regex:/^[A-Z0-9_]+$/',
+            'terms.deliver.*.destinationSymbol' => 'required|string|max:80|regex:/^[A-Z0-9-]+$/',
+            'terms.deliver.*.unitsRequired' => 'required|integer|between:1,1000000',
+            'terms.deliver.*.unitsFulfilled' => 'required|integer|between:0,1000000',
+        ], $uncertain);
+        foreach ($data['terms']['deliver'] as $term) {
+            if ($term['unitsFulfilled'] > $term['unitsRequired']) {
+                throw new GameException('Contract delivery exceeds requirement.', uncertain: $uncertain);
+            }
+        }
+
+        return Arr::only($data, ['id', 'type', 'accepted', 'fulfilled', 'terms', 'deadlineToAccept', 'expiration']);
+    }
+
     public function status(): string
     {
         $body = $this->call('get', '/');
@@ -82,11 +131,16 @@ class SpaceTradersApi
 
     public function mutate(Agent $agent, string $ship, string $command, array $arguments): array
     {
-        $path = $command === 'buy_ship' ? '/my/ships' : '/my/ships/'.$ship.'/'.match ($command) {
+        $path = str_starts_with($command, 'contract_')
+            ? '/my/contracts/'.$arguments['contractId'].'/'.match ($command) {
+                'contract_accept' => 'accept', 'contract_deliver' => 'deliver', 'contract_fulfill' => 'fulfill', default => throw new GameException('Unsupported contract command.')
+            }
+        : ($command === 'buy_ship' ? '/my/ships' : '/my/ships/'.$ship.'/'.match ($command) {
             'mine' => 'extract', 'buy' => 'purchase', 'sell' => 'sell', 'navigate' => 'navigate', 'dock' => 'dock', 'orbit' => 'orbit', 'refuel' => 'refuel',
             default => throw new GameException('Unsupported command.'),
-        };
+        });
         $body = match ($command) {
+            'contract_deliver' => ['shipSymbol' => $ship, 'tradeSymbol' => $arguments['symbol'], 'units' => $arguments['units']],
             'buy_ship' => Arr::only($arguments, ['shipType', 'waypointSymbol']),
             'navigate' => Arr::only($arguments, ['waypointSymbol']),
             'buy', 'sell' => Arr::only($arguments, ['symbol', 'units']),
@@ -95,6 +149,8 @@ class SpaceTradersApi
         };
         $data = $this->payload($this->call('post', $path, $body, $agent), true);
         $rules = match ($command) {
+            'contract_accept', 'contract_fulfill' => ['contract' => 'required|array', 'agent.credits' => 'required|integer|min:0'],
+            'contract_deliver' => ['contract' => 'required|array', 'cargo' => 'required|array'],
             'dock' => ['nav' => 'required|array', 'nav.status' => 'required|in:DOCKED'],
             'orbit' => ['nav' => 'required|array', 'nav.status' => 'required|in:IN_ORBIT'],
             'navigate' => ['nav' => 'required|array', 'nav.status' => 'required|in:IN_TRANSIT', 'nav.route.arrival' => 'required|date', 'fuel.current' => 'required|integer|min:0'],
@@ -105,7 +161,14 @@ class SpaceTradersApi
         };
         $this->validate($data, $rules, true);
 
-        return Arr::only($data, ['nav', 'fuel', 'cargo', 'cooldown', 'extraction', 'agent', 'transaction', 'ship']);
+        if (str_starts_with($command, 'contract_')) {
+            $data['contract'] = $this->contractData($data['contract'], true);
+            if ($data['contract']['id'] !== $arguments['contractId']) {
+                throw new GameException('Returned contract target differs from approval.', uncertain: true);
+            }
+        }
+
+        return Arr::only($data, ['contract', 'nav', 'fuel', 'cargo', 'cooldown', 'extraction', 'agent', 'transaction', 'ship']);
     }
 
     public function shipData(array $data): array
@@ -145,16 +208,16 @@ class SpaceTradersApi
         return '/systems/'.implode('-', array_slice(explode('-', $waypoint), 0, 2)).'/waypoints/'.$waypoint;
     }
 
-    private function pages(string $path, Agent $agent): array
+    private function pages(string $path, Agent $agent, string $identity = 'symbol'): array
     {
         $all = [];
         $total = null;
         for ($page = 1; $page <= config('gameplay.max_pages'); $page++) {
             $body = $this->call('get', $path, ['page' => $page, 'limit' => 20], $agent);
-            $this->validate($body, ['data' => 'present|array|max:20', 'data.*' => 'array', 'data.*.symbol' => 'required|string|distinct|max:80', 'meta.total' => 'required|integer|min:0', 'meta.page' => 'required|integer|in:'.$page, 'meta.limit' => 'required|integer|in:20']);
+            $this->validate($body, ['data' => 'present|array|max:20', 'data.*' => 'array', 'data.*.'.$identity => 'required|string|distinct|max:80', 'meta.total' => 'required|integer|min:0', 'meta.page' => 'required|integer|in:'.$page, 'meta.limit' => 'required|integer|in:20']);
             $total ??= $body['meta']['total'];
             $all = array_merge($all, $body['data']);
-            if ($total !== $body['meta']['total'] || count(array_unique(array_column($all, 'symbol'))) !== count($all) || count($all) > $total) {
+            if ($total !== $body['meta']['total'] || count(array_unique(array_column($all, $identity))) !== count($all) || count($all) > $total) {
                 throw new GameException('Discovery changed or repeated records while paginating. Synchronize again.');
             }
             if (count($all) === $total) {
@@ -166,6 +229,12 @@ class SpaceTradersApi
 
     private function call(string $method, string $path, array $body = [], ?Agent $agent = null): array
     {
+        if ($this->readGuard) {
+            if ($method !== 'get') {
+                throw new GameException('Investigation forbids game mutations.');
+            }
+            ($this->readGuard)();
+        }
         try {
             $response = $this->client->request($method, $path, $body, $agent?->credential());
         } catch (ConnectionException) {

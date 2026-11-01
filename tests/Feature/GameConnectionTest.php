@@ -3,7 +3,7 @@
 namespace Tests\Feature;
 
 use App\Http\Middleware\HandleInertiaRequests;
-use App\Jobs\AdvanceMiningRun;
+use App\Jobs\AdvanceAutomationRun;
 use App\Jobs\ExecuteShipCommand;
 use App\Models\User;
 use App\Services\SpaceTradersClient;
@@ -49,7 +49,7 @@ class GameConnectionTest extends TestCase
 
     public function test_default_database_worker_consumes_the_queue_used_by_gameplay_jobs(): void
     {
-        foreach ([new ExecuteShipCommand(1), new AdvanceMiningRun(1)] as $job) {
+        foreach ([new ExecuteShipCommand(1), new AdvanceAutomationRun(1)] as $job) {
             $this->assertSame('database', $job->connection);
             $this->assertSame('spacetraders', $job->queue);
             $this->assertSame($job->queue, config('queue.connections.database.queue'));
