@@ -1,6 +1,6 @@
 # Local automation data contract
 
-Plan version 1 identifies historical mining runs. Version 2 identifies staged Mining and Contracts previews. Execution rejects other versions. No historical outcome is rewritten.
+Plan version 1 identifies historical mining runs. Version 2 identifies staged Mining and Contracts previews. Version 3 identifies bounded scout and trade previews. Execution rejects unsupported versions. No historical outcome is rewritten.
 
 An investigation stores owner agent, reset, one system, strategy, status, request and elapsed bounds, validated observations and candidate snapshots. Candidates contain a stable ID, classification, reasons, prerequisites, optional estimates, capital and fuel bounds, and evidence timestamps. Null means unknown. A mining trial never ranks above a priced contract on invented yield.
 
