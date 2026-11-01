@@ -31,6 +31,7 @@ node --check scripts/verify-automation-browser.mjs
 node --check scripts/verify-opportunities-browser.mjs
 node --check scripts/verify-deployment-browser.mjs
 node --check scripts/verify-adviser-browser.mjs
+node --check scripts/verify-exploration-browser.mjs
 "$php_bin" scripts/verify-environment.php
 "$php_bin" vendor/bin/phpunit --display-all-issues
 "$php_bin" vendor/bin/pint --test \
@@ -54,5 +55,6 @@ node --check scripts/verify-adviser-browser.mjs
     tests/Feature/AgentArchiveTest.php tests/Feature/LocalAutomationTest.php tests/Feature/OpportunityTest.php tests/Feature/RequestBudgetTest.php tests/Feature/SQLiteConcurrencyTest.php tests/Feature/BudgetResponseTest.php \
     tests/Feature/DeploymentGateTest.php scripts/verify-deployment.php \
     tests/Feature/CycleEconomicsTest.php \
+    tests/Feature/ExplorationTest.php \
     scripts/mvp-fixture.php scripts/verify-mvp-worker.php scripts/verify-environment.php scripts/verify-local-engine.php scripts/verify-automation-worker.php scripts/runtime-preflight.php
 git diff --check

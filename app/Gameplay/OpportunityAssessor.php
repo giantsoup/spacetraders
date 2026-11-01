@@ -45,9 +45,9 @@ class OpportunityAssessor
                 }
                 $cargoOptions = array_merge($cargoOptions, $this->cargo($agent, $ship, $markets->all(), $listings));
                 foreach ($points->where('data.systemSymbol', $ship['nav']['systemSymbol']) as $point) {
-                    if (in_array('UNCHARTED', array_column($point->data['traits'], 'symbol'), true)) {
+                    if (! ExplorationPolicy::traitsKnown($point->data)) {
                         $questions[] = ['ship' => $owned->symbol, 'destination' => $point->symbol, 'fact' => 'Hidden traits',
-                            'purpose' => 'Reveal whether this hidden waypoint offers a buyer, fuel or an extraction site. Re-read remotely before planning a scan or chart.', 'benefit' => 'Unknown', 'stop' => 'Stop when traits are observed or approved visit/time/fuel limits are exhausted.'];
+                            'purpose' => 'Choose a marketplace or shipyard question in Manual commands. A scan stays at the current location; charting requires this waypoint. Prices and safe travel still need separate evidence.', 'benefit' => 'Unknown', 'stop' => 'Stop when traits are observed or approved visit/time/fuel limits are exhausted.'];
                     }
                 }
                 foreach ($markets as $market) {
@@ -113,7 +113,8 @@ class OpportunityAssessor
 
         return ['agent_id' => $agent->id, 'valid_for_planning' => ! $agent->isArchived(), 'reset_id' => $agent->reset_id,
             'catalogues' => $observations->where('kind', 'catalogue')->values(), 'discovery' => $observations->firstWhere('kind', 'discovery')?->data,
-            'hidden_waypoints' => $points->filter(fn ($point) => in_array('UNCHARTED', array_column($point->data['traits'], 'symbol'), true))->pluck('symbol')->values(),
+            'exploration_evidence' => $observations->whereIn('kind', ['waypoint_listing', 'waypoint_scan', 'waypoint_chart'])->values(),
+            'hidden_waypoints' => $points->filter(fn ($point) => ! ExplorationPolicy::traitsKnown($point->data))->pluck('symbol')->values(),
             'markets' => $markets, 'opportunities' => $opportunities, 'observation_tasks' => $questions,
             'cargo_options' => $cargoOptions, 'observation_gaps' => $observationGaps, 'candidate_limit_reached' => count($opportunities) >= config('gameplay.opportunity_limit'),
             'evidence' => app(EvidenceAnalysis::class)->report($agent, $listings),

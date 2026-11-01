@@ -96,6 +96,10 @@ class CommandRules
             throw new GameException('A guaranteed upstream execution-price ceiling is unsupported.');
         }
         switch ($command) {
+            case 'scan_waypoints':
+            case 'chart':
+                $estimate['exploration'] = app(ExplorationPolicy::class)->inspect($agent, $ship, $command, $arguments, $floor);
+                break;
             case 'contract_accept':
                 if ($contract['accepted'] || $contract['fulfilled']) {
                     throw new GameException('Contract is already accepted or fulfilled.');

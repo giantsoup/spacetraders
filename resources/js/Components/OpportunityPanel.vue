@@ -29,6 +29,7 @@ const questions = computed(() => props.report?.observation_tasks.filter(row => r
                 <td>{{ readableLabel(market.state) }}</td><td>{{ formatLocalTime(market.price_at, 'Unknown') }}<br>{{ market.observer_ship || 'Observer unknown' }}</td><td>{{ formatLocalTime(market.listing_at) }}</td>
             </tr></tbody>
         </table></div>
+        <details v-if="report.exploration_evidence?.length"><summary>Listing, scan and chart evidence</summary><p>Each source keeps its own observation time in this reset. Listings with UNCHARTED leave hidden traits unknown. A scan covers only the returned waypoints.</p><div class="table-scroll"><table><thead><tr><th>Waypoint</th><th>Source</th><th>Observed</th><th>Observer</th></tr></thead><tbody><tr v-for="row in report.exploration_evidence" :key="row.id"><td>{{ row.symbol }}</td><td>{{ row.source }}</td><td>{{ formatLocalTime(row.observed_at) }}</td><td>{{ row.observer_ship || 'Unknown' }}</td></tr></tbody></table></div></details>
         <h3>Candidate complete cycles</h3>
         <p v-if="report.candidate_limit_reached" class="warning">Candidate display reached its bounded limit. This shortlist is not a complete ranking.</p>
         <p>Estimates include empty returns where stated. Unpriced cargo, wear and unmeasured time keep earnings unresolved. Cash margin alone does not rank earnings per hour.</p>
