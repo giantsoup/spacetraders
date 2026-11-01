@@ -1,0 +1,10 @@
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.4.27
+Configuration: phpunit.xml [owned worktree]
+
+........................                                          24 / 24 (100%)
+
+Time: 00:01.882, Memory: 60.50 MB
+
+OK (24 tests, 123 assertions)

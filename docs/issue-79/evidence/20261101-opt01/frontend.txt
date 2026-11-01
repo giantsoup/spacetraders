@@ -1,0 +1,8 @@
+Pinia restores and persists the existing elementsStore key and JSON state.
+PASS: HTTP-origin submission keys are valid independent UUIDs without randomUUID.
+PASS: America/Los_Angeles timestamps, guided waits, nested evidence, and unchanged UTC source values.
+PASS: America/New_York timestamps, guided waits, nested evidence, and unchanged UTC source values.
+PASS: Asia/Tokyo timestamps, guided waits, nested evidence, and unchanged UTC source values.
+PASS: UTC timestamps, guided waits, nested evidence, and unchanged UTC source values.
+PASS: course structure, malformed progress recovery, deduplication, and user/agent/reset isolation.
+PASS: deterministic planning, exact fields, approval matching, confirmed receipts, batching, refuel units, setup/scouting, blockers and progress isolation.
