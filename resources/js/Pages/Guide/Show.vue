@@ -1,4 +1,6 @@
 <script setup>
+import AppShell from '@/Layouts/AppShell.vue';
+import { formatLocalTime } from '@/dateTime.js';
 import { Head, Link } from '@inertiajs/vue3';
 import TutorialCourse from '@/Components/TutorialCourse.vue';
 import GameConnection from '@/Components/GameConnection.vue';
@@ -9,12 +11,7 @@ defineProps({ agent: { type: Object, default: null }, agents: { type: Array, req
 
 <template>
     <Head title="New player guide" />
-    <div class="guide-page">
-        <a class="skip" href="#course">Skip to tutorial</a>
-        <header class="guide-topbar">
-            <Link :href="route('agents.index')" class="brand">ST // FLIGHT SCHOOL</Link>
-            <nav aria-label="Guide navigation"><Link :href="route('agents.index')">Agents</Link><Link v-if="agent" :href="route('agents.show', agent.id)">Flight deck</Link><Link :href="route('profile.edit')">Profile</Link></nav>
-        </header>
+    <AppShell brand="ST // FLIGHT SCHOOL" skip-to="course" skip-label="Skip to tutorial" :agent-id="agent?.id" class="guide-page">
         <main>
             <GameConnection />
             <div class="intro">
@@ -25,7 +22,7 @@ defineProps({ agent: { type: Object, default: null }, agents: { type: Array, req
             </div>
             <section class="agent-context" aria-labelledby="context-heading">
                 <h2 id="context-heading">{{ agent ? `Flying with ${agent.name}` : 'Start here, then choose your agent' }}</h2>
-                <p>{{ agent ? `Checklist for ${agent.name} · Reset ${agent.reset_id || 'not observed yet'}. Select another agent to switch checklists.` : 'You can read every lesson before connecting an agent. Preparation progress is separate from each agent’s checklist.' }}</p>
+                <p>{{ agent ? `Checklist for ${agent.name} · Reset ${formatLocalTime(agent.reset_id, agent.reset_id || 'not observed yet')}. Select another agent to switch checklists.` : 'You can read every lesson before connecting an agent. Preparation progress is separate from each agent’s checklist.' }}</p>
                 <nav v-if="agents.length" aria-label="Tutorial agent" class="agent-links">
                     <Link v-for="entry in agents" :key="entry.id" :href="route('agents.guide', entry.id)" :aria-current="entry.id === agent?.id ? 'page' : undefined">{{ entry.name }}</Link>
                 </nav>
@@ -37,7 +34,7 @@ defineProps({ agent: { type: Object, default: null }, agents: { type: Array, req
                 <Link :href="agent ? route('agents.show', { agent: agent.id, guided: 1 }) : route('agents.create', { guided: 1 })" class="guided-launch">{{ agent ? 'Start guided flight' : 'Begin guided agent setup' }} →</Link>
                 <p>The lessons below remain available as a reference handbook.</p>
             </section>
-            <div id="course"><TutorialCourse :key="agent?.id || 'preparation'" :agent="agent" /></div>
+            <div id="course" tabindex="-1"><TutorialCourse :key="agent?.id || 'preparation'" :agent="agent" /></div>
             <section class="reference" aria-labelledby="reference-heading">
                 <h2 id="reference-heading">Keep these within reach</h2>
                 <details>
@@ -62,9 +59,9 @@ defineProps({ agent: { type: Object, default: null }, agents: { type: Array, req
             </section>
         </main>
         <footer>ST // FLIGHT SCHOOL · Early-game course · Mid-game and late-game lessons coming later</footer>
-    </div>
+    </AppShell>
 </template>
 
 <style scoped>
-.guide-page{color-scheme:dark;min-height:100vh;background:#0a111c;color:#e4edf7;font:15px/1.7 ui-sans-serif,system-ui,sans-serif;overflow-wrap:anywhere}.guide-page *{box-sizing:border-box}.guide-topbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:18px;padding:20px 28px;border-bottom:1px solid #344b65;background:#101b2b}.brand{font:700 14px ui-monospace,monospace;color:#a6f3d0;letter-spacing:.08em}.guide-topbar nav{display:flex;gap:24px}.guide-page a{color:#a6f3d0;text-underline-offset:4px}.guide-page :is(a,summary):focus-visible{outline:3px solid #f7dc91;outline-offset:4px}.guide-page main{max-width:1200px;margin:auto;padding:48px 24px}.intro{max-width:780px;margin-bottom:32px}.eyebrow{color:#a6f3d0;font:12px ui-monospace,monospace;letter-spacing:.15em}.guide-page h1{font-size:clamp(30px,4vw,46px);font-weight:750;line-height:1.15;margin:16px 0 20px;letter-spacing:-.025em}.intro>p:not(.eyebrow){font-size:18px;color:#bdcfe2}.scope{display:flex;flex-wrap:wrap;gap:12px 24px;margin-top:24px;font:12px ui-monospace,monospace;color:#a6f3d0}.agent-context{border-left:3px solid #7ccbac;padding:16px 22px;background:#13232e;margin-bottom:24px}.guide-page .guided-launch{display:inline-flex;align-items:center;min-height:44px;background:#a6f3d0;color:#0a241d;padding:10px 16px;margin:10px 0;text-decoration:none;font-weight:700}.guide-page h2{font-weight:700;font-size:18px;margin:0 0 8px}.guide-page p{margin:8px 0}.agent-context p{font-size:13px;color:#bacbde}.agent-links{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.agent-links a{padding:8px 14px;min-height:44px;border:1px solid #58708b;border-radius:4px;text-decoration:none}.agent-links a[aria-current]{border-color:#a6f3d0;background:#1c3b34;color:#e0fff2}.reference{margin-top:36px}.reference h2{margin-bottom:16px}.reference details{border-bottom:1px solid #344b65;padding:16px 0}.reference summary{cursor:pointer;color:#b5ebd8;min-height:44px;padding:8px 0;font-weight:600}.reference p,.reference dl{max-width:850px;color:#bacbde}.reference dt{font-weight:700;color:#e4edf7;margin-top:16px}.reference dd{margin-top:4px}.reference pre{overflow-x:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#101b2b;border:1px solid #344b65;padding:16px;font:12px/1.7 ui-monospace,monospace}.reference .sources{font-size:12px;margin-top:24px}.guide-page footer{max-width:1200px;margin:auto;padding:0 24px 32px;color:#a9bed3;font:11px/1.8 ui-monospace,monospace}.skip{position:fixed;top:-100px;left:16px;z-index:99;background:#132d29;padding:12px}.skip:focus{top:12px}@media(max-width:600px){.guide-page main{padding:28px 14px}.guide-topbar{padding:18px}.agent-context{padding:14px 18px}.guide-topbar nav{font-size:13px}.intro>p:not(.eyebrow){font-size:16px}}
+.guide-page{font-family:ui-sans-serif,system-ui,sans-serif;line-height:1.7}.guide-page main a{color:var(--color-accent);text-underline-offset:4px}.guide-page :is(a,summary):focus-visible{outline:3px solid var(--color-focus);outline-offset:4px}.guide-page main{max-width:1200px;margin:auto;padding:48px 24px}.intro{max-width:780px;margin-bottom:32px}.eyebrow{color:var(--color-accent);font:12px ui-monospace,monospace;letter-spacing:.15em}.guide-page h1{font-size:clamp(30px,4vw,46px);font-weight:750;line-height:1.15;margin:16px 0 20px;letter-spacing:-.025em}.intro>p:not(.eyebrow){font-size:18px;color:#bdcfe2}.scope{display:flex;flex-wrap:wrap;gap:12px 24px;margin-top:24px;font:12px ui-monospace,monospace;color:var(--color-accent)}.agent-context{border-left:3px solid #7ccbac;padding:16px 22px;background:#13232e;margin-bottom:24px}.guide-page .guided-launch{display:inline-flex;align-items:center;min-height:44px;background:var(--color-accent);color:#0a241d;padding:10px 16px;margin:10px 0;text-decoration:none;font-weight:700}.guide-page h2{font-weight:700;font-size:18px;margin:0 0 8px}.guide-page p{margin:8px 0}.agent-context p{font-size:13px;color:#bacbde}.agent-links{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.agent-links a{padding:8px 14px;min-height:44px;border:1px solid #58708b;border-radius:4px;text-decoration:none}.agent-links a[aria-current]{border-color:var(--color-accent);background:#1c3b34;color:#e0fff2}.reference{margin-top:36px}.reference h2{margin-bottom:16px}.reference details{border-bottom:1px solid #344b65;padding:16px 0}.reference summary{cursor:pointer;color:#b5ebd8;min-height:44px;padding:8px 0;font-weight:600}.reference p,.reference dl{max-width:850px;color:#bacbde}.reference dt{font-weight:700;color:var(--color-ink);margin-top:16px}.reference dd{margin-top:4px}.reference pre{overflow-x:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--color-panel);border:1px solid #344b65;padding:16px;font:12px/1.7 ui-monospace,monospace}.reference .sources{font-size:12px;margin-top:24px}.guide-page footer{max-width:1200px;margin:auto;padding:0 24px 32px;color:#a9bed3;font:11px/1.8 ui-monospace,monospace}@media(max-width:600px){.guide-page main{padding:28px 14px}.agent-context{padding:14px 18px}.intro>p:not(.eyebrow){font-size:16px}}
 </style>

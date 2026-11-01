@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Linode memory capacity</title>
+<style>
+:root { color-scheme: dark; --foreground: #e8edf5; --muted-foreground: #acb7c8; --card: #151d2a; --secondary: #283447; --chart-1: #7caaff; --radius: 10px; --font-sans: system-ui, sans-serif; }
+html,body { margin: 0; color: var(--foreground); font-family: var(--font-sans); }
+#linode-capacity { padding: 16px; background: var(--card); border-radius: var(--radius); }
+#linode-capacity h2 { margin: 0 0 16px; font-size: 17px; font-weight: 500; }
+#linode-capacity .row { margin-bottom: 16px; }
+#linode-capacity .label { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px; font-size: 14px; }
+#linode-capacity .track { height: 18px; background: var(--secondary); }
+#linode-capacity .bar { height: 18px; background: var(--chart-1); }
+#linode-capacity .axis { display: flex; justify-content: space-between; margin-top: -8px; color: var(--muted-foreground); font-size: 12px; }
+#linode-capacity .source { margin: 14px 0 0; font-size: 12px; color: var(--muted-foreground); }
+#linode-capacity a { color: var(--chart-1); }
+</style>
+</head>
+<body>
+<section id="linode-capacity" aria-labelledby="capacity-title">
+<h2 id="capacity-title">Linode memory capacity</h2>
+<div role="img" aria-label="Total server RAM and monthly North America compute prices: Nanode 1 GB, 5 dollars; Linode 2 GB, 12 dollars; Linode 4 GB, 24 dollars. These are server capacities, not measured application requirements.">
+<div class="row"><div class="label"><span>Nanode · 1 GB</span><span>$5/month</span></div><div class="track"><div class="bar" style="width:25%"></div></div></div>
+<div class="row"><div class="label"><span>Linode · 2 GB</span><span>$12/month</span></div><div class="track"><div class="bar" style="width:50%"></div></div></div>
+<div class="row"><div class="label"><span>Linode · 4 GB</span><span>$24/month</span></div><div class="track"><div class="bar" style="width:100%"></div></div></div>
+<div class="axis" aria-hidden="true"><span>0 GB</span><span>2 GB</span><span>4 GB</span></div>
+</div>
+<p class="source">Total server RAM, not app requirements. <a href="https://www.akamai.com/cloud/pricing/cpu">Akamai North America pricing</a>, checked Nov 1, 2026. Taxes and add-ons excluded.</p>
+</section>
+</body>
+</html>

@@ -1,20 +1,20 @@
 <script setup>
-import ApplicationLogo from '@/Components/ApplicationLogo.vue';
-import { Link } from '@inertiajs/vue3';
+import AppShell from '@/Layouts/AppShell.vue';
+
+defineProps({ title: { type: String, required: true } });
 </script>
 
 <template>
-    <div class="min-h-screen flex flex-col sm:justify-center items-center pt-6 sm:pt-0 bg-gray-100">
-        <div>
-            <Link href="/">
-                <ApplicationLogo class="w-20 h-20 fill-current text-gray-500" />
-            </Link>
-        </div>
-
-        <div
-            class="w-full sm:max-w-md mt-6 px-6 py-4 bg-white shadow-md overflow-hidden sm:rounded-lg"
-        >
-            <slot />
-        </div>
-    </div>
+    <AppShell>
+        <main id="main-content" tabindex="-1" class="app-content app-auth">
+            <header class="app-page-heading">
+                <p class="app-eyebrow">CLIENT ACCESS</p>
+                <h1>{{ title }}</h1>
+                <p class="app-muted">Your login to this client is separate from your SpaceTraders agent.</p>
+            </header>
+            <div class="app-panel">
+                <slot />
+            </div>
+        </main>
+    </AppShell>
 </template>

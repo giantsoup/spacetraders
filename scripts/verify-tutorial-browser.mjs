@@ -221,8 +221,7 @@ try {
     await record('dark appearance, mobile reflow, reference keyboard interaction and narrow flight deck', async () => {
         await page.setViewportSize({ width: 390, height: 844 });
         await page.goto(`${origin}/agents`);
-        await button('Toggle navigation').click();
-        await page.locator('#account-navigation').getByRole('link', { name: 'Player guide', exact: true }).click();
+        await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Player guide', exact: true }).click();
         await page.waitForURL('**/guide');
         await page.getByRole('navigation', { name: 'Tutorial agent' }).getByRole('link', { name: 'LOCAL', exact: true }).click();
         await choose('sell');

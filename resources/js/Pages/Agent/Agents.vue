@@ -1,57 +1,142 @@
 <script setup>
-import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
-import {Head, Link} from '@inertiajs/vue3';
-const props = defineProps(['agents']);
+import AppShell from '@/Layouts/AppShell.vue';
+import { Head, Link } from '@inertiajs/vue3';
+import GameConnection from '@/Components/GameConnection.vue';
+import { formatLocalTime, localTimeZone } from '@/dateTime.js';
+
+defineProps({ agents: { type: Array, required: true } });
+
+const connectionStates = {
+    connected: { label: 'Synchronized', tone: 'good', help: 'Open the flight deck to review your fleet and synchronize the latest game state.' },
+    unsynchronized: { label: 'Not synchronized', tone: 'neutral', help: 'Open the flight deck and synchronize to discover your fleet and balance.' },
+    reset: { label: 'World reset', tone: 'warning', help: 'Import your current agent token after the world reset before issuing more commands.', reconnect: true },
+    invalid_credential: { label: 'Token needs attention', tone: 'warning', help: 'Import a current agent token to restore access to this agent.', reconnect: true },
+};
+const unknownConnection = { label: 'Connection not verified', tone: 'neutral', help: 'Open the flight deck to check this agent’s connection.' };
+const connection = agent => connectionStates[agent.connection_state] || unknownConnection;
+const credits = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 </script>
 
 <template>
     <Head title="Agents" />
 
-    <AuthenticatedLayout>
-        <template #header>
-            <h2 class="font-semibold text-xl text-gray-800 leading-tight">Agents</h2>
-        </template>
+    <AppShell skip-to="agents" skip-label="Skip to agents" class="agents-page">
 
-        <div class="py-12">
-            <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
+        <main id="agents" tabindex="-1">
+            <div class="page-heading">
+                <div>
+                    <p class="eyebrow">FLEET ACCESS</p>
+                    <h1>Agents</h1>
+                    <p class="muted">Choose an agent to open its flight deck and manage your fleet.</p>
+                </div>
+                <div class="actions">
+                    <Link :href="route('agents.create', { existing: 1 })" class="action secondary">Import existing agent</Link>
+                    <Link :href="route('agents.create')" class="action primary">Register new agent <span aria-hidden="true">→</span></Link>
+                </div>
+            </div>
 
-                <section class="mb-8 rounded-lg border border-slate-600 bg-slate-900 p-6 text-slate-100" aria-labelledby="new-player-heading">
-                    <p class="text-xs font-semibold tracking-widest text-emerald-300">FLIGHT SCHOOL</p>
-                    <h1 id="new-player-heading" class="mt-2 text-2xl font-semibold">New to SpaceTraders?</h1>
-                    <p class="mt-2 max-w-2xl text-slate-300">Learn how to connect an agent, fly a mining ship, sell your first cargo, and refuel. Follow the tutorial at your own pace alongside the flight deck.</p>
-                    <Link :href="route('guide')" class="mt-4 inline-flex min-h-11 items-center rounded-sm bg-emerald-200 px-4 py-2 font-semibold text-slate-950 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-amber-200">Start the new player guide →</Link>
-                </section>
+            <GameConnection />
 
-                <div class="agents-wrapper overflow-hidden shadow-xs sm:rounded-lg">
+            <section class="flight-school" aria-labelledby="new-player-heading">
+                <div>
+                    <p class="eyebrow">FLIGHT SCHOOL</p>
+                    <h2 id="new-player-heading">New to SpaceTraders?</h2>
+                    <p class="muted">Connect an agent, fly a mining ship, sell your first cargo, and refuel with step-by-step guidance.</p>
+                </div>
+                <Link :href="route('guide')" class="action secondary">Start the new player guide <span aria-hidden="true">→</span></Link>
+            </section>
 
-                    <Link :href="route('agents.show', agent.id)" v-for="agent in agents" :key="agent.id"
-                         class="agents mt-6 p-6 bg-white border-b border-gray-400 rounded-md hover:bg-gray-200 hover:cursor-pointer">
-                        <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                            <span class="text-black px-4 break-words">{{ agent.name }}</span>
-                            <span class="text-black px-4 break-words">{{ agent.account_id }}</span>
-                            <span class="text-black px-4 break-words">
-                                {{ agent.connection_state || 'Open flight deck' }}
-                            </span>
-                            <span class="text-black px-4 break-words">{{ agent.email }}</span>
-                        </div>
-                    </Link>
-
-                    <div class="mt-10">
-                        <Link :href="route('agents.create')">
-                            <button class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-l">
-                                Register New Agent
-                            </button>
-                        </Link>
-                    </div>
+            <section aria-labelledby="saved-agents-heading">
+                <div class="section-heading">
+                    <h2 id="saved-agents-heading">Your agents <span class="count">{{ agents.length }}</span></h2>
+                    <p class="muted">Saved snapshots · Times shown in {{ localTimeZone }}</p>
                 </div>
 
-            </div>
-        </div>
-    </AuthenticatedLayout>
+                <ul v-if="agents.length" class="agent-grid">
+                    <li v-for="agent in agents" :key="agent.id" class="agent-card">
+                        <div class="card-heading">
+                            <h3>{{ agent.name }}</h3>
+                            <span class="status" :class="connection(agent).tone">{{ connection(agent).label }}</span>
+                        </div>
+                        <dl>
+                            <div><dt>Faction</dt><dd>{{ agent.faction || 'Unknown' }}</dd></div>
+                            <div><dt>Last saved balance</dt><dd class="balance">{{ agent.synced_at && agent.credits !== null ? `${credits.format(agent.credits)} CR` : 'Not synchronized' }}</dd></div>
+                            <div><dt>World reset</dt><dd>{{ formatLocalTime(agent.reset_id, agent.reset_id || 'Unknown') }}</dd></div>
+                            <div><dt>Last synchronized</dt><dd><time v-if="agent.synced_at" :datetime="agent.synced_at">{{ formatLocalTime(agent.synced_at) }}</time><span v-else>Never</span></dd></div>
+                        </dl>
+                        <p class="connection-help" :class="{ warning: connection(agent).reconnect }">{{ connection(agent).help }}</p>
+                        <div class="card-actions">
+                            <Link :href="route('agents.show', agent.id)" class="action secondary" :aria-label="`Open flight deck for ${agent.name}`">Open flight deck <span aria-hidden="true">→</span></Link>
+                            <Link v-if="connection(agent).reconnect" :href="route('agents.create', { existing: 1 })" class="reconnect" :aria-label="`Import current token for ${agent.name}`">Import current token</Link>
+                        </div>
+                    </li>
+                </ul>
+
+                <div v-else class="empty-state">
+                    <p class="eyebrow">READY FOR YOUR FIRST FLIGHT</p>
+                    <h3>No agents connected yet</h3>
+                    <p class="muted">Your client login is ready. Import an existing SpaceTraders agent or register a new one to start building your fleet.</p>
+                    <Link :href="route('agents.create', { guided: 1 })" class="action primary">Begin guided agent setup <span aria-hidden="true">→</span></Link>
+                </div>
+            </section>
+        </main>
+    </AppShell>
 </template>
 
 <style scoped>
-.agents:first-child {
-    margin-top: 0;
+
+.agents-page main { max-width: 1280px; margin: auto; padding: 40px 24px 64px; }
+.page-heading, .section-heading, .card-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+.page-heading { margin-bottom: 28px; gap: 24px; }
+.eyebrow { color: var(--color-accent); font-size: 12px; letter-spacing: .12em; }
+.agents-page h1 { font-size: clamp(30px, 4vw, 40px); line-height: 1.3; font-weight: 800; margin: 6px 0 10px; }
+.agents-page h2 { font-size: 18px; font-weight: 750; }
+.agents-page h3 { font-size: 21px; font-weight: 750; }
+.muted, dt { color: var(--color-muted); }
+.actions, .card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.action { display: inline-flex; align-items: center; justify-content: center; gap: 12px; min-height: 44px; padding: 10px 16px; border: 1px solid; font-size: 13px; font-weight: 700; text-align: center; }
+.primary { background: var(--color-accent); border-color: var(--color-accent); color: #0a241d; }
+.primary:hover { background: #c4ffe4; }
+.secondary { background: #243c54; border-color: #7593ac; color: #f0f5ff; }
+.secondary:hover { background: #365574; }
+.agents-page :is(a, button):focus-visible { outline: 3px solid var(--color-focus); outline-offset: 4px; }
+
+.flight-school { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 24px; padding: 24px; margin-bottom: 36px; border: 1px solid #456b65; border-left: 3px solid var(--color-accent); background: #13232e; }
+.flight-school > div { flex: 1 1 460px; }
+.flight-school h2 { margin: 6px 0 8px; }
+.section-heading { margin-bottom: 18px; }
+.section-heading p { font-size: 12px; }
+.count { display: inline-block; margin-left: 8px; padding: 0 8px; border: 1px solid var(--color-line); color: var(--color-muted); font-size: 13px; }
+.agent-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; list-style: none; padding: 0; }
+.agent-card { display: flex; flex-direction: column; min-width: 0; padding: 24px; border: 2px solid var(--color-line); background: var(--color-panel); box-shadow: 5px 5px 0 #05090f; }
+.card-heading { align-items: start; gap: 12px; }
+.status { padding: 4px 8px; border: 1px solid #58708b; font-size: 12px; }
+.good { background: #123029; color: var(--color-accent); border-color: #78c6a4; }
+.neutral { background: #18283b; color: #c9d7e8; }
+.status.warning { background: #302819; border-color: #bd9e61; }
+.warning { color: #ffe09a; }
+.agent-card dl { display: grid; gap: 14px; margin: 24px 0; font-size: 13px; }
+.agent-card dl > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 12px; }
+.agent-card dd { text-align: right; }
+.balance { color: #fce4a6; }
+.connection-help { font-size: 13px; color: var(--color-muted); margin-bottom: 22px; }
+.connection-help.warning { color: #ffe09a; }
+.card-actions { margin-top: auto; padding-top: 18px; border-top: 1px solid var(--color-line); }
+.reconnect { display: inline-flex; align-items: center; min-height: 44px; color: var(--color-accent); font-size: 13px; text-decoration: underline; text-underline-offset: 4px; }
+.empty-state { padding: 40px 24px; border: 2px dashed var(--color-line); background: var(--color-panel); text-align: center; }
+.empty-state h3 { margin: 10px 0; }
+.empty-state > .muted { max-width: 620px; margin: 0 auto 24px; }
+
+@media (max-width: 800px) {
+    .agent-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 480px) {
+
+    .agents-page main { padding: 28px 16px 48px; }
+    .flight-school, .agent-card { padding: 18px; }
+    .page-heading .actions { width: 100%; }
+    .page-heading .action { width: 100%; }
+    .card-actions { align-items: stretch; flex-direction: column; }
+    .reconnect { justify-content: center; }
 }
 </style>

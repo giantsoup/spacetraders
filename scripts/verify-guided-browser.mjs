@@ -57,7 +57,7 @@ let serverLog = '';
 server.stdout.on('data', value => { serverLog += value; });
 server.stderr.on('data', value => { serverLog += value; });
 await once(server.stderr, 'data');
-const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, colorScheme: 'light' });
+const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, colorScheme: 'light', locale: 'en-US', timezoneId: 'America/Los_Angeles' });
 await context.route('**/*', route => {
     const url = new URL(route.request().url());
     if (url.origin === origin) return route.continue();
@@ -66,6 +66,16 @@ await context.route('**/*', route => {
 });
 const page = await context.newPage();
 page.setDefaultTimeout(15000);
+async function assertLocalTimes() {
+    await page.getByText('Times shown in America/Los_Angeles (your local timezone).', { exact: true }).waitFor();
+    const times = await page.locator('time').evaluateAll(elements => elements.map(element => ({ utc: element.dateTime, text: element.textContent })));
+    assert.ok(times.length, 'The rendered page must contain a timestamp');
+    for (const { utc, text } of times) {
+        assert.match(utc, /Z$|[+-]\d{2}:\d{2}$/, 'Machine-readable timestamps retain their timezone');
+        assert.match(text, /P[DS]T$/, 'Visible timestamps use Pacific time with a daylight-saving-aware label');
+        assert.notEqual(text, utc);
+    }
+}
 const errors = [], responses = [], steps = [];
 page.on('pageerror', error => errors.push(error.message));
 page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -158,6 +168,7 @@ try {
             assert.equal(response.status(), 202, preview.message);
             assert.equal(preview.ship_symbol, (await session()).plan.ship);
             await page.locator('[data-guide="approve"].guided-target').waitFor();
+            await assertLocalTimes();
             if (scenario === 'mining' && phase === 'sell') await shot('03-highlighted-sale-approval.png');
         } else if (kind === 'approve') {
             if (scenario === 'recovery' && !previewRecovered && phase === 'outbound') {
@@ -233,6 +244,7 @@ try {
         assert.ok(saved.receipts.every(id => snapshot.actions.some(action => action.id === id && action.state === 'confirmed')));
         assert.equal(snapshot.actions.filter(action => action.command === 'buy_ship' && action.state === 'confirmed').length, scenario === 'setup' ? 1 : 0);
         await shot('04-guided-complete.png');
+        await assertLocalTimes();
         await reload();
         await coach.getByRole('heading', { name: 'Guided first trip complete' }).waitFor();
         if (scenario === 'recovery') {

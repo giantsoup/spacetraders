@@ -6,23 +6,18 @@ const origin = process.env.QA_URL;
 assert.ok(origin && process.env.QA_EMAIL && process.env.QA_PASSWORD,
     'Set QA_URL, QA_EMAIL and QA_PASSWORD for an owned local fixture.');
 assert.ok(new URL(origin).hostname.endsWith('.test'), 'Use a local .test fixture.');
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE } : {}) });
 const context = await browser.newContext({ viewport: { width: 1280, height: 960 } });
 await context.route('**/*', route => new URL(route.request().url()).origin === new URL(origin).origin
     ? route.continue() : route.abort());
 const page = await context.newPage();
 page.setDefaultTimeout(10000);
-const modal = page.locator('.fixed.z-50');
+const modal = page.getByRole('dialog', { name: 'Are you sure you want to delete your account?', exact: true });
 const confirm = modal.getByRole('button', { name: 'Delete Account', exact: true });
 
 async function openModal() {
     await page.getByRole('button', { name: 'Delete Account', exact: true }).click();
     await modal.getByPlaceholder('Password', { exact: true }).waitFor();
-    await page.waitForFunction(() => {
-        const panel = document.querySelector('.fixed.z-50 .mb-6');
-        return panel && getComputedStyle(panel).opacity === '1'
-            && !panel.getAnimations().some(animation => animation.playState === 'running');
-    });
     assert.equal(await confirm.evaluate(button => {
         const box = button.getBoundingClientRect();
         const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);

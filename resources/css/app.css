@@ -1,5 +1,6 @@
 @import "tailwindcss" source(none);
 @import "./guided.css";
+@import "./command.css";
 @config "../../tailwind.config.js";
 @source "../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php";
 @source "../views/**/*.blade.php";

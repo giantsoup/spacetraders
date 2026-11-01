@@ -21,7 +21,7 @@ const submit = () => {
 </script>
 
 <template>
-    <GuestLayout>
+    <GuestLayout title="Create client login">
         <Head title="Register" />
 
         <form @submit.prevent="submit">
@@ -29,6 +29,8 @@ const submit = () => {
                 <InputLabel for="name" value="Name" />
 
                 <TextInput
+                    :aria-invalid="Boolean(form.errors.name)"
+                    :aria-describedby="form.errors.name ? 'register-name-error' : undefined"
                     id="name"
                     type="text"
                     class="mt-1 block w-full"
@@ -38,13 +40,15 @@ const submit = () => {
                     autocomplete="name"
                 />
 
-                <InputError class="mt-2" :message="form.errors.name" />
+                <InputError id="register-name-error" class="mt-2" :message="form.errors.name" />
             </div>
 
             <div class="mt-4">
                 <InputLabel for="email" value="Email" />
 
                 <TextInput
+                    :aria-invalid="Boolean(form.errors.email)"
+                    :aria-describedby="form.errors.email ? 'register-email-error' : undefined"
                     id="email"
                     type="email"
                     class="mt-1 block w-full"
@@ -53,13 +57,15 @@ const submit = () => {
                     autocomplete="username"
                 />
 
-                <InputError class="mt-2" :message="form.errors.email" />
+                <InputError id="register-email-error" class="mt-2" :message="form.errors.email" />
             </div>
 
             <div class="mt-4">
                 <InputLabel for="password" value="Password" />
 
                 <TextInput
+                    :aria-invalid="Boolean(form.errors.password)"
+                    :aria-describedby="form.errors.password ? 'register-password-error' : undefined"
                     id="password"
                     type="password"
                     class="mt-1 block w-full"
@@ -68,13 +74,15 @@ const submit = () => {
                     autocomplete="new-password"
                 />
 
-                <InputError class="mt-2" :message="form.errors.password" />
+                <InputError id="register-password-error" class="mt-2" :message="form.errors.password" />
             </div>
 
             <div class="mt-4">
                 <InputLabel for="password_confirmation" value="Confirm Password" />
 
                 <TextInput
+                    :aria-invalid="Boolean(form.errors.password_confirmation)"
+                    :aria-describedby="form.errors.password_confirmation ? 'register-password_confirmation-error' : undefined"
                     id="password_confirmation"
                     type="password"
                     class="mt-1 block w-full"
@@ -83,18 +91,18 @@ const submit = () => {
                     autocomplete="new-password"
                 />
 
-                <InputError class="mt-2" :message="form.errors.password_confirmation" />
+                <InputError id="register-password_confirmation-error" class="mt-2" :message="form.errors.password_confirmation" />
             </div>
 
-            <div class="flex items-center justify-end mt-4">
+            <div class="app-form-actions">
                 <Link
                     :href="route('login')"
-                    class="underline text-sm text-gray-600 hover:text-gray-900 rounded-md focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                    class="app-link text-sm"
                 >
                     Already registered?
                 </Link>
 
-                <PrimaryButton class="ml-4" :class="{ 'opacity-25': form.processing }" :disabled="form.processing">
+                <PrimaryButton :class="{ 'opacity-25': form.processing }" :disabled="form.processing">
                     Register
                 </PrimaryButton>
             </div>

@@ -20,7 +20,7 @@ const formExisting = useForm({
     token: '',
 });
 
-const showExistingForm = ref(false);
+const showExistingForm = ref(new URL(window.location.href).searchParams.get('existing') === '1');
 const setupGuided = ref(new URL(window.location.href).searchParams.get('guided') === '1');
 const setupStage = ref('path');
 const setupStep = computed(() => {
@@ -71,32 +71,36 @@ function toggleForm() {
 </script>
 
 <template>
-    <Head title="Agents - Register" />
+    <Head :title="showExistingForm ? 'Import agent' : 'Register agent'" />
 
     <AuthenticatedLayout>
         <template #header>
-            <h2 class="font-semibold text-xl text-gray-800 leading-tight">Agents | Create</h2>
+            <p class="app-eyebrow">FLEET ACCESS</p>
+            <h1>{{ showExistingForm ? 'Import existing agent' : 'Register new agent' }}</h1>
+            <p class="app-muted">Connect your SpaceTraders agent to this command terminal.</p>
         </template>
 
-        <div class="py-12">
-            <div class="max-w-xl mx-auto sm:px-6 lg:px-8">
+        <div class="max-w-3xl mx-auto">
+            <div>
                 <GameConnection />
                 <GuidedFlight v-if="setupGuided" :session="{ active: true, phase: 'connect' }" :step="setupStep" :storage-available="true" :busy="form.processing || formExisting.processing" @pause="setupGuided = false" @advance="advanceSetup" @start="setupStage = 'path'" />
                 <div v-if="setupGuided" data-guide="setup-path" class="mb-6 grid gap-3">
-                    <button type="button" :disabled="form.processing || formExisting.processing" class="min-h-11 rounded-sm bg-slate-800 p-3 text-white" @click="chooseSetup(true)">I already have a SpaceTraders agent</button>
-                    <button type="button" :disabled="form.processing || formExisting.processing" class="min-h-11 rounded-sm bg-slate-800 p-3 text-white" @click="chooseSetup(false)">I need a new SpaceTraders agent</button>
-                    <a href="https://my.spacetraders.io" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-11 items-center text-blue-800 underline">Open official account dashboard<span class="sr-only"> in a new tab</span></a>
+                    <button type="button" :disabled="form.processing || formExisting.processing" class="app-button app-button-secondary" @click="chooseSetup(true)">I already have a SpaceTraders agent</button>
+                    <button type="button" :disabled="form.processing || formExisting.processing" class="app-button app-button-secondary" @click="chooseSetup(false)">I need a new SpaceTraders agent</button>
+                    <a href="https://my.spacetraders.io" target="_blank" rel="noopener noreferrer" class="app-link">Open official account dashboard<span class="sr-only"> in a new tab</span></a>
                 </div>
-                <aside class="mb-8 rounded-lg border border-slate-600 bg-slate-900 p-5 text-slate-100">
-                    <h1 class="font-semibold">Your client login and game agent are separate</h1>
-                    <p class="mt-2 text-sm text-slate-300">Use an account token to register a new agent, or import an existing agent with its agent token.</p>
-                    <Link :href="route('guide')" class="mt-3 inline-flex min-h-11 items-center text-emerald-200 underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-amber-200">Read the step-by-step player guide →</Link>
+                <aside class="app-panel mb-6">
+                    <h2>Your client login and game agent are separate</h2>
+                    <p class="mt-2 text-sm text-muted">Use an account token to register a new agent, or import an existing agent with its agent token.</p>
+                    <Link :href="route('guide')" class="app-link mt-3">Read the step-by-step player guide →</Link>
                 </aside>
-                <form v-if="showExistingForm" @submit.prevent="fetchAndSaveAgent">
+                <form class="app-panel" v-if="showExistingForm" @submit.prevent="fetchAndSaveAgent">
                     <div>
                         <InputLabel for="token" value="Agent token" />
 
                         <TextInput
+                            :aria-invalid="Boolean(formExisting.errors.token)"
+                            :aria-describedby="formExisting.errors.token ? 'token-error' : undefined"
                             id="token" data-guide="agent-token"
                             type="password"
                             class="mt-1 block w-full"
@@ -105,25 +109,27 @@ function toggleForm() {
                             required
                         />
 
-                        <InputError class="mt-2" :message="formExisting.errors.token" />
+                        <InputError id="token-error" class="mt-2" :message="formExisting.errors.token" />
                     </div>
 
                     <InputError class="mt-4" :message="formExisting.errors.api" role="alert" />
 
-                    <div class="flex items-center justify-end mt-4">
-                        <button type="button" @click="toggleForm" class="underline" :disabled="formExisting.processing || setupGuided">
+                    <div class="app-form-actions">
+                        <button type="button" @click="toggleForm" class="app-link text-sm" :disabled="formExisting.processing || setupGuided">
                             Back to Create New Agent
                         </button>
-                        <PrimaryButton data-guide="save-agent" type="submit" class="ml-4" :class="{ 'opacity-25': formExisting.processing }" :disabled="formExisting.processing || (setupGuided && setupStage !== 'submit')">
+                        <PrimaryButton data-guide="save-agent" type="submit" :class="{ 'opacity-25': formExisting.processing }" :disabled="formExisting.processing || (setupGuided && setupStage !== 'submit')">
                             Save Existing Agent
                         </PrimaryButton>
                     </div>
                 </form>
-                <form v-else @submit.prevent="createAgent">
+                <form class="app-panel" v-else @submit.prevent="createAgent">
                     <div>
                         <InputLabel for="account_token" value="Account token" />
 
                         <TextInput
+                            :aria-invalid="Boolean(form.errors.account_token)"
+                            :aria-describedby="'account-token-help' + (form.errors.account_token ? ' account_token-error' : '')"
                             id="account_token" data-guide="account-token"
                             type="password"
                             class="mt-1 block w-full"
@@ -132,17 +138,19 @@ function toggleForm() {
                             required
                         />
 
-                        <p class="mt-2 text-sm text-gray-600">
+                        <p id="account-token-help" class="mt-2 text-sm text-muted">
                             Use your SpaceTraders account token to register a new agent.
                             Your account token is used for this request and is not saved.
                         </p>
-                        <InputError class="mt-2" :message="form.errors.account_token" />
+                        <InputError id="account_token-error" class="mt-2" :message="form.errors.account_token" />
                     </div>
 
                     <div class="mt-4">
                         <InputLabel for="symbol" value="Agent name" />
 
                         <TextInput
+                            :aria-invalid="Boolean(form.errors.symbol)"
+                            :aria-describedby="form.errors.symbol ? 'symbol-error' : undefined"
                             id="symbol" data-guide="agent-name"
                             type="text"
                             class="mt-1 block w-full"
@@ -152,13 +160,15 @@ function toggleForm() {
                             required
                         />
 
-                        <InputError class="mt-2" :message="form.errors.symbol" />
+                        <InputError id="symbol-error" class="mt-2" :message="form.errors.symbol" />
                     </div>
 
                     <div class="mt-4">
                         <InputLabel for="faction" value="Faction" />
 
                         <TextInput
+                            :aria-invalid="Boolean(form.errors.faction)"
+                            :aria-describedby="form.errors.faction ? 'faction-error' : undefined"
                             id="faction" data-guide="agent-faction"
                             type="text"
                             class="mt-1 block w-full"
@@ -166,29 +176,31 @@ function toggleForm() {
                             required
                         />
 
-                        <InputError class="mt-2" :message="form.errors.faction" />
+                        <InputError id="faction-error" class="mt-2" :message="form.errors.faction" />
                     </div>
 
                     <div class="mt-4">
                         <InputLabel for="email" value="Email" />
 
                         <TextInput
+                            :aria-invalid="Boolean(form.errors.email)"
+                            :aria-describedby="form.errors.email ? 'email-error' : undefined"
                             id="email"
                             type="email"
                             class="mt-1 block w-full"
                             v-model="form.email"
                         />
 
-                        <InputError class="mt-2" :message="form.errors.email" />
+                        <InputError id="email-error" class="mt-2" :message="form.errors.email" />
                     </div>
 
                     <InputError class="mt-4" :message="form.errors.api" role="alert" />
 
-                    <div class="flex items-center justify-end mt-4">
-                        <button type="button" @click="toggleForm" class="underline" :disabled="form.processing || setupGuided">
+                    <div class="app-form-actions">
+                        <button type="button" @click="toggleForm" class="app-link text-sm" :disabled="form.processing || setupGuided">
                             Already have an Agent?
                         </button>
-                        <PrimaryButton data-guide="register-agent" type="submit" class="ml-4" :class="{ 'opacity-25': form.processing }" :disabled="form.processing || (setupGuided && setupStage !== 'submit')">
+                        <PrimaryButton data-guide="register-agent" type="submit" :class="{ 'opacity-25': form.processing }" :disabled="form.processing || (setupGuided && setupStage !== 'submit')">
                             Register New Agent
                         </PrimaryButton>
                     </div>

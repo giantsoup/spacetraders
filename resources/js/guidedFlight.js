@@ -1,4 +1,5 @@
 import miningYields from '../data/mining-yields.json' with { type: 'json' };
+import { formatLocalTime } from './dateTime.js';
 
 const phases = ['welcome', 'sync', 'plan', 'briefing', 'outbound', 'extract', 'inbound', 'marketSync', 'sell', 'refuel', 'review', 'complete'];
 const miningTypes = ['ASTEROID', 'ASTEROID_FIELD', 'ENGINEERED_ASTEROID'];
@@ -154,7 +155,7 @@ export function flightStep(session, context, now = Date.now()) {
     if (ship.nav.status === 'IN_TRANSIT') {
         const arrival = Date.parse(ship.nav.route.arrival);
         return now >= arrival ? syncStep(`The reported arrival at ${ship.nav.waypointSymbol} has elapsed. Synchronize to confirm that ${plan.ship} is in orbit.`)
-            : { kind: 'wait', target: 'fleet', title: 'Wait for arrival', body: `${plan.ship} is travelling to ${ship.nav.waypointSymbol}. Arrival: ${ship.nav.route.arrival}. Guidance will highlight Synchronize when that time arrives.` };
+            : { kind: 'wait', target: 'fleet', title: 'Wait for arrival', body: `${plan.ship} is travelling to ${ship.nav.waypointSymbol}. Arrival: ${formatLocalTime(ship.nav.route.arrival)}. Guidance will highlight Synchronize when that time arrives.` };
     }
     let intent;
     const move = (target, next) => ship.nav.waypointSymbol !== target
@@ -184,7 +185,7 @@ export function flightStep(session, context, now = Date.now()) {
     if (session.phase === 'extract') {
         if (ship.nav.waypointSymbol !== plan.site) return blocked(`The selected miner moved away from ${plan.site}. Pause guidance and inspect the route.`, 'fleet');
         if (ship.nav.status === 'DOCKED') intent = { command: 'orbit', args: {}, next: 'extract' };
-        else if (Date.parse(ship.cooldown.expiration) > now) return { kind: 'wait', target: 'fleet', title: 'Wait for the mining cooldown', body: `Mining becomes available after ${ship.cooldown.expiration}. Do not submit another extraction before then.` };
+        else if (Date.parse(ship.cooldown.expiration) > now) return { kind: 'wait', target: 'fleet', title: 'Wait for the mining cooldown', body: `Mining becomes available after ${formatLocalTime(ship.cooldown.expiration)}. Do not submit another extraction before then.` };
         else if (ship.cargo.units !== 0) return blocked('Mining starts with an empty hold. Cargo changed outside this guided trip. Inspect it before continuing.', 'market');
         else intent = { command: 'mine', args: {}, next: 'inbound' };
     }

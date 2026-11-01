@@ -32,7 +32,7 @@ const submit = () => {
 </script>
 
 <template>
-    <GuestLayout>
+    <GuestLayout title="Choose a new password">
         <Head title="Reset Password" />
 
         <form @submit.prevent="submit">
@@ -40,6 +40,8 @@ const submit = () => {
                 <InputLabel for="email" value="Email" />
 
                 <TextInput
+                    :aria-invalid="Boolean(form.errors.email)"
+                    :aria-describedby="form.errors.email ? 'resetpassword-email-error' : undefined"
                     id="email"
                     type="email"
                     class="mt-1 block w-full"
@@ -49,13 +51,15 @@ const submit = () => {
                     autocomplete="username"
                 />
 
-                <InputError class="mt-2" :message="form.errors.email" />
+                <InputError id="resetpassword-email-error" class="mt-2" :message="form.errors.email" />
             </div>
 
             <div class="mt-4">
                 <InputLabel for="password" value="Password" />
 
                 <TextInput
+                    :aria-invalid="Boolean(form.errors.password)"
+                    :aria-describedby="form.errors.password ? 'resetpassword-password-error' : undefined"
                     id="password"
                     type="password"
                     class="mt-1 block w-full"
@@ -64,13 +68,15 @@ const submit = () => {
                     autocomplete="new-password"
                 />
 
-                <InputError class="mt-2" :message="form.errors.password" />
+                <InputError id="resetpassword-password-error" class="mt-2" :message="form.errors.password" />
             </div>
 
             <div class="mt-4">
                 <InputLabel for="password_confirmation" value="Confirm Password" />
 
                 <TextInput
+                    :aria-invalid="Boolean(form.errors.password_confirmation)"
+                    :aria-describedby="form.errors.password_confirmation ? 'resetpassword-password_confirmation-error' : undefined"
                     id="password_confirmation"
                     type="password"
                     class="mt-1 block w-full"
@@ -79,10 +85,10 @@ const submit = () => {
                     autocomplete="new-password"
                 />
 
-                <InputError class="mt-2" :message="form.errors.password_confirmation" />
+                <InputError id="resetpassword-password_confirmation-error" class="mt-2" :message="form.errors.password_confirmation" />
             </div>
 
-            <div class="flex items-center justify-end mt-4">
+            <div class="app-form-actions">
                 <PrimaryButton :class="{ 'opacity-25': form.processing }" :disabled="form.processing">
                     Reset Password
                 </PrimaryButton>

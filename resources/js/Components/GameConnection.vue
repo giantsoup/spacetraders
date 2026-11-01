@@ -16,5 +16,5 @@ const connection = computed(() => page.props.gameConnection);
 </template>
 
 <style scoped>
-.game-connection{color-scheme:dark;background:#123029;color:#defbed;border:1px solid #78c6a4;padding:14px 18px;margin-bottom:22px;font:14px/1.6 ui-sans-serif,system-ui,sans-serif;overflow-wrap:anywhere}.game-connection strong{display:block;font-weight:700;color:#a6f3d0}.game-connection p{margin:5px 0}.game-connection span{color:#b7d6c8;font:12px/1.6 ui-monospace,monospace}.game-connection.offline{background:#302819;border-color:#bd9e61;color:#fff0d0}.game-connection.offline strong{color:#ffe09a}
+.game-connection{color-scheme:dark;background:#123029;color:#defbed;border:1px solid #78c6a4;padding:14px 18px;margin-bottom:22px;font:14px/1.6 ui-sans-serif,system-ui,sans-serif;overflow-wrap:anywhere}.game-connection strong{display:block;font-weight:700;color:var(--color-accent)}.game-connection p{margin:5px 0}.game-connection span{color:#b7d6c8;font:12px/1.6 ui-monospace,monospace}.game-connection.offline{background:#302819;border-color:#bd9e61;color:#fff0d0}.game-connection.offline strong{color:#ffe09a}
 </style>
