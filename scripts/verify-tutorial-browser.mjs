@@ -71,6 +71,8 @@ async function post(label, suffix) {
     ]);
     const data = await received.json();
     assert.equal(received.status(), 202, `${label}: ${data.message || JSON.stringify(data.errors)}`);
+    // The POST response precedes Dashboard's Inertia reload and busy-state reset.
+    await page.waitForFunction(() => document.querySelector('[data-guide="sync"]')?.disabled === false);
     return data;
 }
 async function refreshDeck() { await page.goto(deck); await page.getByRole('heading', { name: 'LOCAL', exact: true }).waitFor(); }

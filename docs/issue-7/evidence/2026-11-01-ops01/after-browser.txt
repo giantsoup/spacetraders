@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "steps": [
+    "Asset names preserve categories, tiers, official names, duplicate quantities and raw select values",
+    "Orbit arguments use readable labels and credit units; primary, secondary, selected-ship, focus and responsive button spacing verified at four widths",
+    "Real one-time ship purchase preview renders nested equipment, arrays, route, percentages and costs as readable details",
+    "Mining cargo counts and reconciliation preserve zero, false, unknown and empty values; escaped text, local DST timestamps and unchanged UTC datetime verified"
+  ],
+  "errors": [],
+  "browser": "156.0.8078.4",
+  "fixture": "<owned-temporary-fixture>
+  "output": "<worktree>/storage/app/mvp-evidence/ops01-private/after-browser"
+}

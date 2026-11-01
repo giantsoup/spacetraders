@@ -1,0 +1,10 @@
+$ PHP_BIN=./scripts/herd-php ./scripts/verify.sh
+PASS PHP 8.5.12 matches Composer, lockfile and CI pin; worker/SQLite extensions loaded.
+PASS real selected PHP and matching runtime pins
+PASS stale Composer lock pin rejected
+PASS untested PHP patch rejected even when manifest pins agree
+PASS executable PHP_BIN wrapper preserves paths and literal arguments with spaces
+PASS missing Herd executable fails without falling back to global PHP
+Runtime:       PHP 8.5.12
+OK (293 tests, 1528 assertions)
+verify.sh exit: 0

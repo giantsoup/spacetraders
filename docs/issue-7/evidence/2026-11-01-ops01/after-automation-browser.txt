@@ -1,0 +1,20 @@
+PASS mining investigation and staged reload
+PASS complete mining flow
+PASS complete contract flow
+{
+  "passed": true,
+  "steps": [
+    "Engine-off read-only mining investigation, trial explanation, staging and reload recovery",
+    "Start authorizes no gameplay and changed-price approval is rejected",
+    "Complete mining trial through actual owned engine; one extraction, confirmed contribution and keyboard review",
+    "Complete offered contract with explicit acceptance, three purchase batches, delivery, fulfillment and separate confirmed accounting",
+    "Server validation is readable, focuses the error and marks invalid fields",
+    "End session cancels an unsent manual preview; restart replays no approval",
+    "Visible Stop prevents further run reservations while the engine remains available for manual commands"
+  ],
+  "errors": [],
+  "serviceRemoved": true,
+  "browser": "156.0.8078.4",
+  "fixture": "<owned-temporary-fixture>
+  "output": "<worktree>/storage/app/mvp-evidence/ops01-private/after-automation-browser"
+}

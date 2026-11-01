@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Select only this process's Herd runtime. Never change Herd's global or site settings.
+php_bin="${HERD_PHP85_BIN:-$HOME/Library/Application Support/Herd/bin/php85}"
+if [[ ! -x "$php_bin" ]]; then
+    printf 'Herd PHP 8.5 executable not found: %s\n' "$php_bin" >&2
+    exit 1
+fi
+exec "$php_bin" "$@"

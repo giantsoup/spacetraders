@@ -1,0 +1,6 @@
+PASS login, normal guide entry, keyboard focus and preparation persistence
+PASS agent-scoped progress, lesson links, flight-deck checklist and real manual mining loop
+PASS complete, undo, resume, reset cancellation and confirmed checklist reset
+PASS agent/reset boundaries, malformed and unavailable storage, cross-tab updates
+PASS dark appearance, mobile reflow, reference keyboard interaction and narrow flight deck
+Tutorial evidence: <worktree>/storage/app/mvp-evidence/ops01-private/before-tutorial-browser

@@ -1,0 +1,8 @@
+$ PHP_BIN=Herd/php85 bash -x scripts/verify.sh
++ 'Herd/bin/php85' -r 'exit(PHP_VERSION_ID >= 80401 && PHP_VERSION_ID < 80500 ? 0 : 1);'
+exit: 1
+
+$ PHP_BIN=Herd/php84 ./scripts/verify.sh
+Runtime:       PHP 8.4.27
+OK (293 tests, 1528 assertions)
+verify.sh exit: 0

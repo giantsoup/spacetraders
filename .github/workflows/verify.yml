@@ -1,0 +1,72 @@
+name: Verify PHP runtime
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      PHP_BIN: php
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ops01-browsers
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Read tested PHP patch
+        id: runtime
+        run: echo "php=$(cat .php-version)" >> "$GITHUB_OUTPUT"
+      - uses: shivammathur/setup-php@d52fc211a0436f8839a587b3b5b8efddab4744ea # v2
+        with:
+          php-version: ${{ steps.runtime.outputs.php }}
+          extensions: curl, dom, fileinfo, mbstring, openssl, pcntl, pdo_mysql, pdo_sqlite, posix, session, sqlite3, tokenizer, xml
+          tools: composer:2.10.3
+          coverage: none
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+      - name: Install locked dependencies
+        id: dependencies
+        run: |
+          ./scripts/composer install --no-interaction --prefer-dist
+          ./scripts/composer validate --strict
+          ./scripts/composer check-platform-reqs
+          npm install --prefix "$RUNNER_TEMP/ops01-pnpm" --no-audit --no-fund pnpm@12.16.1
+          echo "$RUNNER_TEMP/ops01-pnpm/node_modules/.bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/ops01-pnpm/node_modules/.bin/pnpm" install --frozen-lockfile --strict-peer-dependencies
+          node node_modules/playwright/cli.js install --with-deps chromium
+      - name: Full verification
+        run: ./scripts/verify.sh
+      - name: Read-only server runtime preflight
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: ./scripts/server-preflight.sh
+      - name: Real disposable database workers
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          php scripts/verify-mvp-worker.php
+          php scripts/verify-automation-worker.php
+      - name: Browser journeys with fake provider and compiled assets
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node scripts/verify-presentation-browser.mjs
+          node scripts/verify-tutorial-browser.mjs
+          for scenario in mining setup uncertain rejected recovery preparation; do
+            QA_GUIDED_SCENARIO="$scenario" node scripts/verify-guided-browser.mjs
+          done
+      - name: Native owned engine and Start/Stop browser journey
+        if: ${{ !cancelled() && runner.os == 'macOS' && steps.dependencies.outcome == 'success' }}
+        run: |
+          php scripts/verify-local-engine.php
+          node scripts/verify-automation-browser.mjs

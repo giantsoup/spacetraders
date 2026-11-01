@@ -1,0 +1,35 @@
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS separate queue worker uses FULL and macOS fullfsync
+PASS persisted manual intent confirmed by a default-queue worker without an explicit queue flag
+PASS two workers plus duplicate delivery caused exactly one simulated mutation
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS full mining trip completed across real worker process restarts
+PASS cargo and confirmed credit outcomes persisted
+PASS real worker reached upstream-commit/local-confirmation crash window
+PASS SIGKILL left durable sending intent and released OS ownership
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS killed sender becomes uncertain rather than pending
+PASS restart never repeats the purchase whose response was lost
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS abandoned sending intent becomes uncertain after restart
+PASS uncertain intent is not replayed by a real worker
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS offline Stop survives until the next real worker starts
+PASS offline Stop starts no additional mutation
+PASS no failed jobs in disposable queue
+Owned disposable evidence: <owned-temporary-fixture>
