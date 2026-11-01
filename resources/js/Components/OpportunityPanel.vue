@@ -36,7 +36,7 @@ const questions = computed(() => props.report?.observation_tasks.filter(row => r
         <details v-for="(candidate, index) in opportunities" :key="index">
             <summary>{{ readableLabel(candidate.strategy) }} · {{ candidate.site || candidate.source }} → {{ candidate.market }} {{ candidate.good ? assetName(candidate.good) : '' }} · {{ readableLabel(candidate.state) }}</summary>
             <p>{{ candidate.reason }}</p>
-            <p v-if="candidate.samples !== undefined">{{ candidate.samples }} extraction samples for this configuration. Estimated net credits/hour: unknown.</p>
+            <p v-if="candidate.samples !== undefined">{{ candidate.samples }} extraction samples for this configuration. Base / conservative net credits per hour: {{ candidate.net_credits_per_hour ?? 'Unknown' }} / {{ candidate.conservative_net_per_hour ?? 'Unknown' }}. Forecasts remain separate from realized outcomes.</p>
             <p v-if="candidate.estimated_cash_margin !== undefined">Base cash margin {{ candidate.estimated_cash_margin }} CR · adverse case {{ candidate.conservative_cash_margin }} CR · inventory exposure {{ candidate.inventory_exposure }} CR. Neither is realized income.</p>
             <DataDetails :value="candidate" />
         </details>
@@ -46,7 +46,7 @@ const questions = computed(() => props.report?.observation_tasks.filter(row => r
         <h3 v-if="report.cargo_options?.some(row => row.ship === selected)">Plan for owned cargo</h3>
         <details v-for="cargo in report.cargo_options?.filter(row => row.ship === selected) || []" :key="cargo.good"><summary>{{ assetName(cargo.good) }} · {{ cargo.units }} units · retain pending approval</summary><DataDetails :value="cargo.choices" /></details>
         <p class="muted">{{ report.fleet_gate }}</p>
-        <EvidencePanel :evidence="report.evidence" />
+        <EvidencePanel :evidence="report.evidence" :agent-id="report.agent_id" />
     </section>
 </template>
 

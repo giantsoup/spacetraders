@@ -22,7 +22,8 @@ class LocalAutomationRequest extends FormRequest
             'game.drafts.create', 'game.drafts.update' => [
                 'investigation_id' => ['required', 'integer', 'min:1'], 'candidate_id' => ['required', 'string', 'size:24', 'regex:/^[a-f0-9]+$/'],
                 'revision' => [Rule::requiredIf($this->route()->getName() === 'game.drafts.update'), 'integer', 'min:1'],
-                'limits' => ['required', 'array:reserve,max_spend,max_loss,minutes,cycles,delivery_limit,purchase_limit,max_extractions,extraction_headroom,site_seconds,survey_signature'],
+                'limits' => ['required', 'array:reserve,max_spend,max_loss,minutes,cycles,delivery_limit,purchase_limit,max_extractions,extraction_headroom,site_seconds,survey_signature,wear_allowance'],
+                'limits.wear_allowance' => ['sometimes', 'nullable', 'integer', 'between:0,1000000000'],
                 'limits.reserve' => ['required', 'integer', 'between:1,1000000000'],
                 'limits.max_spend' => ['required', 'integer', 'between:0,1000000000'],
                 'limits.max_loss' => ['required', 'integer', 'between:0,1000000000'],

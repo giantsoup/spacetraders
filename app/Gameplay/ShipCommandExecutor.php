@@ -8,6 +8,7 @@ use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\LocalEngine;
+use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Services\SpaceTradersClient;
 use Carbon\CarbonImmutable;
@@ -335,5 +336,7 @@ class ShipCommandExecutor
     public function block(AutomationRun $run, string $reason): void
     {
         $run->update(['state' => RunState::Blocked, 'blocked_reason' => $reason]);
+        $ship = Ship::where('agent_id', $run->agent_id)->where('symbol', $run->ship_symbol)->first()?->snapshot;
+        app(CycleAccounting::class)->record($run, $ship);
     }
 }

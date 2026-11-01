@@ -53,5 +53,6 @@ node --check scripts/verify-adviser-browser.mjs
     tests/Feature/GameplayTest.php tests/Feature/PlayerGuideTest.php tests/Feature/GameConnectionTest.php app/Http/Controllers/PlayerGuideController.php tests/Support tests/TestCase.php \
     tests/Feature/AgentArchiveTest.php tests/Feature/LocalAutomationTest.php tests/Feature/OpportunityTest.php tests/Feature/RequestBudgetTest.php tests/Feature/SQLiteConcurrencyTest.php tests/Feature/BudgetResponseTest.php \
     tests/Feature/DeploymentGateTest.php scripts/verify-deployment.php \
+    tests/Feature/CycleEconomicsTest.php \
     scripts/mvp-fixture.php scripts/verify-mvp-worker.php scripts/verify-environment.php scripts/verify-local-engine.php scripts/verify-automation-worker.php scripts/runtime-preflight.php
 git diff --check

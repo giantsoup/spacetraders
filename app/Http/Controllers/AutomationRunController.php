@@ -12,7 +12,7 @@ class AutomationRunController extends Controller
     public function preview(GameplayRequest $request, Agent $agent, AutomationRunner $runner, AgentDashboardController $responses)
     {
         $limits = $request->safe()->except('ship_symbol');
-        foreach (['reserve', 'max_spend', 'max_loss', 'minutes', 'cycles', 'max_fuel', 'max_visits', 'units', 'max_inventory', 'min_margin', 'min_sell_price', 'max_extractions', 'extraction_headroom', 'site_seconds'] as $key) {
+        foreach (['reserve', 'max_spend', 'max_loss', 'minutes', 'cycles', 'max_fuel', 'max_visits', 'units', 'max_inventory', 'min_margin', 'min_sell_price', 'max_extractions', 'extraction_headroom', 'site_seconds', 'wear_allowance'] as $key) {
             if (isset($limits[$key])) {
                 $limits[$key] = (int) $limits[$key];
             }

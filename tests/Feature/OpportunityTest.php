@@ -231,11 +231,11 @@ class OpportunityTest extends TestCase
         $this->assertSame(370, $open['cash_contribution']);
         $this->assertCount(4, $open['unresolved']);
         $this->assertNull($open['net_credits_per_hour']);
-        $closed = $accounting->summarize($start, $start, ['sales' => 500, 'goods' => 100, 'fuel' => 20, 'repairs' => 10, 'wear_recorded' => true, 'capital' => 50000], 1800, 2);
+        $closed = $accounting->summarize($start, $start, ['sales' => 500, 'goods' => 100, 'fuel' => 20, 'repairs' => 10, 'wear_cost' => 10, 'capital' => 50000], 1800, 2);
         $this->assertEquals(740, $closed['net_credits_per_hour']);
         $this->assertEquals(370, $closed['income_per_ship_hour']);
-        $this->assertFalse($accounting->fleetInvestment(50000, 1000, 100, 40, 80)['ready']);
-        $this->assertNull($accounting->fleetInvestment(50000, null, 10, 40, 80)['payback_hours']);
+        $this->assertFalse($accounting->fleetInvestment(['ship_capital' => 50000, 'equipment_capital' => 0, 'base_net' => 2000, 'conservative_net' => 1500, 'elapsed_seconds' => 3600, 'ship_seconds' => 7200, 'production_units' => 100, 'hauler_capacity' => 40, 'buyer_capacity' => 80, 'round_trip_seconds' => 3600], 1000)['ready']);
+        $this->assertNull($accounting->fleetInvestment(['ship_capital' => 50000], null)['payback_hours']);
     }
 
     public function test_signed_surveys_preserve_duplicates_and_exhaustion_is_shared(): void

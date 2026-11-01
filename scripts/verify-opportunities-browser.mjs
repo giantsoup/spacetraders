@@ -93,6 +93,9 @@ try {
     await click('Start approved scout run', `/runs/${scout.id}/start`);
     await drain();
     assert.equal(state().runs[0].totals.visits, 1);
+    assert.equal(state().runs[0].totals.accounting.state, 'unresolved');
+    assert.equal(state().runs[0].totals.accounting.net_credits_per_hour, null);
+    assert.ok(state().runs[0].totals.accounting.unresolved.includes('Wear and repair exposure is unmeasured.'));
     steps.push('One purposeful scout visit collected prices, returned home, refueled and ended through real workers.');
     await world(value => {
         const observer = structuredClone(value.ships[0]);
@@ -111,12 +114,17 @@ try {
     await page.getByLabel('Total inventory units', { exact: true }).fill('10');
     await page.getByLabel('Maximum inventory exposure in CR', { exact: true }).fill('500');
     await page.getByLabel('Minimum sale price per owned unit', { exact: true }).fill('20');
+    await page.getByRole('region', { name: 'Bounded scouting and trading' }).getByLabel('Run wear allowance including repairs in CR', { exact: true }).fill('25');
     const trade = await click('Preview trade cycle', '/runs/preview');
     await page.getByRole('heading', { name: 'Review trade operation' }).waitFor();
     await click('Start approved trade run', `/runs/${trade.id}/start`);
     await drain();
     assert.equal(state().runs[0].totals.purchase_cost, 300);
     assert.equal(state().runs[0].totals.cash_contribution, 295);
+    assert.equal(state().runs[0].plan.wear_allowance, 25);
+    assert.equal(state().runs[0].totals.accounting.state, 'estimated_comparable');
+    assert.equal(state().runs[0].totals.accounting.net_after_wear, 270);
+    assert.equal(state().runs[0].totals.accounting.realized_net_per_hour, null);
     steps.push('Trade bought and sold 4/4/2 batches, returned home, and deducted acquisition and fuel.');
     await shipView(page, 'intelligence');
     await page.getByText(/^Travel calibration ·/).click();
@@ -129,6 +137,47 @@ try {
     assert.ok(evidence.request_usage.account.requests > 0);
     assert.ok(evidence.request_usage.host.requests >= evidence.request_usage.account.requests);
     assert.equal(evidence.request_usage.account.rate_limits, 0);
+    const cycle = evidence.cycles.find(row => row.run_id === trade.id);
+    assert.equal(cycle.accounting.state, 'estimated_comparable');
+    assert.equal(cycle.accounting.net_after_wear, 270);
+    assert.equal(cycle.capital.total, null, 'Imported capital remains unknown');
+    await page.getByText(/^Complete-cycle outcomes ·/).click();
+    await page.getByText(`Run ${trade.id} · LOCAL-1 · trade · completed`, { exact: true }).click();
+    await page.getByRole('heading', { name: /Complete-cycle accounting · Estimated comparable/ }).waitFor();
+    const comparisons = page.locator('.fleet-comparison');
+    await comparisons.getByText('Compare a fleet investment', { exact: true }).click();
+    await comparisons.getByLabel('Reference closed cycle', { exact: true }).selectOption(String(trade.id));
+    const baseline = cycle.accounting.net_credits_per_hour;
+    const inputs = {
+        'Base fleet net after all costs and wear in CR': String(Math.ceil(baseline) + 2000),
+        'Conservative fleet net after all costs and wear in CR': String(Math.ceil(baseline) + 1000),
+        'Fleet elapsed seconds': '3600', 'Total occupied ship-seconds': '7200', 'Added ship capital in CR': '40000', 'Added equipment capital in CR': '10000',
+        'Units produced during one hauler round trip': '20', 'Hauler round trip in seconds': '600', 'Hauler cargo capacity in units': '30', 'Buyer capacity during one round trip in units': '25',
+    };
+    for (const [label, value] of Object.entries(inputs)) await comparisons.getByLabel(label, { exact: true }).fill(value);
+    await comparisons.getByLabel('Source and assumptions', { exact: true }).fill('Synthetic case only: matched trade endpoints, empty inventory, full tanks, all fleet operating costs and wear included.');
+    await comparisons.getByRole('checkbox').check();
+    const beforeComparison = state().actions.length;
+    let compared = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/economics/investment'));
+    await comparisons.getByRole('button', { name: 'Calculate incremental payback' }).click();
+    const positive = await (await compared).json();
+    assert.equal(positive.ready, true);
+    assert.equal(positive.alternative_run, trade.id);
+    assert.equal(positive.capital, 50000);
+    assert.ok(positive.payback_hours > 0);
+    assert.ok(positive.conservative_payback_hours > positive.payback_hours);
+    await comparisons.getByRole('region', { name: 'Fleet investment estimate' }).waitFor();
+    await comparisons.getByRole('region', { name: 'Fleet investment estimate' }).screenshot({ path: path.join(output, 'fleet-comparison-desktop.png'), animations: 'disabled' });
+    await comparisons.getByText('Operating case inputs', { exact: true }).click();
+    await comparisons.getByLabel('Buyer capacity during one round trip in units', { exact: true }).fill('10');
+    compared = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/economics/investment'));
+    await comparisons.getByRole('button', { name: 'Calculate incremental payback' }).click();
+    const constrained = await (await compared).json();
+    assert.equal(constrained.ready, false);
+    assert.equal(constrained.payback_hours, null);
+    assert.equal(state().actions.length, beforeComparison, 'Report comparison issues no gameplay writes');
+    await fs.writeFile(path.join(output, 'fleet-comparisons.json'), JSON.stringify({ positive, constrained }, null, 2));
+    steps.push('Missing wear stays unresolved; entered wear reaches real workers, report and download. Fleet comparison uses incremental gain and withholds payback when buyer throughput is insufficient.');
     await page.getByText('API request usage', { exact: true }).click();
     await page.getByText(/Host and account budgets share/).waitFor();
     steps.push('Travel inputs, error analysis and summary export render without changing the conservative route policy.');
@@ -149,6 +198,8 @@ try {
         await page.getByText('API request usage', { exact: true }).scrollIntoViewIfNeeded();
         await page.screenshot({ path: path.join(output, `api-usage-${width}.png`), animations: 'disabled' });
         await page.getByText('API request usage', { exact: true }).locator('..').screenshot({ path: path.join(output, `api-usage-panel-${width}.png`), animations: 'disabled' });
+        await comparisons.getByRole('region', { name: 'Fleet investment estimate' }).screenshot({ path: path.join(output, `fleet-comparison-${width}.png`), animations: 'disabled' });
+        await page.getByRole('region', { name: 'Complete-cycle accounting' }).last().screenshot({ path: path.join(output, `cycle-accounting-${width}.png`), animations: 'disabled' });
 
     }
     assert.deepEqual(errors, []);

@@ -87,6 +87,7 @@ try {
     };
     const stage = async name => {
         await button(name).click();
+        await page.getByRole('region', { name: 'Stage plan', exact: true }).getByLabel('Run wear allowance including repairs in CR', { exact: true }).fill('25');
         await post('Stage plan', '/drafts');
         await page.getByText(/Saved draft #\d+ · Revision 1/).waitFor();
     };
@@ -136,6 +137,11 @@ try {
     await waitRun('completed');
     assert.equal((await world()).writes.filter(w => w.path.endsWith('/extract')).length, 1);
     assert.equal(cli("echo json_encode(App\\Models\\AutomationRun::latest('id')->first()->totals['cash_contribution']);"), 240);
+    const miningAccounting = cli("$r=App\\Models\\AutomationRun::latest('id')->first(); echo json_encode(['plan'=>$r->plan,'accounting'=>$r->totals['accounting']]);");
+    assert.equal(miningAccounting.plan.wear_allowance, 25);
+    assert.equal(miningAccounting.accounting.state, 'estimated_comparable');
+    assert.equal(miningAccounting.accounting.net_after_wear, 215);
+    assert.equal(miningAccounting.accounting.realized_net_per_hour, null);
     steps.push('Complete mining trial through actual owned engine; one extraction, confirmed contribution and keyboard review');
     console.log('PASS complete mining flow');
     await investigate('Contracts');
@@ -153,6 +159,8 @@ try {
     await waitRun('completed');
     const result = cli("$r=App\\Models\\AutomationRun::where('strategy','contracts')->latest('id')->first(); echo json_encode($r->totals);");
     assert.equal(result.receipts, 1600); assert.equal(result.acquisition_cost, 300); assert.equal(result.cash_contribution, 1300);
+    assert.equal(result.accounting.state, 'unresolved');
+    assert.equal(result.accounting.net_credits_per_hour, null);
     assert.equal((await world()).writes.filter(w => w.path.endsWith('/accept')).length, 1);
     assert.equal((await world()).writes.filter(w => w.path.endsWith('/fulfill')).length, 1);
     await screenshot('contract-outcome');

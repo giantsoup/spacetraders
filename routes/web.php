@@ -57,6 +57,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/agents/{agent}/adviser/collect', [AdviserController::class, 'collect'])->name('game.adviser.collect');
         Route::post('/agents/{agent}/adviser/investigations/{investigation}/advance', [AdviserController::class, 'advance'])->name('game.adviser.advance');
         Route::post('/agents/{agent}/adviser/investigations/{investigation}/cancel', [AdviserController::class, 'cancel'])->name('game.adviser.cancel');
+        Route::post('/agents/{agent}/economics/investment', [AgentDashboardController::class, 'investment'])->name('game.economics.investment');
         Route::post('/agents/{agent}/accounting/review', [LocalAutomationController::class, 'reviewBalance'])->name('game.accounting.review');
         Route::post('/agents/{agent}/investigations', [LocalAutomationController::class, 'investigate'])->name('game.investigations.create');
         Route::post('/agents/{agent}/investigations/{investigation}/advance', [LocalAutomationController::class, 'advance'])->name('game.investigations.advance');
