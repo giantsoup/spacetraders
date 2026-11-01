@@ -61,6 +61,47 @@ class GameplayTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_incomplete_observations_remain_available_without_inventing_planning_values(): void
+    {
+        $ship = Ship::firstOrFail();
+        $snapshot = $ship->snapshot;
+        unset($snapshot['nav']['flightMode'], $snapshot['cargo']['inventory'], $snapshot['fuel'], $snapshot['crew'], $snapshot['cooldown']);
+        $ship->update(['snapshot' => $snapshot]);
+        $requests = Http::recorded()->count();
+        $this->get(route('agents.show', $this->agent))->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->missing('ships.0.snapshot.fuel')->missing('ships.0.snapshot.cargo.inventory')
+            ->has('intelligence.observation_gaps', 1)->has('intelligence.opportunities', 0));
+        $this->assertSame($requests, Http::recorded()->count());
+    }
+
+    public function test_missing_flight_mode_does_not_break_the_intelligence_report(): void
+    {
+        $ship = Ship::firstOrFail();
+        $snapshot = $ship->snapshot;
+        unset($snapshot['nav']['flightMode']);
+        $ship->update(['snapshot' => $snapshot]);
+        $this->get(route('agents.show', $this->agent))->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->missing('ships.0.snapshot.nav.flightMode')->has('intelligence.observation_gaps', 1));
+    }
+
+    public function test_history_is_owner_scoped_paginated_and_does_not_contact_upstream(): void
+    {
+        $action = $this->preview('orbit');
+        for ($index = 0; $index < 44; $index++) {
+            $copy = $action->replicate();
+            $copy->key = (string) Str::uuid();
+            $copy->save();
+        }
+        $requests = Http::recorded()->count();
+        $first = $this->getJson('/agents/'.$this->agent->id.'/history?before='.($copy->id + 1));
+        $first->assertOk()->assertJsonCount(40, 'actions')->assertJsonPath('has_more', true)->assertDontSee('synthetic-agent-token');
+        $before = $first->json('actions.39.id');
+        $this->getJson('/agents/'.$this->agent->id.'/history?before='.$before)->assertOk()->assertJsonCount(5, 'actions')->assertJsonPath('has_more', false);
+        $this->getJson('/agents/'.$this->agent->id.'/history?before=0')->assertUnprocessable();
+        $this->assertSame($requests, Http::recorded()->count());
+        $this->actingAs(User::factory()->create())->getJson('/agents/'.$this->agent->id.'/history?before='.$before)->assertNotFound();
+    }
+
     public function test_navigation_preview_requires_a_readable_destination_without_contacting_upstream(): void
     {
         $requests = Http::recorded()->count();

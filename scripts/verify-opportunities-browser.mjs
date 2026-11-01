@@ -1,3 +1,4 @@
+import { shipView } from './ship-browser-navigation.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:net';
@@ -50,6 +51,7 @@ const button = name => page.getByRole('button', { name, exact: true });
 const state = () => cli("echo json_encode(['runs'=>App\\Models\\AutomationRun::latest('id')->get(),'actions'=>App\\Models\\ShipAction::orderBy('id')->get(),'ships'=>App\\Models\\Ship::all()]);");
 async function click(name, suffix) {
     const waiting = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(suffix));
+    if (name === 'Synchronize') await shipView(page, 'guide');
     await button(name).click();
     const response = await waiting;
     const result = await response.json();
@@ -66,6 +68,7 @@ async function drain() {
     await page.reload();
 }
 async function limits() {
+    await shipView(page, 'automation');
     for (const [label, value] of [['Protected reserve in CR', '1000'], ['Maximum total spending in CR', '1000'], ['Maximum cash drawdown in CR', '1000'], ['Maximum travel fuel in tank units', '30']]) await page.getByLabel(label, { exact: true }).fill(value);
 }
 try {
@@ -77,6 +80,7 @@ try {
     await page.waitForURL('**/agents');
     await page.goto(`${origin}/agents/${auth.agent_id}`);
     await click('Synchronize', '/sync');
+    await shipView(page, 'intelligence');
     await page.getByRole('heading', { name: 'Local intelligence and opportunities' }).waitFor();
     assert.match(await page.locator('#opportunities').innerText(), /Prices unknown/);
     assert.match(await page.locator('#opportunities').innerText(), /Complete known geography; hidden traits remain unresolved/);
@@ -85,7 +89,7 @@ try {
     await page.getByLabel('Observation question', { exact: true }).selectOption('X1-TEST-PORT');
     const scout = await click('Preview observation trip', '/runs/preview');
     await page.getByRole('heading', { name: 'Review scout operation' }).waitFor();
-    assert.equal(await page.locator('.approval').evaluate(element => element === document.activeElement), true);
+    assert.equal(await page.getByRole('dialog', {name:'Review approval',exact:true}).evaluate(element => element.contains(document.activeElement)), true);
     await click('Start approved scout run', `/runs/${scout.id}/start`);
     await drain();
     assert.equal(state().runs[0].totals.visits, 1);
@@ -99,6 +103,7 @@ try {
         value.market_goods['X1-TEST-PORT'][0].sellPrice = 60;
     });
     await click('Synchronize', '/sync');
+    await shipView(page, 'automation');
     await page.getByLabel('Operation', { exact: true }).selectOption('trade');
     await limits();
     await page.getByLabel('Buyer', { exact: true }).selectOption('X1-TEST-PORT');
@@ -113,6 +118,7 @@ try {
     assert.equal(state().runs[0].totals.purchase_cost, 300);
     assert.equal(state().runs[0].totals.cash_contribution, 295);
     steps.push('Trade bought and sold 4/4/2 batches, returned home, and deducted acquisition and fuel.');
+    await shipView(page, 'intelligence');
     await page.getByText(/^Travel calibration ·/).click();
     await page.getByRole('img', { name: /Fuel prediction error by distance/ }).waitFor();
     const [download] = await Promise.all([page.waitForEvent('download'), button('Download evidence summary').click()]);
@@ -129,12 +135,15 @@ try {
 
     for (const width of [1440, 390]) {
         await page.setViewportSize({ width, height: 1100 });
+        await shipView(page, 'intelligence');
         await page.locator('#opportunities').scrollIntoViewIfNeeded();
         assert.equal(await page.locator('.app-shell').evaluate(element => getComputedStyle(element).colorScheme), 'dark');
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
         await page.screenshot({ path: path.join(output, `intelligence-${width}.png`), animations: 'disabled' });
+        await shipView(page, 'automation');
         await page.getByRole('heading', { name: 'Bounded scouting and trading' }).scrollIntoViewIfNeeded();
         await page.screenshot({ path: path.join(output, `operations-${width}.png`), animations: 'disabled' });
+        await shipView(page, 'intelligence');
         await page.getByRole('heading', { name: 'Our travel and mining evidence' }).scrollIntoViewIfNeeded();
         await page.screenshot({ path: path.join(output, `evidence-${width}.png`), animations: 'disabled' });
         await page.getByText('API request usage', { exact: true }).scrollIntoViewIfNeeded();

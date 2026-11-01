@@ -1,3 +1,4 @@
+import { shipView } from './ship-browser-navigation.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -103,7 +104,8 @@ try {
     await page.setViewportSize({ width: 1440, height: 1100 });
     await archived.getByRole('link', { name: 'View archived record for LOCAL from 2026-10-18', exact: true }).click();
     await page.waitForURL(`**/agents/${oldAgentId}`);
-    await page.getByRole('heading', { name: 'Archived agent · World reset', exact: true }).waitFor();
+    await page.getByText('Archived agent · World reset.', { exact: false }).waitFor();
+    await shipView(page, 'commands');
     assert.equal(await page.getByRole('button', { name: 'Synchronize', exact: true }).isDisabled(), true);
     assert.equal(await page.getByRole('button', { name: 'Preview orbit', exact: true }).isDisabled(), true);
     assert.equal(await page.getByRole('button', { name: 'Start guided flight', exact: true }).count(), 0);
@@ -111,6 +113,7 @@ try {
     await page.setViewportSize({ width: 320, height: 900 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: path.join(output, 'archived-record-mobile.png'), fullPage: true });
+    await page.getByRole('button', { name: 'Back to ship', exact: true }).click();
     await page.getByRole('link', { name: 'Back to current and archived agents', exact: false }).click();
     await page.waitForURL('**/agents#archived-agents');
     await page.reload();
@@ -125,7 +128,7 @@ try {
     await page.goto(`${origin}/agents`);
     await page.getByRole('link', { name: 'Open flight deck for LOCAL', exact: true }).click();
     await page.waitForURL(`**/agents/${auth.agent_id}`);
-    await page.getByRole('heading', { name: 'LOCAL', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'LOCAL-1', exact: true }).waitFor();
     await page.goto(`${origin}/agents`);
     await page.getByRole('link', { name: 'Import current token for TOKEN_PILOT', exact: true }).click();
     await page.getByLabel('Agent token', { exact: true }).waitFor();

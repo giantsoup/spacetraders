@@ -12,7 +12,7 @@ const questions = computed(() => props.report?.observation_tasks.filter(row => r
 
 <template>
     <section v-if="report" id="opportunities" class="panel" aria-labelledby="opportunities-heading">
-        <h2 id="opportunities-heading">Local intelligence and opportunities</h2>
+        <h2 id="opportunities-heading">Local intelligence and opportunities</h2><p v-for="gap in report?.observation_gaps || []" :key="gap.ship" class="warning">{{ gap.ship }} · {{ gap.reason }}</p>
         <p v-if="!report.valid_for_planning" class="warning">Archived world. These observations cannot support new plans.</p>
         <p>{{ report.limits }}</p>
         <p v-if="!report.catalogues.length" class="warning">Catalogue coverage unknown. Synchronize before assessing routes.</p>
@@ -57,11 +57,11 @@ p { margin: 10px 0; }
 .muted { color: var(--color-muted); }
 .warning { color: #f8d99b; }
 .table-scroll { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+table { min-width: 560px; width: 100%; border-collapse: collapse; font-size: 14px; }
 caption { text-align: left; padding: 10px 0; color: var(--color-muted); }
 th { text-align: left; background: var(--color-field); color: var(--color-accent); }
 td, th { padding: 12px; border-bottom: 1px solid var(--color-line); vertical-align: top; }
 details { margin: 12px 0; }
-summary { cursor: pointer; color: var(--color-accent); min-height: 36px; }
+summary { cursor: pointer; color: var(--color-accent); min-height: 44px; }
 summary:focus-visible { outline: 3px solid var(--color-focus); outline-offset: 4px; }
 </style>

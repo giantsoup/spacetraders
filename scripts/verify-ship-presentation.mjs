@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import { remaining, shipPresentation, observedNumber, meterPercent } from '../resources/js/shipPresentation.js';
+const now = Date.parse('2026-11-01T20:00:00Z');
+assert.equal(remaining('2026-11-01T20:00:01Z', now), '0:01');
+assert.equal(remaining('2026-11-01T20:00:00Z', now), 'Checking');
+assert.equal(remaining(null, now), 'Unknown');
+assert.equal(observedNumber(null), 'Unknown'); assert.equal(observedNumber(0), '0');
+assert.equal(meterPercent(0, 0), 0); assert.equal(meterPercent(5, 10), 50);
+const ship = { nav: { status: 'IN_TRANSIT', waypointSymbol: 'X1-TEST-PORT', route: { departureTime: '2026-11-01T19:59:00Z', arrival: '2026-11-01T20:01:00Z' } }, cooldown: { expiration: '2026-11-01T19:59:59Z', remainingSeconds: 0 } };
+let state = shipPresentation(ship, '2026-11-01T20:00:00Z', 'connected', now);
+assert.equal(state.progress, .5); assert.equal(state.readiness, 'Ready'); assert.equal(state.stale, false);
+state = shipPresentation(ship, '2026-11-01T19:59:00Z', 'connected', now + 61000);
+assert.equal(state.readiness, 'Checking'); assert.equal(state.status, 'Checking arrival'); assert.equal(state.transit, true);
+assert.equal(shipPresentation(ship, '2026-11-01T19:00:00Z', 'connected', now).stale, true);
+assert.equal(shipPresentation({}, null, 'disconnected', now).readiness, 'Unknown');
+console.log('PASS absolute deadlines, observation-confirmed readiness, unknowns, zero-capacity meters and freshness');

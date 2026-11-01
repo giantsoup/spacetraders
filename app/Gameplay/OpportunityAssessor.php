@@ -31,9 +31,15 @@ class OpportunityAssessor
         $opportunities = [];
         $questions = [];
         $cargoOptions = [];
+        $observationGaps = [];
         if (! $agent->isArchived()) {
             foreach (Ship::where('agent_id', $agent->id)->get() as $owned) {
                 $ship = $owned->snapshot;
+                if (! isset($ship['nav']['flightMode'], $ship['nav']['systemSymbol'], $ship['nav']['waypointSymbol'], $ship['fuel']['current'], $ship['fuel']['capacity'], $ship['cargo']['units'], $ship['cargo']['capacity']) || ! is_array($ship['cargo']['inventory'] ?? null)) {
+                    $observationGaps[] = ['ship' => $owned->symbol, 'reason' => 'Ship observations are incomplete. Missing values remain Unknown. Synchronize before planning.'];
+
+                    continue;
+                }
                 $cargoOptions = array_merge($cargoOptions, $this->cargo($agent, $ship, $markets->all()));
                 foreach ($points->where('data.systemSymbol', $ship['nav']['systemSymbol']) as $point) {
                     if (in_array('UNCHARTED', array_column($point->data['traits'], 'symbol'), true)) {
@@ -100,7 +106,7 @@ class OpportunityAssessor
             'catalogues' => $observations->where('kind', 'catalogue')->values(), 'discovery' => $observations->firstWhere('kind', 'discovery')?->data,
             'hidden_waypoints' => $points->filter(fn ($point) => in_array('UNCHARTED', array_column($point->data['traits'], 'symbol'), true))->pluck('symbol')->values(),
             'markets' => $markets, 'opportunities' => $opportunities, 'observation_tasks' => $questions,
-            'cargo_options' => $cargoOptions, 'candidate_limit_reached' => count($opportunities) >= config('gameplay.opportunity_limit'),
+            'cargo_options' => $cargoOptions, 'observation_gaps' => $observationGaps, 'candidate_limit_reached' => count($opportunities) >= config('gameplay.opportunity_limit'),
             'evidence' => app(EvidenceAnalysis::class)->report($agent),
             'limits' => 'Local evidence only. Quote age is a client policy. Feasible estimates require a new bounded preview; they do not authorize movement, purchases or profit claims.',
             'fleet_gate' => 'Probes, surveys, hauling and refining require measured incremental benefit, loadouts and separate capital approval. Cargo refueling and other flight modes remain unvalidated.'];

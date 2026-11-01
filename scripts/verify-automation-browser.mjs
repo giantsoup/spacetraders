@@ -1,3 +1,4 @@
+import { shipView } from './ship-browser-navigation.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -67,6 +68,7 @@ try {
         return received.json();
     };
     const screenshot = async name => {
+        await shipView(page, 'automation');
         for (const width of [1440, 390, 320]) {
             await page.setViewportSize({ width, height: 1100 });
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `No horizontal overflow at ${width}`);
@@ -98,6 +100,7 @@ try {
     await button('Log in').click();
     await page.waitForURL('**/agents');
     await page.goto(`${origin}/agents/${auth.agent_id}`);
+    await shipView(page, 'automation');
     assert.equal(await page.locator('html').evaluate(el => getComputedStyle(el).colorScheme), 'dark');
     await investigate('Mining');
     assert.equal((await world()).writes.length, 0);
@@ -161,9 +164,12 @@ try {
     assert.equal(await page.getByLabel('Automation protected reserve', { exact: true }).getAttribute('aria-invalid'), 'true');
     await page.getByRole('alert').filter({ hasText: /reserve/ }).waitFor();
     steps.push('Server validation is readable, focuses the error and marks invalid fields');
+    await shipView(page, 'commands');
     await post('Preview orbit', '/commands/preview');
     const old = cli("echo json_encode(App\\Models\\ShipAction::latest('id')->first()->id);");
     const writes = (await world()).writes.length;
+    await shipView(page, 'automation');
+    await shipView(page, 'automation');
     await post('End session', '/engine/end');
     await waitFor(() => cli("echo json_encode(App\\Models\\LocalEngine::find(1)?->state === 'off');"));
     await page.reload();
@@ -178,12 +184,15 @@ try {
     await stage('Select LOCAL-1 X1-TEST-ROCK via X1-TEST-PORT');
     await post('Preview automation', '/preview');
     await post('Approve and start', '/start');
+    await button('Run details and Stop').click();
     await post('Stop automation', '/stop');
     await waitRun('stopped');
     assert.equal(cli("echo json_encode(is_int(App\\Models\\AutomationRun::latest('id')->first()->totals['elapsed_seconds']));"), true);
     assert.equal(cli("echo json_encode(App\\Models\\LocalEngine::find(1)->state);"), 'running');
     await screenshot('stopped-run');
     steps.push('Visible Stop prevents further run reservations while the engine remains available for manual commands');
+    await shipView(page, 'automation');
+    await shipView(page, 'automation');
     await post('End session', '/engine/end');
     await waitFor(() => cli("echo json_encode(App\\Models\\LocalEngine::find(1)?->state === 'off');"));
     assert.deepEqual(errors, []);
