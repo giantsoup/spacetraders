@@ -12,10 +12,12 @@ use Illuminate\Validation\ValidationException;
 
 class SpaceTradersClient
 {
+    public const BASE_URL = 'https://api.spacetraders.io/v2';
+
     public function request(string $method, string $path, array $data = [], ?string $token = null): Response
     {
         app(RequestBudget::class)->reserve();
-        $request = Http::baseUrl('https://api.spacetraders.io/v2')
+        $request = Http::baseUrl(self::BASE_URL)
             ->acceptJson()
             ->connectTimeout(10)
             ->timeout(30)

@@ -1,6 +1,7 @@
 <script setup>
 import { Head, Link } from '@inertiajs/vue3';
 import TutorialCourse from '@/Components/TutorialCourse.vue';
+import GameConnection from '@/Components/GameConnection.vue';
 import { glossary } from '@/tutorial.js';
 
 defineProps({ agent: { type: Object, default: null }, agents: { type: Array, required: true } });
@@ -15,6 +16,7 @@ defineProps({ agent: { type: Object, default: null }, agents: { type: Array, req
             <nav aria-label="Guide navigation"><Link :href="route('agents.index')">Agents</Link><Link v-if="agent" :href="route('agents.show', agent.id)">Flight deck</Link><Link :href="route('profile.edit')">Profile</Link></nav>
         </header>
         <main>
+            <GameConnection />
             <div class="intro">
                 <p class="eyebrow">NEW PLAYER GUIDE</p>
                 <h1>Your first flight. Your first sale.</h1>

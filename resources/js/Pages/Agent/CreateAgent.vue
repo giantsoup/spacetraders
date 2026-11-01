@@ -5,6 +5,7 @@ import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import TextInput from '@/Components/TextInput.vue';
 import GuidedFlight from '@/Components/GuidedFlight.vue';
+import GameConnection from '@/Components/GameConnection.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
@@ -79,6 +80,7 @@ function toggleForm() {
 
         <div class="py-12">
             <div class="max-w-xl mx-auto sm:px-6 lg:px-8">
+                <GameConnection />
                 <GuidedFlight v-if="setupGuided" :session="{ active: true, phase: 'connect' }" :step="setupStep" :storage-available="true" :busy="form.processing || formExisting.processing" @pause="setupGuided = false" @advance="advanceSetup" @start="setupStage = 'path'" />
                 <div v-if="setupGuided" data-guide="setup-path" class="mb-6 grid gap-3">
                     <button type="button" :disabled="form.processing || formExisting.processing" class="min-h-11 rounded-sm bg-slate-800 p-3 text-white" @click="chooseSetup(true)">I already have a SpaceTraders agent</button>

@@ -54,7 +54,7 @@ function workers(string $root, array $env, string $directory): void
 {
     $children = [];
     for ($i = 0; $i < 2; $i++) {
-        $children[] = proc_open([PHP_BINARY, 'artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'],
+        $children[] = proc_open([PHP_BINARY, 'artisan', 'queue:work', 'database', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'],
             [0 => ['file', '/dev/null', 'r'], 1 => ['file', $directory.'/worker-'.$i.'.log', 'a'], 2 => ['file', $directory.'/worker-'.$i.'.log', 'a']], $pipes, $root, array_merge(getenv(), $env));
     }
     foreach ($children as $child) {
@@ -70,7 +70,7 @@ ExecuteShipCommand::dispatch($action->id); // deliberately duplicate delivery to
 workers($root, $env, $directory);
 $workerStorage = json_decode(file_get_contents($file), true)['worker_storage'];
 check($workerStorage['pid'] !== getmypid() && $workerStorage['synchronous'] === 2 && $workerStorage['fullfsync'] === 1, 'separate queue worker uses FULL and macOS fullfsync');
-check($action->fresh()->state === ActionState::Confirmed, 'persisted manual intent confirmed by real worker');
+check($action->fresh()->state === ActionState::Confirmed, 'persisted manual intent confirmed by a default-queue worker without an explicit queue flag');
 check(count(json_decode(file_get_contents($file), true)['writes']) === 1, 'two workers plus duplicate delivery caused exactly one simulated mutation');
 $run = app(MiningRunner::class)->preview($agent->fresh(), 'LOCAL-1', ['site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-ROCK', 'reserve' => 2000, 'max_spend' => 100, 'max_loss' => 100, 'minutes' => 60, 'cycles' => 1]);
 app(MiningRunner::class)->start($agent, $run);

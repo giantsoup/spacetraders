@@ -68,7 +68,7 @@ const key = guidedKey(identities.user, identities.agent);
 const session = () => page.evaluate(key => JSON.parse(localStorage.getItem(key)), key);
 const state = () => cli("echo json_encode(['actions'=>App\\Models\\ShipAction::orderBy('id')->get(),'ships'=>App\\Models\\Ship::all(),'agent'=>App\\Models\\Agent::first()]);");
 const reload = async () => { await page.reload(); await coach.waitFor(); };
-const drain = () => execFileSync(php, ['artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' });
+const drain = () => execFileSync(php, ['artisan', 'queue:work', 'database', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' });
 const shot = name => page.screenshot({ path: path.join(output, name), animations: 'disabled' });
 let failure;
 try {
@@ -97,6 +97,8 @@ try {
         await page.waitForURL(`**/agents/${auth.agent_id}?guided=1`);
     } else await page.goto(`${origin}/agents/${auth.agent_id}?guided=1`);
     await coach.getByRole('heading', { name: 'Your guided first trip' }).waitFor();
+    await page.getByRole('complementary', { name: 'Game connection' }).getByText('Offline practice', { exact: true }).waitFor();
+    assert.equal(await page.getByText('Live SpaceTraders API', { exact: true }).count(), 0, 'An offline fixture must not present itself as live gameplay');
     assert.equal(await button('Preview mining').isDisabled(), true, 'Unrelated commands must be disabled');
     await shot('02-guided-start.png');
     let paused = false, reloaded = false, injected = false, completed = false, recovered = false, previewRecovered = false;

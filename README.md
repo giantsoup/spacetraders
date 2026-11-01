@@ -64,6 +64,14 @@ The approved scope and acceptance requirements are in [the migration plan](docs/
 
 ## Early-game MVP
 
+### Play against the live API
+
+The tutorial uses the same server-side SpaceTraders client and saved encrypted agent credential as manual gameplay. With `SPACETRADERS_FIXTURE_PATH` empty or unset, requests go to `https://api.spacetraders.io/v2`. The guide, agent setup, and flight deck show **Live SpaceTraders API**. A configured offline fixture shows **Offline practice** instead. Offline fixtures are for verification; there is no separate simulated tutorial in the normal live environment.
+
+Open your saved agent and choose **Start guided flight**, then **Synchronize**. Approve each highlighted command to queue a real game action. The tutorial advances when Activity history confirms its result. Unknown or expired outcomes remain visible and are never replayed automatically. If an old approval expired while the worker was offline, review the rejected action and restart guidance to create fresh previews.
+
+Approved commands need a running database queue worker. The database connection defaults to the `spacetraders` queue, matching both gameplay jobs, so Herd’s queue process consumes them without an extra queue flag. Start **Queue** for this site in Herd, or use the explicit `queue:work` command in Local operation below. Run `php artisan schedule:work` alongside it for pending-intent recovery. Manual tutorial commands work with `SPACETRADERS_AUTOMATION_ENABLED=false`; enabling autonomous mining is a separate choice.
+
 ### New player guide
 
 Choose **Start guided flight** in the player guide or on the flight deck for the interactive tutorial. Before connecting an agent, **Begin guided agent setup** highlights the required token, name, faction, and submit controls. Successful guided registration or import opens that exact agent’s guided flight.

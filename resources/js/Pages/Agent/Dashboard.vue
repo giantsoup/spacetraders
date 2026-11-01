@@ -7,6 +7,7 @@ import SecondaryButton from '@/Components/SecondaryButton.vue';
 import DangerButton from '@/Components/DangerButton.vue';
 import TutorialCourse from '@/Components/TutorialCourse.vue';
 import GuidedFlight from '@/Components/GuidedFlight.vue';
+import GameConnection from '@/Components/GameConnection.vue';
 import { useGuidedFlight } from '@/Composables/useGuidedFlight.js';
 
 const props = defineProps({ agent: Object, ships: Array, capabilities: Object, observations: Array, actions: Array, runs: Array, health: Object, automationEnabled: Boolean, synthetic: Boolean, guidedOffers: { type: Array, default: () => [] } });
@@ -151,6 +152,7 @@ function distance(point) {
             <nav aria-label="Account"><Link :href="route('agents.index')">Agents</Link><Link :href="route('agents.guide', agent.id)">Player guide</Link><Link :href="route('profile.edit')">Profile</Link><Link :href="route('logout')" method="post" as="button">Log out</Link></nav>
         </header>
         <main>
+            <GameConnection />
             <p v-if="synthetic" class="notice warning" role="status">OFFLINE FIXTURE · Commands use synthetic SpaceTraders responses. No live gameplay.</p>
             <section class="agent-heading" aria-labelledby="agent-heading">
                 <div><p class="eyebrow">AGENT ONLINE RECORD</p><h1 id="agent-heading">{{ agent.name }}</h1><p class="muted">Reset {{ agent.reset_id || 'unknown' }} · {{ agent.connection_state }} · Snapshot {{ age(agent.synced_at) }}</p></div>
