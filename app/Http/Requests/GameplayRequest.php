@@ -14,6 +14,13 @@ class GameplayRequest extends FormRequest
         return true;
     }
 
+    public function messages(): array
+    {
+        return $this->input('command') === 'navigate'
+            ? ['arguments.waypointSymbol.required' => 'Select a destination before previewing navigation.']
+            : [];
+    }
+
     public function rules(): array
     {
         $name = $this->route()->getName();

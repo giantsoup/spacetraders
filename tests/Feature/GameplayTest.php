@@ -59,6 +59,20 @@ class GameplayTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_navigation_preview_requires_a_readable_destination_without_contacting_upstream(): void
+    {
+        $requests = Http::recorded()->count();
+        $response = $this->postJson('/agents/'.$this->agent->id.'/commands/preview', [
+            'key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'navigate',
+            'arguments' => ['waypointSymbol' => '', 'reserve' => 0],
+        ]);
+
+        $response->assertUnprocessable()->assertJsonValidationErrors('arguments.waypointSymbol');
+        $this->assertSame('Select a destination before previewing navigation.', $response->json('errors')['arguments.waypointSymbol'][0]);
+        $this->assertSame($requests, Http::recorded()->count());
+        $this->assertSame(0, ShipAction::count());
+    }
+
     private function world(?callable $mutate = null): array
     {
         $world = json_decode(file_get_contents($this->worldFile), true);

@@ -40,6 +40,13 @@ const note = ref('');
 const reconciliation = ref(null);
 const selectedQuote = computed(() => market.value?.data.tradeGoods?.find(q => q.symbol === good.value));
 const selectedWaypoint = computed(() => waypoints.value.find(w => w.symbol === destination.value));
+const navigationHelp = computed(() => {
+    if (!destination.value) return 'Select a destination before previewing navigation.';
+    if (!selectedWaypoint.value || destination.value === ship.value?.nav.waypointSymbol) return 'Choose a different waypoint in this system.';
+    if (ship.value?.nav.status === 'DOCKED') return 'Enter orbit first: preview orbit and approve that command.';
+    if (ship.value?.nav.status === 'IN_TRANSIT') return 'Wait for arrival, then synchronize before navigating again.';
+    return '';
+});
 const cash = value => value === null || value === undefined ? 'Unknown' : Number(value).toLocaleString();
 const age = value => value ? `${Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 1000))}s ago` : 'Never observed';
 const healthy = value => value && Date.now() - Date.parse(value) < 90000;
@@ -67,6 +74,11 @@ async function post(path, payload = {}, allowBusy = false) {
     }
 }
 async function preview(command) {
+    if (command === 'navigate' && navigationHelp.value) {
+        error.value = true;
+        notice.value = navigationHelp.value;
+        return;
+    }
     const args = {};
     if (command === 'navigate') args.waypointSymbol = destination.value;
     if (['buy', 'sell', 'refuel'].includes(command)) args.units = Number(quantity.value);
@@ -131,7 +143,7 @@ function distance(point) {
                 <aside class="panel fleet" aria-labelledby="fleet-heading">
                     <h2 id="fleet-heading">01 / Fleet</h2>
                     <p v-if="ships.length === 0">No saved fleet. Synchronize to discover ships and local waypoints.</p>
-                    <button v-for="entry in ships" :key="entry.symbol" class="ship-choice" :class="{ selected: selected === entry.symbol }" :aria-pressed="selected === entry.symbol" @click="selected = entry.symbol; commandPreview = null; runPreview = null">
+                    <button v-for="entry in ships" :key="entry.symbol" class="ship-choice" :class="{ selected: selected === entry.symbol }" :aria-pressed="selected === entry.symbol" @click="selected = entry.symbol; destination = ''; commandPreview = null; runPreview = null">
                         <strong>{{ entry.symbol }}</strong><span>{{ entry.snapshot.registration?.role || 'SHIP' }}</span><span>{{ entry.snapshot.nav.waypointSymbol }}</span><span>{{ entry.snapshot.nav.status }} · Cargo {{ entry.snapshot.cargo.units }}/{{ entry.snapshot.cargo.capacity }}</span>
                     </button>
                     <template v-if="ship">
@@ -169,7 +181,10 @@ function distance(point) {
                         <fieldset :disabled="busy || !ship || controlled || !!pending">
                             <legend class="sr-only">Ship commands</legend>
                             <div class="button-row"><SecondaryButton @click="preview('orbit')">Preview orbit</SecondaryButton><SecondaryButton @click="preview('dock')">Preview docking</SecondaryButton><SecondaryButton @click="preview('mine')">Preview mining</SecondaryButton></div>
-                            <div class="form-grid"><label>Destination<select v-model="destination" aria-label="Destination"><option value="">Select waypoint</option><option v-for="point in waypoints" :key="point.id" :value="point.symbol">{{ point.symbol }} · {{ point.data.type }}</option></select></label><div class="field-action"><p class="muted">{{ selectedWaypoint ? `${distance(selectedWaypoint.data)} units away` : 'Same-system navigation, orbit required' }}</p><SecondaryButton @click="preview('navigate')">Preview navigation</SecondaryButton></div></div>
+                            <div class="form-grid">
+                                <label>Destination<select v-model="destination" aria-label="Destination" aria-describedby="navigation-help"><option value="">Select waypoint</option><option v-for="point in waypoints" :key="point.id" :value="point.symbol" :disabled="point.symbol === ship?.nav.waypointSymbol">{{ point.symbol }} · {{ point.data.type }}{{ point.symbol === ship?.nav.waypointSymbol ? ' · current location' : '' }}</option></select></label>
+                                <div class="field-action"><p id="navigation-help" class="muted" aria-live="polite">{{ navigationHelp || `${distance(selectedWaypoint.data)} units away. The server checks fuel and route before approval.` }}</p><SecondaryButton :disabled="!!navigationHelp" aria-describedby="navigation-help" @click="preview('navigate')">Preview navigation</SecondaryButton></div>
+                            </div>
                             <div class="form-grid"><label>Trade good<select v-model="good" aria-label="Trade good"><option value="">Select good</option><option v-for="quote in market?.data.tradeGoods || []" :key="quote.symbol" :value="quote.symbol">{{ quote.symbol }}</option></select></label><label>Quantity / refuel tank units<input v-model="quantity" type="number" min="1" max="100000" step="1"></label><label>Maximum cost / minimum sale total<input v-model="priceBound" type="number" min="0" step="1"></label><label>Protected credits<input v-model="reserve" type="number" min="0" step="1"></label></div>
                             <p v-if="selectedQuote" class="muted">Observed buy {{ selectedQuote.purchasePrice }} · sell {{ selectedQuote.sellPrice }} · transaction volume {{ selectedQuote.tradeVolume }}. Quote {{ age(market.observed_at) }}. Refuel: 100 tank units per market unit, rounded up.</p>
                             <div class="button-row"><SecondaryButton @click="preview('buy')">Preview cargo purchase</SecondaryButton><SecondaryButton @click="preview('sell')">Preview cargo sale</SecondaryButton><SecondaryButton @click="preview('refuel')">Preview refueling</SecondaryButton></div>

@@ -100,6 +100,27 @@ try {
         await page.keyboard.press('Enter');
         assert.equal(new URL(page.url()).hash, '#manual');
     });
+    await record('navigation requires a destination and orbit before preview', async () => {
+        const navigate = button('Preview navigation');
+        const destination = page.getByLabel('Destination', { exact: true });
+        const before = state().actions.length;
+        assert.equal(await navigate.isDisabled(), true);
+        assert.match(await page.locator('#navigation-help').innerText(), /Select a destination/);
+        assert.equal(await destination.locator('option[value="X1-TEST-ROCK"]').isDisabled(), true);
+        await destination.selectOption('X1-TEST-PORT');
+        assert.equal(await navigate.isDisabled(), true);
+        assert.match(await page.locator('#navigation-help').innerText(), /Enter orbit first/);
+        assert.equal(state().actions.length, before);
+        await command('Preview orbit');
+        await destination.selectOption('X1-TEST-PORT');
+        assert.equal(await navigate.isDisabled(), false);
+        const writes = (await world()).writes.length;
+        const action = await clickResponse('Preview navigation', '/commands/preview');
+        assert.equal(action.arguments.waypointSymbol, 'X1-TEST-PORT');
+        assert.equal((await world()).writes.length, writes, 'A preview must not move the ship.');
+        await button('Cancel preview').click();
+        await shot('navigation-guidance.png', true);
+    });
     await record('manual orbit and mining with persisted reload', async () => {
         await command('Preview orbit');
         await command('Preview mining');
