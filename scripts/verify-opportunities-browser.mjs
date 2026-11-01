@@ -1,78 +1,56 @@
 import { shipView } from './ship-browser-navigation.mjs';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
-import { createServer } from 'node:net';
-import { once } from 'node:events';
+import { withBrowserVerification } from './browser-verification.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
 const php = process.env.PHP_BIN || 'php';
-const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const created = execFileSync(php, ['scripts/mvp-fixture.php', '--isolated'], { cwd: root, encoding: 'utf8' });
-const directory = created.match(/Owned fixture directory: (.+)/)?.[1];
-assert.ok(directory?.startsWith('/private/var/') || directory?.startsWith('/var/') || directory?.startsWith('/tmp/'));
-const parsed = JSON.parse(execFileSync(php, ['-r', 'require "vendor/autoload.php"; echo json_encode(Dotenv\\Dotenv::parse(file_get_contents($argv[1])));', `${directory}/.env`], { cwd: root, encoding: 'utf8' }));
-assert.equal(parsed.DB_DATABASE, `${directory}/database.sqlite`);
-assert.equal(parsed.SPACETRADERS_FIXTURE_PATH, `${directory}/world.json`);
-const socket = createServer();
-socket.listen(0, '127.0.0.1');
-await once(socket, 'listening');
-const port = socket.address().port;
-await new Promise(resolve => socket.close(resolve));
-const origin = `http://127.0.0.1:${port}`;
-const env = { ...process.env, ...parsed, APP_URL: origin, APP_CONFIG_CACHE: `${directory}/no-config.php`, SESSION_COOKIE: `opportunity_${port}`, CACHE_STORE: 'array', SESSION_DRIVER: 'file', LARAVEL_STORAGE_PATH: `${directory}/storage`, LOG_CHANNEL: 'stderr' };
-for (const child of ['framework/sessions', 'framework/views', 'framework/cache/data', 'logs']) await fs.mkdir(`${env.LARAVEL_STORAGE_PATH}/${child}`, { recursive: true });
-const cli = code => JSON.parse(execFileSync(php, ['-r', `require 'vendor/autoload.php'; $app=require 'bootstrap/app.php'; $app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap(); ${code}`], { cwd: root, env, encoding: 'utf8' }));
-const auth = JSON.parse(await fs.readFile(`${directory}/browser.json`, 'utf8'));
 const output = path.resolve(process.env.QA_ARTIFACT_DIR || path.join(root, 'storage/app/opportunity-evidence'));
-await fs.mkdir(output, { recursive: true });
-const world = async change => {
-    const value = JSON.parse(await fs.readFile(parsed.SPACETRADERS_FIXTURE_PATH, 'utf8'));
-    change(value);
-    await fs.writeFile(parsed.SPACETRADERS_FIXTURE_PATH, JSON.stringify(value));
-};
-const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE } : {}) });
-const server = spawn(php, ['-S', `127.0.0.1:${port}`, path.join(root, 'vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php')], { cwd: path.join(root, 'public'), env, stdio: ['ignore', 'pipe', 'pipe'] });
-const serverReady = once(server.stderr, 'data');
-const errors = [], steps = [];
-const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, colorScheme: 'light', timezoneId: 'America/Los_Angeles' });
-await context.route('**/*', route => {
-    if (new URL(route.request().url()).origin === origin) return route.continue();
-    if (new URL(route.request().url()).hostname === 'fonts.bunny.net') return route.fulfill({ status: 200, contentType: 'text/css', body: '' });
-    return route.abort();
-});
-const page = await context.newPage();
-page.setDefaultTimeout(15000);
-page.on('pageerror', error => errors.push(error.message));
-page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
-page.on('response', response => { if (response.status() >= 500) errors.push(`HTTP ${response.status()} ${new URL(response.url()).pathname}`); });
-const button = name => page.getByRole('button', { name, exact: true });
-const state = () => cli("echo json_encode(['runs'=>App\\Models\\AutomationRun::latest('id')->get(),'actions'=>App\\Models\\ShipAction::orderBy('id')->get(),'ships'=>App\\Models\\Ship::all()]);");
-async function click(name, suffix) {
-    const waiting = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(suffix));
-    if (name === 'Synchronize') await shipView(page, 'guide');
-    await button(name).click();
-    const response = await waiting;
-    const result = await response.json();
-    assert.equal(response.status(), 202, result.message || JSON.stringify(result.errors));
-    return result;
-}
-async function drain() {
-    for (let pass = 0; pass < 45 && state().runs.some(run => run.active_agent_id); pass++) {
-        cli("App\\Models\\AutomationRun::whereNotNull('active_agent_id')->update(['next_action_at'=>now(),'last_dispatched_at'=>null]); Illuminate\\Support\\Facades\\Artisan::call('spacetraders:dispatch-due'); echo '{}';");
-        execFileSync(php, ['artisan', 'queue:work', 'database', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' });
-        if (state().runs[0]?.state === 'blocked') throw new Error(state().runs[0].blocked_reason);
+await withBrowserVerification({ root, php, output }, async ({ parsed, env, origin, browser, auth, cli, execute, signal, details }) => {
+    const world = async change => {
+        const value = JSON.parse(await fs.readFile(parsed.SPACETRADERS_FIXTURE_PATH, 'utf8'));
+        change(value);
+        await fs.writeFile(parsed.SPACETRADERS_FIXTURE_PATH, JSON.stringify(value));
+    };
+    const errors = [], steps = [];
+    Object.assign(details, { steps, errors });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, colorScheme: 'light', timezoneId: 'America/Los_Angeles' });
+    await context.route('**/*', route => {
+        if (new URL(route.request().url()).origin === origin) return route.continue();
+        if (new URL(route.request().url()).hostname === 'fonts.bunny.net') return route.fulfill({ status: 200, contentType: 'text/css', body: '' });
+        return route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(15000);
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+    page.on('response', response => { if (response.status() >= 500) errors.push(`HTTP ${response.status()} ${new URL(response.url()).pathname}`); });
+    const button = name => page.getByRole('button', { name, exact: true });
+    const state = () => cli("echo json_encode(['runs'=>App\\Models\\AutomationRun::latest('id')->get(),'actions'=>App\\Models\\ShipAction::orderBy('id')->get(),'ships'=>App\\Models\\Ship::all()]);");
+    async function click(name, suffix) {
+        const waiting = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(suffix));
+        if (name === 'Synchronize') await shipView(page, 'guide');
+        await button(name).click();
+        const response = await waiting;
+        const result = await response.json();
+        assert.equal(response.status(), 202, result.message || JSON.stringify(result.errors));
+        return result;
     }
-    assert.equal(state().runs[0].state, 'completed');
-    await page.reload();
-}
-async function limits() {
-    await shipView(page, 'automation');
-    for (const [label, value] of [['Protected reserve in CR', '1000'], ['Maximum total spending in CR', '1000'], ['Maximum cash drawdown in CR', '1000'], ['Maximum travel fuel in tank units', '30']]) await page.getByLabel(label, { exact: true }).fill(value);
-}
-try {
-    await serverReady;
+    async function drain() {
+        for (let pass = 0; pass < 45 && state().runs.some(run => run.active_agent_id); pass++) {
+            cli("App\\Models\\AutomationRun::whereNotNull('active_agent_id')->update(['next_action_at'=>now(),'last_dispatched_at'=>null]); Illuminate\\Support\\Facades\\Artisan::call('spacetraders:dispatch-due'); echo '{}';");
+            signal.throwIfAborted();
+            execute(['artisan', 'queue:work', 'database', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], env);
+            if (state().runs[0]?.state === 'blocked') throw new Error(state().runs[0].blocked_reason);
+        }
+        assert.equal(state().runs[0].state, 'completed');
+        await page.reload();
+    }
+    async function limits() {
+        await shipView(page, 'automation');
+        for (const [label, value] of [['Protected reserve in CR', '1000'], ['Maximum total spending in CR', '1000'], ['Maximum cash drawdown in CR', '1000'], ['Maximum travel fuel in tank units', '30']]) await page.getByLabel(label, { exact: true }).fill(value);
+    }
     await page.goto(origin + '/login');
     await page.getByLabel('Email', { exact: true }).fill(auth.email);
     await page.getByLabel('Password', { exact: true }).fill(auth.password);
@@ -203,14 +181,5 @@ try {
 
     }
     assert.deepEqual(errors, []);
-    const result = { result: 'pass', steps, errors, fixture: directory, evidence: output };
-    await fs.writeFile(path.join(output, 'results.json'), JSON.stringify(result, null, 2));
-    console.log(JSON.stringify(result, null, 2));
-} catch (error) {
-    await page.screenshot({ path: path.join(output, 'failure.png'), fullPage: true });
-    await fs.writeFile(path.join(output, 'failure.json'), JSON.stringify({ message: error.message.replaceAll(auth.password, '[redacted]'), errors }, null, 2));
-    throw error;
-} finally {
-    await browser.close();
-    server.kill('SIGTERM');
-}
+    return { steps, errors };
+});

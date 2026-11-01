@@ -18,6 +18,8 @@ node --check scripts/verify-ship-https-browser.mjs
 node --check scripts/ship-browser-navigation.mjs
 node scripts/verify-tutorial.mjs
 node scripts/verify-guided-flight.mjs
+node --test scripts/verify-verification-lifecycle.mjs
+node --check scripts/browser-verification.mjs
 node --check scripts/verify-tutorial-browser.mjs
 node --check scripts/verify-guided-browser.mjs
 node --check scripts/verify-mvp-browser.mjs

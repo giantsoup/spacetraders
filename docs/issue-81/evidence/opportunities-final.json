@@ -1,0 +1,25 @@
+{
+  "processes": {
+    "browser": 40656,
+    "server": 40737
+  },
+  "steps": [
+    "Coverage and independently dated market evidence rendered.",
+    "One purposeful scout visit collected prices, returned home, refueled and ended through real workers.",
+    "Trade bought and sold 4/4/2 batches, returned home, and deducted acquisition and fuel.",
+    "Travel inputs, error analysis and summary export render without changing the conservative route policy."
+  ],
+  "errors": [],
+  "browser": "156.0.8078.4",
+  "evidence": "/Users/Taylor/.t3/worktrees/spacetraders/implement-issue-81-fixt-db345b8ae25c516a/storage/app/mvp-evidence/opt02/opportunities-final",
+  "passed": true,
+  "shutdown": {
+    "server": "verified",
+    "browserConnection": "verified",
+    "browser": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-ay3WMQ",
+  "fixtureRemoved": true,
+  "diagnostics": null,
+  "failures": []
+}

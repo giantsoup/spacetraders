@@ -1,0 +1,186 @@
+Owned lifecycle regression results: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/opt02-regression-results-q8mmav
+{
+  "passed": true,
+  "shutdown": {
+    "child": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-Bl7TQW",
+  "fixtureRemoved": true,
+  "diagnostics": null,
+  "failures": []
+}
+✔ success waits for actual child exit, removes only its allocation and preserves durable output and an unrelated process (235.64675ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-JCOP2B
+{
+  "passed": false,
+  "shutdown": {
+    "child": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-JCOP2B",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-JCOP2B",
+  "failures": [
+    "assertion with [redacted]"
+  ]
+}
+✔ failure retains private diagnostics, redacts durable errors and still shuts down all acquired resources (119.033ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-LJUJi6
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-LJUJi6",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-LJUJi6",
+  "failures": [
+    "setup stopped before browser"
+  ]
+}
+✔ partial setup failure before acquisition retains its allocation (14.770375ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-XSWExC
+{
+  "passed": false,
+  "shutdown": {
+    "service": "verified",
+    "browser": "failed",
+    "server": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-XSWExC",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-XSWExC",
+  "failures": [
+    "close failed"
+  ]
+}
+✔ one shutdown failure never skips the other cleanups or removes diagnostics (9.9895ms)
+{
+  "passed": true,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-2KPGMb",
+  "fixtureRemoved": true,
+  "diagnostics": null,
+  "failures": []
+}
+✔ descendant symlinks are unlinked without traversing an external target (14.711542ms)
+Cleanup refused at /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-18vUTh. Ownership is unverified; the original allocation may have moved.
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-18vUTh",
+  "fixtureRemoved": false,
+  "diagnostics": null,
+  "failures": [
+    "Owned fixture was replaced by a symlink"
+  ]
+}
+✔ refuses cleanup when the owned symlink changes (3.357542ms)
+Cleanup refused at /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-rITFUg. Ownership is unverified; the original allocation may have moved.
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-rITFUg",
+  "fixtureRemoved": false,
+  "diagnostics": null,
+  "failures": [
+    "Owned fixture directory identity changed\n+ actual - expected\n\n+ 115930313\n- 115930311\n          ^\n"
+  ]
+}
+✔ refuses cleanup when the owned directory changes (3.784375ms)
+Cleanup refused at /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-6qeSX2. Ownership is unverified; the original allocation may have moved.
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-6qeSX2",
+  "fixtureRemoved": false,
+  "diagnostics": null,
+  "failures": [
+    "Owned fixture marker mismatch\n+ actual - expected\n\n+ 'unowned'\n- 'b522f1554275c9bffcb8b72ce83a4f53fc34d60748e5f2804ccc7a3d8a3a0564'\n"
+  ]
+}
+✔ refuses cleanup when the owned marker changes (3.065833ms)
+Cleanup refused at /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-nJA9AT. Ownership is unverified; the original allocation may have moved.
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-nJA9AT",
+  "fixtureRemoved": false,
+  "diagnostics": null,
+  "failures": [
+    "Owned fixture marker changed"
+  ]
+}
+✔ refuses cleanup when the owned marker-symlink changes (2.946125ms)
+Cleanup refused at /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-l2C7r2. Ownership is unverified; the original allocation may have moved.
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-l2C7r2",
+  "fixtureRemoved": false,
+  "diagnostics": null,
+  "failures": [
+    "Owned fixture is no longer private\n\n493 !== 448\n"
+  ]
+}
+✔ refuses cleanup when the owned permissions changes (3.104666ms)
+✔ a child that already exited or failed to spawn cannot hang shutdown (278.833666ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-vTGsFx
+{
+  "passed": false,
+  "shutdown": {
+    "child": "failed"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-vTGsFx",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-vTGsFx",
+  "failures": [
+    "Owned process required SIGKILL; diagnostics retained"
+  ]
+}
+✔ an unresponsive owned child is reaped, and escalation fails the run (691.6315ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-ZUBezC
+{
+  "passed": false,
+  "shutdown": {
+    "resource": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-ZUBezC",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-ZUBezC",
+  "failures": [
+    "Verification interrupted by SIGTERM"
+  ]
+}
+✔ SIGTERM enters shutdown, retains diagnostics and does not skip subsequent cleanups (4.713167ms)
+{
+  "passed": true,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-zuH9JD",
+  "fixtureRemoved": true,
+  "diagnostics": null,
+  "failures": []
+}
+✔ a user-supplied output directory is never a deletion target (6.565167ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-9Bwywl
+✔ a reporting failure retains the owned fixture and still verifies resource shutdown (4.136167ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-cB2q0b
+✔ replaced durable output cannot redirect reporting into the private fixture (4.919625ms)
+✔ result filenames cannot escape the durable output directory (0.600708ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-imIP2D
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-imIP2D",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-imIP2D",
+  "failures": [
+    "intentional failure"
+  ]
+}
+✔ failed-run diagnostics never follow an injected file symlink (5.39125ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1719.355375

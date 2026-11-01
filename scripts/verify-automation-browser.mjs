@@ -1,54 +1,29 @@
 import { shipView } from './ship-browser-navigation.mjs';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
-import { once } from 'node:events';
+import { withBrowserVerification } from './browser-verification.mjs';
 import fs from 'node:fs/promises';
-import { createServer } from 'node:net';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
 const php = process.env.PHP_BIN || 'php';
-const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const created = execFileSync(php, ['scripts/mvp-fixture.php', '--isolated'], { cwd: root, encoding: 'utf8' });
-const directory = created.match(/Owned fixture directory: (.+)/)?.[1];
-assert.ok(directory);
-const parsed = JSON.parse(execFileSync(php, ['-r', 'require "vendor/autoload.php"; echo json_encode(Dotenv\\Dotenv::parse(file_get_contents($argv[1])));', `${directory}/.env`], { cwd: root, encoding: 'utf8' }));
-const socket = createServer();
-socket.listen(0, '127.0.0.1');
-await once(socket, 'listening');
-const port = socket.address().port;
-await new Promise(resolve => socket.close(resolve));
-const origin = `http://127.0.0.1:${port}`;
-const env = { ...process.env, ...parsed, APP_URL: origin, APP_CONFIG_CACHE: `${directory}/no-config.php`, SESSION_COOKIE: `automation_${port}`, CACHE_DRIVER: 'array', CACHE_STORE: 'array', SESSION_DRIVER: 'file', LARAVEL_STORAGE_PATH: `${directory}/storage`, LOG_CHANNEL: 'stderr', SPACETRADERS_LOCAL_ENGINE_ENABLED: 'true', SPACETRADERS_LOCAL_HOST: '127.0.0.1', SPACETRADERS_OPERATOR_ID: '1', SPACETRADERS_PHP_BINARY: execFileSync(php, ['-r', 'echo PHP_BINARY;'], { encoding: 'utf8' }) };
-for (const child of ['framework/sessions', 'framework/views', 'framework/cache/data', 'logs']) await fs.mkdir(`${env.LARAVEL_STORAGE_PATH}/${child}`, { recursive: true });
-const cli = code => JSON.parse(execFileSync(php, ['-r', `require 'vendor/autoload.php'; $app=require 'bootstrap/app.php'; $app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap(); ${code}`], { cwd: root, env, encoding: 'utf8' }));
-const auth = JSON.parse(await fs.readFile(`${directory}/browser.json`, 'utf8'));
 const output = path.resolve(process.env.QA_ARTIFACT_DIR || path.join(root, 'storage/app/mvp-evidence/local-automation'));
-await fs.mkdir(output, { recursive: true });
-const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE } : {}) });
-const server = spawn(php, ['-S', `127.0.0.1:${port}`, path.join(root, 'vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php')], { cwd: path.join(root, 'public'), env, stdio: ['ignore', 'pipe', 'pipe'] });
-let serverLog = '';
-server.stdout.on('data', value => { serverLog += value; });
-server.stderr.on('data', value => { serverLog += value; });
-const errors = [], steps = [];
-let failure, installed = false;
-const world = async edit => {
-    const file = `${directory}/world.json`;
-    const value = JSON.parse(await fs.readFile(file, 'utf8'));
-    if (edit) { edit(value); await fs.writeFile(file, JSON.stringify(value)); }
-    return value;
-};
-async function waitFor(check, seconds = 20) {
-    const deadline = Date.now() + seconds * 1000;
-    while (!await check()) {
-        if (Date.now() >= deadline) throw new Error('Timed out waiting for offline state');
-        await new Promise(resolve => setTimeout(resolve, 200));
+await withBrowserVerification({ root, php, output, engine: true, resultFile: 'result.json' }, async ({ directory, origin, browser, auth, cli, signal, details }) => {
+    const errors = [], steps = [];
+    Object.assign(details, { steps, errors });
+    const world = async edit => {
+        const file = `${directory}/world.json`;
+        const value = JSON.parse(await fs.readFile(file, 'utf8'));
+        if (edit) { edit(value); await fs.writeFile(file, JSON.stringify(value)); }
+        return value;
+    };
+    async function waitFor(check, seconds = 20) {
+        const deadline = Date.now() + seconds * 1000;
+        while (!await check()) {
+            signal.throwIfAborted();
+            if (Date.now() >= deadline) throw new Error('Timed out waiting for offline state');
+            await new Promise(resolve => setTimeout(resolve, 200));
+        }
     }
-}
-try {
-    await once(server.stderr, 'data');
-    execFileSync(php, ['artisan', 'spacetraders:engine-service', 'install'], { cwd: root, env, encoding: 'utf8' });
-    installed = true;
     const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, colorScheme: 'light', timezoneId: 'America/Los_Angeles' });
     await context.route('**/*', route => {
         const url = new URL(route.request().url());
@@ -204,21 +179,5 @@ try {
     await post('End session', '/engine/end');
     await waitFor(() => cli("echo json_encode(App\\Models\\LocalEngine::find(1)?->state === 'off');"));
     assert.deepEqual(errors, []);
-} catch (error) { failure = error; }
-finally {
-    let cleanupFailure;
-    try {
-        if (installed) {
-            cli("app(App\\Gameplay\\LocalEngineManager::class)->end(); echo json_encode(true);");
-            await waitFor(() => cli("$e=App\\Models\\LocalEngine::find(1); echo json_encode(!$e || !app(App\\Gameplay\\LocalEngineManager::class)->alive($e->processes['supervisor'] ?? null));"), 50);
-            execFileSync(php, ['artisan', 'spacetraders:engine-service', 'uninstall'], { cwd: root, env, encoding: 'utf8' });
-        }
-    } catch (error) { cleanupFailure = error.message; failure ||= error; }
-    const result = { passed: !failure, steps, errors, failure: failure?.message?.replaceAll(auth.password, '[redacted]'), cleanupFailure, serviceRemoved: !cleanupFailure, browser: browser.version(), fixture: directory };
-    await fs.writeFile(path.join(output, 'result.json'), JSON.stringify(result, null, 2));
-    await fs.writeFile(path.join(output, 'server.log'), serverLog.replaceAll(auth.password, '[redacted]'));
-    if (failure) { const pages = browser.contexts().flatMap(c => c.pages()); if (pages[0]) await pages[0].screenshot({ path: path.join(output, 'failure.png'), fullPage: true }); }
-    await browser.close(); server.kill(); await once(server, 'exit');
-    console.log(JSON.stringify({ ...result, output }, null, 2));
-}
-if (failure) throw failure;
+    return { steps, errors };
+});
