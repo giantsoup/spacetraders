@@ -106,7 +106,7 @@ try {
         const before = state().actions.length;
         assert.equal(await navigate.isDisabled(), true);
         assert.match(await page.locator('#navigation-help').innerText(), /Select a destination/);
-        assert.equal(await destination.locator('option[value="X1-TEST-ROCK"]').isDisabled(), true);
+        assert.equal(await destination.locator('option[value="X1-TEST-ROCK"]').evaluate(o => o.disabled), true);
         await destination.selectOption('X1-TEST-PORT');
         assert.equal(await navigate.isDisabled(), true);
         assert.match(await page.locator('#navigation-help').innerText(), /Enter orbit first/);
