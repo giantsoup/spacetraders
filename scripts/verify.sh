@@ -30,6 +30,7 @@ node --check scripts/verify-modal.mjs
 node --check scripts/verify-automation-browser.mjs
 node --check scripts/verify-opportunities-browser.mjs
 node --check scripts/verify-deployment-browser.mjs
+node --check scripts/verify-adviser-browser.mjs
 "$php_bin" scripts/verify-environment.php
 "$php_bin" vendor/bin/phpunit --display-all-issues
 "$php_bin" vendor/bin/pint --test \
@@ -44,6 +45,7 @@ node --check scripts/verify-deployment-browser.mjs
     tests/Feature/AgentTest.php tests/Feature/ForwarderTest.php \
     tests/Feature/UpgradeCompatibilityTest.php \
     app/Gameplay app/Enums app/Jobs app/Queue app/Console app/Http/Middleware/DeploymentAdmission.php app/Http/Requests/GameplayRequest.php app/Http/Requests/LocalAutomationRequest.php \
+    app/Http/Controllers/AdviserController.php app/Http/Requests/AdviserRequest.php tests/Feature/AdviserTest.php \
     app/Http/Controllers/AgentDashboardController.php app/Http/Controllers/AgentCommandController.php \
     app/Http/Controllers/ProfileController.php app/Http/Controllers/AutomationRunController.php app/Http/Controllers/LocalAutomationController.php app/Models app/Providers/AppServiceProvider.php app/Providers/RouteServiceProvider.php \
     config/gameplay.php config/database.php config/queue.php config/deployment.php \

@@ -1,6 +1,6 @@
 # OpenAI adviser for the next ship activity
 
-Status: future-feature plan, incorporating Taylor's answers on 2026-11-01. No application implementation or live acceptance has occurred.
+Status: ADV01 policy/selection foundation is implemented locally; see [implementation and verification](issue-37/implementation.md). Model integration, policy-executed actions and live acceptance remain future work. This plan incorporates Taylor's answers on 2026-11-01.
 
 Source review: local `main` at `88bc0262b65b70e611e2fdc37e64a5225591d5c0`. Existing untracked exploration research and its HTML comparison are separate work and remain unchanged.
 
@@ -32,7 +32,7 @@ The existing [MiningPlanner](../app/Gameplay/MiningPlanner.php) chooses determin
 
 [MiningRunner](../app/Gameplay/MiningRunner.php) already provides preview, start, stop, approved limits, and state revalidation. [ShipCommandExecutor](../app/Gameplay/ShipCommandExecutor.php) provides the shared command path, durable intents, agent locking, and uncertain-write handling. [DispatchDueSpaceTraders](../app/Console/Commands/DispatchDueSpaceTraders.php) recovers pending commands and due mining steps. Its five-second schedule must not become a five-second model-call schedule.
 
-The broader investigator and evaluator described in the [local automation implementation plan](local-automation-implementation-plan.md) are proposals, not implemented services. Reuse those proposed responsibilities instead of building a competing discovery and ranking system. The [exploration research](exploration-fuel-and-opportunity-research.md) supplies planning context, not live fleet evidence.
+The investigator and evaluator described in the [local automation implementation plan](local-automation-implementation-plan.md) are now implemented as `OpportunityInvestigator` and `OpportunityEvaluator`. ADV01 reuses them and the existing fuel/operation planners rather than adding another discovery system. The [exploration research](exploration-fuel-and-opportunity-research.md) supplies planning context, not live fleet evidence.
 
 The adviser can ship before contracts or the proposed local engine manager. It needs bounded investigation, candidate evaluation, a persisted authorization policy, and working queue processing. Contract execution, ship purchases, equipment changes, scanning, charting, and intersystem expansion remain outside the first release.
 
@@ -194,7 +194,7 @@ At automatic start, atomically claim the decision and link it to one durable com
 
 ## Proposed implementation boundaries
 
-These names describe future responsibilities, not existing classes:
+The investigator/evaluator and ADV01 policy/selection foundation exist. The other responsibilities below remain future work:
 
 - `OpportunityInvestigator` gathers bounded observations and stores coverage and immutable evidence.
 - `OpportunityEvaluator` calculates candidates, feasibility, costs, and preference from supplied evidence without network calls.

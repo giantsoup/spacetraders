@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Gameplay\Adviser;
 use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\CreditAccounting;
 use App\Gameplay\GameException;
@@ -48,6 +49,7 @@ class AgentDashboardController extends Controller
             'investigations' => OpportunityInvestigation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->latest('id')->limit(5)->get(),
             'drafts' => AutomationDraft::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->latest('id')->limit(10)->get(),
             'accounting' => app(CreditAccounting::class)->summary($agent),
+            'adviser' => fn () => app(Adviser::class)->history($agent),
             'synthetic' => (bool) config('gameplay.fixture_path'),
         ]);
     }

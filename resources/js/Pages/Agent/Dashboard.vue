@@ -1,4 +1,5 @@
 <script setup>
+import AdviserPanel from '@/Components/AdviserPanel.vue';
 import FocusSheet from '@/Components/FocusSheet.vue';
 import ShipScene from '@/Components/ShipScene.vue';
 import ShipReport from '@/Components/ShipReport.vue';
@@ -21,7 +22,7 @@ import OpportunityPanel from '@/Components/OpportunityPanel.vue';
 import OperationControls from '@/Components/OperationControls.vue';
 import { useGuidedFlight } from '@/Composables/useGuidedFlight.js';
 
-const props = defineProps({ agent: Object, ships: Array, capabilities: Object, observations: Array, actions: Array, runs: Array, health: Object, intelligence: Object, automationEnabled: Boolean, synthetic: Boolean, localAutomation: Boolean, engine: Object, engineOperator: Boolean, investigations: { type: Array, default: () => [] }, drafts: { type: Array, default: () => [] }, accounting: Object, guidedOffers: { type: Array, default: () => [] } });
+const props = defineProps({ adviser: Object, agent: Object, ships: Array, capabilities: Object, observations: Array, actions: Array, runs: Array, health: Object, intelligence: Object, automationEnabled: Boolean, synthetic: Boolean, localAutomation: Boolean, engine: Object, engineOperator: Boolean, investigations: { type: Array, default: () => [] }, drafts: { type: Array, default: () => [] }, accounting: Object, guidedOffers: { type: Array, default: () => [] } });
 const archived = computed(() => props.agent.connection_state === 'reset');
 const selected = ref(props.ships[0]?.symbol || '');
 const page = usePage();
@@ -43,7 +44,7 @@ const paused = ref(false);
 const hidden = ref(false);
 const view = ref('');
 const reportSection = ref('systems');
-const views = { report: 'Ship report', fleet: 'Your fleet', commands: 'Commands', review: 'Review approval', automation: 'Automation', intelligence: 'Intelligence', activity: 'Activity history', run: 'Active run', guide: 'Guided flight' };
+const views = { adviser: 'Adviser policy', report: 'Ship report', fleet: 'Your fleet', commands: 'Commands', review: 'Review approval', automation: 'Automation', intelligence: 'Intelligence', activity: 'Activity history', run: 'Active run', guide: 'Guided flight' };
 const aliases = { manual: 'commands', setup: 'commands', market: 'intelligence', waypoints: 'intelligence', fleet: 'fleet', activity: 'activity', automation: 'automation' };
 function readView() {
     const key = window.location.hash.slice(1);
@@ -162,7 +163,7 @@ const cash = value => value === null || value === undefined ? 'Unknown' : Number
 const age = value => value && Number.isFinite(Date.parse(value)) ? `${Math.max(0, Math.floor((now.value - Date.parse(value)) / 1000))}s ago` : 'Never observed';
 const healthy = value => value && now.value - Date.parse(value) < 90000;
 const url = suffix => `/agents/${props.agent.id}/${suffix}`;
-const reload = () => new Promise(resolve => router.reload({ only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'engine', 'investigations', 'drafts', 'accounting', 'intelligence'], onFinish: resolve }));
+const reload = () => new Promise(resolve => router.reload({ only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'engine', 'investigations', 'drafts', 'accounting', 'intelligence', 'adviser'], onFinish: resolve }));
 usePoll(5000, { only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'engine', 'investigations', 'drafts', 'accounting', 'intelligence'] });
 const guided = useGuidedFlight(() => page.props.auth.user.id, () => ({
     ...props, selected: selected.value, offers: offers.value, commandPreview: commandPreview.value,
@@ -297,7 +298,7 @@ function distance(point) {
                 <div class="home-action"><PrimaryButton :disabled="busy" @click="primary.sync ? synchronize() : openView(primary.view)">{{ primary.label }}</PrimaryButton><DangerButton v-if="activeRun && !archived && !view" :disabled="!!activeRun.stop_requested_at" @click="post(`runs/${activeRun.id}/stop`, {}, true)">{{ activeRun.stop_requested_at ? 'Stop requested' : 'Stop automation' }}</DangerButton></div>
             </section>
             <p v-if="notice" :role="error ? 'alert' : 'status'" class="notice" :class="{ fault: error }">{{ readableText(notice) }}</p>
-            <nav class="home-destinations" aria-label="Ship destinations"><button v-for="key in ['commands', 'automation', 'intelligence', 'activity', 'guide']" :key="key" type="button" @click="openView(key)">{{ key === 'activity' && actions[0] ? `Activity · ${readableLabel(actions[0].state)}` : views[key] }}</button></nav>
+            <nav class="home-destinations" aria-label="Ship destinations"><button v-for="key in ['commands', 'automation', 'adviser', 'intelligence', 'activity', 'guide']" :key="key" type="button" @click="openView(key)">{{ key === 'activity' && actions[0] ? `Activity · ${readableLabel(actions[0].state)}` : views[key] }}</button></nav>
             <FocusSheet :open="!!view" :title="views[view] || 'Ship'" @ready="sheetReady" @close="openView('')">
                 <nav class="sheet-tabs" aria-label="Flight deck destinations"><button type="button" @click="openView('')">Back to ship</button><SecondaryButton v-if="['commands', 'intelligence', 'guide'].includes(view)" data-guide="sync" :disabled="archived || busy || (guiding && guidedStep?.kind !== 'sync' && !guidedStep?.canSync && !(guidedStep?.kind === 'blocked' && guidedStep?.target === 'sync'))" @click="synchronize">Synchronize</SecondaryButton></nav>
                 <p v-if="notice" :role="error ? 'alert' : 'status'" class="notice" :class="{ fault: error }">{{ readableText(notice) }}</p>
@@ -309,6 +310,7 @@ function distance(point) {
 
                 </div>
                 <ShipReport v-if="view === 'report'" :ship="ship" :observed-at="shipRecord?.observed_at" :section="reportSection" :readiness="presentation.readiness" :capability="capabilities[selected]" @section="reportSection = $event" />
+                <AdviserPanel v-if="view === 'adviser'" :agent="agent" :ships="ships" :selected="selected" :history="adviser" :runs="runs" :investigations="investigations" :disabled="archived || guiding" @refresh="async done => { await reload(); done(); }" />
                 <section v-if="view === 'run'"><h3>{{ activeRun ? `Run #${activeRun.id}` : 'No active run' }}</h3><template v-if="activeRun"><p>{{ readableLabel(activeRun.state) }} · {{ readableLabel(runStep) }}</p><p v-if="activeRun.stop_requested_at" role="status">Stop requested. Reserved work may settle; travel continues upstream.</p><p v-if="activeRun.blocked_reason" class="warning">{{ readableText(activeRun.blocked_reason) }}</p><p>Next step <time :datetime="activeRun.next_action_at">{{ formatLocalTime(activeRun.next_action_at) }}</time></p><DangerButton data-guide="stop" :disabled="archived || !!activeRun.stop_requested_at" @click="post(`runs/${activeRun.id}/stop`, {}, true)">{{ activeRun.stop_requested_at ? 'Stop requested' : 'Stop automation' }}</DangerButton><h3>Approved limits</h3><DataDetails :value="activeRun.plan" /><h3>Observed outcomes</h3><DataDetails :value="activeRun.totals" /></template><SecondaryButton @click="openView('automation')">Automation and engine controls</SecondaryButton></section>
                 <aside v-show="view === 'fleet'" id="fleet" data-guide="fleet" class="panel fleet" aria-labelledby="fleet-heading">
                     <h2 id="fleet-heading">Fleet</h2>

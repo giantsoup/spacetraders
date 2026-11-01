@@ -110,6 +110,14 @@ PHPUnit uses disposable in-memory SQLite and an isolated test key. External API 
 
 The approved scope and acceptance requirements are in [the migration plan](docs/laravel13-upgrade-plan.md). The historical Laravel upgrade baseline commit `a3ea1d4` remains its rollback point for code and locks. Its old dependencies require PHP 8.2, so it is not a PHP 8.4 fallback. The PHP 8.5 migration has its own [tested PHP 8.4 rollback instructions](docs/issue-7/php85-runtime.md#rollback). It adds no schema migration.
 
+## Adviser policy foundation
+
+Open **Adviser policy** on a saved agent's flight deck to configure an expiring one-ship policy and inspect deterministic next-activity assessments. Starting cargo requires explicit sale quantities. Exploration defaults off until its cost, fuel, time and frequency limits are chosen. Unknown earnings stay unknown.
+
+Saving a grant or assessment queues no gameplay. Model calls and policy execution remain disabled. **Pause automatic decisions** invalidates the grant without stopping a current run; **Stop current activity** uses the existing durable run Stop path. Deadlines stay in UTC and display in the detected browser timezone.
+
+Run `node scripts/verify-adviser-browser.mjs` with the owned PHP/Playwright setup for offline grant, decision, CSRF, layout and real worker checks. See [ADV01 implementation and open tuning choices](docs/issue-37/implementation.md) and the [dark evidence report](docs/issue-37/report.html). No live or paid acceptance is claimed.
+
 ## Early-game MVP
 
 ### Play against the live API

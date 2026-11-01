@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AdviserController;
 use App\Http\Controllers\AgentCommandController;
 use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AgentDashboardController;
@@ -46,9 +47,16 @@ Route::middleware('auth')->group(function () {
     Route::post('/agents/storeExisting', [AgentController::class, 'storeExisting'])->name('agents.storeExisting');
     Route::resource('/agents', AgentController::class)->only(['index', 'create', 'store']);
 
+    Route::get('/agents/{agent}/adviser/history', [AdviserController::class, 'history'])->name('game.adviser.history');
     Route::get('/agents/{agent}/history', [AgentDashboardController::class, 'history'])->name('game.history');
     Route::get('/agents/{agent}', [AgentDashboardController::class, 'show'])->name('agents.show');
     Route::middleware('throttle:60,1')->group(function () {
+        Route::post('/agents/{agent}/adviser/policies', [AdviserController::class, 'policies'])->name('game.adviser.policies');
+        Route::post('/agents/{agent}/adviser/policies/{policy}/pause', [AdviserController::class, 'pause'])->name('game.adviser.pause');
+        Route::post('/agents/{agent}/adviser/assess', [AdviserController::class, 'assess'])->name('game.adviser.assess');
+        Route::post('/agents/{agent}/adviser/collect', [AdviserController::class, 'collect'])->name('game.adviser.collect');
+        Route::post('/agents/{agent}/adviser/investigations/{investigation}/advance', [AdviserController::class, 'advance'])->name('game.adviser.advance');
+        Route::post('/agents/{agent}/adviser/investigations/{investigation}/cancel', [AdviserController::class, 'cancel'])->name('game.adviser.cancel');
         Route::post('/agents/{agent}/accounting/review', [LocalAutomationController::class, 'reviewBalance'])->name('game.accounting.review');
         Route::post('/agents/{agent}/investigations', [LocalAutomationController::class, 'investigate'])->name('game.investigations.create');
         Route::post('/agents/{agent}/investigations/{investigation}/advance', [LocalAutomationController::class, 'advance'])->name('game.investigations.advance');
