@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fuel spent per unit of cargo sold</title>
+<style>
+:root{color-scheme:dark;--background:#11151e;--foreground:#edf2fa;--muted:#acb9ce;--card:#161d29;--border:#38465b;--primary:#8ed8c6;--chart-1:#8ed8c6;--chart-2:#a7baff;--radius:14px;--font-sans:system-ui,sans-serif;--font-mono:ui-monospace,monospace}
+*{box-sizing:border-box}html,body{margin:0;font-family:var(--font-sans);color:var(--foreground)}section{background:var(--card);padding:20px;border-radius:var(--radius)}h1{font-size:20px;margin:0 0 8px;font-weight:650}p{font-size:14px;line-height:1.5;margin:0 0 16px}.muted{color:var(--muted)}label{font-size:14px;display:block;margin:8px 0}input{width:100%;accent-color:var(--primary)}output{font-family:var(--font-mono);color:var(--foreground)}.controls{display:grid;grid-template-columns:1fr 1fr;gap:20px}.chart{height:208px;display:flex;flex-direction:column;justify-content:space-evenly;margin:12px 0 4px}.row{display:grid;grid-template-columns:78px 1fr 90px;gap:10px;align-items:center;font-size:13px}.track{height:23px;background:var(--background);border-radius:4px}.bar{height:100%;background:var(--chart-1);border-radius:4px;min-width:3px}.row:first-child .bar{background:var(--chart-2)}.value{text-align:right;font-family:var(--font-mono)}.result{padding-top:14px;border-top:1px solid var(--border);margin-bottom:10px}a{color:var(--primary)}@media(max-width:480px){section{padding:16px}.controls{grid-template-columns:1fr;gap:0}.row{grid-template-columns:65px 1fr 80px;gap:6px}.chart{height:190px}}
+</style>
+<main><section aria-labelledby="title">
+<h1 id="title">Fuller loads spread the fuel cost</h1>
+<p class="muted">Illustrative arithmetic, not live game results. Compare the same round trip with different amounts of cargo sold.</p>
+<div class="controls">
+<label for="fuel">Round-trip fuel: <output id="fuelOut" for="fuel">40</output> tank units<input id="fuel" type="range" min="10" max="200" step="10" value="40"></label>
+<label for="load">Larger load: <output id="loadOut" for="load">60</output> cargo units<input id="load" type="range" min="20" max="100" step="10" value="60"></label>
+</div>
+<div class="chart" role="img" id="chart" aria-label="Fuel per unit sold at four cargo loads">
+<div class="row"><span>10 units</span><div class="track"><div class="bar" id="b0"></div></div><span class="value" id="v0"></span></div>
+<div class="row"><span>20 units</span><div class="track"><div class="bar" id="b1"></div></div><span class="value" id="v1"></span></div>
+<div class="row"><span>40 units</span><div class="track"><div class="bar" id="b2"></div></div><span class="value" id="v2"></span></div>
+<div class="row"><span id="customLabel">60 units</span><div class="track"><div class="bar" id="b3"></div></div><span class="value" id="v3"></span></div>
+</div>
+<p class="muted">Bar length = tank fuel consumed per cargo unit sold. Lower is better.</p>
+<p class="result" id="result" aria-live="polite"></p>
+<p class="muted">Assumes enough cargo space, equal route fuel, and sale of the full load. Extra extraction time, cooldowns, site hazards, price changes, and refueling purchase rounding can change net earnings per hour.</p>
+</section></main>
+<script>
+const fuel=document.getElementById('fuel'),load=document.getElementById('load');
+function update(){const f=Number(fuel.value),q=Number(load.value),loads=[10,20,40,q];document.getElementById('fuelOut').textContent=f;document.getElementById('loadOut').textContent=q;document.getElementById('customLabel').textContent=q+' units';loads.forEach((n,i)=>{document.getElementById('b'+i).style.width=(10/n*100)+'%';document.getElementById('v'+i).textContent=(f/n).toFixed(2)});document.getElementById('result').textContent='Selling '+q+' units instead of 10 uses '+Math.round((1-10/q)*100)+'% less route fuel per cargo unit. Fuel per trip stays '+f+'.';document.getElementById('chart').setAttribute('aria-label',loads.map(n=>n+' cargo units: '+(f/n).toFixed(2)+' tank fuel per unit sold').join('; '));}
+fuel.addEventListener('input',update);load.addEventListener('input',update);update();
+</script>
+</html>

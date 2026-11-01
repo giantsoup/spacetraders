@@ -5,6 +5,7 @@ namespace App\Gameplay;
 use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\GameObservation;
+use App\Models\ObservationHistory;
 use App\Models\Ship;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -90,21 +91,40 @@ class AgentSynchronizer
             throw new GameException('Discovery is limited to three local systems.');
         }
         foreach ($systems as $system) {
-            foreach ($this->api->waypoints($agent, $system) as $waypoint) {
-                $this->observe($agent, 'waypoint', $waypoint['symbol'], $waypoint);
-            }
+            $this->api->catalogue($agent, $system, function (array $rows, array $coverage) use ($agent, $system) {
+                foreach ($rows as $waypoint) {
+                    $this->observe($agent, 'waypoint', $waypoint['symbol'], $waypoint, 'listing');
+                }
+                if ($coverage['complete']) {
+                    GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->get()
+                        ->filter(fn ($point) => $point->data['systemSymbol'] === $system && ! in_array($point->symbol, $coverage['listed_symbols'], true))
+                        ->each->delete();
+                }
+                $this->observe($agent, 'catalogue', $system, $coverage, 'listing');
+            });
         }
-        $observations = 0;
         $locations = array_column(array_column($fleet, 'nav'), 'waypointSymbol');
-        $points = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->get()
-            ->sortByDesc(fn ($point) => in_array($point->symbol, $locations, true));
-        foreach ($points as $waypoint) {
+        $saved = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->get();
+        $tasks = [];
+        foreach ($saved->where('kind', 'waypoint') as $waypoint) {
             foreach (['MARKETPLACE' => 'market', 'SHIPYARD' => 'shipyard'] as $trait => $kind) {
-                if (in_array($trait, array_column($waypoint->data['traits'], 'symbol'), true) && $observations++ < config('gameplay.max_observations')) {
-                    $this->observe($agent, $kind, $waypoint->symbol, $this->api->$kind($agent, $waypoint->symbol));
+                if (in_array($trait, array_column($waypoint->data['traits'], 'symbol'), true)) {
+                    $last = $saved->first(fn ($row) => $row->symbol === $waypoint->symbol && $row->kind === ($kind === 'market' ? 'market_listing' : $kind));
+                    $tasks[] = ['symbol' => $waypoint->symbol, 'kind' => $kind, 'occupied' => in_array($waypoint->symbol, $locations, true), 'last' => $last?->observed_at->getTimestamp() ?? 0];
                 }
             }
         }
+        usort($tasks, fn ($a, $b) => [! $a['occupied'], $a['last'], $a['symbol'], $a['kind']] <=> [! $b['occupied'], $b['last'], $b['symbol'], $b['kind']]);
+        $coverage = ['observations' => 0, 'candidates' => count($tasks), 'complete' => false];
+        $this->observe($agent, 'discovery', 'local', $coverage, 'listing');
+        foreach (array_slice($tasks, 0, config('gameplay.max_observations')) as $task) {
+            $kind = $task['kind'];
+            $this->observe($agent, $kind, $task['symbol'], $this->api->$kind($agent, $task['symbol']));
+            $coverage['observations']++;
+            $this->observe($agent, 'discovery', 'local', $coverage, 'listing');
+        }
+        $coverage['complete'] = $coverage['observations'] === $coverage['candidates'];
+        $this->observe($agent, 'discovery', 'local', $coverage, 'listing');
     }
 
     public function refreshShip(Agent $agent, string $symbol): Ship
@@ -117,10 +137,37 @@ class AgentSynchronizer
         return Ship::updateOrCreate(['agent_id' => $agent->id, 'symbol' => $data['symbol']], ['snapshot' => $data, 'observed_at' => now()]);
     }
 
-    public function observe(Agent $agent, string $kind, string $symbol, array $data): GameObservation
+    public function invalidateMarket(Agent $agent, string $symbol, int $action): void
     {
-        return GameObservation::updateOrCreate(['agent_id' => $agent->id, 'kind' => $kind, 'symbol' => $symbol], [
-            'reset_id' => $agent->reset_id, 'data' => $data, 'observed_at' => now(),
-        ]);
+        $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $symbol)->first();
+        if ($quote) {
+            $quote->update(['data' => array_merge($quote->data, ['invalidated_by_action' => $action])]);
+        }
+    }
+
+    public function observe(Agent $agent, string $kind, string $symbol, array $data, string $source = 'read', ?string $observer = null): GameObservation
+    {
+        return DB::transaction(function () use ($agent, $kind, $symbol, $data, $source, $observer) {
+            if ($kind === 'waypoint' && in_array($source, ['listing', 'scan', 'chart'], true)) {
+                $this->observe($agent, 'waypoint_'.$source, $symbol, $data, $source, $observer);
+            }
+            if ($kind === 'market') {
+                $listing = array_intersect_key($data, array_flip(['symbol', 'imports', 'exports', 'exchange']));
+                $this->observe($agent, 'market_listing', $symbol, $listing, $source, $observer);
+                if (empty($data['tradeGoods'])) {
+                    $old = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $symbol)->first();
+                    if ($old && ! empty($old->data['tradeGoods'])) {
+                        return $old;
+                    }
+                } else {
+                    $observer ??= Ship::where('agent_id', $agent->id)->get()->first(fn ($ship) => $ship->snapshot['nav']['waypointSymbol'] === $symbol && $ship->snapshot['nav']['status'] !== 'IN_TRANSIT')?->symbol;
+                }
+            }
+            $values = ['reset_id' => $agent->reset_id, 'data' => $data, 'observed_at' => now(), 'source' => $source, 'observer_ship' => $observer];
+            $key = ['agent_id' => $agent->id, 'kind' => $kind, 'symbol' => $symbol];
+            ObservationHistory::create(array_merge($key, $values));
+
+            return GameObservation::updateOrCreate($key, $values);
+        });
     }
 }

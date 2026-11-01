@@ -55,11 +55,11 @@ class MiningPlanner
         if (! $start || ! $mine || ! $buyer || $mine['systemSymbol'] !== $ship['nav']['systemSymbol'] || $buyer['systemSymbol'] !== $mine['systemSymbol']) {
             throw new GameException('Discover a complete same-system route first.');
         }
-        if (! in_array($mine['type'], ['ASTEROID', 'ASTEROID_FIELD', 'ENGINEERED_ASTEROID'], true) || array_intersect(array_column($mine['traits'], 'symbol'), ['UNCHARTED', 'UNSTABLE', 'DEBRIS_FIELD'])) {
-            throw new GameException('Mining site is unverified, unstable or inaccessible.');
+        if ($reason = self::hazard($mine)) {
+            throw new GameException($reason);
         }
         $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $market)->first();
-        if (! $quote || $quote->observed_at->lt(now()->subSeconds(config('gameplay.snapshot_seconds'))) || empty($quote->data['tradeGoods'])) {
+        if (! $quote || ! empty($quote->data['invalidated_by_action']) || $quote->observed_at->lt(now()->subSeconds(config('gameplay.snapshot_seconds'))) || empty($quote->data['tradeGoods'])) {
             throw new GameException('Buyer prices are unknown or stale. Synchronize at that market; approve a manual scouting navigation first if no ship is there.');
         }
         $goods = collect($quote->data['tradeGoods'])->keyBy('symbol');
@@ -71,8 +71,9 @@ class MiningPlanner
         if (! is_int($fuelPrice) || $fuelPrice < 1) {
             throw new GameException('The buyer must offer observed fuel for a safe return.');
         }
-        $initial = self::fuelEstimate($start, $mine) + self::fuelEstimate($mine, $buyer);
-        $repeat = self::fuelEstimate($buyer, $mine) * 2;
+        $fuelPlanner = app(FuelPlanner::class);
+        $initial = $fuelPlanner->units($agent, $ship, $start, $mine) + $fuelPlanner->units($agent, $ship, $mine, $buyer) + config('gameplay.fuel_reserve_units');
+        $repeat = $fuelPlanner->units($agent, $ship, $buyer, $mine) + $fuelPlanner->units($agent, $ship, $mine, $buyer) + config('gameplay.fuel_reserve_units');
         if ($ship['fuel']['capacity'] < max($initial, $repeat) || $ship['fuel']['current'] < $initial) {
             throw new GameException('Insufficient fuel for the conservative route estimate. Refuel manually first.');
         }
@@ -111,11 +112,22 @@ class MiningPlanner
         if ($expected !== $inventory) {
             return MiningStep::blocked('Cargo changed outside this run. Reconcile retained inventory before continuing.');
         }
-        $destination = $totals['phase'] === 'mine' ? $plan['route']['site'] : $plan['route']['market'];
+        $phase = $totals['phase'];
+        $loadAttempts = $totals['load_attempts'] ?? 0;
+        $limit = $plan['max_extractions'] ?? 1;
+        if ($phase === 'mine' && $loadAttempts > 0 && array_diff(array_keys($inventory), $plan['route']['known_buyers']) !== []) {
+            return MiningStep::blocked('An extraction output has no verified buyer. Retain cargo; further extraction is not justified.');
+        }
+        $headroom = $plan['extraction_headroom'] ?? $ship['cargo']['capacity'];
+        $siteExpired = isset($totals['load_started_at']) && $now->gte(CarbonImmutable::parse($totals['load_started_at'])->addSeconds($plan['site_seconds'] ?? 300));
+        if ($phase === 'mine' && $loadAttempts > 0 && ($loadAttempts >= $limit || $ship['cargo']['capacity'] - $ship['cargo']['units'] < $headroom || $siteExpired)) {
+            return MiningStep::depart();
+        }
+        $destination = $phase === 'mine' ? $plan['route']['site'] : $plan['route']['market'];
         if ($ship['nav']['waypointSymbol'] !== $destination) {
             return $ship['nav']['status'] === 'DOCKED' ? MiningStep::act('orbit') : MiningStep::act('navigate', ['waypointSymbol' => $destination]);
         }
-        if ($totals['phase'] === 'mine') {
+        if ($phase === 'mine') {
             if ($ship['nav']['status'] === 'DOCKED') {
                 return MiningStep::act('orbit');
             }
@@ -123,12 +135,17 @@ class MiningPlanner
             if ($ready->greaterThan($now)) {
                 return MiningStep::wait($ready);
             }
-            // One extraction per trip bounds unknown yield sizes and time at the site.
-            if ($ship['cargo']['units'] !== 0) {
+            if ($loadAttempts === 0 && $ship['cargo']['units'] !== 0) {
                 return MiningStep::blocked('Mining starts with empty cargo to reserve full capacity for an unknown yield. Sell or move existing cargo manually.');
             }
 
-            return MiningStep::act('mine');
+            if ($ship['cargo']['capacity'] - $ship['cargo']['units'] < $headroom) {
+                return MiningStep::blocked('Approved extraction headroom is unavailable. Cargo retained.');
+            }
+
+            return isset($plan['survey_signature']) && $plan['survey_signature'] !== ''
+                ? MiningStep::act('mine_survey', ['surveySignature' => $plan['survey_signature'], 'surveyWaypoint' => $plan['route']['site']])
+                : MiningStep::act('mine');
         }
         if ($ship['nav']['status'] !== 'DOCKED') {
             return MiningStep::act('dock');
@@ -167,6 +184,16 @@ class MiningPlanner
     public static function fuelEstimate(array $from, array $to): int
     {
         return $from['symbol'] === $to['symbol'] ? 0 : (int) ceil(hypot($from['x'] - $to['x'], $from['y'] - $to['y'])) + 2;
+    }
+
+    public static function hazard(array $waypoint): ?string
+    {
+        $warnings = array_intersect(array_column(array_merge($waypoint['traits'] ?? [], $waypoint['modifiers'] ?? []), 'symbol'), ['UNCHARTED', 'UNSTABLE', 'CRITICAL_LIMIT', 'STRIPPED', 'DEBRIS_FIELD']);
+        if (! in_array($waypoint['type'], ['ASTEROID', 'ASTEROID_FIELD', 'ENGINEERED_ASTEROID'], true) || $warnings !== []) {
+            return 'Mining site is unverified, unsafe or inaccessible'.($warnings ? ': '.implode(', ', $warnings) : '.');
+        }
+
+        return null;
     }
 
     public static function inventory(array $ship): array

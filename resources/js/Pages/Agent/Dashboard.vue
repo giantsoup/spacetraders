@@ -12,9 +12,11 @@ import DangerButton from '@/Components/DangerButton.vue';
 import TutorialCourse from '@/Components/TutorialCourse.vue';
 import GuidedFlight from '@/Components/GuidedFlight.vue';
 import GameConnection from '@/Components/GameConnection.vue';
+import OpportunityPanel from '@/Components/OpportunityPanel.vue';
+import OperationControls from '@/Components/OperationControls.vue';
 import { useGuidedFlight } from '@/Composables/useGuidedFlight.js';
 
-const props = defineProps({ agent: Object, ships: Array, capabilities: Object, observations: Array, actions: Array, runs: Array, health: Object, automationEnabled: Boolean, synthetic: Boolean, guidedOffers: { type: Array, default: () => [] } });
+const props = defineProps({ agent: Object, ships: Array, capabilities: Object, observations: Array, actions: Array, runs: Array, health: Object, intelligence: Object, automationEnabled: Boolean, synthetic: Boolean, guidedOffers: { type: Array, default: () => [] } });
 const archived = computed(() => props.agent.connection_state === 'reset');
 const selected = ref(props.ships[0]?.symbol || '');
 const page = usePage();
@@ -54,12 +56,19 @@ const quantity = ref(1);
 const priceBound = ref(0);
 const reserve = ref(0);
 const offerIndex = ref('');
+const surveySignature = ref('');
+const runSurveySignature = ref('');
+const transferTarget = ref('');
+const surveys = computed(() => props.observations.filter(o => o.kind === 'survey' && o.data.signed.symbol === ship.value?.nav.waypointSymbol && !o.data.exhausted && !o.data.unavailable_reason && Date.parse(o.data.signed.expiration) > Date.now()));
 const site = ref('');
 const buyer = ref('');
 const spend = ref(0);
 const loss = ref(0);
 const cycles = ref(1);
 const minutes = ref(60);
+const extractionCount = ref(1);
+const extractionHeadroom = ref(1);
+const siteSeconds = ref(300);
 const busy = ref(false);
 const notice = ref('');
 const error = ref(false);
@@ -69,6 +78,7 @@ const previewPanel = ref(null);
 const note = ref('');
 const reconciliation = ref(null);
 const selectedQuote = computed(() => market.value?.data.tradeGoods?.find(q => q.symbol === good.value));
+const tradeOptions = computed(() => [...new Map([...(market.value?.data.tradeGoods || []), ...(ship.value?.cargo.inventory || [])].map(item => [item.symbol, item])).values()]);
 const selectedWaypoint = computed(() => waypoints.value.find(w => w.symbol === destination.value));
 const navigationHelp = computed(() => {
     if (!destination.value) return 'Select a destination before previewing navigation.';
@@ -81,8 +91,8 @@ const cash = value => value === null || value === undefined ? 'Unknown' : Number
 const age = value => value ? `${Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 1000))}s ago` : 'Never observed';
 const healthy = value => value && Date.now() - Date.parse(value) < 90000;
 const url = suffix => `/agents/${props.agent.id}/${suffix}`;
-const reload = () => new Promise(resolve => router.reload({ only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers'], onFinish: resolve }));
-usePoll(5000, { only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers'] });
+const reload = () => new Promise(resolve => router.reload({ only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'intelligence'], onFinish: resolve }));
+usePoll(5000, { only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'intelligence'] });
 const guided = useGuidedFlight(() => page.props.auth.user.id, () => ({
     ...props, selected: selected.value, offers: offers.value, commandPreview: commandPreview.value,
     form: { destination: destination.value, good: good.value, quantity: quantity.value, priceBound: priceBound.value, reserve: reserve.value, site: site.value, buyer: buyer.value, offerIndex: offerIndex.value },
@@ -127,8 +137,10 @@ async function preview(command) {
     }
     const args = {};
     if (command === 'navigate') args.waypointSymbol = destination.value;
-    if (['buy', 'sell', 'refuel'].includes(command)) args.units = Number(quantity.value);
-    if (['buy', 'sell'].includes(command)) args.symbol = good.value;
+    if (['buy', 'sell', 'refuel', 'transfer'].includes(command)) args.units = Number(quantity.value);
+    if (['buy', 'sell', 'transfer'].includes(command)) args.symbol = good.value;
+    if (command === 'transfer') args.targetShip = transferTarget.value;
+    if (command === 'mine_survey') Object.assign(args, { surveySignature: surveySignature.value, surveyWaypoint: ship.value.nav.waypointSymbol });
     if (['buy', 'refuel', 'buy_ship'].includes(command)) args.maxTotal = Number(priceBound.value);
     if (command === 'sell') args.minTotal = Number(priceBound.value);
     args.reserve = Number(reserve.value);
@@ -148,7 +160,11 @@ async function approveCommand() {
     if (action) commandPreview.value = null;
 }
 async function previewRun() {
-    runPreview.value = await post('runs/preview', { ship_symbol: selected.value, site: site.value, market: buyer.value, reserve: Number(reserve.value), max_spend: Number(spend.value), max_loss: Number(loss.value), cycles: Number(cycles.value), minutes: Number(minutes.value) });
+    runPreview.value = await post('runs/preview', { ship_symbol: selected.value, site: site.value, market: buyer.value, reserve: Number(reserve.value), max_spend: Number(spend.value), max_loss: Number(loss.value), cycles: Number(cycles.value), minutes: Number(minutes.value), max_extractions: Number(extractionCount.value), ...(Number(extractionCount.value) > 1 ? { extraction_headroom: Number(extractionHeadroom.value), site_seconds: Number(siteSeconds.value) } : {}), ...(runSurveySignature.value ? { survey_signature: runSurveySignature.value } : {}) });
+    if (runPreview.value) { await nextTick(); previewPanel.value?.focus(); }
+}
+async function previewOperation(limits) {
+    runPreview.value = await post('runs/preview', limits);
     if (runPreview.value) { await nextTick(); previewPanel.value?.focus(); }
 }
 async function startRun() {
@@ -210,13 +226,15 @@ function distance(point) {
                 </aside>
 
                 <div class="work-panels">
+                    <OpportunityPanel :report="intelligence" :selected="selected" />
                     <section v-if="!archived && (commandPreview || runPreview)" ref="previewPanel" tabindex="-1" class="panel approval" aria-labelledby="approval-heading">
-                        <h2 id="approval-heading">Review {{ commandPreview?.command === 'buy_ship' ? 'one-time ship purchase' : commandPreview ? 'manual command' : 'mining trip' }}</h2>
+                        <h2 id="approval-heading">Review {{ commandPreview?.command === 'buy_ship' ? 'one-time ship purchase' : commandPreview ? 'manual command' : `${runPreview.plan.strategy || 'mining'} operation` }}</h2>
                         <template v-if="commandPreview">
                             <p>{{ commandPreview.ship_symbol }} · {{ readableLabel(commandPreview.command) }} · Expires <time :datetime="commandPreview.expires_at">{{ formatLocalTime(commandPreview.expires_at) }}</time></p>
                             <DataDetails :value="commandPreview.arguments" class="command-arguments" />
                             <dl><dt>Observed cost</dt><dd>{{ cash(commandPreview.before_state.estimate.cost_estimate) }} CR</dd><dt>Observed sale</dt><dd>{{ cash(commandPreview.before_state.estimate.sale_estimate) }} CR</dd><dt>Protected reserve</dt><dd>{{ cash(commandPreview.before_state.estimate.reserve) }} CR</dd><dt>Available credits</dt><dd>{{ cash(commandPreview.before_state.credits) }} CR</dd><dt>Free cargo</dt><dd>{{ commandPreview.before_state.estimate.cargo_free }}</dd></dl>
                             <p v-if="commandPreview.before_state.estimate.fuel_estimate">Conservative fuel estimate: {{ commandPreview.before_state.estimate.fuel_estimate }}. Arrival comes from the navigation response.</p>
+                            <DataDetails v-if="commandPreview.before_state.estimate.route" :value="commandPreview.before_state.estimate.route" />
                             <details v-if="commandPreview.before_state.estimate.configuration"><summary>Complete offered configuration and route</summary><DataDetails :value="commandPreview.before_state.estimate" /></details>
                             <p class="warning">{{ commandPreview.before_state.estimate.quote_limit_warning }} Scouting movement also requires this explicit approval.</p>
                             <div class="button-row approval-actions">
@@ -227,8 +245,9 @@ function distance(point) {
                         <template v-else>
                             <p>{{ runPreview.ship_symbol }} · {{ runPreview.plan.route.site }} → {{ runPreview.plan.route.market }}</p>
                             <dl><dt>Trips / duration cap</dt><dd>{{ runPreview.plan.cycles }} / {{ runPreview.plan.minutes }} min</dd><dt>Credit reserve</dt><dd>{{ cash(runPreview.plan.reserve) }}</dd><dt>Maximum fuel spend</dt><dd>{{ cash(runPreview.plan.max_spend) }}</dd><dt>Maximum loss</dt><dd>{{ cash(runPreview.plan.max_loss) }}</dd><dt>Fuel estimate / refuel ceiling</dt><dd>{{ runPreview.plan.route.fuel_estimate }} tank units / {{ cash(runPreview.plan.route.fuel_ceiling) }} CR</dd><dt>Starting fuel</dt><dd>{{ runPreview.plan.initial_fuel }}</dd><dt>Quote timestamp</dt><dd><time :datetime="runPreview.plan.route.quote_at">{{ formatLocalTime(runPreview.plan.route.quote_at) }}</time></dd><dt>Known buyers for</dt><dd>{{ runPreview.plan.route.known_buyers.map(assetName).join(', ') }}</dd><dt>Unknown yields</dt><dd>{{ runPreview.plan.route.unknown_yields.map(assetName).join(', ') || 'None observed' }}</dd></dl>
-                            <p class="warning">One extraction per trip. Unknown cargo stays aboard and blocks the run. No guaranteed execution price or profitability. Stop on reserve, spending, loss, duration, condition, reset, uncertain write or no progress. The first trip stops unless you explicitly preview more trips.</p>
-                            <div class="button-row approval-actions"><PrimaryButton :disabled="archived || busy || !automationEnabled || guiding" @click="startRun">Start approved mining run</PrimaryButton><SecondaryButton @click="runPreview = null">Cancel preview</SecondaryButton></div>
+                            <DataDetails :value="runPreview.plan" />
+                            <p class="warning">{{ runPreview.plan.strategy === 'mining' ? `Up to ${runPreview.plan.max_extractions || 1} extractions per trip.` : runPreview.plan.strategy === 'scout' ? 'One observation visit, then return home.' : 'Bounded inventory purchases, batch sales and an empty return.' }} Unknown cargo stays aboard. No guaranteed execution price or profitability. Stop on reserve, spending, loss, duration, condition, reset, uncertainty or no progress.</p>
+                            <div class="button-row approval-actions"><PrimaryButton :disabled="archived || busy || !automationEnabled || guiding" @click="startRun">Start approved {{ runPreview.plan.strategy || 'mining' }} run</PrimaryButton><SecondaryButton @click="runPreview = null">Cancel preview</SecondaryButton></div>
                         </template>
                     </section>
                     <section id="manual" tabindex="-1" class="panel" aria-labelledby="manual-heading">
@@ -241,9 +260,15 @@ function distance(point) {
                                 <label>Destination<select v-model="destination" data-guide="destination" :disabled="archived || (guiding && guidedStep?.target !== 'destination')" aria-label="Destination" aria-describedby="navigation-help"><option value="">Select waypoint</option><option v-for="point in waypoints" :key="point.id" :value="point.symbol" :disabled="point.symbol === ship?.nav.waypointSymbol">{{ point.symbol }} · {{ assetName(point.data.type) }}{{ point.symbol === ship?.nav.waypointSymbol ? ' · current location' : '' }}</option></select></label>
                                 <div class="field-action"><p id="navigation-help" class="muted" aria-live="polite">{{ navigationHelp || `${distance(selectedWaypoint.data)} units away. The server checks fuel and route before approval.` }}</p><SecondaryButton :disabled="!!navigationHelp || !guideAllows('navigate')" aria-describedby="navigation-help" data-guide="preview-navigate" @click="preview('navigate')">Preview navigation</SecondaryButton></div>
                             </div>
-                            <div class="form-grid"><label>Trade good<select v-model="good" data-guide="good" :disabled="archived || (guiding && guidedStep?.target !== 'good')" aria-label="Trade good"><option value="">Select good</option><option v-for="quote in market?.data.tradeGoods || []" :key="quote.symbol" :value="quote.symbol">{{ assetName(quote) }}</option></select></label><label>Quantity / refuel tank units<input v-model="quantity" data-guide="quantity" :disabled="archived || (guiding && guidedStep?.target !== 'quantity')" type="number" min="1" max="100000" step="1"></label><label>Maximum cost / minimum sale total<input v-model="priceBound" data-guide="price" :disabled="archived || (guiding && guidedStep?.target !== 'price')" type="number" min="0" step="1"></label><label>Protected credits<input v-model="reserve" data-guide="reserve" :disabled="archived || (guiding && guidedStep?.target !== 'reserve')" type="number" min="0" step="1"></label></div>
-                            <p v-if="selectedQuote" class="muted">Observed buy {{ selectedQuote.purchasePrice }} · sell {{ selectedQuote.sellPrice }} · transaction volume {{ selectedQuote.tradeVolume }}. Quote {{ age(market.observed_at) }}. Refuel: 100 tank units per market unit, rounded up.</p>
+                            <div class="form-grid"><label>Trade good<select v-model="good" data-guide="good" :disabled="archived || (guiding && guidedStep?.target !== 'good')" aria-label="Trade good"><option value="">Select good</option><option v-for="quote in tradeOptions" :key="quote.symbol" :value="quote.symbol">{{ assetName(quote) }}</option></select></label><label>Quantity / refuel tank units<input v-model="quantity" data-guide="quantity" :disabled="archived || (guiding && guidedStep?.target !== 'quantity')" type="number" min="1" max="100000" step="1"></label><label>Maximum cost / minimum sale total<input v-model="priceBound" data-guide="price" :disabled="archived || (guiding && guidedStep?.target !== 'price')" type="number" min="0" step="1"></label><label>Protected credits<input v-model="reserve" data-guide="reserve" :disabled="archived || (guiding && guidedStep?.target !== 'reserve')" type="number" min="0" step="1"></label></div>
+                            <p v-if="selectedQuote" class="muted">Observed buy {{ selectedQuote.purchasePrice }} · sell {{ selectedQuote.sellPrice }} · transaction volume {{ selectedQuote.tradeVolume }}. Quote {{ age(market.observed_at) }}. Refuel: 100 tank units per market unit. Whole-unit cost rounding is a conservative budget assumption.</p>
                             <div class="button-row"><SecondaryButton :disabled="!guideAllows('buy')" data-guide="preview-buy" @click="preview('buy')">Preview cargo purchase</SecondaryButton><SecondaryButton :disabled="!guideAllows('sell')" data-guide="preview-sell" @click="preview('sell')">Preview cargo sale</SecondaryButton><SecondaryButton :disabled="!guideAllows('refuel')" data-guide="preview-refuel" @click="preview('refuel')">Preview refueling</SecondaryButton></div>
+                            <details><summary>Surveys and cargo transfers</summary>
+                                <p>Survey deposits are preserved exactly. Duplicate counts are not exact probabilities. Transfers need both ships at the same waypoint in matching states.</p>
+                                <SecondaryButton :disabled="!guideAllows('survey')" @click="preview('survey')">Preview survey creation</SecondaryButton>
+                                <div class="form-grid"><label>Usable signed survey<select v-model="surveySignature"><option value="">Select survey</option><option v-for="survey in surveys" :key="survey.id" :value="survey.symbol">{{ survey.data.signed.size }} · {{ formatLocalTime(survey.data.signed.expiration) }} · {{ survey.symbol }}</option></select></label><SecondaryButton :disabled="!surveySignature || !guideAllows('mine_survey')" @click="preview('mine_survey')">Preview surveyed extraction</SecondaryButton>
+                                <label>Receiving ship<select v-model="transferTarget"><option value="">Select receiving ship</option><option v-for="entry in ships.filter(s => s.symbol !== selected)" :key="entry.symbol" :value="entry.symbol">{{ entry.symbol }}</option></select></label><SecondaryButton :disabled="!transferTarget || !good || !guideAllows('transfer')" @click="preview('transfer')">Preview transfer of selected good and quantity</SecondaryButton></div>
+                            </details>
                         </fieldset>
                         <p class="muted">Every command is checked again by the server. Transit, cargo, cooldown, ownership and spending failures appear before send where known.</p>
                     </section>
@@ -255,11 +280,16 @@ function distance(point) {
                         <p v-if="latestRun?.blocked_reason" class="warning">{{ readableText(latestRun.blocked_reason) }}</p>
                         <fieldset :disabled="archived || busy || !ship || !!activeRun || !!pending"><legend>Bounded trip limits</legend>
                             <div class="form-grid"><label>Mining site<select v-model="site" data-guide="site" :disabled="archived || (guiding && guidedStep?.target !== 'site')" aria-label="Mining site"><option value="">Select site</option><option v-for="point in waypoints.filter(p => ['ASTEROID', 'ASTEROID_FIELD', 'ENGINEERED_ASTEROID'].includes(p.data.type))" :key="point.id" :value="point.symbol">{{ point.symbol }}</option></select></label><label>Sale and refueling market<select v-model="buyer" data-guide="buyer" :disabled="archived || (guiding && guidedStep?.target !== 'buyer')" aria-label="Sale and refueling market"><option value="">Select buyer</option><option v-for="point in markets" :key="point.id" :value="point.symbol">{{ point.symbol }} · {{ point.data.tradeGoods ? 'observed quotes' : 'prices unknown' }}</option></select></label><label>Protected credit reserve<input v-model="reserve" data-guide="reserve" :disabled="archived || (guiding && guidedStep?.target !== 'reserve')" type="number" min="1" step="1"></label><label>Maximum fuel spending<input v-model="spend" type="number" min="1" step="1"></label><label>Maximum credit loss<input v-model="loss" type="number" min="0" step="1"></label><label>Trip count<input v-model="cycles" type="number" min="1" max="10" step="1"></label><label>Duration cap in minutes<input v-model="minutes" type="number" min="1" max="60" step="1"></label></div>
+                            <div class="form-grid"><label>Maximum extractions per trip<input v-model="extractionCount" type="number" min="1" max="10"></label><template v-if="Number(extractionCount) > 1"><label>Required headroom before each extraction<input v-model="extractionHeadroom" type="number" min="1" :max="ship?.cargo.capacity"></label><label>Maximum seconds extracting at the site<input v-model="siteSeconds" type="number" min="1" max="900"></label></template></div>
+                            <p v-if="Number(extractionCount) > 1" class="warning">Yield size is uncertain. Choose a conservative headroom allowance; the server may still reject an extraction. Stops at the first count, headroom, site-time, buyer or hazard bound. Fuller loads have no proven live earnings advantage.</p>
+                            <label>Optional survey for this run<select v-model="runSurveySignature" aria-label="Optional survey for this run"><option value="">Extract without a survey</option><option v-for="survey in observations.filter(o => o.kind === 'survey' && o.data.signed.symbol === site && !o.data.exhausted && !o.data.unavailable_reason && Date.parse(o.data.signed.expiration) > Date.now())" :key="survey.id" :value="survey.symbol">{{ survey.symbol }} · {{ survey.data.signed.size }} · {{ formatLocalTime(survey.data.signed.expiration) }}</option></select></label>
                             <PrimaryButton :disabled="guiding" @click="previewRun">Preview mining run</PrimaryButton>
                         </fieldset>
-                        <p class="muted">Enter explicit credit bounds. Preview computes the minimum reserve from observed fuel quotes and current credits. Unknown prices require an approved scouting navigation and synchronization. One extraction uses the empty cargo hold; the bot never buys cargo or jettisons goods.</p>
-                        <div v-if="latestRun" class="outcomes"><h3>Recorded outcomes</h3><dl><dt>Completed trips</dt><dd>{{ latestRun.totals.cycles }}</dd><dt>Run credit contribution</dt><dd>{{ cash(latestRun.totals.credit_delta) }} CR</dd><dt>Agent balance change</dt><dd>{{ cash(latestRun.totals.agent_balance_delta ?? latestRun.totals.credit_delta) }} CR</dd><dt>Other local commands</dt><dd>{{ cash(latestRun.totals.other_credit_delta ?? 0) }} CR</dd><dt>Sale proceeds</dt><dd>{{ cash(latestRun.totals.sale_proceeds) }} CR</dd><dt>Fuel purchased</dt><dd>{{ latestRun.totals.fuel_units }} tank units / {{ cash(latestRun.totals.fuel_cost) }} CR</dd><dt>Trip cash contribution</dt><dd>{{ cash(latestRun.totals.cash_contribution) }} CR</dd><dt>Starting / ending fuel</dt><dd>{{ latestRun.plan.initial_fuel }} / {{ latestRun.totals.ending_fuel ?? 'pending' }}</dd><dt>Elapsed time</dt><dd>{{ latestRun.totals.elapsed_seconds ?? 'pending' }} seconds</dd></dl><dl class="cargo-totals"><dt>Extracted cargo</dt><dd>{{ cargoSummary(latestRun.totals.extracted) }}</dd><dt>Sold cargo</dt><dd>{{ cargoSummary(latestRun.totals.sold) }}</dd><dt>Unsold cargo</dt><dd>{{ cargoSummary(latestRun.totals.unsold) }}</dd></dl><p class="muted">Cash contribution is proceeds minus purchased fuel. Existing fuel and retained inventory prevent treating it as economic profit.</p></div>
+                        <p class="muted">Enter explicit credit bounds. Preview computes the minimum reserve from observed fuel quotes and current credits. Unknown prices require an approved observation trip. One extraction is the default; longer loads use the explicit limits above. Mining never buys cargo or discards goods.</p>
+                        <div v-if="latestRun" class="outcomes"><h3>Recorded outcomes</h3><dl><dt>Completed trips</dt><dd>{{ latestRun.totals.cycles }}</dd><dt>Run credit contribution</dt><dd>{{ cash(latestRun.totals.credit_delta) }} CR</dd><dt>Agent balance change</dt><dd>{{ cash(latestRun.totals.agent_balance_delta ?? latestRun.totals.credit_delta) }} CR</dd><dt>Other local commands</dt><dd>{{ cash(latestRun.totals.other_credit_delta ?? 0) }} CR</dd><dt>Sale proceeds</dt><dd>{{ cash(latestRun.totals.sale_proceeds) }} CR</dd><dt>Fuel purchased</dt><dd>{{ latestRun.totals.fuel_units }} tank units / {{ cash(latestRun.totals.fuel_cost) }} CR</dd><dt>Trip cash contribution</dt><dd>{{ cash(latestRun.totals.cash_contribution) }} CR</dd><dt>Starting / ending fuel</dt><dd>{{ latestRun.plan.initial_fuel }} / {{ latestRun.totals.ending_fuel ?? 'pending' }}</dd><dt>Elapsed time</dt><dd>{{ latestRun.totals.elapsed_seconds ?? 'pending' }} seconds</dd></dl><dl class="cargo-totals"><dt>Extracted cargo</dt><dd>{{ cargoSummary(latestRun.totals.extracted) }}</dd><dt>Sold cargo</dt><dd>{{ cargoSummary(latestRun.totals.sold) }}</dd><dt>Unsold cargo</dt><dd>{{ cargoSummary(latestRun.totals.unsold) }}</dd></dl><p class="muted">Cash contribution deducts inventory acquisition and purchased fuel. Unmatched location, fuel, inventory and unmeasured wear prevent treating it as economic profit.</p><DataDetails v-if="latestRun.totals.accounting" :value="latestRun.totals.accounting" /></div>
                     </section>
+
+                    <OperationControls :selected="selected" :report="intelligence" :disabled="archived || busy || !ship || !!activeRun || !!pending || guiding" @preview="previewOperation" />
 
                     <section data-guide="setup" id="setup" class="panel" aria-labelledby="setup-heading">
                         <h2 id="setup-heading">04 / One-time mining setup</h2>

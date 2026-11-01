@@ -1,0 +1,1204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Three mobile single-ship redesigns for the SpaceTraders client: Horizon, Logbook and Voyage. Design study with demo data only.">
+<title>Less dashboard, more ship · Single-ship redesigns</title>
+<style>
+/* ───────────────────────── Tokens ───────────────────────── */
+:root{
+  color-scheme:dark;
+  --background:#070d17;
+  --foreground:#e8eef6;
+  --muted:#97a8bc;
+  --card:#0e1726;
+  --secondary:#162337;
+  --border:rgba(178,200,230,.14);
+  --ring:#f7dc91;
+  --primary:#a6f3d0;
+  --primary-foreground:#0c271d;
+  --accent:#b8b1ff;
+  --warning:#f7dc91;
+  --success:#a6f3d0;
+  --danger:#ffb4bf;
+  --radius:18px;
+  --font-sans:-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,"Segoe UI",system-ui,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+
+  --screen:#060b14;
+  --sheet:#0d1524;
+  --inset:#111b2c;
+  --sep:rgba(178,200,230,.11);
+  --faint:#6f8197;
+  --app-h:800px;            /* replaced by measured window.innerHeight */
+  --safe-b:0px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:transparent}
+body{color:var(--foreground);font:16px/1.55 var(--font-sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;overflow-x:hidden}
+h1,h2,h3,h4,p,ul,ol,dl,dd,figure{margin:0}
+ul,ol{padding:0;list-style:none}
+button,select{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0;padding:0;-webkit-tap-highlight-color:transparent}
+a{color:var(--primary);text-underline-offset:4px}
+:focus-visible{outline:3px solid var(--ring);outline-offset:3px;border-radius:10px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}
+.mono{font-family:var(--font-mono)}
+svg.icon{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.sprite{shape-rendering:crispEdges}
+
+/* ───────────────────────── Report (editorial) ───────────────────────── */
+.report{max-width:1240px;margin:0 auto;padding:48px 0 96px}
+.pad{padding-inline:20px}
+.eyebrow{font:12px/1.4 var(--font-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.intro{max-width:780px}
+.intro h1{margin:16px 0 18px;font-size:clamp(38px,7vw,76px);line-height:1;letter-spacing:-.045em;font-weight:760}
+.intro .lede{font-size:clamp(17px,2.2vw,21px);line-height:1.5;color:var(--muted);max-width:640px}
+.intro .lede strong{color:var(--foreground);font-weight:600}
+
+.shifts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px;margin-top:48px}
+.shifts > div{border-top:1px solid var(--sep);padding-top:16px}
+.shifts h2{font-size:17px;letter-spacing:-.01em;margin-bottom:6px}
+.shifts p{font-size:15px;color:var(--muted)}
+
+.clockbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin-top:56px;padding-block:14px;border-block:1px solid var(--sep)}
+.clockbar .readout{font-size:14px;color:var(--muted);margin-right:auto;min-width:0}
+.clockbar .readout b{color:var(--foreground);font-weight:600}
+.ctl{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 16px;border-radius:999px;background:var(--secondary);font-size:14px;font-weight:600}
+.ctl[aria-pressed=true]{background:var(--foreground);color:var(--background)}
+.ctl:hover{filter:brightness(1.12)}
+
+.jump{display:none;gap:8px;margin-top:24px;overflow-x:auto}
+.jump a{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:999px;background:var(--secondary);color:var(--foreground);text-decoration:none;font-size:14px;font-weight:600;white-space:nowrap}
+
+.concepts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:40px 28px;margin-top:40px}
+.concept{min-width:0;scroll-margin-top:20px}
+.concept-head{padding-inline:4px;margin-bottom:20px;min-height:104px}
+.concept-head .num{font:13px var(--font-mono);color:var(--faint)}
+.concept-head h3{font-size:30px;letter-spacing:-.035em;line-height:1.1;margin:4px 0 8px}
+.concept-head p{font-size:15px;color:var(--muted);max-width:360px}
+
+.demo-controls{max-width:390px;margin:16px auto 0;padding-inline:4px}
+.demo-controls .lbl{display:block;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.seg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;padding:3px;border-radius:14px;background:var(--secondary)}
+.seg button{min-height:44px;border-radius:11px;font-size:13px;font-weight:600;color:var(--muted)}
+.seg button[aria-pressed=true]{background:#2a3a52;color:var(--foreground)}
+.preview-link{display:inline-flex;align-items:center;gap:6px;min-height:44px;margin-top:8px;font-size:15px;font-weight:600}
+
+.notes{max-width:390px;margin:20px auto 0;padding-inline:4px}
+.notes dt{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin-top:16px}
+.notes dd{font-size:15px;color:var(--muted);margin-top:4px}
+
+.section{margin-top:112px}
+.section h2.big{font-size:clamp(30px,4.6vw,48px);letter-spacing:-.04em;line-height:1.05;max-width:760px;margin:12px 0 20px}
+.section .lede{font-size:18px;color:var(--muted);max-width:640px}
+.reco{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px;margin-top:40px}
+.reco li{border-top:1px solid var(--sep);padding-top:16px}
+.reco b{display:block;font-size:17px;margin-bottom:6px}
+.reco span{font-size:15px;color:var(--muted)}
+.skip-note{margin-top:32px;font-size:15px;color:var(--muted);max-width:640px}
+.skip-note b{color:var(--foreground)}
+.rules{margin-top:28px;max-width:720px}
+.rules li{display:flex;gap:16px;padding:14px 0;border-bottom:1px solid var(--sep);font-size:15px;color:var(--muted)}
+.rules li:first-child{border-top:1px solid var(--sep)}
+.rules li span{font:13px/1.9 var(--font-mono);color:var(--faint);flex:none;width:24px}
+.rules code{font:13px var(--font-mono);color:var(--foreground)}
+.rules b{color:var(--foreground);font-weight:600}
+.foot{margin-top:72px;font-size:13px;color:var(--faint)}
+
+/* ───────────────────────── Shared app screen ───────────────────────── */
+.screen{position:relative;width:100%;max-width:390px;height:780px;margin-inline:auto;background:var(--screen);border-radius:36px;overflow:hidden;display:flex;flex-direction:column;isolation:isolate;box-shadow:0 0 0 1px rgba(178,200,230,.07),0 40px 90px -50px #000;font-size:17px;line-height:1.4}
+.scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.screen .demo-tag{font:600 12px var(--font-mono);letter-spacing:.1em;color:var(--warning)}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px 4px 16px;flex:none}
+.switcher{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 4px;font-size:17px;font-weight:650;letter-spacing:-.01em}
+.switcher .icon{width:14px;height:14px;color:var(--muted)}
+.text-btn{display:inline-flex;align-items:center;gap:4px;min-height:44px;min-width:44px;padding:0 10px;font-size:17px;font-weight:500;color:var(--primary)}
+.primary-btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:52px;padding:0 20px;border-radius:16px;background:var(--primary);color:var(--primary-foreground);font-size:17px;font-weight:650;letter-spacing:-.01em}
+.primary-btn:disabled{opacity:.55;cursor:default}
+.primary-btn.quiet{background:var(--secondary);color:var(--foreground)}
+.meter{display:block;height:4px;border-radius:2px;background:rgba(178,200,230,.14);overflow:hidden}
+.meter i{display:block;height:100%;border-radius:inherit;background:var(--primary)}
+.meter.cargo i{background:var(--accent)}
+.label-up{font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--faint)}
+.screen[data-state=stale] .is-known{color:var(--warning)}
+
+/* Scene (pixel world). Coordinates are percentages of the scene box. */
+.scene{position:relative;overflow:hidden;--x0:14;--y0:70;--x1:84;--y1:34;--p:0}
+.scene .stars{position:absolute;inset:0;width:100%;height:100%}
+.scene .route{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.scene .route line{stroke-width:2;vector-effect:non-scaling-stroke}
+.scene .route .trail{stroke:rgba(178,200,230,.28);stroke-dasharray:2 7}
+.scene .route .done{stroke:var(--primary);opacity:.55}
+.body{position:absolute;transform:translate(-50%,-50%);transition:left .6s,top .6s,width .6s,height .6s}
+.body svg{display:block;width:100%;height:100%}
+.origin{left:calc(var(--x0)*1%);top:calc(var(--y0)*1%);width:52px;height:52px}
+.dest{left:calc(var(--x1)*1%);top:calc(var(--y1)*1%);width:72px;height:54px}
+.ship-btn{position:absolute;transform:translate(-50%,-50%);width:76px;height:60px;display:grid;place-items:center;border-radius:14px;
+  left:calc((var(--x0) + (var(--x1) - var(--x0)) * var(--p)) * 1%);
+  top:calc((var(--y0) + (var(--y1) - var(--y0)) * var(--p)) * 1%);
+  transition:left 1s linear,top 1s linear}
+.ship-btn svg{width:64px;height:48px;animation:bob 3.2s ease-in-out infinite}
+.ship-btn:hover svg{filter:drop-shadow(0 0 6px rgba(166,243,208,.45))}
+.flame{animation:thrust .5s steps(2) infinite;transform-origin:10px 12px}
+.screen[data-state=orbit] .ship-btn{left:calc((var(--x1) - 13) * 1%);top:calc((var(--y1) - 14) * 1%)}
+.screen[data-state=docked] .ship-btn{left:calc((var(--x1) - 17) * 1%);top:calc((var(--y1) + 6) * 1%)}
+.screen[data-state=orbit] .ship-btn svg,.screen[data-state=docked] .ship-btn svg{animation-duration:5s}
+.screen[data-state=stale] .ship-btn svg{opacity:.45;filter:grayscale(1);animation:none}
+.scene-note{position:absolute;left:16px;bottom:12px;font-size:12px;color:var(--muted)}
+@keyframes bob{0%,100%{transform:translateY(-2px)}50%{transform:translateY(2px)}}
+@keyframes thrust{50%{transform:scaleX(.6)}}
+
+/* ───────────── Concept 01 · Horizon ───────────── */
+.hz .scene{height:250px;margin-top:-4px;background:radial-gradient(120% 90% at 85% 10%,#13284a 0%,transparent 60%),radial-gradient(90% 80% at 0% 100%,#122437 0%,transparent 70%)}
+.hz .scene::after{content:"";position:absolute;inset:auto 0 0;height:56px;background:linear-gradient(transparent,var(--screen));pointer-events:none}
+.hz .scene .demo-tag{position:absolute;right:16px;top:8px}
+.hz-hero{padding:4px 20px 0}
+.hz-hero .label{font-size:17px;color:var(--muted)}
+.hz-hero .label b{color:var(--foreground);font-weight:600}
+.hz-eta{font-size:72px;line-height:1;font-weight:650;letter-spacing:-.045em;font-variant-numeric:tabular-nums;margin:6px 0 8px}
+.hz-eta[data-word=true]{font-size:48px;letter-spacing:-.035em;padding-block:12px 4px}
+.hz-hero .cap{font-size:15px;color:var(--muted)}
+.inset{margin:24px 16px 0;border-radius:14px;background:var(--inset);overflow:hidden}
+.inset li + li .inset-row{box-shadow:inset 0 1px 0 var(--sep)}
+.inset li + li{margin-left:0}
+.inset-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;width:100%;min-height:56px;padding:8px 14px 8px 16px;text-align:left}
+.inset-row:active{background:rgba(255,255,255,.04)}
+.inset-row .k{font-weight:500}
+.inset-row .v{justify-self:end;display:grid;gap:5px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+.inset-row .v .meter{width:72px;justify-self:end}
+.inset-row .icon{color:var(--faint);width:14px;height:14px}
+.hz .footnote{margin:12px 32px 24px;font-size:13px;color:var(--faint)}
+.accessory{flex:none;padding:10px 16px calc(14px + var(--safe-b))}
+.hz .accessory{background:linear-gradient(transparent,var(--screen) 30%)}
+/* Fit modes come from the screen's measured height (ResizeObserver), not the viewport.
+   compact < 720px: smaller scene and numerals. tight < 560px: Systems moves into the report
+   so identity, ETA, Fuel, Cargo and the action stay on one screen. Large text still scrolls. */
+.hz:is([data-fit=compact],[data-fit=tight]) .scene .demo-tag{left:16px;right:auto}
+.hz[data-fit=compact] .scene{height:164px}
+.hz[data-fit=compact] .hz-eta{font-size:60px;margin:4px 0 6px}
+.hz[data-fit=compact] .hz-eta[data-word=true]{font-size:42px;padding-block:6px 2px}
+.hz[data-fit=compact] .inset{margin-top:16px}
+.hz[data-fit=compact] .inset-row{min-height:50px}
+.hz[data-fit=tight] .scene{height:96px}
+.hz[data-fit=tight] .scene::after{height:28px}
+.hz[data-fit=tight] .origin{width:34px;height:34px}
+.hz[data-fit=tight] .dest{width:46px;height:35px}
+.hz[data-fit=tight] .ship-btn{width:60px;height:48px}
+.hz[data-fit=tight] .ship-btn svg{width:44px;height:33px}
+.hz[data-fit=tight] .hz-hero .label{font-size:15px}
+.hz[data-fit=tight] .hz-eta{font-size:48px;margin:2px 0 4px}
+.hz[data-fit=tight] .hz-eta[data-word=true]{font-size:36px;padding-block:4px 2px}
+.hz[data-fit=tight] .inset{margin-top:12px}
+.hz[data-fit=tight] .inset-row{min-height:48px}
+.hz[data-fit=tight] [data-row=systems]{display:none}
+.hz[data-fit=tight] .footnote{margin:8px 32px 10px}
+.hz[data-fit=tight] .accessory{padding-top:6px;padding-bottom:calc(10px + var(--safe-b))}
+
+/* ───────────── Concept 02 · Logbook ───────────── */
+.lb .view{display:flex;flex-direction:column;flex:1;min-height:0}
+.lb .view[hidden]{display:none}
+.lb-title{position:relative;padding:12px 20px 0}
+.lb-title .demo-tag{position:absolute;right:20px;top:26px}
+.lb-title .switcher{font-size:34px;font-weight:720;letter-spacing:-.035em;padding:0;min-height:48px}
+.lb-title .switcher .icon{width:18px;height:18px}
+.lb-title .sub{font-size:15px;color:var(--muted)}
+.lb-lead{padding:20px 20px 0;font-size:25px;line-height:1.28;letter-spacing:-.02em;font-weight:600}
+.lb-lead .soft{color:var(--muted);font-weight:500}
+.lb .scene{height:96px;margin:18px 0 0;--x0:9;--y0:50;--x1:91;--y1:50}
+.lb .origin{width:30px;height:30px}
+.lb .dest{width:44px;height:34px}
+.lb .ship-btn{width:56px;height:48px}
+.lb .ship-btn svg{width:44px;height:33px}
+.lb h4{padding:28px 20px 8px}
+.timeline{padding:0 20px}
+.timeline li{position:relative;display:grid;grid-template-columns:20px 1fr auto;gap:12px;padding:10px 0;align-items:start}
+.timeline li::before{content:"";position:absolute;left:9px;top:0;bottom:0;width:2px;background:var(--sep)}
+.timeline li:first-child::before{top:18px}
+.timeline li:last-child::before{bottom:calc(100% - 18px)}
+.timeline .dot{position:relative;width:12px;height:12px;margin:5px 0 0 4px;border-radius:2px;background:var(--screen);box-shadow:inset 0 0 0 2px var(--faint)}
+.timeline .done .dot{background:var(--faint);box-shadow:none}
+.timeline .now .dot{background:var(--primary);box-shadow:0 0 0 4px rgba(166,243,208,.18)}
+.timeline .warn .dot{background:var(--warning);box-shadow:0 0 0 4px rgba(247,220,145,.16)}
+.timeline .t{font-size:16px}
+.timeline .t small{display:block;font-size:14px;color:var(--muted);margin-top:2px}
+.timeline time{font-size:14px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;padding-top:2px}
+.plain{padding:0 20px}
+.plain div{display:flex;justify-content:space-between;gap:16px;padding:13px 0;border-bottom:1px solid var(--sep)}
+.plain div:first-child{border-top:1px solid var(--sep)}
+.plain dt{color:var(--foreground)}
+.plain dd{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.lb .footnote{padding:14px 20px 28px;font-size:13px;color:var(--faint)}
+.lb[data-fit=tight] .lb-title .switcher{font-size:28px;min-height:44px}
+.lb[data-fit=tight] .lb-lead{font-size:20px;padding-top:10px}
+.lb[data-fit=tight] .scene{height:64px;margin-top:8px}
+.lb[data-fit=tight] h4{padding-top:18px}
+.toolbar{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px calc(10px + var(--safe-b)) 8px;border-top:1px solid var(--sep);background:#080f1b}
+.toolbar .primary-btn{width:auto;min-height:44px;border-radius:999px;font-size:16px;padding:0 18px}
+.navbar{display:flex;align-items:center;justify-content:space-between;padding:8px 12px 0 6px;flex:none}
+.lb .report-view h3{font-size:34px;letter-spacing:-.035em;padding:4px 20px 2px;outline:none}
+.lb .report-view .sub{padding:0 20px;font-size:15px;color:var(--muted)}
+.lb .report-view section{padding:0 20px}
+.lb .report-view section h4{padding:28px 0 10px}
+
+/* ───────────── Concept 03 · Voyage ───────────── */
+.vy{background:radial-gradient(130% 70% at 70% 0%,#15294a 0%,#0a1424 45%,var(--screen) 80%)}
+.vy .scene{position:absolute;inset:0;z-index:-1}
+.vy .scene .route{display:none}
+.vy .origin{display:none}
+.vy .dest{left:82%;top:13%;width:40px;height:30px}
+.vy .ship-btn{left:50%;top:31%;width:200px;height:156px;transition:left .6s,top .6s}
+.vy .ship-btn svg{width:176px;height:132px;animation-duration:4s}
+.vy[data-state=orbit] .dest,.vy[data-state=docked] .dest{left:76%;top:27%;width:160px;height:120px}
+.vy[data-state=orbit] .ship-btn{left:34%;top:20%}
+.vy[data-state=docked] .ship-btn{left:30%;top:31%}
+.vy[data-state=orbit] .ship-btn svg,.vy[data-state=docked] .ship-btn svg{width:112px;height:84px}
+.vy[data-state=stale] .ship-btn{left:50%;top:31%}
+.vy .topbar{position:relative}
+.vy-copy{margin-top:auto;padding:0 20px 16px}
+.vy-copy .label{font-size:17px;color:var(--muted)}
+.vy-copy .label b{color:var(--foreground);font-weight:600}
+.vy-eta{font-size:64px;line-height:1.02;font-weight:650;letter-spacing:-.045em;font-variant-numeric:tabular-nums;margin:4px 0 6px}
+.vy-eta[data-word=true]{font-size:44px;letter-spacing:-.03em}
+.vy-copy .cap{font-size:15px;color:var(--muted)}
+.ruler{margin-top:22px;display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;font:13px var(--font-mono);color:var(--muted)}
+.ruler .track{position:relative;height:2px;background:rgba(178,200,230,.2);border-radius:1px}
+.ruler .track i{position:absolute;left:0;top:0;bottom:0;width:calc(var(--p)*100%);background:var(--primary);opacity:.6;transition:width 1s linear}
+.ruler .track b{position:absolute;top:50%;left:calc(var(--p)*100%);width:10px;height:10px;border-radius:2px;background:var(--primary);transform:translate(-50%,-50%);transition:left 1s linear}
+.vy[data-state=stale] .ruler .track b{background:var(--warning)}
+.vy[data-state=orbit] .ruler,.vy[data-state=docked] .ruler,.vy[data-state=orbit] .ruler-note,.vy[data-state=docked] .ruler-note{display:none}
+.ruler-note{margin-top:8px;font-size:12px;color:var(--faint)}
+.vy[data-fit=tight] .vy-eta{font-size:48px}
+.vy[data-fit=tight] .vy-eta[data-word=true]{font-size:36px}
+.vy[data-fit=tight] .ruler{margin-top:14px}
+.tripbar{flex:none;margin:0 12px calc(12px + var(--safe-b));display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;min-height:64px;padding:8px 14px 8px 10px;border-radius:20px;background:rgba(17,27,44,.92);box-shadow:0 0 0 1px rgba(178,200,230,.09),0 16px 40px -20px #000;text-align:left;width:calc(100% - 24px)}
+.tripbar svg.sprite{width:40px;height:30px}
+.tripbar .tb-main{display:grid;min-width:0}
+.tripbar .tb-main b{font-size:16px;font-weight:600}
+.tripbar .tb-main span{font-size:14px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tripbar .tb-open{display:inline-flex;align-items:center;gap:4px;font-size:15px;font-weight:600;color:var(--primary)}
+
+/* ───────────────────────── Dialog sheets ───────────────────────── */
+dialog.sheet{width:min(100%,440px);max-width:100%;max-height:calc(var(--app-h) - 16px);margin:auto auto 0;padding:0;border:0;border-radius:26px 26px 0 0;background:var(--sheet);color:var(--foreground);font-size:17px;line-height:1.45;overflow:hidden}
+dialog.sheet[open]{display:flex;flex-direction:column}
+dialog.sheet.tall{height:calc(var(--app-h) - 16px)}
+dialog.sheet::backdrop{background:rgba(2,5,10,.7)}
+@media (min-width:700px){dialog.sheet{margin:auto;border-radius:26px;max-height:min(760px,calc(var(--app-h) - 48px))}dialog.sheet.tall{height:min(760px,calc(var(--app-h) - 48px))}}
+.sheet-head{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 8px 10px 20px}
+.sheet-head h2{font-size:20px;letter-spacing:-.02em;line-height:1.2}
+.sheet-head p{font-size:14px;color:var(--muted)}
+.sheet-id{display:flex;align-items:center;gap:12px;min-width:0}
+.sheet-id svg{width:44px;height:33px;flex:none}
+.sheet-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:4px 20px 20px}
+.sheet-foot{flex:none;padding:12px 20px calc(16px + env(safe-area-inset-bottom));border-top:1px solid var(--sep)}
+.sheet-foot .note{margin-top:8px;font-size:13px;color:var(--faint);text-align:center}
+.sheet .seg{grid-template-columns:repeat(3,minmax(0,1fr));margin:0 0 20px}
+.stat{display:flex;align-items:baseline;gap:6px;font-size:40px;font-weight:650;letter-spacing:-.035em;font-variant-numeric:tabular-nums;line-height:1.1}
+.stat small{font-size:17px;font-weight:500;color:var(--muted);letter-spacing:0}
+.stat + .meter{margin:12px 0 20px;height:6px;border-radius:3px}
+.rows li,.rows > div{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:13px 0;border-top:1px solid var(--sep)}
+.rows li:last-child,.rows > div:last-child{border-bottom:1px solid var(--sep)}
+.rows li > span:first-child,.rows > div > span:first-child{flex:none;white-space:nowrap}
+.rows .r{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.rows .mono{display:block;font-size:12px;color:var(--faint);margin-top:2px}
+.para{font-size:15px;color:var(--muted);margin-top:14px}
+.sys li{display:block}
+.sys .line{display:flex;justify-content:space-between;gap:12px}
+.sys .pair{display:flex;gap:16px;margin-top:4px;font-size:14px;color:var(--muted);font-variant-numeric:tabular-nums}
+.sub-h{margin:28px 0 8px}
+.fold{border-top:1px solid var(--sep)}
+.fold:last-of-type{border-bottom:1px solid var(--sep)}
+.fold > summary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px;cursor:pointer;list-style:none;font-weight:600}
+.fold > summary::-webkit-details-marker{display:none}
+.fold > summary .icon{color:var(--faint);transition:transform .2s}
+.fold[open] > summary .icon{transform:rotate(90deg)}
+.fold > summary .s{font-weight:400;color:var(--muted);font-size:15px;margin-left:auto}
+.fold-body{padding:0 0 16px}
+.fold-body .rows li:last-child{border-bottom:0}
+.raw{margin-top:24px}
+.raw > summary{min-height:48px;display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--muted);font-size:15px;list-style:none}
+.raw > summary::-webkit-details-marker{display:none}
+.raw > summary .icon{transition:transform .2s}
+.raw[open] > summary .icon{transform:rotate(90deg)}
+.raw h5{font:600 12px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin:18px 0 4px}
+.raw dl div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:12px;padding:7px 0;border-top:1px solid var(--sep);font-size:13px}
+.raw dt{font-family:var(--font-mono);color:var(--muted);overflow-wrap:anywhere}
+.raw dd{overflow-wrap:anywhere;font-family:var(--font-mono);font-size:12.5px}
+.raw dd .null{color:var(--warning)}
+.raw .raw-note{font-size:13px;color:var(--faint);padding:6px 0 2px}
+.raw .raw-intro{font-size:14px;color:var(--muted);margin-top:4px}
+.callout{margin-top:16px;padding-left:14px;border-left:2px solid var(--warning);font-size:15px;color:var(--muted)}
+.status-line{margin-top:12px;font-size:15px;color:var(--primary);min-height:1.4em}
+.fleet-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:14px;padding:12px 0;border-top:1px solid var(--sep)}
+.fleet-row:last-of-type{border-bottom:1px solid var(--sep)}
+.fleet-row svg.sprite{width:44px;height:33px}
+.fleet-row small{display:block;font-size:14px;color:var(--muted)}
+.fleet-row.ghost{opacity:.5}
+.fleet-row .check{color:var(--primary);font-size:15px;font-weight:600}
+
+/* ───────────────────────── Preview mode (?preview=slug) ───────────────────────── */
+#preview-root{display:none}
+body.preview .report{display:none}
+body.preview #preview-root{display:flex;flex-direction:column;height:var(--app-h);overflow:hidden}
+.preview-bar{flex:none;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:calc(2px + env(safe-area-inset-top)) max(4px,env(safe-area-inset-right)) 2px max(4px,env(safe-area-inset-left));background:#000;border-bottom:1px solid var(--sep);font-size:14px}
+.preview-bar a,.preview-bar button{display:inline-flex;align-items:center;gap:6px;min-height:44px;min-width:44px;padding:0 12px;font-weight:600;text-decoration:none;white-space:nowrap}
+.preview-bar button{border-radius:999px;background:var(--secondary);color:var(--foreground)}
+.preview-bar button[aria-expanded=true]{background:var(--foreground);color:var(--background)}
+.pc-label{display:block;margin:4px 0 8px}
+#preview-dialog .seg{grid-template-columns:repeat(4,minmax(0,1fr))}
+.pc-row{display:flex;flex-wrap:wrap;gap:8px}
+.pc-back{display:inline-flex;align-items:center;gap:6px;min-height:44px;margin-top:12px;font-weight:600}
+@media (max-width:359px){.pb-long{display:none}}
+#preview-slot{flex:1;min-height:0;display:flex}
+body.preview .screen{max-width:none;height:auto;flex:1;border-radius:0;box-shadow:none;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+body.preview{--safe-b:env(safe-area-inset-bottom)}
+
+/* ───────────────────────── Motion ───────────────────────── */
+body.paused .screen *,body.paused .screen{animation-play-state:paused!important}
+body.paused .ship-btn,body.paused .ruler .track i,body.paused .ruler .track b{transition:none}
+body.still .screen *{animation:none!important;transition:none!important}
+@media (prefers-reduced-motion:reduce){.screen *,.fold > summary .icon,.raw > summary .icon{animation:none!important;transition:none!important}}
+
+/* ───────────────────────── Responsive ───────────────────────── */
+@media (max-width:1200px){
+  .concepts{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .concept:last-child{grid-column:1 / -1}
+}
+@media (max-width:820px){
+  .concepts{grid-template-columns:minmax(0,1fr);gap:72px}
+  .concept:last-child{grid-column:auto}
+  .concept-head{min-height:0;max-width:390px;margin-inline:auto}
+  .jump{display:flex}
+  .shifts,.reco{grid-template-columns:minmax(0,1fr);gap:20px}
+}
+@media (max-width:430px){
+  .report{padding-top:28px}
+  .screen{border-radius:24px}
+  .concept-head,.demo-controls,.notes{padding-inline:20px}
+  .hz-eta{font-size:64px}
+  .vy-eta{font-size:56px}
+  .lb-lead{font-size:23px}
+}
+@media (max-width:340px){
+  .seg button{font-size:12px}
+  .hz-eta{font-size:56px}
+  .lb-title .switcher{font-size:30px}
+  .inset-row .v .meter{width:56px}
+}
+@media (max-width:360px){.tb-word{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}.tripbar .tb-open .icon{width:20px;height:20px}}
+</style>
+</head>
+<body>
+
+<!-- Sprites and icons. Ship art reused from single-ship-vision.html. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+<symbol id="sprite-scout" viewBox="0 0 32 24"><g class="flame"><path fill="#f7aa62" d="M1 10h9v4H1zM4 8h6v8H4z"/><path fill="#f7dc91" d="M5 10h6v4H5z"/></g><path fill="#526881" d="M10 4h6v3h5v3h6v4h-6v3h-5v3h-6v-5H8V9h2z"/><path fill="#dce8f0" d="M12 6h4v3h7v2h5v2h-5v2h-7v3h-4v-5h-2v-2h2z"/><path fill="#a6f3d0" d="M16 10h5v4h-5z"/><path fill="#4d8e8d" d="M17 10h3v2h-3z"/><path fill="#8997be" d="M11 5h3v3h-3zM11 16h3v3h-3z"/><path fill="#fff" d="M23 11h3v1h-3z"/></symbol>
+<symbol id="sprite-scout-idle" viewBox="0 0 32 24"><path fill="#526881" d="M10 4h6v3h5v3h6v4h-6v3h-5v3h-6v-5H8V9h2z"/><path fill="#dce8f0" d="M12 6h4v3h7v2h5v2h-5v2h-7v3h-4v-5h-2v-2h2z"/><path fill="#a6f3d0" d="M16 10h5v4h-5z"/><path fill="#4d8e8d" d="M17 10h3v2h-3z"/><path fill="#8997be" d="M11 5h3v3h-3zM11 16h3v3h-3z"/><path fill="#fff" d="M23 11h3v1h-3z"/></symbol>
+<symbol id="sprite-miner" viewBox="0 0 32 24"><path fill="#59708b" d="M7 4h13v3h5v3h4v5h-5v3h-4v3H7v-5H4V9h3z"/><path fill="#e5bb70" d="M9 6h9v4h7v5h-7v4H9v-5H7v-4h2z"/><path fill="#f7dc91" d="M11 7h6v3h-6z"/><path fill="#a6f3d0" d="M19 11h5v3h-5z"/><path fill="#a47f51" d="M9 14h8v4H9z"/><path fill="#dce8f0" d="M25 10h5v2h-5zM25 14h5v2h-5z"/><path fill="#f7aa62" d="M2 10h5v4H2z"/></symbol>
+<symbol id="sprite-hauler" viewBox="0 0 32 24"><path fill="#536580" d="M5 5h17v3h5v2h3v5h-4v3h-4v2H5z"/><path fill="#b8b1ff" d="M7 7h6v10H7zM15 7h6v10h-6z"/><path fill="#817ab0" d="M7 14h6v3H7zM15 14h6v3h-6z"/><path fill="#dce8f0" d="M22 10h5v5h-5z"/><path fill="#a6f3d0" d="M24 10h4v3h-4z"/><path fill="#f7aa62" d="M1 8h4v3H1zM1 14h4v3H1z"/></symbol>
+<symbol id="sprite-planet" viewBox="0 0 24 24"><path fill="#3c626c" d="M7 2h10v2h3v3h2v10h-2v3h-3v2H7v-2H4v-3H2V7h2V4h3z"/><path fill="#67918e" d="M7 3h8v2h4v4H8v3H3V7h2V5h2z"/><path fill="#a6c4a0" d="M8 4h5v3H8zM4 8h4v3H4zM12 12h7v4h-3v4h-4z"/><path fill="#2a4558" d="M20 7h2v10h-2v3h-3v2H8v-2h7v-3h3v-5h2z"/></symbol>
+<symbol id="sprite-station" viewBox="0 0 32 24"><path fill="#75869c" d="M14 3h5v18h-5zM5 10h23v5H5z"/><path fill="#b8b1ff" d="M2 5h7v5H2zM2 15h7v5H2zM24 5h6v5h-6zM24 15h6v5h-6z"/><path fill="#dce8f0" d="M12 8h9v9h-9z"/><path fill="#a6f3d0" d="M14 10h5v5h-5z"/><path fill="#364e68" d="M4 7h3v1H4zM26 7h2v1h-2zM4 17h3v1H4zM26 17h2v1h-2z"/></symbol>
+<symbol id="i-right" viewBox="0 0 16 16"><path d="M6 3l5 5-5 5"/></symbol>
+<symbol id="i-down" viewBox="0 0 16 16"><path d="M3 6l5 5 5-5"/></symbol>
+<symbol id="i-up" viewBox="0 0 16 16"><path d="M3 10l5-5 5 5"/></symbol>
+<symbol id="i-back" viewBox="0 0 16 16"><path d="M10 2.5L4.5 8l5.5 5.5"/></symbol>
+<symbol id="i-out" viewBox="0 0 16 16"><path d="M6 3h7v7M13 3L4 12"/></symbol>
+</defs></svg>
+
+<!-- ═══════════════════════════ REPORT ═══════════════════════════ -->
+<main class="report" id="report">
+
+  <header class="intro pad">
+    <p class="eyebrow">SpaceTraders · single ship · redesign, two passes</p>
+    <h1>Less dashboard. More ship.</h1>
+    <p class="lede">The first board answered the right questions but stacked every answer in its own box. These are three ways to make the same screen feel like <strong>an app you open, glance at, and put away</strong>. Each is a different structure, not a different palette.</p>
+  </header>
+
+  <div class="shifts pad">
+    <div><h2>One surface</h2><p>The screen is a single canvas. Numbers live in type and grouped rows, not tiles.</p></div>
+    <div><h2>One answer per glance</h2><p>Where is the ship going, and when does it get there. Everything else is one tap away.</p></div>
+    <div><h2>Details on request</h2><p>Tap the ship for its report. Selected API fields stay folded until you ask.</p></div>
+  </div>
+
+  <div class="clockbar pad" role="group" aria-labelledby="clock-label">
+    <p class="readout"><span id="clock-label">Shared demo clock</span> · arrival <b><time data-global-time="arrival"></time></b> <span data-global="zone"></span></p>
+    <button class="ctl" type="button" data-control="pause" aria-pressed="false">Pause</button>
+    <button class="ctl" type="button" data-control="still" aria-pressed="false">Reduce motion</button>
+    <button class="ctl" type="button" data-control="restart">Restart trip</button>
+  </div>
+
+  <nav class="jump pad" aria-label="Concepts">
+    <a href="#concept-horizon">01 Horizon</a><a href="#concept-logbook">02 Logbook</a><a href="#concept-voyage">03 Voyage</a>
+  </nav>
+
+  <section class="concepts" aria-labelledby="concepts-title">
+    <h2 class="sr" id="concepts-title">Three concepts</h2>
+
+    <!-- ─────────────── 01 HORIZON ─────────────── -->
+    <article class="concept" id="concept-horizon" aria-labelledby="horizon-name">
+      <div class="concept-head">
+        <p class="num">01</p>
+        <h3 id="horizon-name">Horizon</h3>
+        <p>Scene on top, the answer in big type, one grouped list. The calmest way to check in.</p>
+      </div>
+
+      <div class="screen hz" data-screen="horizon" data-state="transit">
+        <div class="topbar">
+          <button class="switcher" type="button" data-action="fleet">Mochi <svg class="icon" aria-hidden="true"><use href="#i-down"/></svg><span class="sr">, switch ship</span></button>
+          <button class="text-btn" type="button" data-action="report" data-section="cargo">Report</button>
+        </div>
+        <div class="scroll">
+          <div class="scene" data-scene>
+            <span class="demo-tag">DEMO</span>
+            <div class="body origin" aria-hidden="true"><svg class="sprite"><use href="#sprite-planet"/></svg></div>
+            <div class="body dest" aria-hidden="true"><svg class="sprite"><use href="#sprite-station"/></svg></div>
+            <button class="ship-btn" type="button" data-action="report" data-section="cargo"><svg class="sprite" aria-hidden="true"><use href="#sprite-scout"/></svg><span class="sr">Mochi. Open ship report</span></button>
+          </div>
+          <div class="hz-hero">
+            <p class="label" data-bind="headline">Arriving at X1-DEMO-A7</p>
+            <p class="hz-eta" data-bind="big">--:--</p>
+            <p class="cap"><span data-bind="caption"></span> <time data-time="arrival"></time></p>
+          </div>
+          <ul class="inset">
+            <li><button class="inset-row" type="button" data-action="report" data-section="fuel"><span class="k">Fuel</span><span class="v"><span data-bind="fuel"></span><span class="meter" aria-hidden="true"><i style="width:72%"></i></span></span><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button></li>
+            <li><button class="inset-row" type="button" data-action="report" data-section="cargo"><span class="k">Cargo</span><span class="v"><span data-bind="cargo"></span><span class="meter cargo" aria-hidden="true"><i style="width:57.5%"></i></span></span><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button></li>
+            <li data-row="systems"><button class="inset-row" type="button" data-action="report" data-section="systems"><span class="k">Systems</span><span class="v" data-bind="systems"></span><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button></li>
+          </ul>
+          <p class="footnote"><span data-bind="observed"></span> <time data-time="observed"></time> · demo data</p>
+        </div>
+        <div class="accessory">
+          <button class="primary-btn" type="button" data-action="primary" data-bind="action">Destination brief</button>
+        </div>
+        <p class="sr" role="status" data-bind="announce"></p>
+      </div>
+
+      <div class="demo-controls" data-slug="horizon">
+        <span class="lbl" id="horizon-state-label">Demo state</span>
+        <div class="seg" role="group" aria-labelledby="horizon-state-label">
+          <button type="button" data-set-state="transit" aria-pressed="true">Transit</button>
+          <button type="button" data-set-state="orbit" aria-pressed="false">Orbit</button>
+          <button type="button" data-set-state="docked" aria-pressed="false">Docked</button>
+          <button type="button" data-set-state="stale" aria-pressed="false">Stale</button>
+        </div>
+        <a class="preview-link" href="?preview=horizon" data-preview-link="horizon">Open full-screen preview <svg class="icon" aria-hidden="true"><use href="#i-out"/></svg></a>
+      </div>
+
+      <dl class="notes">
+        <dt>Structure</dt><dd>Scene → ETA → Fuel, Cargo, Systems → one action. Report is a sheet with three segments.</dd>
+        <dt>Good at</dt><dd>The two-second check. List rows double as shortcuts into the report.</dd>
+        <dt>Short screens</dt><dd>Fits the height it is given. Below 720px the scene and numerals shrink; below 560px Systems moves into the report so Fuel, Cargo and the action stay in view.</dd>
+        <dt>Costs</dt><dd>The least surprising of the three. Personality lives mostly in the scene, which is the first thing to give up space.</dd>
+      </dl>
+    </article>
+
+    <!-- ─────────────── 02 LOGBOOK ─────────────── -->
+    <article class="concept" id="concept-logbook" aria-labelledby="logbook-name">
+      <div class="concept-head">
+        <p class="num">02</p>
+        <h3 id="logbook-name">Logbook</h3>
+        <p>Reads like a sentence, then a timeline. The report pushes in as its own page.</p>
+      </div>
+
+      <div class="screen lb" data-screen="logbook" data-state="transit">
+        <div class="view" data-view="main">
+          <div class="scroll">
+            <div class="lb-title">
+              <span class="demo-tag">DEMO</span>
+              <button class="switcher" type="button" data-action="fleet">Mochi <svg class="icon" aria-hidden="true"><use href="#i-down"/></svg><span class="sr">, switch ship</span></button>
+              <p class="sub">TAYLOR-1 · Explorer</p>
+            </div>
+            <p class="lb-lead"><span data-bind="lead"></span> <span class="soft" data-bind="lead2"></span></p>
+            <div class="scene" data-scene>
+              <div class="body origin" aria-hidden="true"><svg class="sprite"><use href="#sprite-planet"/></svg></div>
+              <div class="body dest" aria-hidden="true"><svg class="sprite"><use href="#sprite-station"/></svg></div>
+              <button class="ship-btn" type="button" data-action="report"><svg class="sprite" aria-hidden="true"><use href="#sprite-scout"/></svg><span class="sr">Mochi. Open ship report</span></button>
+            </div>
+            <h4 class="label-up">Aboard</h4>
+            <dl class="plain">
+              <div><dt>Fuel</dt><dd data-bind="fuel"></dd></div>
+              <div><dt>Cargo</dt><dd data-bind="cargo"></dd></div>
+            </dl>
+            <h4 class="label-up">Journey</h4>
+            <ol class="timeline" data-slot="timeline"></ol>
+            <p class="footnote"><span data-bind="observed"></span> <time data-time="observed"></time> · demo data</p>
+          </div>
+          <div class="toolbar">
+            <button class="text-btn" type="button" data-action="report">Ship report</button>
+            <button class="primary-btn" type="button" data-action="primary" data-bind="action">Destination brief</button>
+          </div>
+        </div>
+
+        <div class="view report-view" data-view="report" hidden>
+          <div class="navbar">
+            <button class="text-btn" type="button" data-action="back"><svg class="icon" aria-hidden="true"><use href="#i-back"/></svg> Mochi</button>
+            <span class="demo-tag">DEMO</span>
+          </div>
+          <div class="scroll">
+            <h3 tabindex="-1" data-focus-target>Ship report</h3>
+            <p class="sub">TAYLOR-1 · <span data-bind="status"></span></p>
+            <div data-slot="lb-report"></div>
+          </div>
+        </div>
+        <p class="sr" role="status" data-bind="announce"></p>
+      </div>
+
+      <div class="demo-controls" data-slug="logbook">
+        <span class="lbl" id="logbook-state-label">Demo state</span>
+        <div class="seg" role="group" aria-labelledby="logbook-state-label">
+          <button type="button" data-set-state="transit" aria-pressed="true">Transit</button>
+          <button type="button" data-set-state="orbit" aria-pressed="false">Orbit</button>
+          <button type="button" data-set-state="docked" aria-pressed="false">Docked</button>
+          <button type="button" data-set-state="stale" aria-pressed="false">Stale</button>
+        </div>
+        <a class="preview-link" href="?preview=logbook" data-preview-link="logbook">Open full-screen preview <svg class="icon" aria-hidden="true"><use href="#i-out"/></svg></a>
+      </div>
+
+      <dl class="notes">
+        <dt>Structure</dt><dd>Large title → status sentence → flight strip → Fuel and Cargo → journey timeline. Report is a pushed page with a back button.</dd>
+        <dt>Good at</dt><dd>Explaining what happened and what comes next. Stale and uncertain states read naturally as prose.</dd>
+        <dt>Costs</dt><dd>The ETA is a phrase, not a hero number, so each glance means more reading. The journey is meant to scroll: on a phone the next step sits at or below the fold. That is the price of telling it as a story.</dd>
+      </dl>
+    </article>
+
+    <!-- ─────────────── 03 VOYAGE ─────────────── -->
+    <article class="concept" id="concept-voyage" aria-labelledby="voyage-name">
+      <div class="concept-head">
+        <p class="num">03</p>
+        <h3 id="voyage-name">Voyage</h3>
+        <p>The ship fills the screen. A single trip bar holds the numbers and opens the report.</p>
+      </div>
+
+      <div class="screen vy" data-screen="voyage" data-state="transit">
+        <div class="scene" data-scene>
+          <div class="body origin" aria-hidden="true"><svg class="sprite"><use href="#sprite-planet"/></svg></div>
+          <div class="body dest" aria-hidden="true"><svg class="sprite"><use href="#sprite-station"/></svg></div>
+          <button class="ship-btn" type="button" data-action="report"><svg class="sprite" aria-hidden="true"><use href="#sprite-scout"/></svg><span class="sr">Mochi. Open ship report</span></button>
+        </div>
+        <div class="topbar">
+          <button class="switcher" type="button" data-action="fleet">Mochi <svg class="icon" aria-hidden="true"><use href="#i-down"/></svg><span class="sr">, switch ship</span></button>
+          <span class="demo-tag" style="padding-right:8px">DEMO</span>
+        </div>
+        <div class="vy-copy">
+          <p class="label" data-bind="headline"></p>
+          <p class="vy-eta" data-bind="big">--:--</p>
+          <p class="cap"><span data-bind="caption"></span> <time data-time="arrival"></time></p>
+          <div class="ruler" aria-hidden="true"><span>A1</span><span class="track"><i></i><b></b></span><span>A7</span></div>
+          <p class="ruler-note" data-bind="rulerNote">Marker placed from departure and arrival times, not live position.</p>
+        </div>
+        <button class="tripbar" type="button" data-action="report">
+          <svg class="sprite" aria-hidden="true"><use href="#sprite-scout"/></svg>
+          <span class="tb-main"><b data-bind="status">In transit</b><span data-bind="tripline"></span></span>
+          <span class="tb-open"><span class="tb-word">Report</span> <svg class="icon" aria-hidden="true"><use href="#i-up"/></svg></span>
+        </button>
+        <p class="sr" role="status" data-bind="announce"></p>
+      </div>
+
+      <div class="demo-controls" data-slug="voyage">
+        <span class="lbl" id="voyage-state-label">Demo state</span>
+        <div class="seg" role="group" aria-labelledby="voyage-state-label">
+          <button type="button" data-set-state="transit" aria-pressed="true">Transit</button>
+          <button type="button" data-set-state="orbit" aria-pressed="false">Orbit</button>
+          <button type="button" data-set-state="docked" aria-pressed="false">Docked</button>
+          <button type="button" data-set-state="stale" aria-pressed="false">Stale</button>
+        </div>
+        <a class="preview-link" href="?preview=voyage" data-preview-link="voyage">Open full-screen preview <svg class="icon" aria-hidden="true"><use href="#i-out"/></svg></a>
+      </div>
+
+      <dl class="notes">
+        <dt>Structure</dt><dd>Full-bleed sky → ETA over the sky → route ruler → trip bar. The bar expands into a tall sheet of folded sections.</dd>
+        <dt>Good at</dt><dd>Delight. Open it, smile, close it. The trip bar is a ready-made row for the fleet list.</dd>
+        <dt>Costs</dt><dd>Fuel and cargo are always one tap away. Harder to fit dense states like an unresolved command.</dd>
+      </dl>
+    </article>
+  </section>
+
+  <section class="section pad" aria-labelledby="reco-title">
+    <p class="eyebrow">Recommendation</p>
+    <h2 class="big" id="reco-title">Build Horizon. Borrow one idea from each of the others.</h2>
+    <p class="lede">Horizon answers the question people open the app for, first and largest, and its grouped rows grow cleanly as the ship gains capabilities. The other two each solve a problem Horizon will meet soon.</p>
+    <ol class="reco">
+      <li><b>Horizon is the home screen</b><span>Scene, ETA, Fuel and Cargo rows, one contextual action. Systems is a third row when the height allows and lives in the report when it doesn't. The report sheet replaces the old Cargo tab.</span></li>
+      <li><b>Logbook's sentence for hard states</b><span>When data is stale, arrival is being checked, or a command is unresolved, swap the big number for one plain sentence.</span></li>
+      <li><b>Voyage's trip bar for the fleet</b><span>Each ship in the future fleet sheet becomes a trip-bar row: sprite, status, destination, ETA.</span></li>
+    </ol>
+    <p class="skip-note"><b>Drop the tab bar for now.</b> With one ship, Bridge, Cargo and Activity were mostly empty rooms. The report covers cargo and systems; recent activity can be a single row until it earns a place.</p>
+  </section>
+
+  <section class="section pad" aria-labelledby="pass2-title">
+    <p class="eyebrow">Second pass</p>
+    <h2 class="big" id="pass2-title">Fit the phone you actually have.</h2>
+    <p class="lede">Pass one looked right on a tall phone and failed on a short browser window. Pass two made these changes.</p>
+    <ol class="rules">
+      <li><span>1</span><div>Horizon sizes itself from the height it measures, not the device. On a 375 × 548 browser the ship name, ETA, Fuel, Cargo and the action all fit without scrolling. Large text still scrolls.</div></li>
+      <li><span>2</span><div>Previews now open with just two controls: a link back to the report and a <b>Preview controls</b> sheet holding state, pause, reduced motion and restart. Demo controls stay outside the app.</div></li>
+      <li><span>3</span><div>Logbook lists Fuel and Cargo above the journey, so the scrolling part is the story, not the essentials.</div></li>
+      <li><span>4</span><div>The folded data is now called <b>Selected API fields</b>. Values keep their types, unknowns show as <code>null</code>, and explanations sit in notes beside the values instead of inside them.</div></li>
+    </ol>
+    <p class="skip-note">Grouping follows Apple's guidance on <a href="https://developer.apple.com/design/human-interface-guidelines/layout">layout</a> (alignment, space and separators before containers) and <a href="https://developer.apple.com/design/human-interface-guidelines/sheets">sheets</a> (Done closes, Back returns).</p>
+  </section>
+
+  <section class="section pad" aria-labelledby="rules-title">
+    <p class="eyebrow">Kept from the first board</p>
+    <h2 class="big" id="rules-title">The cute ship never lies.</h2>
+    <ol class="rules">
+      <li><span>1</span>The countdown comes from the arrival instant. At zero it says “Checking”. Nothing unlocks from a client timer.</li>
+      <li><span>2</span>Ship position on any route is drawn from departure and arrival times. It is never presented as telemetry.</li>
+      <li><span>3</span>While in transit, the API's waypoint symbol is the destination, not the current location.</li>
+      <li><span>4</span>Times display locally with a zone. Raw ISO instants stay available in the report.</li>
+      <li><span>5</span>Pause freezes the picture only. Deadlines never move.</li>
+    </ol>
+    <p class="foot">Design study. Every ship, value, time and command on this page is a demo. No requests are sent.</p>
+  </section>
+</main>
+
+<!-- ═══════════════════════════ PREVIEW ROOT ═══════════════════════════ -->
+<div id="preview-root">
+  <div class="preview-bar">
+    <a href="?#concepts-title" data-back-link><svg class="icon" aria-hidden="true"><use href="#i-back"/></svg><span><span class="pb-long">Back to </span>report</span></a>
+    <button type="button" data-action="preview-controls" aria-haspopup="dialog" aria-expanded="false" aria-controls="preview-dialog">Preview controls</button>
+  </div>
+  <div id="preview-slot"></div>
+</div>
+
+<!-- ═══════════════════════════ DIALOGS (body level so they work in preview) ═══════════════════════════ -->
+<dialog class="sheet" id="horizon-report" data-dialog-of="horizon" aria-labelledby="horizon-report-title">
+  <div class="sheet-head">
+    <div class="sheet-id"><svg class="sprite" aria-hidden="true"><use href="#sprite-scout"/></svg>
+      <div><h2 id="horizon-report-title">Mochi<span class="sr">, ship report</span></h2><p>TAYLOR-1 · <span data-bind="status"></span></p></div></div>
+    <button class="text-btn" type="button" data-action="close" autofocus>Done</button>
+  </div>
+  <div class="sheet-body">
+    <div class="seg" role="group" aria-label="Report section">
+      <button type="button" data-seg="cargo" aria-pressed="true">Cargo</button>
+      <button type="button" data-seg="fuel" aria-pressed="false">Fuel</button>
+      <button type="button" data-seg="systems" aria-pressed="false">Systems</button>
+    </div>
+    <div data-slot="segment"></div>
+    <div data-slot="raw"></div>
+  </div>
+</dialog>
+
+<dialog class="sheet tall" id="voyage-report" data-dialog-of="voyage" aria-labelledby="voyage-report-title">
+  <div class="sheet-head">
+    <div class="sheet-id"><svg class="sprite" aria-hidden="true"><use href="#sprite-scout"/></svg>
+      <div><h2 id="voyage-report-title">Mochi<span class="sr">, ship report</span></h2><p><span data-bind="status"></span> · <span data-bind="tripline"></span></p></div></div>
+    <button class="text-btn" type="button" data-action="close" autofocus>Close</button>
+  </div>
+  <div class="sheet-body" data-slot="vy-report"></div>
+  <div class="sheet-foot">
+    <button class="primary-btn" type="button" data-action="primary" data-bind="action">Destination brief</button>
+  </div>
+</dialog>
+
+<dialog class="sheet" id="action-dialog" aria-labelledby="action-title">
+  <div class="sheet-head">
+    <div><h2 id="action-title">Destination brief</h2><p>Demo preview</p></div>
+    <button class="text-btn" type="button" data-action="close" autofocus>Close</button>
+  </div>
+  <div class="sheet-body" data-slot="action"></div>
+</dialog>
+
+<dialog class="sheet" id="fleet-dialog" aria-labelledby="fleet-title">
+  <div class="sheet-head">
+    <div><h2 id="fleet-title">Ships</h2><p>Future fleet doorway</p></div>
+    <button class="text-btn" type="button" data-action="close" autofocus>Done</button>
+  </div>
+  <div class="sheet-body">
+    <div class="fleet-row"><svg class="sprite" aria-hidden="true"><use href="#sprite-scout"/></svg><div><b>Mochi</b><small>TAYLOR-1 · Explorer</small></div><span class="check">Current</span></div>
+    <div class="fleet-row ghost"><svg class="sprite" aria-hidden="true"><use href="#sprite-miner"/></svg><div><b>Nugget</b><small>Example miner · not a real ship</small></div><span></span></div>
+    <div class="fleet-row ghost"><svg class="sprite" aria-hidden="true"><use href="#sprite-hauler"/></svg><div><b>Bento</b><small>Example hauler · not a real ship</small></div><span></span></div>
+    <p class="para">Switching ships arrives after the single-ship loop feels right. Each row will carry the ship's status and next-ready time.</p>
+  </div>
+</dialog>
+
+<dialog class="sheet" id="preview-dialog" data-slug="" aria-labelledby="pc-title">
+  <div class="sheet-head">
+    <div><h2 id="pc-title">Preview controls</h2><p>Demo only. Not part of the app.</p></div>
+    <button class="text-btn" type="button" data-action="close" autofocus>Done</button>
+  </div>
+  <div class="sheet-body">
+    <span class="label-up pc-label" id="pc-state-label">Demo state</span>
+    <div class="seg" role="group" aria-labelledby="pc-state-label">
+      <button type="button" data-set-state="transit" aria-pressed="true">Transit</button>
+      <button type="button" data-set-state="orbit" aria-pressed="false">Orbit</button>
+      <button type="button" data-set-state="docked" aria-pressed="false">Docked</button>
+      <button type="button" data-set-state="stale" aria-pressed="false">Stale</button>
+    </div>
+    <span class="label-up pc-label" id="pc-motion-label">Presentation</span>
+    <div class="pc-row" role="group" aria-labelledby="pc-motion-label">
+      <button class="ctl" type="button" data-control="pause" aria-pressed="false">Pause</button>
+      <button class="ctl" type="button" data-control="still" aria-pressed="false">Reduce motion</button>
+      <button class="ctl" type="button" data-control="restart">Restart trip</button>
+    </div>
+    <p class="para">Pause freezes the picture only. The arrival instant never moves.</p>
+    <a class="pc-back" href="?#concepts-title" data-back-link><svg class="icon" aria-hidden="true"><use href="#i-back"/></svg>Back to report</a>
+  </div>
+</dialog>
+
+<script>
+'use strict';
+
+/* ───────────── Demo data (fictional) ───────────── */
+const SHIP = {
+  symbol:'TAYLOR-1', nickname:'Mochi', role:'Explorer', faction:'COSMIC',
+  system:'X1-DEMO', origin:'X1-DEMO-A1', destination:'X1-DEMO-A7', flightMode:'CRUISE',
+  fuel:{current:72, capacity:100, consumed:18},
+  cargo:{units:23, capacity:40, items:[{symbol:'IRON_ORE', name:'Iron ore', units:16},{symbol:'COPPER_ORE', name:'Copper ore', units:7}]},
+  crew:{current:10, required:10, capacity:30, morale:90, rotation:'STRICT'},
+  systems:[
+    {key:'Frame',   model:'Explorer frame',  symbol:'FRAME_EXPLORER',   condition:.96, integrity:.98},
+    {key:'Reactor', model:'Fusion reactor I',symbol:'REACTOR_FUSION_I', condition:.97, integrity:.99},
+    {key:'Engine',  model:'Ion drive I',     symbol:'ENGINE_ION_DRIVE_I',condition:.98, integrity:.99, extra:'Speed 30'}
+  ],
+  modules:['Cargo hold I','Crew quarters I'], mounts:['Sensor array I'],
+  moduleSymbols:['MODULE_CARGO_HOLD_I','MODULE_CREW_QUARTERS_I'], mountSymbols:['MOUNT_SENSOR_ARRAY_I']
+};
+const SLUGS = ['horizon','logbook','voyage'];
+const STATES = ['transit','orbit','docked','stale'];
+
+/* ───────────── Clock: absolute deadlines only ───────────── */
+const TRIP_MS = 240000;
+const clock = { arrival:0, departure:0, observed:0, pausedAt:null };
+function restartTrip(){
+  const now = Date.now();
+  clock.arrival = now + 138000;
+  clock.departure = clock.arrival - TRIP_MS;
+  clock.observed = now;
+  if (clock.pausedAt !== null) clock.pausedAt = now;
+}
+const shownNow = () => clock.pausedAt ?? Date.now();
+
+/* Per-concept demo state. Arrived/stale instants are fixed when the state is chosen. */
+const concept = Object.fromEntries(SLUGS.map(s => [s, {state:'transit', arrivedAt:0, staleAt:0, seg:'cargo'}]));
+
+/* ───────────── Formatting ───────────── */
+const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+const fmtTime = new Intl.DateTimeFormat(undefined, {hour:'numeric', minute:'2-digit', timeZoneName:'short'});
+const fmtTimeSec = new Intl.DateTimeFormat(undefined, {hour:'numeric', minute:'2-digit', second:'2-digit', timeZoneName:'short'});
+const iso = ms => new Date(ms).toISOString();
+const pct = n => Math.round(n * 100) + '%';
+const clamp = n => Math.min(1, Math.max(0, n));
+function countdown(ms){
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), r = s % 60;
+  return (h ? h + ':' + String(m).padStart(2,'0') : m) + ':' + String(r).padStart(2,'0');
+}
+function inWords(ms){
+  const s = Math.max(0, Math.ceil(ms / 1000)), m = Math.floor(s / 60), r = s % 60;
+  return m ? `${m} min ${r} s` : `${r} s`;
+}
+const esc = v => String(v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const timeTag = ms => `<time datetime="${iso(ms)}" title="${iso(ms)} · ${esc(zone)}">${esc(fmtTime.format(ms))}</time>`;
+
+/* ───────────── View model: one source of truth for all three concepts ───────────── */
+function trip(slug){
+  const c = concept[slug];
+  if (c.state === 'orbit' || c.state === 'docked') return {departure:c.arrivedAt - TRIP_MS, arrival:c.arrivedAt};
+  return {departure:clock.departure, arrival:clock.arrival};
+}
+function model(slug, now){
+  const c = concept[slug], t = trip(slug), D = SHIP.destination;
+  const remaining = t.arrival - now;
+  const due = c.state === 'transit' && remaining <= 0;
+  const last = c.state === 'stale';
+  const v = {
+    state:c.state, due, trip:t,
+    p: c.state === 'transit' ? clamp((now - t.departure) / TRIP_MS)
+     : last ? clamp((c.staleAt - t.departure) / TRIP_MS) : 1,
+    fuel:`${SHIP.fuel.current} / ${SHIP.fuel.capacity}` + (last ? ' · last known' : ''),
+    cargo:`${SHIP.cargo.units} / ${SHIP.cargo.capacity}` + (last ? ' · last known' : ''),
+    systems:`Lowest condition ${pct(Math.min(...SHIP.systems.map(s => s.condition)))}`,
+    observedAt: last ? c.staleAt : clock.observed,
+    observed: last ? 'Last observation' : 'Observed',
+    showArrival: c.state === 'transit' || last
+  };
+  const map = {
+    transit: due
+      ? {status:'Checking arrival', headline:`Checking arrival at ${D}`, big:'Checking', word:true, caption:'Arrival was due', action:'Destination brief',
+         lead:`Mochi should be at ${D} by now.`, lead2:'Waiting for a fresh observation before anything changes.'}
+      : {status:'In transit', headline:`Arriving at ${D}`, big:countdown(remaining), word:false, caption:'Arrives', action:'Destination brief',
+         lead:`Cruising to ${D}.`, lead2:`Arrives in ${inWords(remaining)}, at ${fmtTime.format(t.arrival)}.`},
+    orbit:  {status:'In orbit', headline:`In orbit at ${D}`, big:'Ready', word:true, caption:'No cooldown observed', action:'Preview docking',
+             lead:`Holding orbit at ${D}.`, lead2:'Ready for the next step. Preview before anything is sent.'},
+    docked: {status:'Docked', headline:`Docked at ${D}`, big:'Ready', word:true, caption:'No cooldown observed', action:'Preview refuel',
+             lead:`Docked at ${D}.`, lead2:'Tank is at 72 of 100. A refuel preview is one tap away.'},
+    stale:  {status:'Last known', headline:`Last seen heading to ${D}`, big:'Unconfirmed', word:true, caption:'Was due', action:'Refresh demo state',
+             lead:`Last seen cruising to ${D}.`, lead2:`No fresh observation since ${fmtTime.format(c.staleAt)}. Position and arrival are unconfirmed.`}
+  };
+  Object.assign(v, map[c.state]);
+  v.tripline = `${last ? 'Last known · ' : ''}Fuel ${SHIP.fuel.current} · Cargo ${SHIP.cargo.units}/${SHIP.cargo.capacity}`;
+  return v;
+}
+
+/* ───────────── Scoped DOM helpers ───────────── */
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+const screenOf = slug => $(`[data-screen="${slug}"]`);
+const scope = slug => [screenOf(slug), ...$$(`[data-dialog-of="${slug}"]`)];
+function slugOf(el){
+  const host = el.closest('[data-screen],[data-dialog-of],[data-slug]');
+  return host ? (host.dataset.screen || host.dataset.dialogOf || host.dataset.slug) : null;
+}
+function setText(slug, key, value){
+  for (const root of scope(slug)) for (const el of $$(`[data-bind="${key}"]`, root))
+    if (el.textContent !== value) el.textContent = value;
+}
+function setTime(slug, key, ms, show = true){
+  for (const root of scope(slug)) for (const el of $$(`time[data-time="${key}"]`, root)){
+    el.hidden = !show;
+    const stamp = iso(ms);
+    if (el.dateTime !== stamp){ el.dateTime = stamp; el.title = `${stamp} · ${zone}`; el.textContent = fmtTimeSec.format(ms); }
+  }
+}
+
+/* ───────────── Report content builders (shared, demo data) ───────────── */
+const sections = {
+  cargo(v){
+    const c = SHIP.cargo;
+    return `<p class="stat">${c.units}<small>/ ${c.capacity} units${v.state==='stale'?' · last known':''}</small></p>
+      <span class="meter cargo" aria-hidden="true"><i style="width:${c.units/c.capacity*100}%"></i></span>
+      <ul class="rows">${c.items.map(i => `<li><span>${esc(i.name)}<span class="mono">${esc(i.symbol)}</span></span><span class="r">${i.units}</span></li>`).join('')}
+      <li><span>Free space</span><span class="r">${c.capacity - c.units}</span></li></ul>`;
+  },
+  fuel(v){
+    const f = SHIP.fuel, t = v.trip;
+    return `<p class="stat">${f.current}<small>/ ${f.capacity} tank units${v.state==='stale'?' · last known':''}</small></p>
+      <span class="meter" aria-hidden="true"><i style="width:${f.current/(f.capacity||1)*100}%"></i></span>
+      <ul class="rows"><li><span>Last used</span><span class="r">${f.consumed} units at ${timeTag(t.departure)}</span></li>
+      <li><span>Flight mode</span><span class="r">Cruise</span></li></ul>
+      <p class="para">Tank units are not the same as FUEL cargo. Prices come from a real preview, never from this number.</p>`;
+  },
+  systems(){
+    const cr = SHIP.crew;
+    return `<ul class="rows sys">${SHIP.systems.map(s => `<li><span class="line"><span>${s.key}</span><span class="r">${esc(s.model)}</span></span>
+      <span class="pair"><span>Condition ${pct(s.condition)}</span><span>Integrity ${pct(s.integrity)}</span>${s.extra ? `<span>${s.extra}</span>` : ''}</span></li>`).join('')}
+      <li><span>Crew</span><span class="r">${cr.current} of ${cr.required} required · morale ${cr.morale}</span></li>
+      <li><span>Modules</span><span class="r">${SHIP.modules.join(', ')}</span></li>
+      <li><span>Mounts</span><span class="r">${SHIP.mounts.join(', ')}</span></li></ul>
+      <p class="para">Condition and integrity stay separate per component. There is no averaged “health”.</p>`;
+  }
+};
+
+/* A selection of API fields with their real types. Explanations live in notes, never in values. */
+function rawGroups(slug){
+  const v = model(slug, shownNow()), t = v.trip, s = v.state, last = s === 'stale';
+  const when = fmtTime.format(v.observedAt);
+  const indexed = (name, list) => Object.fromEntries(list.map((x, n) => [`${name}[${n}].symbol`, x]));
+  return [
+    ['Registration', {symbol:SHIP.symbol, 'registration.factionSymbol':SHIP.faction, 'registration.role':SHIP.role.toUpperCase()}],
+    ['Navigation', {
+      systemSymbol:SHIP.system, waypointSymbol:SHIP.destination,
+      status: s === 'orbit' ? 'IN_ORBIT' : s === 'docked' ? 'DOCKED' : 'IN_TRANSIT',
+      flightMode:SHIP.flightMode,
+      'route.origin.symbol':SHIP.origin, 'route.destination.symbol':SHIP.destination,
+      'route.departureTime':iso(t.departure), 'route.arrival':iso(t.arrival)
+    }, (s === 'transit' ? 'While IN_TRANSIT, waypointSymbol is the destination. ' : '')
+       + (last ? `Last known values from ${when}. Status and position are unconfirmed. ` : '')
+       + `Instants are UTC; the app shows them in ${zone}.`],
+    ['Fuel', {current:SHIP.fuel.current, capacity:SHIP.fuel.capacity, 'consumed.amount':SHIP.fuel.consumed, 'consumed.timestamp':iso(t.departure)}, last ? `Last known values from ${when}.` : ''],
+    ['Cargo', {units:SHIP.cargo.units, capacity:SHIP.cargo.capacity, ...Object.fromEntries(SHIP.cargo.items.flatMap((i,n)=>[[`inventory[${n}].symbol`,i.symbol],[`inventory[${n}].units`,i.units]]))}, last ? `Last known values from ${when}.` : ''],
+    ['Cooldown', last ? {remainingSeconds:null, expiration:null} : {},
+      last ? 'Unknown since the last observation.' : 'No active cooldown observed.'],
+    ['Crew', {current:SHIP.crew.current, required:SHIP.crew.required, capacity:SHIP.crew.capacity, rotation:SHIP.crew.rotation, morale:SHIP.crew.morale}],
+    ['Frame, reactor, engine', Object.fromEntries(SHIP.systems.flatMap(c => [[`${c.key.toLowerCase()}.symbol`, c.symbol],[`${c.key.toLowerCase()}.condition`, c.condition],[`${c.key.toLowerCase()}.integrity`, c.integrity]]))],
+    ['Modules', indexed('modules', SHIP.moduleSymbols)],
+    ['Mounts', indexed('mounts', SHIP.mountSymbols)]
+  ];
+}
+function rawValue(val){
+  if (val === null) return '<span class="null">null</span>';
+  return typeof val === 'string' ? esc(JSON.stringify(val)) : esc(String(val));
+}
+function rawHTML(slug){
+  return `<details class="raw" data-raw="${slug}"><summary><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg>Selected API fields</summary>
+    <p class="raw-intro">A subset of the ship response, shown with real types. Requirements, module capacities, mount strength and the full component objects are left out of this demo.</p>
+    <div data-raw-body></div></details>`;
+}
+function fillRaw(details){
+  const slug = details.dataset.raw, v = model(slug, shownNow());
+  $('[data-raw-body]', details).innerHTML = rawGroups(slug).map(([name, g, note]) => {
+    const rows = Object.entries(g);
+    return `<h5>${esc(name)}</h5>${rows.length ? `<dl>${rows.map(([k, val]) => `<div><dt>${esc(k)}</dt><dd>${rawValue(val)}</dd></div>`).join('')}</dl>` : ''}${note ? `<p class="raw-note">${esc(note)}</p>` : ''}`;
+  }).join('') + `<p class="raw-note">Observed ${esc(iso(v.observedAt))}. Fictional demo snapshot.</p>`;
+}
+document.addEventListener('toggle', e => { if (e.target.matches?.('details.raw') && e.target.open) fillRaw(e.target); }, true);
+
+function timelineHTML(slug, v){
+  const t = v.trip, D = SHIP.destination;
+  const item = (cls, text, sub, ms) => `<li class="${cls}"><span class="dot" aria-hidden="true"></span><span class="t">${text}${sub ? `<small>${sub}</small>` : ''}</span>${ms ? timeTag(ms) : '<span></span>'}</li>`;
+  const departed = item('done', `Departed ${SHIP.origin}`, `Used ${SHIP.fuel.consumed} fuel`, t.departure);
+  switch (v.state){
+    case 'transit': return v.due
+      ? departed + item('warn', 'Checking arrival', 'Due time passed. Waiting for a fresh observation.', t.arrival) + item('', 'Then: what can I do here?', 'Shown after arrival is confirmed')
+      : departed + item('now', 'Cruising', 'Position drawn from timing, not telemetry') + item('', `Arrive ${D}`, 'Expected', t.arrival) + item('', 'Then: what can I do here?', 'Shown after arrival is confirmed');
+    case 'orbit':  return departed + item('done', `Arrived at ${D}`, '', t.arrival) + item('now', 'Holding orbit', 'No cooldown observed') + item('', 'Next: dock', 'Preview first');
+    case 'docked': return departed + item('done', `Arrived at ${D}`, '', t.arrival) + item('now', 'Docked', 'No cooldown observed') + item('', 'Next: refuel', 'Preview first');
+    case 'stale':  return departed + item('warn', 'Last observation', 'Cruising. Nothing newer since.', concept[slug].staleAt) + item('', `Arrive ${D}`, 'Unconfirmed', t.arrival);
+  }
+}
+
+/* ───────────── Render one concept ───────────── */
+function render(slug){
+  const now = shownNow(), v = model(slug, now), screen = screenOf(slug);
+  screen.dataset.state = v.state;
+  screen.dataset.arrived = String(v.due);
+  for (const k of ['headline','big','caption','action','status','fuel','cargo','systems','observed','tripline','lead','lead2'])
+    if (v[k] !== undefined) setText(slug, k, v[k]);
+  for (const el of $$('[data-bind="big"]', screen)) el.dataset.word = String(v.word);
+  setTime(slug, 'arrival', v.trip.arrival, v.showArrival);
+  setTime(slug, 'observed', v.observedAt);
+  setText(slug, 'rulerNote', v.state === 'stale' ? 'Last known marker, placed from timing. Position unconfirmed.' : 'Marker placed from departure and arrival times, not live position.');
+  for (const sc of $$('[data-scene]', screen)) sc.style.setProperty('--p', v.p.toFixed(4));
+  const ruler = $('.ruler', screen); if (ruler) ruler.style.setProperty('--p', v.p.toFixed(4));
+  for (const route of $$('.route', screen)){
+    const [x0, y0, x1, y1] = route.dataset.line.split(',').map(Number), done = $('.done', route);
+    done.setAttribute('x2', x0 + (x1 - x0) * v.p); done.setAttribute('y2', y0 + (y1 - y0) * v.p);
+    route.style.display = v.state === 'transit' || v.state === 'stale' ? '' : 'none';
+  }
+  /* Flame lives inside a <use> clone, so swap the symbol instead of styling it. */
+  const sprite = v.state === 'transit' && !v.due ? '#sprite-scout' : '#sprite-scout-idle';
+  for (const u of $$('.ship-btn use, .tripbar svg.sprite use', screen)) if (u.getAttribute('href') !== sprite) u.setAttribute('href', sprite);
+  const tl = $('[data-slot="timeline"]', screen);
+  if (tl){ const key = v.state + v.due + v.trip.arrival; if (tl.dataset.key !== key){ tl.dataset.key = key; tl.innerHTML = timelineHTML(slug, v); } }
+  for (const b of $$(`[data-slug="${slug}"] [data-set-state]`)) b.setAttribute('aria-pressed', String(b.dataset.setState === v.state));
+}
+
+/* Report bodies re-render on open and on state change, not every second. */
+function renderReports(slug){
+  const v = model(slug, shownNow());
+  if (slug === 'horizon'){
+    const seg = concept.horizon.seg;
+    $('#horizon-report [data-slot="segment"]').innerHTML = sections[seg](v);
+    const raw = $('#horizon-report [data-slot="raw"]'); if (!raw.firstChild) raw.innerHTML = rawHTML('horizon');
+    for (const b of $$('#horizon-report [data-seg]')) b.setAttribute('aria-pressed', String(b.dataset.seg === seg));
+  }
+  if (slug === 'logbook'){
+    $('[data-slot="lb-report"]').innerHTML =
+      `<section><h4 class="label-up">Cargo</h4>${sections.cargo(v)}</section>
+       <section><h4 class="label-up">Fuel</h4>${sections.fuel(v)}</section>
+       <section><h4 class="label-up">Systems</h4>${sections.systems(v)}${rawHTML('logbook')}</section><div style="height:32px"></div>`;
+  }
+  if (slug === 'voyage'){
+    const body = $('[data-slot="vy-report"]'), open = new Set($$('details.fold[open]', body).map(d => d.dataset.fold));
+    if (!open.size) open.add(concept.voyage.seg);
+    const fold = (key, title, summary, html) => `<details class="fold" data-fold="${key}"${open.has(key) ? ' open' : ''}><summary>${title}<span class="s">${summary}</span><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></summary><div class="fold-body">${html}</div></details>`;
+    body.innerHTML = (v.state === 'stale' ? `<p class="callout">Last known values. Refresh before acting.</p>` : '')
+      + `<div style="height:8px"></div>`
+      + fold('cargo', 'Cargo', `${SHIP.cargo.units} / ${SHIP.cargo.capacity}`, sections.cargo(v))
+      + fold('fuel', 'Fuel', `${SHIP.fuel.current} / ${SHIP.fuel.capacity}`, sections.fuel(v))
+      + fold('systems', 'Systems', v.systems.replace('Lowest condition', 'Lowest'), sections.systems(v))
+      + rawHTML('voyage');
+  }
+  for (const d of $$(`details.raw[open]`)) fillRaw(d);
+}
+
+function renderAll(){
+  for (const s of SLUGS) render(s);
+  const g = $('time[data-global-time="arrival"]');
+  g.dateTime = iso(clock.arrival); g.title = `${iso(clock.arrival)} · ${zone}`; g.textContent = fmtTimeSec.format(clock.arrival);
+  $('[data-global="zone"]').textContent = `· ${zone}` + (clock.pausedAt !== null ? ' · display paused' : '');
+}
+
+/* ───────────── State changes ───────────── */
+function setState(slug, state){
+  const c = concept[slug], now = Date.now();
+  if (state === c.state) return;
+  if (state === 'orbit' || state === 'docked') c.arrivedAt = Math.min(clock.arrival, now - 180000);
+  c.state = state;
+  if (state === 'stale') staleInstant(slug);
+  render(slug); renderReports(slug);
+}
+/* "Last observed 4 minutes ago", kept inside the current demo trip. */
+function staleInstant(slug){
+  const c = concept[slug];
+  if (c.state === 'stale') c.staleAt = Math.max(clock.departure + 30000, Math.min(Date.now() - 240000, clock.arrival - 30000));
+}
+function announce(slug, text){ setText(slug, 'announce', ''); setTimeout(() => setText(slug, 'announce', text), 50); }
+
+/* ───────────── Dialogs: opener tracking, focus containment, focus return ───────────── */
+function openDialog(dialog, opener){
+  dialog._opener = opener || document.activeElement;
+  if (!dialog.open) dialog.showModal();
+}
+for (const d of $$('dialog')){
+  d.addEventListener('close', () => {
+    const o = d._opener;
+    if (o && o.hasAttribute('aria-expanded')) o.setAttribute('aria-expanded', 'false');
+    if (o && o.isConnected) o.focus({preventScroll:true});
+  });
+  d.addEventListener('click', e => { if (e.target === d) d.close(); });      /* backdrop tap */
+  d.addEventListener('keydown', e => {
+    if (e.key !== 'Tab') return;
+    const items = $$('button:not([disabled]),a[href],select,summary,[tabindex]:not([tabindex="-1"])', d).filter(el => el.getClientRects().length);
+    if (!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+  });
+}
+
+function openReport(slug, opener, section){
+  if (section && sections[section]) concept[slug].seg = section;
+  if (slug === 'logbook') return pushReport(opener);
+  if (slug === 'voyage'){ const b = $('[data-slot="vy-report"]'); b.innerHTML = ''; }
+  renderReports(slug);
+  openDialog($(`#${slug}-report`), opener);
+}
+
+/* Logbook uses an in-screen push view instead of a modal. */
+function pushReport(opener){
+  const screen = screenOf('logbook');
+  renderReports('logbook');
+  screen._opener = opener;
+  $('[data-view="main"]', screen).hidden = true;
+  const view = $('[data-view="report"]', screen); view.hidden = false;
+  $('.scroll', view).scrollTop = 0;
+  $('[data-focus-target]', view).focus();
+}
+function popReport(){
+  const screen = screenOf('logbook');
+  $('[data-view="report"]', screen).hidden = true;
+  $('[data-view="main"]', screen).hidden = false;
+  const o = screen._opener; if (o && o.isConnected) o.focus({preventScroll:true});
+}
+screenOf('logbook').addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !$('[data-view="report"]', screenOf('logbook')).hidden){ e.preventDefault(); popReport(); }
+});
+
+function openAction(slug, opener){
+  const v = model(slug, shownNow()), D = SHIP.destination;
+  if (v.state === 'stale'){
+    setState(slug, 'transit');
+    clock.observed = Date.now();
+    renderAll();
+    announce(slug, 'Fresh demo observation loaded. No network request was made.');
+    return;
+  }
+  const dlg = $('#action-dialog'), body = $('[data-slot="action"]', dlg);
+  const approve = `<button class="primary-btn" type="button" data-action="approve" style="margin-top:20px">Approve (demo)</button><p class="status-line" role="status"></p>`;
+  let title, html;
+  if (v.state === 'transit'){
+    title = 'Destination brief';
+    html = `<ul class="rows"><li><span>Waypoint</span><span class="r">${D}</span></li><li><span>Type</span><span class="r">Orbital station</span></li>
+      <li><span>Arrival</span><span class="r">${timeTag(v.trip.arrival)}</span></li><li><span>Services</span><span class="r">Unknown until observed</span></li></ul>
+      <p class="callout">Arrival is confirmed by a fresh observation, not by the countdown. Docking and trading stay locked until then.</p>`;
+  } else if (v.state === 'orbit'){
+    title = 'Preview docking';
+    html = `<ul class="rows"><li><span>Ship</span><span class="r">${SHIP.symbol}</span></li><li><span>Waypoint</span><span class="r">${D}</span></li>
+      <li><span>Change</span><span class="r">In orbit → Docked</span></li></ul>${approve}`;
+  } else {
+    title = 'Preview refuel';
+    html = `<ul class="rows"><li><span>Tank</span><span class="r">72 → 100 tank units</span></li><li><span>Cost</span><span class="r">From the server preview</span></li>
+      <li><span>Spending limit</span><span class="r">Set before approving</span></li></ul>${approve}`;
+  }
+  $('#action-title').textContent = title;
+  body.innerHTML = html;
+  openDialog(dlg, opener);
+}
+
+/* ───────────── Event delegation ───────────── */
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-action],[data-set-state],[data-seg],[data-control]');
+  if (!el) return;
+  const slug = slugOf(el);
+  if (el.dataset.setState) return setState(slug, el.dataset.setState);
+  if (el.dataset.seg){ concept.horizon.seg = el.dataset.seg; return renderReports('horizon'); }
+  if (el.dataset.control) return control(el.dataset.control);
+  switch (el.dataset.action){
+    case 'report':  return openReport(slug, el, el.dataset.section);
+    case 'primary': {
+      const inDialog = el.closest('dialog');
+      if (inDialog){ const o = inDialog._opener; inDialog._opener = null; inDialog.close(); return openAction(slug, o); }
+      return openAction(slug, el);
+    }
+    case 'fleet':   return openDialog($('#fleet-dialog'), el);
+    case 'preview-controls': el.setAttribute('aria-expanded', 'true'); return openDialog($('#preview-dialog'), el);
+    case 'close':   return el.closest('dialog').close();
+    case 'back':    return popReport();
+    case 'approve': {
+      el.disabled = true;
+      el.nextElementSibling.textContent = 'Demo only. Nothing was sent. A real command still waits for upstream confirmation.';
+      return;
+    }
+  }
+});
+
+/* ───────────── Motion and clock controls ───────────── */
+const reduceQuery = matchMedia('(prefers-reduced-motion: reduce)');
+function control(name){
+  if (name === 'pause'){
+    clock.pausedAt = clock.pausedAt === null ? Date.now() : null;   // deadlines never move
+    document.body.classList.toggle('paused', clock.pausedAt !== null);
+    for (const b of $$('[data-control="pause"]')){ b.setAttribute('aria-pressed', String(clock.pausedAt !== null)); b.textContent = clock.pausedAt !== null ? 'Resume' : 'Pause'; }
+  }
+  if (name === 'still'){
+    const on = !document.body.classList.contains('still');
+    document.body.classList.toggle('still', on);
+    for (const b of $$('[data-control="still"]')) b.setAttribute('aria-pressed', String(on));
+  }
+  if (name === 'restart'){ restartTrip(); for (const s of SLUGS) staleInstant(s); }
+  renderAll();
+}
+function syncReduced(){
+  if (reduceQuery.matches){ document.body.classList.add('still'); for (const b of $$('[data-control="still"]')) b.setAttribute('aria-pressed', 'true'); }
+}
+reduceQuery.addEventListener?.('change', syncReduced);
+
+/* ───────────── Viewport height in px (no vh units) ───────────── */
+function measure(){ document.documentElement.style.setProperty('--app-h', window.innerHeight + 'px'); }
+addEventListener('resize', measure);
+visualViewport?.addEventListener('resize', measure);
+
+/* ───────────── Static starfields and route lines ───────────── */
+function starfield(seed, w, h, n){
+  let x = seed; const rnd = () => (x = (x * 16807) % 2147483647) / 2147483647;
+  let rects = '';
+  for (let i = 0; i < n; i++){
+    const s = rnd() < .15 ? 2 : 1, o = (.25 + rnd() * .6).toFixed(2);
+    rects += `<rect x="${Math.floor(rnd()*w)}" y="${Math.floor(rnd()*h)}" width="${s}" height="${s}" fill="#dce8f0" opacity="${o}"/>`;
+  }
+  return `<svg class="stars" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid slice" aria-hidden="true" shape-rendering="crispEdges">${rects}</svg>`;
+}
+$$('[data-scene]').forEach((sc, i) => {
+  const tall = sc.closest('.vy'), strip = sc.closest('.lb');
+  sc.insertAdjacentHTML('afterbegin', starfield(7 + i * 131, 390, tall ? 780 : strip ? 96 : 250, tall ? 140 : strip ? 26 : 70));
+  if (!tall){
+    const [x0,y0,x1,y1] = strip ? [9,50,91,50] : [14,70,84,34];
+    sc.querySelector('.stars').insertAdjacentHTML('afterend',
+      `<svg class="route" data-line="${x0},${y0},${x1},${y1}" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><line class="trail" x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}"/><line class="done" x1="${x0}" y1="${y0}" x2="${x0}" y2="${y0}"/></svg>`);
+  }
+});
+
+/* ───────────── Preview mode: ?preview=<slug> renders one concept edge to edge ───────────── */
+let previewSlug = null;
+(function initPreview(){
+  const slug = new URLSearchParams(location.search).get('preview');
+  if (!SLUGS.includes(slug)) return;
+  previewSlug = slug;
+  document.body.classList.add('preview');
+  $('#preview-slot').append(screenOf(slug));
+  for (const a of $$('[data-back-link]')) a.href = `?#concept-${slug}`;
+  document.title = `${slug[0].toUpperCase() + slug.slice(1)} preview · Single-ship redesigns`;
+  $('#preview-dialog').dataset.slug = slug;
+})();
+
+/* ───────────── Fit modes: each screen adapts to its own measured height ───────────── */
+const fitFor = h => h < 560 ? 'tight' : h < 720 ? 'compact' : 'regular';
+const fitObserver = new ResizeObserver(entries => {
+  for (const e of entries){ const f = fitFor(e.contentRect.height); if (e.target.dataset.fit !== f) e.target.dataset.fit = f; }
+});
+for (const sc of $$('.screen')){ sc.dataset.fit = fitFor(sc.clientHeight || 780); fitObserver.observe(sc); }
+
+/* ───────────── Start ───────────── */
+measure();
+restartTrip();
+syncReduced();
+renderAll();
+for (const s of SLUGS) renderReports(s);
+setInterval(renderAll, 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) renderAll(); });
+</script>
+</body>
+</html>

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\GameException;
 use App\Gameplay\MiningPlanner;
+use App\Gameplay\OpportunityAssessor;
 use App\Gameplay\ShipCommandExecutor;
 use App\Http\Requests\GameplayRequest;
 use App\Models\Agent;
@@ -19,7 +20,7 @@ use Inertia\Response;
 
 class AgentDashboardController extends Controller
 {
-    public function show(Request $request, Agent $agent, MiningPlanner $planner): Response
+    public function show(Request $request, Agent $agent, MiningPlanner $planner, OpportunityAssessor $assessor): Response
     {
         abort_unless($agent->user_id === $request->user()->id, 404);
         $ships = Ship::where('agent_id', $agent->id)->get();
@@ -29,6 +30,7 @@ class AgentDashboardController extends Controller
             'agent' => $agent, 'ships' => $ships,
             'capabilities' => $ships->mapWithKeys(fn ($s) => [$s->symbol => $planner->capability($s->snapshot)]),
             'observations' => $observations,
+            'intelligence' => $assessor->report($agent),
             'guidedOffers' => $observations->where('kind', 'shipyard')->flatMap(fn ($yard) => collect($yard->data['ships'] ?? [])
                 ->filter(fn ($offer) => $planner->capability($offer, true) === null)
                 ->map(fn ($offer) => ['yard' => $yard->symbol, 'configuration' => $offer]))->values(),

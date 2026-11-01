@@ -29,10 +29,12 @@ const port = scoutBuyer.observations.find(entry => entry.kind === 'market' && en
 port.data.exchange = [...laserYields, 'FUEL'].map(symbol => ({ symbol }));
 delete port.data.tradeGoods;
 scoutBuyer.observations.find(entry => entry.kind === 'market' && entry.symbol.endsWith('ROCK')).data.tradeGoods = [world.goods.find(good => good.symbol === 'FUEL')];
-assert.equal(chooseFlight(scoutBuyer).plan.site, 'X1-TEST-PORT', 'Scout a listed complete ore buyer before unrelated unknown markets');
+assert.ok(chooseFlight(scoutBuyer).reason, 'An advertised fuel listing cannot justify a one-way trip without observed fuel or a safe return');
+scoutBuyer.ships[0].snapshot.fuel = { current: 100, capacity: 100 };
+assert.equal(chooseFlight(scoutBuyer).plan.site, 'X1-TEST-PORT', 'Scout a listed complete ore buyer with a verified fuel-safe continuation');
 assert.equal(chooseFlight(scoutBuyer).plan.fuelAllowance, 10);
 scoutBuyer.agent.credits = 0;
-assert.ok(chooseFlight(scoutBuyer).reason, 'One-way scouting requires funds beyond its protected fuel allowance');
+assert.ok(chooseFlight(scoutBuyer).reason, 'Scouting requires funds beyond its protected fuel allowance');
 const preparation = context();
 preparation.observations.find(entry => entry.kind === 'waypoint' && entry.symbol.endsWith('ROCK')).data.type = 'PLANET';
 preparation.observations.find(entry => entry.kind === 'waypoint' && entry.symbol.endsWith('PORT')).data.type = 'ASTEROID_FIELD';
@@ -125,6 +127,8 @@ assert.equal(flightStep({ ...session, phase: 'review', extracted: 8, sold: 8, re
 
 const scout = context();
 scout.observations = scout.observations.filter(observation => observation.kind !== 'market');
+assert.ok(chooseFlight(scout).reason, 'Without a verified fuel seller the guide must request observations before travel');
+scout.observations.push({ kind: 'market', symbol: 'X1-TEST-ROCK', data: { symbol: 'X1-TEST-ROCK', tradeGoods: [world.goods.find(good => good.symbol === 'FUEL')] } });
 assert.equal(chooseFlight(scout).plan.kind, 'scout');
 assert.ok(chooseFlight(scout, world.waypoints.map(point => point.symbol)).reason, 'Do not repeat fruitless scouting forever');
 const noMiner = context();
