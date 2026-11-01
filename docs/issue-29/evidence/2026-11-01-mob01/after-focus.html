@@ -1,0 +1,49 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>First release decisions</title><style>:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#070d17;color:#e8eef6;font:17px/1.6 -apple-system,BlinkMacSystemFont,Arial,sans-serif}main{max-width:1040px;margin:auto;padding:28px 36px}header{border-bottom:1px solid #34445b;padding-bottom:18px;margin-bottom:24px;color:#b1c0d3;font-size:14px}h1{font-size:30px;line-height:1.25}h2{font-size:24px;line-height:1.3;margin:28px 0 16px}h3{font-size:20px}a{color:#a6f3d0}code{font:14px/1.5 monospace;overflow-wrap:anywhere}pre{white-space:pre-wrap}table{border-collapse:collapse;width:100%;font-size:16px}th,td{padding:11px 14px;border:1px solid #34445b;text-align:left;vertical-align:top}th{background:#162337}li{margin:9px 0}#focus{padding:8px 20px 20px;background:#0d1524;border:1px solid #34445b;border-radius:12px}#focus h2{margin-top:16px}footer{color:#b1c0d3;font-size:14px;margin-top:24px}</style><main><header>MOB01 · AFTER · Rendered document evidence, not an iPhone app<br>docs/ios-app-plan.md · working document SHA-256 0856101928587c5c</header><section id="focus"><h2 id="first-release-decisions">First release decisions</h2>
+<p>The <a href="../../../adr/0001-first-iphone-release.md">MOB01 decision record</a> defines these choices and their release gates. This is document evidence, not an installed iPhone app.</p>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Client</td>
+<td>Native SwiftUI and Swift, iPhone on iOS 17.0 or later. Laravel and the JavaScript web stack stay unchanged.</td>
+</tr>
+<tr>
+<td>Complete workflow</td>
+<td>Manual mining preparation and cargo sale, then one investigated, staged, approved mining trip with inspect, Stop, and recovery.</td>
+</tr>
+<tr>
+<td>Connection</td>
+<td>Approved HTTPS engine origin. Per-device Sanctum token, 30-day expiry, Keychain storage, explicit sign-in and revocation. SpaceTraders credentials stay in Laravel.</td>
+</tr>
+<tr>
+<td>API</td>
+<td>Proposed <code>/api/mobile/v1</code> reads, previews, approvals, status, mining staging, and Stop reuse owner-scoped services. Durable request identity resolves lost responses.</td>
+</tr>
+<tr>
+<td>Navigation</td>
+<td>Horizon ship home, report sheet, focused Actions, Mining, and Activity pages, and a secondary account menu. No empty bottom tabs.</td>
+</tr>
+<tr>
+<td>Refresh and offline</td>
+<td>Five-second foreground reads of saved server state. Explicit upstream synchronization. Memory-only snapshots, read-only offline view, and no queued offline writes.</td>
+</tr>
+<tr>
+<td>Compatibility</td>
+<td>Additive v1 evolution, capability and plan-version checks, UTC exchange, and local display. Unknown states disable new gameplay approval.</td>
+</tr>
+<tr>
+<td>Repository and release</td>
+<td>Future <code>mobile/ios/</code> project in this repository. Xcode and <code>xcodebuild</code>; manual signed archive and private TestFlight upload after authorization. Monthly replacement target before 90-day beta expiry.</td>
+</tr>
+<tr>
+<td>Run limits and web</td>
+<td>Default one extraction and one trip. Keep 60-minute, 10-trip, and 10-extraction ceilings and all approved bounds. Web retains setup, full gameplay, and operator recovery.</td>
+</tr>
+</tbody>
+</table>
+</section><footer>Offline document rendering. No mobile client, engine deployment, or gameplay is represented.</footer></main></html>

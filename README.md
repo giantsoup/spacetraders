@@ -8,6 +8,8 @@ Use the [design brief](docs/design-brief.md) for new UI work. It records the app
 
 ## API compatibility
 
+The separate [iPhone release decision](docs/adr/0001-first-iphone-release.md) defines the first native client workflow, API/authentication boundary, navigation, offline recovery, and private release choices. It is a reviewed-design candidate; the mobile API, app, hosting, and TestFlight delivery remain future work in [the iPhone plan](docs/ios-app-plan.md).
+
 The integration targets [SpaceTraders API v2.3.0](https://docs.spacetraders.io/openapi), verified against the [official bundled OpenAPI specification](https://spacetraders.io/SpaceTraders.json).
 
 - New-agent registration sends `POST /v2/register` with an **account token** as the bearer credential. The returned **agent token** is saved locally. The account token is not saved.
