@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "ERR_PNPM_BROKEN_LOCKFILE",
+    "message": "The lockfile at \"/Users/Taylor/.t3/worktrees/spacetraders/implement-issue-51-scan-3f253d14973b6f3b/pnpm-lock.yaml\" is broken: expected a single document in the stream, but found more"
+  }
+}

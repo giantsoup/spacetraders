@@ -1,0 +1,46 @@
+{
+  "result": "pass",
+  "api_version": "2.3.0",
+  "contracts": {
+    "scan_waypoints": {
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/scan/waypoints",
+      "required_response": [
+        "cooldown",
+        "waypoints"
+      ]
+    },
+    "chart": {
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/chart",
+      "required_response": [
+        "agent",
+        "chart",
+        "waypoint"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/SpaceTradersAPI/api-docs/main/reference/SpaceTraders.json",
+      "sha256": "197cf9b9a2b604fa47a5edf8ba81f405a71ba78490feeb107da6932bb2eb3362"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/SpaceTradersAPI/api-docs/main/models/ScannedWaypoint.json",
+      "sha256": "ebd93d879afbf039b9fccc1b133532dc5061ba9a0d5c0522f5f3c045dd8decd7"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/SpaceTradersAPI/api-docs/main/models/Cooldown.json",
+      "sha256": "e84d1f10265780a9ded42b2c4933e7536d0bcd8bb23287baaca909ad72d910b8"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/SpaceTradersAPI/api-docs/main/models/Chart.json",
+      "sha256": "d0a1475e6ca475e84e2e2510cbd1a478092811fcea02db208d9300a82b8cc979"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/SpaceTradersAPI/api-docs/main/models/ShipMount.json",
+      "sha256": "2ce1c72d1e1da38ede8bc40a9eb0d1bd0e0bd42860c0a6be08825e1c2cedf33a"
+    }
+  ],
+  "limits": "Documentation verification only. No fixed range, scan duration or orbit prerequisite is asserted by these endpoint schemas. Orbit and expired cooldown are conservative client requirements; live behavior is untested."
+}

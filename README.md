@@ -32,6 +32,12 @@ Run `node scripts/verify-agents-browser.mjs` with the existing Playwright setup 
 
 The authenticated legacy forwarder now accepts only public `GET /` and `GET /factions` requests, with bounded pagination. Caller credentials and every upstream mutation are rejected. This deliberate compatibility change closes the command-ownership bypass. Gameplay uses owner-scoped saved-agent routes, server credentials, previews and the shared durable executor.
 
+## Bounded hidden-trait exploration
+
+On the flight deck, open **Commands → Hidden-trait exploration** to preview one waypoint scan or chart for a marketplace or shipyard question. Each approval permits zero travel and spending. Scans require a Sensor Array; charting requires the current waypoint. Both require orbit, an expired cooldown, and a verified affordable fuel continuation under client policy. Scan range and duration remain unknown before execution. The cooldown threshold pauses for review if exceeded; it cannot cap the server cooldown. Missing targets stay unknown, and no follow-up is automatic.
+
+Listing, scan, and chart evidence remain separate. Stop cancels unreserved exploration; reserved actions may settle. Uncertain results require reconciliation and operator review. See the [EXP01 implementation and evidence](docs/issue-51/README.md) for contracts, limits, verification commands, and the dark review report. All recorded acceptance evidence uses owned fake-provider fixtures.
+
 ## Local setup
 
 Use Herd PHP **8.5.12**, Node 26.13.0, and pnpm 12.16.1. `.php-version` pins the tested patch for verification, CI and server preflight. Composer requires `~8.5.12` and resolves against 8.5.12. Verification rejects a different patch until it is reviewed and pinned together. See the [PHP runtime and rollback runbook](docs/issue-7/php85-runtime.md).
