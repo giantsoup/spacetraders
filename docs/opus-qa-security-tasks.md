@@ -510,3 +510,16 @@ No confidentiality, authorization or injection issue was found. T6 is closed.
 ### Round 3 decision
 
 **ACCEPTED at `f56513bad2db946ce83ca29e88df30eb30a8e7bc` for local fixture scope.** No blocking QA or security task remains. This acceptance covers synthetic and local-fixture behavior only; it guarantees no live mechanics, throughput or profit. Before any live activation, which remains unauthorized, resolve D3 through a separately authorized, bounded, read-only header check, and keep the existing explicit approvals, protected credits, limits and reconciliation in force.
+
+
+## Authorized live-header follow-up, pending independent review
+
+The user explicitly authorized the bounded read-only check for D3. Six live GETs completed on 2026-11-01, all HTTP 200: one public status and five authenticated agent reads, with reset/identity matches. No writes or automation activation occurred. The sanitized headers and scope are in [live-rate-header-verification.md](live-rate-header-verification.md) and its linked JSON record.
+
+Every response advertised IP Address, per-second limit 2, burst 30, Remaining 1 and a near-term ISO Reset. The initial limiter deferred the next request before transport, confirming the suspected underuse. Three-second spacing collected the remaining authenticated samples within the six-request bound.
+
+The correction adopts the round-2 suggested alternative: positive Remaining is advisory. It retains the existing 1.9/s and burst-10 host/account budgets, downward header corrections, priority reservation, explicit zero/429/5xx pauses and reconciliation. Legacy positive-window fields are discarded without clearing tokens, usage or genuine blocked-until pauses. Captured-header regressions cover all three priorities plus old-store compatibility. Account throttling and actual exhaustion were not induced live; their existing fixture coverage remains.
+
+This follow-up can close D3 once independently reviewed, without claiming to have inferred the full server limiter or achieved published throughput. Earlier exact-revision review history remains intact. Live gameplay, purchases, deployment and publication remain unauthorized.
+
+Parent follow-up verification: standard check and final suite pass at **289 tests / 1,504 assertions**; both fixture browser journeys and both real-worker suites pass. The engine browser reports serviceRemoved=true with no console errors. No new live requests were issued after the six captured reads. All four protected inputs still match their hashes.

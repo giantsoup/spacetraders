@@ -58,6 +58,9 @@ class RequestBudgetTest extends TestCase
             try {
                 $budget->reserve('a', null, 'write');
                 $sent[] = $budget->time;
+                $budget->observe($this->response(200, ['X-RateLimit-Type' => 'IP Address', 'X-RateLimit-Limit-Per-Second' => '2',
+                    'X-RateLimit-Limit-Burst' => '30', 'X-RateLimit-Remaining' => '1',
+                    'X-RateLimit-Reset' => gmdate('c', (int) ceil($budget->time + 1))]), 'a');
             } catch (RequestDeferred) {
                 $budget->time += 0.05;
             }
@@ -78,7 +81,7 @@ class RequestBudgetTest extends TestCase
         $usage = $budget->usage('a');
         $this->assertEquals(0.95, $usage['account']['sustained_per_second']);
         $this->assertEquals(4, $usage['account']['burst_capacity']);
-        $this->assertEquals(2, $usage['account']['available']);
+        $this->assertEquals(4, $usage['account']['available']);
         $this->assertEquals(1.9, $usage['host']['sustained_per_second']);
         $budget->observe($this->response(200, ['X-RateLimit-Type' => 'Account', 'X-RateLimit-Remaining' => '0', 'X-RateLimit-Reset' => gmdate('c', (int) $budget->time + 30)]), 'a');
         $this->assertGreaterThanOrEqual($budget->time + 30, $budget->usage('a')['account']['blocked_until']);
@@ -87,22 +90,43 @@ class RequestBudgetTest extends TestCase
         $budget->reserve('a', null, 'write');
     }
 
-    public function test_reported_remaining_cannot_refill_past_the_server_window(): void
+    public static function requestPriorities(): array
+    {
+        return [['write'], ['critical'], ['discovery']];
+    }
+
+    #[DataProvider('requestPriorities')]
+    public function test_captured_live_success_remaining_is_advisory_for_all_request_priorities(string $priority): void
+    {
+        $fixture = json_decode(file_get_contents(base_path('tests/Fixtures/rate-limit-success.json')), true);
+        $budget = $this->budget();
+        $budget->time = (float) strtotime($fixture['observed_at']);
+        $budget->reserve('a', null, 'critical');
+        $budget->observe($this->response($fixture['status'], $fixture['headers']), 'a');
+        $budget->reserve('a', null, $priority);
+        $this->assertSame(2, $budget->usage('a')['host']['requests']);
+        $this->assertSame(0, $budget->usage('a')['host']['deferrals']);
+        $this->assertEquals(1.9, $budget->usage('a')['host']['sustained_per_second']);
+        $this->assertEquals(10, $budget->usage('a')['host']['burst_capacity']);
+    }
+
+    public function test_legacy_positive_remaining_window_is_removed_without_clearing_real_pauses_or_usage(): void
     {
         $budget = $this->budget();
-        $budget->observe($this->response(200, ['X-RateLimit-Type' => 'Account', 'X-RateLimit-Remaining' => '3', 'X-RateLimit-Reset' => (string) ($budget->time + 30)]), 'a');
-        $budget->reserve('a', null, 'write');
-        $budget->reserve('a', null, 'write');
-        $budget->time += 10;
-        try {
-            $budget->reserve('a', null, 'write');
-            $this->fail('Local refill bypassed the reported server window.');
-        } catch (RequestDeferred) {
-            $this->assertSame(2, $budget->usage('a')['account']['requests']);
-        }
-        $budget->time += 21;
-        $budget->reserve('a', null, 'write');
-        $this->assertSame(3, $budget->usage('a')['account']['requests']);
+        $budget->reserve(null, null, 'write');
+        $file = config('gameplay.request_budget_path').'/budget.json';
+        $state = json_decode(file_get_contents($file), true);
+        $state['buckets']['host']['server_remaining'] = 0;
+        $state['buckets']['host']['server_reset_at'] = $budget->time + 3600;
+        file_put_contents($file, json_encode($state));
+        $budget->reserve(null, null, 'critical');
+        $this->assertSame(2, $budget->usage()['host']['requests']);
+        $state = json_decode(file_get_contents($file), true);
+        $this->assertArrayNotHasKey('server_remaining', $state['buckets']['host']);
+        $state['buckets']['host']['blocked_until'] = $budget->time + 30;
+        file_put_contents($file, json_encode($state));
+        $this->expectException(RequestDeferred::class);
+        $budget->reserve(null, null, 'write');
     }
 
     public function test_writes_and_critical_reads_have_capacity_reserved_ahead_of_discovery(): void

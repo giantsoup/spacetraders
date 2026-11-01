@@ -1,0 +1,13 @@
+{
+  "observed_at": "2026-11-01T20:35:08+00:00",
+  "status": 200,
+  "headers": {
+    "date": "Sun, 01 Nov 2026 20:35:07 GMT",
+    "retry-after": "1",
+    "x-ratelimit-type": "IP Address",
+    "x-ratelimit-limit-per-second": "2",
+    "x-ratelimit-limit-burst": "30",
+    "x-ratelimit-remaining": "1",
+    "x-ratelimit-reset": "2026-11-01T20:35:09.144Z"
+  }
+}

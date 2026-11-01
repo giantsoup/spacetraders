@@ -1,0 +1,126 @@
+{
+  "started_at": "2026-11-01T20:35:07+00:00",
+  "method": "GET",
+  "maximum_requests": 6,
+  "pacing_seconds": 3,
+  "endpoint_allowlist": [
+    "/",
+    "/my/agent"
+  ],
+  "samples": [
+    {
+      "sequence": 1,
+      "at": "2026-11-01T20:35:08+00:00",
+      "path": "/",
+      "authenticated": false,
+      "status": 200,
+      "elapsed_ms": 769,
+      "headers": {
+        "date": "Sun, 01 Nov 2026 20:35:07 GMT",
+        "retry-after": "1",
+        "x-ratelimit-type": "IP Address",
+        "x-ratelimit-limit-per-second": "2",
+        "x-ratelimit-limit-burst": "30",
+        "x-ratelimit-remaining": "1",
+        "x-ratelimit-reset": "2026-11-01T20:35:09.144Z"
+      },
+      "reset_matches_saved_agent": true
+    },
+    {
+      "sequence": 2,
+      "at": "2026-11-01T20:35:59+00:00",
+      "path": "/my/agent",
+      "authenticated": true,
+      "status": 200,
+      "elapsed_ms": 755,
+      "headers": {
+        "date": "Sun, 01 Nov 2026 20:35:58 GMT",
+        "retry-after": "1",
+        "x-ratelimit-type": "IP Address",
+        "x-ratelimit-limit-per-second": "2",
+        "x-ratelimit-limit-burst": "30",
+        "x-ratelimit-remaining": "1",
+        "x-ratelimit-reset": "2026-11-01T20:36:00.251Z"
+      },
+      "credential_identity_matches": true
+    },
+    {
+      "sequence": 3,
+      "at": "2026-11-01T20:36:02+00:00",
+      "path": "/my/agent",
+      "authenticated": true,
+      "status": 200,
+      "elapsed_ms": 561,
+      "headers": {
+        "date": "Sun, 01 Nov 2026 20:36:02 GMT",
+        "retry-after": "1",
+        "x-ratelimit-type": "IP Address",
+        "x-ratelimit-limit-per-second": "2",
+        "x-ratelimit-limit-burst": "30",
+        "x-ratelimit-remaining": "1",
+        "x-ratelimit-reset": "2026-11-01T20:36:03.826Z"
+      },
+      "credential_identity_matches": true
+    },
+    {
+      "sequence": 4,
+      "at": "2026-11-01T20:36:06+00:00",
+      "path": "/my/agent",
+      "authenticated": true,
+      "status": 200,
+      "elapsed_ms": 615,
+      "headers": {
+        "date": "Sun, 01 Nov 2026 20:36:05 GMT",
+        "retry-after": "1",
+        "x-ratelimit-type": "IP Address",
+        "x-ratelimit-limit-per-second": "2",
+        "x-ratelimit-limit-burst": "30",
+        "x-ratelimit-remaining": "1",
+        "x-ratelimit-reset": "2026-11-01T20:36:07.459Z"
+      },
+      "credential_identity_matches": true
+    },
+    {
+      "sequence": 5,
+      "at": "2026-11-01T20:36:10+00:00",
+      "path": "/my/agent",
+      "authenticated": true,
+      "status": 200,
+      "elapsed_ms": 803,
+      "headers": {
+        "date": "Sun, 01 Nov 2026 20:36:10 GMT",
+        "retry-after": "1",
+        "x-ratelimit-type": "IP Address",
+        "x-ratelimit-limit-per-second": "2",
+        "x-ratelimit-limit-burst": "30",
+        "x-ratelimit-remaining": "1",
+        "x-ratelimit-reset": "2026-11-01T20:36:11.135Z"
+      },
+      "credential_identity_matches": true
+    },
+    {
+      "sequence": 6,
+      "at": "2026-11-01T20:36:14+00:00",
+      "path": "/my/agent",
+      "authenticated": true,
+      "status": 200,
+      "elapsed_ms": 723,
+      "headers": {
+        "date": "Sun, 01 Nov 2026 20:36:13 GMT",
+        "retry-after": "1",
+        "x-ratelimit-type": "IP Address",
+        "x-ratelimit-limit-per-second": "2",
+        "x-ratelimit-limit-burst": "30",
+        "x-ratelimit-remaining": "1",
+        "x-ratelimit-reset": "2026-11-01T20:36:14.994Z"
+      },
+      "credential_identity_matches": true
+    }
+  ],
+  "finished_at": "2026-11-01T20:36:14+00:00",
+  "initial_deferral": {
+    "exception_class": "App\\Gameplay\\RequestDeferred",
+    "after_completed_samples": 1,
+    "initial_pacing_seconds": 1.25
+  }
+}

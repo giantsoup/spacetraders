@@ -33,9 +33,6 @@ class RequestBudget
                     if (config('gameplay.request_budget_enabled')) {
                         $needed = min($floor, $bucket['capacity'] - 1) + 1;
                         $delay = max($delay, ($needed - $bucket['tokens']) / $bucket['rate']);
-                        if ($bucket['server_remaining'] !== null && $bucket['server_remaining'] < $needed) {
-                            $delay = max($delay, $bucket['server_reset_at'] - $now);
-                        }
                     }
                 }
                 if ($delay > 0.001) {
@@ -52,9 +49,6 @@ class RequestBudget
                 foreach ($keys as $key) {
                     $bucket = &$state['buckets'][$key];
                     $bucket['tokens'] = max(0, $bucket['tokens'] - 1);
-                    if ($bucket['server_remaining'] !== null) {
-                        $bucket['server_remaining'] = max(0, $bucket['server_remaining'] - 1);
-                    }
                     $bucket['usage']['requests']++;
                     $bucket['usage']['priorities'][$priority] = ($bucket['usage']['priorities'][$priority] ?? 0) + 1;
                     $bucket['usage']['wait_seconds'] += $waited;
@@ -98,14 +92,9 @@ class RequestBudget
                 $bucket['capacity'] = min($bucket['capacity'], max(1, (int) $burst - 1));
             }
             $remaining = $response->header('X-RateLimit-Remaining');
-            $resetAt = $this->resetAt($response);
-            if (is_numeric($remaining) && (float) $remaining >= 0) {
-                $bucket['tokens'] = min($bucket['tokens'], max(0, (float) $remaining - 1));
-                if ($resetAt > $now && $resetAt <= $now + 3600) {
-                    $bucket['server_remaining'] = max(0, (int) $remaining - 1);
-                    $bucket['server_reset_at'] = $resetAt + 0.25;
-                }
-            }
+            // Live 2xx responses report Remaining=1 beside a separate burst=30 allowance.
+            // A positive value is advisory, not the size of our sustained/burst budget.
+            // Explicit exhaustion still enforces Retry-After/Reset below.
             $bucket['tokens'] = min($bucket['tokens'], $bucket['capacity']);
             $exhausted = is_numeric($remaining) && (float) $remaining <= 0;
             if ($response->status() === 429 || $response->serverError() || $exhausted) {
@@ -145,13 +134,10 @@ class RequestBudget
     private function refill(array $bucket, float $now): array
     {
         $bucket += ['tokens' => 10.0, 'capacity' => 10.0, 'rate' => 1.9, 'updated_at' => $now, 'blocked_until' => 0.0, 'recent' => [],
-            'server_remaining' => null, 'server_reset_at' => 0.0,
             'usage' => ['requests' => 0, 'responses' => 0, 'rate_limits' => 0, 'server_errors' => 0, 'deferrals' => 0, 'deferred_seconds' => 0.0, 'wait_seconds' => 0.0, 'priorities' => []]];
         $bucket['tokens'] = min($bucket['capacity'], $bucket['tokens'] + max(0, $now - $bucket['updated_at']) * $bucket['rate']);
         $bucket['updated_at'] = max($now, $bucket['updated_at']);
-        if ($now >= $bucket['server_reset_at']) {
-            $bucket['server_remaining'] = null;
-        }
+        unset($bucket['server_remaining'], $bucket['server_reset_at']);
         $bucket['recent'] = array_values(array_filter($bucket['recent'], fn ($at) => $at > $now - 60));
 
         return $bucket;
