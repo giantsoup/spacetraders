@@ -1,6 +1,6 @@
 # Opus QA and security review: exploration, calibration, loads, scout/trade, surveys/transfers
 
-Current status: **Accepted for local fixture scope** by Claude Opus 5.5 at `f56513bad2db946ce83ca29e88df30eb30a8e7bc`. All QA/security blockers T1–T6 are closed. See [round 3](#round-3-independent-re-review) for the independent evidence and live gate. Earlier verdicts below are preserved as review history.
+Current status: **QA and security accepted** by Claude Opus 5.5 at `f9913c2b4137628241c7384af12533a1f5cf2a9c`. All blocking tasks T1–T6 are closed, and D3 is resolved within the captured-header/local-fixture scope. See [round 4](#round-4-independent-review-of-the-live-rate-header-follow-up). Earlier verdicts below are preserved as review history. The user separately authorized committing, merging into main and pushing main after verification; deployment and live gameplay remain outside that authorization.
 
 | Item | Value |
 | --- | --- |
@@ -523,3 +523,50 @@ The correction adopts the round-2 suggested alternative: positive Remaining is a
 This follow-up can close D3 once independently reviewed, without claiming to have inferred the full server limiter or achieved published throughput. Earlier exact-revision review history remains intact. Live gameplay, purchases, deployment and publication remain unauthorized.
 
 Parent follow-up verification: standard check and final suite pass at **289 tests / 1,504 assertions**; both fixture browser journeys and both real-worker suites pass. The engine browser reports serviceRemoved=true with no console errors. No new live requests were issued after the six captured reads. All four protected inputs still match their hashes.
+
+## Round 4: independent review of the live rate-header follow-up
+
+Reviewer: Claude Opus 5.5. Worktree `feature/local-automation`. Reviewed exact revision **`f9913c2b4137628241c7384af12533a1f5cf2a9c`** ("Handle live positive rate headers without exhausting local budgets"), compared with `0259710a8f1bd73931ec8a85eb54ca81753b8706` (application source accepted in round 3 at `f56513b`). The diff touches only `app/Gameplay/RequestBudget.php`, `tests/Feature/RequestBudgetTest.php`, the new fixture `tests/Fixtures/rate-limit-success.json`, the sanitized evidence JSON and three documents. There are no frontend, route or dependency changes.
+
+The reviewer made **no live API calls**, public or authenticated. The reviewer did not access credentials, `.env` files or the game database, and did not execute `storage/app/live-rate-check/probe.php`; it was read for audit only. The reviewer did not commit, merge or push.
+
+### Round 4 verdicts
+
+- **QA: PASS.** The false deferral is reproduced on the base and fixed at the head. Every invariant probed below still holds.
+- **Security: PASS.** The committed evidence leaks nothing, the probe kept its read-only bound, and no protection is weakened.
+- **D3: RESOLVED within the captured-header/local-fixture scope.** The limiter no longer depends on any interpretation of a positive `X-RateLimit-Remaining` or `X-RateLimit-Reset`. Configured allowances can still only be lowered.
+
+### Round 4 executed evidence
+
+1. **Standard check.** `PNPM_BIN=… bash scripts/verify.sh` exited 0 with **289 tests / 1,504 assertions**. Build-source, environment, local-time, tutorial and gameplay controls passed, as did Pint and the debug-key positive and negative controls. Log: `storage/app/live-rate-check/opus-r4/opus-r4-verify.txt`.
+2. **Red on base, green on head.** The test runs used a `git archive HEAD` copy with a real `vendor/` copy. A symlinked vendor was rejected after it was found to autoload the worktree class; the class path was confirmed. With the `0259710` `RequestBudget.php` in place, the three captured-header priority cases (write, critical, discovery) and the legacy-store test raise `RequestDeferred`. The 60-second positive-header simulation fails with 31 sends where ≥114 are expected. All five pass at head.
+3. **Independent boundary probes.** Nine probes in the scratch file `opus-r4/OpusR4ProbeTest.php` pass at head:
+   - **Exhaustion on success.** A 200 with `Remaining: 0` and type IP pauses the host for ≥5 s, for all tokens and the unauthenticated path. A 200 with `Remaining: 0` and type Account pauses only that account (any token for it), while another account still sends and the host is not paused. It resumes after Retry-After.
+   - **Server errors.** 503 pauses the host even when tagged Account. 502 pauses for ≥180 s.
+   - **Limits only go down.** Headers of 100/s, burst 1000 and Remaining 999 leave 1.9/s and burst 10. Headers of 0.5/s and burst 3 lower the limits to 0.475/s and capacity 2.
+   - **Positive headers add nothing.** A successful `Retry-After: 3600` with `Remaining: 29` neither pauses nor adds tokens.
+   - **60-second runs per priority.** With captured-style positive headers after every response, the admitted counts are discovery 121, critical 123 and write 125, all ≤ 10 + 1.9×60 + 1. The minimum tokens left after admission are 3, 1 and 0. The ~2×10⁻⁷ shortfall comes from the existing 0.001 s admission tolerance, not this change.
+   - **Legacy store.** Old `server_remaining`/`server_reset_at` fields are dropped on the next write. Tokens (8.0), request counts and an account's real `blocked_until` are preserved, and the paused account stays deferred. `usage()` leaves the file byte-identical.
+   - **Reset cap and malformed values.** A far-future Reset is capped at 3600.25 s. Remaining values of `abc`, empty, `1e9` and ` 1 ` cause no pause. `-1` is treated as exhaustion.
+   - **End to end.** The real `SpaceTradersClient` ran with `Http::preventStrayRequests()` and the captured fixture headers. It made four reads 0.3 s apart with no deferral. Against the base limiter, this probe and the legacy probe fail, which independently reproduces the live false deferral.
+4. **Real-worker scripts.** `verify-automation-worker.php` (exit 0, every scenario PASS) and `verify-mvp-worker.php` (exit 0, 34 PASS, no failures) used only owned fixtures. Logs are under `opus-r4/`. Browser journeys were not rerun because nothing in the UI, routes or assets changed. The parent's artifacts were noted, and no new concern justified a rerun. `launchctl list` shows no SpaceTraders job.
+5. **Protected inputs.** All four untracked inputs match `/tmp/spacetraders-preserved-docs.json` byte for byte and remain unstaged. The only tracked change by the reviewer is this appended section.
+
+### Round 4 security assessment
+
+- **Evidence.** The committed `docs/evidence/live-rate-headers-2026-11-01.json` is semantically identical to the private `result.json`. It contains only timestamps, path, status, latency, eight allowlisted headers truncated to 160 characters, and boolean identity/reset matches. There are no tokens, account IDs, agent symbols or response bodies. The fixture has the same properties.
+- **Probe audit.** The probe requires `--read-only-live`. It opens SQLite with `SQLITE3_OPEN_READONLY` and refuses to run with active runs, unresolved intents or jobs. It decrypts in memory and unsets the key and token, allows GET only on `/` and `/my/agent`, and caps the total at six across resumed runs. It stops on non-success, an identity or reset mismatch, or `Remaining: 0`, goes through the normal limiter, and is gitignored with mode 0600. Its record matches the reported six HTTP 200 samples. The initial deferral happened before transport.
+- **No weakened protection.** Positive Remaining can no longer cause a pause, but every pause path that matters is unchanged: zero or negative values, 429, 5xx, Retry-After and Reset with the cap. Account and host scoping, the write, critical and discovery floors, file safety and locking, the process hold after a recording failure, and reconciliation are untouched.
+
+### Round 4 non-blocking observations
+
+- **N1, efficiency, unverified live.** Every sample at ≥3 s spacing reported `Remaining: 1` with a per-second limit of 2. Remaining may therefore track the per-second pool rather than the 30-request burst. If so, a real local burst of 2 or more within one second could receive `Remaining: 0` and trigger the ≥5 s host pause. That is safe, conservative underuse, unchanged from before, and not to be probed live without new authorization.
+- **N2, documentation.** In `docs/exploration-implementation.md`, the round-3 acceptance paragraph still says "the reviewed application code remains unchanged". The follow-up section still says it "awaits a fresh independent review". The parent may update both to cite this round's acceptance when committing. This is not required for acceptance.
+
+### Round 4 decision
+
+**ACCEPTED at `f9913c2b4137628241c7384af12533a1f5cf2a9c` for the captured-header follow-up within local-fixture scope.** D3 is resolved within that scope, and no QA or security blocker remains.
+
+The six live samples show successful-response headers only. They do not establish the server's full limiter semantics, account throttling, exhaustion or 429 behavior, burst or sustained throughput, live gameplay or profitability. Those remain fixture-verified only.
+
+This acceptance does not authorize live gameplay, automation or engine activation, purchases, deployment or further live calls. The user's separate authorization for the parent to commit, merge to `main` and push stands on its own and is not expanded here.

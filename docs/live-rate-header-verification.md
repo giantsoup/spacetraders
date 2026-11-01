@@ -33,8 +33,8 @@ This resolves D3 without making automation depend on an inferred interpretation 
 
 ## Authorization boundary
 
-The authorization covered these read-only checks. It does not authorize live mining, scouting, trading, ship purchases, engine activation, deployment, pushing or PR creation. Fuel estimates and fleet-measurement prerequisites are unchanged.
+The authorization covered these read-only checks. The user later separately authorized committing, merging to main and pushing main after completion. Neither instruction authorizes live mining, scouting, trading, ship purchases, engine activation, deployment or PR creation. Fuel estimates and fleet-measurement prerequisites are unchanged.
 
 ## Local correction verification
 
-Standard verification passes 289 tests / 1,504 assertions, build determinism, application and environment checks, formatting and whitespace checks. The 60-second simulation now supplies positive Remaining=1 headers after every response and still verifies the existing sustained/burst bounds. Tests also retain real exhaustion, account isolation, restart, contention and uncertain-write coverage. Both real-worker scripts pass. Evidence is saved under `storage/app/live-rate-check/`; a fresh Opus review will record independent acceptance of the correction.
+Standard verification passes 289 tests / 1,504 assertions, build determinism, application and environment checks, formatting and whitespace checks. The 60-second simulation now supplies positive Remaining=1 headers after every response and still verifies the existing sustained/burst bounds. Tests also retain real exhaustion, account isolation, restart, contention and uncertain-write coverage. Both real-worker scripts pass. Evidence is saved under `storage/app/live-rate-check/`; Claude Opus 5.5 independently accepted the correction at `f9913c2b4137628241c7384af12533a1f5cf2a9c`, with nine additional boundary probes and no QA/security blockers. D3 is resolved within this captured-header/local-fixture scope.
