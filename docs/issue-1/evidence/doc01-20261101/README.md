@@ -48,10 +48,16 @@ Optional metadata readback: `python3 scripts/verify-plan-tracking.py --github` u
 
 For browser reproduction, run `scripts/mvp-fixture.php --isolated`. Use only its private environment with a finite loopback server and owned session/cache/storage/request-budget paths, then log in with its generated synthetic account. Investigate Mining, select LOCAL-1 / X1-TEST-ROCK via X1-TEST-ROCK, stage the default one-extraction plan, and preview with the engine off. Capture the review panel at the viewport above. Do not start an engine or approve gameplay. Shut down the owned server afterward.
 
+## Publication readback
+
+All six hosted PNGs at evidence commit `b109ca410b8f2bbfe69108199ecddf9abdb88beb` returned HTTP 200 and matched local SHA256 values. PR #2 was confirmed open/draft on its designated branch with no auto-merge. GitHub reported no check runs, status contexts or submitted reviews at readback. Local verification remains distinct from hosted CI.
+
+During publication, QA01 PR #4 merged independently into main at `683d5efa995709beee66f39ab5f8d67c432cb8f3`. The baseline failure above is historical evidence from DOC01's original base. Main now contains QA01's correction, which was not imported or rerun in this worktree. DOC01 was reported mergeable without conflicts.
+
 ## Review, limits and rollback
 
 DOC01 was self-reviewed without delegation. The initial audit's Sonnet 5.5 final-review attempt was rate-limited; that historical outcome remains recorded. No new independent review ran and no substitute model was used. Taylor's review remains pending, so PR #2 stays draft.
 
-No shared/live database, primary environment, global Herd configuration, deployment, real game mutation, paid model call, external notification or credential change occurred. Only owned fake-provider workers exercised mutations. UI01 integration/acceptance, QA01's deterministic correction, OPS work and LIVE evidence remain with their task pairs. Publishing the plan is not deployment acceptance.
+No shared/live database, primary environment, global Herd configuration, deployment, real game mutation, paid model call, external notification or credential change occurred. Only owned fake-provider workers exercised mutations. UI01 integration/acceptance, OPS work and LIVE evidence remain with their task pairs. QA01 merged separately as recorded above. Publishing the plan is not deployment acceptance.
 
 Rollback is a normal revert of the DOC01 commit. Application output changes by one preview string. Command rules, durable execution, auth, reserve bounds, Stop, reset handling and uncertainty behavior remain unchanged. Tracking consumers must use the explicitly named audit fields; the pinned original manifest remains available in the status index.
