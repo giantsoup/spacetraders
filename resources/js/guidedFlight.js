@@ -1,15 +1,20 @@
+import miningYields from '../data/mining-yields.json' with { type: 'json' };
+
 const phases = ['welcome', 'sync', 'plan', 'briefing', 'outbound', 'extract', 'inbound', 'marketSync', 'sell', 'refuel', 'review', 'complete'];
 const miningTypes = ['ASTEROID', 'ASTEROID_FIELD', 'ENGINEERED_ASTEROID'];
 const unsafeTraits = ['UNCHARTED', 'UNSTABLE', 'DEBRIS_FIELD'];
 const sorted = entries => [...entries].sort((a, b) => a.symbol.localeCompare(b.symbol, 'en'));
-const pointFuel = (from, to) => from.symbol === to.symbol ? 0 : Math.ceil(Math.hypot(from.x - to.x, from.y - to.y) * 2) + 2;
+const pointFuel = (from, to) => from.symbol === to.symbol ? 0 : Math.ceil(Math.hypot(from.x - to.x, from.y - to.y)) + 2;
+const possibleYields = ship => [...new Set(ship.mounts.flatMap(mount => mount.symbol.startsWith('MOUNT_MINING_LASER_') ? mount.deposits?.length ? mount.deposits : miningYields : []))];
+const usableFuel = market => market?.tradeGoods?.find(good => good.symbol === 'FUEL' && good.purchasePrice > 0 && good.tradeVolume > 0);
+const listedGoods = market => [...(market?.imports || []), ...(market?.exports || []), ...(market?.exchange || [])].map(good => good.symbol);
 
 export function guidedKey(userId, agent) {
     return `spacetraders:guided-flight:v1:${userId}:${agent.id}:${agent.reset_id || 'unknown'}`;
 }
 
 export function newFlight(credits = null) {
-    return { active: true, phase: 'welcome', plan: null, pending: null, receipts: [], scouted: [], startingCredits: credits, extracted: 0, sold: 0, failure: '' };
+    return { active: true, phase: 'welcome', plan: null, pending: null, receipts: [], scouted: [], startingCredits: credits, reserveFloor: 0, extracted: 0, sold: 0, failure: '' };
 }
 
 export function restoreFlight(value) {
@@ -18,12 +23,13 @@ export function restoreFlight(value) {
         if (!value.plan || !['mining', 'scout', 'setup'].includes(value.plan.kind) || typeof value.plan.ship !== 'string' || typeof value.plan.site !== 'string' || typeof value.plan.market !== 'string' || !Number.isSafeInteger(value.plan.reserve) || value.plan.reserve < 0) return null;
     }
     if (value.pending && (!Number.isSafeInteger(value.pending.id) || !phases.includes(value.pending.next))) return null;
+    if (value.reserveFloor !== undefined && (!Number.isSafeInteger(value.reserveFloor) || value.reserveFloor < 0)) return null;
     if (![value.extracted, value.sold].every(number => Number.isSafeInteger(number) && number >= 0)) return null;
-    return { ...newFlight(), ...value, receipts: value.receipts.filter(Number.isSafeInteger), scouted: value.scouted.filter(symbol => typeof symbol === 'string') };
+    return { ...newFlight(), ...value, reserveFloor: Math.max(value.reserveFloor || 0, value.plan?.reserve || 0), receipts: value.receipts.filter(Number.isSafeInteger), scouted: value.scouted.filter(symbol => typeof symbol === 'string') };
 }
 
 // Stable choices from saved observations. The existing server preview remains the authority.
-export function chooseFlight(context, scouted = []) {
+export function chooseFlight(context, scouted = [], reserveFloor = 0) {
     const { agent, ships, capabilities, observations, guidedOffers = [] } = context;
     const points = sorted(observations.filter(entry => entry.kind === 'waypoint').map(entry => entry.data));
     const markets = sorted(observations.filter(entry => entry.kind === 'market').map(entry => ({ symbol: entry.symbol, ...entry.data })));
@@ -36,17 +42,19 @@ export function chooseFlight(context, scouted = []) {
     function routesFor(symbol, ship, kind, extra = {}) {
         const start = points.find(point => point.symbol === ship.nav.waypointSymbol);
         if (!start) return;
-        const deposits = [...new Set(ship.mounts.flatMap(mount => mount.symbol.startsWith('MOUNT_MINING_LASER_') ? mount.deposits || [] : []))];
+        const deposits = possibleYields(ship);
         for (const mine of points.filter(point => point.systemSymbol === ship.nav.systemSymbol && miningTypes.includes(point.type) && !point.traits.some(trait => unsafeTraits.includes(trait.symbol)))) {
             for (const market of markets) {
                 const buyer = points.find(point => point.symbol === market.symbol && point.systemSymbol === mine.systemSymbol);
                 const fuelQuote = market.tradeGoods?.find(good => good.symbol === 'FUEL' && good.purchasePrice > 0 && good.tradeVolume > 0);
                 if (!buyer || !fuelQuote || !deposits.length || !deposits.every(symbol => market.tradeGoods.some(good => good.symbol === symbol && good.sellPrice > 0 && good.tradeVolume > 0))) continue;
                 const fuel = pointFuel(start, mine) + pointFuel(mine, buyer);
-                const fuelBudget = Math.ceil(ship.fuel.capacity / 100) * fuelQuote.purchasePrice * 2;
-                const reserve = Math.max(fuelBudget, Math.ceil(agent.credits * 0.01));
-                if (ship.fuel.current < fuel || ship.fuel.capacity < pointFuel(buyer, mine) * 2 || agent.credits - (extra.price || 0) - fuelBudget < reserve) continue;
-                routes.push({ kind, ship: symbol, site: mine.symbol, market: buyer.symbol, reserve, fuel, ...extra });
+                const canRefuel = usableFuel(markets.find(market => market.symbol === start.symbol));
+                const preparation = ship.fuel.current < fuel && canRefuel ? Math.ceil((ship.fuel.capacity - ship.fuel.current) / 100) * canRefuel.purchasePrice : 0;
+                const fuelBudget = Math.max(Math.ceil(ship.fuel.capacity / 100) * fuelQuote.purchasePrice * 2, preparation + Math.ceil(ship.fuel.capacity / 100) * fuelQuote.purchasePrice);
+                const reserve = Math.max(reserveFloor, fuelBudget, Math.ceil(agent.credits * 0.01));
+                if (ship.fuel.capacity < Math.max(fuel, pointFuel(buyer, mine) * 2) || (ship.fuel.current < fuel && !canRefuel) || agent.credits - (extra.price || 0) - fuelBudget < reserve) continue;
+                routes.push({ kind, ship: symbol, site: mine.symbol, market: buyer.symbol, reserve, fuel, ...(ship.fuel.current < fuel ? { refuelAt: start.symbol } : {}), ...extra });
             }
         }
     }
@@ -72,13 +80,23 @@ export function chooseFlight(context, scouted = []) {
             const unknownMarket = traits.includes('MARKETPLACE') && !quote?.tradeGoods?.length;
             const unknownYard = !operational.length && traits.includes('SHIPYARD') && !guidedOffers.some(offer => offer.yard === point.symbol);
             if (!unknownMarket && !unknownYard) continue;
+            const deposits = possibleYields(entry.snapshot);
+            const listed = listedGoods(quote);
+            const usefulBuyer = deposits.length > 0 && deposits.every(symbol => listed.includes(symbol)) && listed.includes('FUEL');
+            if (operational.length && listed.length && !usefulBuyer) continue;
             const fuel = pointFuel(start, point);
-            if (fuel * 2 > entry.snapshot.fuel.current) continue;
-            scouts.push({ kind: 'scout', ship: entry.symbol, site: point.symbol, market: point.symbol, reserve: Math.ceil(agent.credits * 0.01), fuel });
+            if (fuel > entry.snapshot.fuel.current || (fuel * 2 > entry.snapshot.fuel.current && !usefulBuyer)) continue;
+            const fuelAllowance = fuel * 2 > entry.snapshot.fuel.current ? Math.ceil(entry.snapshot.fuel.capacity / 100) * Math.max(0, ...markets.map(market => usableFuel(market)?.purchasePrice || 0)) * 2 : 0;
+            const reserve = Math.max(reserveFloor, Math.ceil(agent.credits * 0.01), fuelAllowance);
+            if (fuel * 2 > entry.snapshot.fuel.current && (!fuelAllowance || agent.credits - fuelAllowance < reserve)) continue;
+            scouts.push({ kind: 'scout', ship: entry.symbol, site: point.symbol, market: point.symbol, reserve, fuel, ...(fuelAllowance ? { fuelAllowance } : {}), buyerCoverage: usefulBuyer });
         }
     }
-    scouts.sort((a, b) => a.fuel - b.fuel || `${a.ship}:${a.site}`.localeCompare(`${b.ship}:${b.site}`, 'en'));
-    if (scouts[0]) return { plan: scouts[0] };
+    scouts.sort((a, b) => Number(b.buyerCoverage) - Number(a.buyerCoverage) || a.fuel - b.fuel || `${a.ship}:${a.site}`.localeCompare(`${b.ship}:${b.site}`, 'en'));
+    if (scouts[0]) {
+        const { buyerCoverage, ...plan } = scouts[0];
+        return { plan };
+    }
     const reason = !miners.length
         ? 'No empty operational CRUISE miner or affordable complete miner with a funded route is observed. Synchronize to refresh offers. This client cannot install missing equipment or change flight mode yet.'
         : 'No observed same-system route has positive buyer prices for every possible laser yield, enough fuel, and a funded protected reserve. Synchronize to refresh observations. The guided trip will not extract cargo without complete buyer coverage.';
@@ -113,11 +131,11 @@ export function flightStep(session, context, now = Date.now()) {
     if (session.phase === 'welcome') return read('Your guided first trip', 'Each instruction names an exact value or action. Previews and approvals stay separate. This uses your real agent; guidance never sends a command for you. Click the highlighted Continue guided flight button to begin.', 'continue-guidance', 'sync');
     if (session.phase === 'sync') return syncStep('This fetches your actual fleet, credits, waypoints, and available prices. The route will be chosen from that fresh observation.');
     if (session.phase === 'plan') {
-        const choice = chooseFlight(context, session.scouted);
+        const choice = chooseFlight(context, session.scouted, session.reserveFloor || 0);
         return choice.plan ? { kind: 'plan', target: 'guided-coach', title: 'Review your exact route', body: choice.plan.kind === 'mining'
             ? `Use ${choice.plan.ship}. Fly to ${choice.plan.site}, extract once, then sell at ${choice.plan.market} and fill the tank. Keep ${choice.plan.reserve} CR protected. Conservative route fuel: ${choice.plan.fuel}. The route stays fixed for this session.`
             : choice.plan.kind === 'setup' ? `No working miner is available. Use ${choice.plan.ship} at ${choice.plan.yard} to preview one ${choice.plan.type} for ${choice.plan.price} CR. Then synchronize and select the delivered miner. The approved mining route is ${choice.plan.site} → ${choice.plan.market}; protect ${choice.plan.reserve} CR.`
-                : `First scout ${choice.plan.site} with ${choice.plan.ship} to observe missing market or shipyard details. The route needs ${choice.plan.fuel} estimated fuel units; twice that fits the tank. Approve each movement, then Synchronize there.`, plan: choice.plan }
+                : `First scout ${choice.plan.site} with ${choice.plan.ship} to observe missing market or shipyard details. The route needs ${choice.plan.fuel} estimated fuel units. ${choice.plan.fuelAllowance ? `Keep ${choice.plan.reserve} CR protected and ${choice.plan.fuelAllowance} CR available for fuel. Refueling needs a separate priced approval on arrival. ` : ''}Inspect actual fuel and buyer prices on arrival; listings alone do not prove prices. Approve each movement, then Synchronize there.`, plan: choice.plan }
             : { ...blocked(choice.reason, 'fleet'), canSync: true };
     }
     const plan = session.plan;
@@ -144,7 +162,17 @@ export function flightStep(session, context, now = Date.now()) {
         : null;
     if (session.phase === 'outbound') {
         const target = plan.kind === 'setup' ? plan.yard : plan.site;
-        intent = move(target, 'outbound');
+        if (plan.kind === 'mining' && ship.nav.waypointSymbol === plan.refuelAt && ship.fuel.current < plan.fuel) {
+            if (ship.nav.status !== 'DOCKED') intent = { command: 'dock', args: {}, next: 'outbound' };
+            else {
+                const quote = usableFuel(context.observations.find(observation => observation.kind === 'market' && observation.symbol === ship.nav.waypointSymbol)?.data);
+                if (!quote) return { ...blocked('Refresh the fuel quote at the current market before preparing this route.', 'market'), canSync: true };
+                const units = Math.min(ship.fuel.capacity - ship.fuel.current, quote.tradeVolume * 100);
+                const cost = Math.ceil(units / 100) * quote.purchasePrice;
+                if (agent.credits - cost < plan.reserve) return blocked(`The ${cost} CR preparation refuel would break the ${plan.reserve} CR protected reserve.`, 'market');
+                intent = { command: 'refuel', args: { units, maxTotal: cost }, next: 'outbound' };
+            }
+        } else intent = move(target, 'outbound');
         if (!intent && plan.kind === 'scout') return syncStep(`You reached ${target}. Synchronize to reveal its prices and shipyard offers, then review the next exact route.`);
         if (!intent && plan.kind === 'setup') {
             const quote = context.observations.find(observation => observation.kind === 'market' && observation.symbol === plan.market);

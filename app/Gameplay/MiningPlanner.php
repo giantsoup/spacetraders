@@ -63,7 +63,7 @@ class MiningPlanner
             throw new GameException('Buyer prices are unknown or stale. Synchronize at that market; approve a manual scouting navigation first if no ship is there.');
         }
         $goods = collect($quote->data['tradeGoods'])->keyBy('symbol');
-        $deposits = array_unique(array_merge(...array_map(fn ($m) => $m['deposits'] ?? [], array_filter($ship['mounts'], fn ($m) => str_starts_with($m['symbol'], 'MOUNT_MINING_LASER_')))));
+        $deposits = array_unique(array_merge(...array_map(fn ($m) => ! empty($m['deposits']) ? $m['deposits'] : json_decode(file_get_contents(resource_path('data/mining-yields.json')), true, flags: JSON_THROW_ON_ERROR), array_filter($ship['mounts'], fn ($m) => str_starts_with($m['symbol'], 'MOUNT_MINING_LASER_')))));
         if ($deposits === [] || ! collect($deposits)->contains(fn ($symbol) => isset($goods[$symbol]) && $goods[$symbol]['sellPrice'] > 0)) {
             throw new GameException('No verified buyer for this laser\'s possible yields.');
         }
@@ -166,7 +166,7 @@ class MiningPlanner
 
     public static function fuelEstimate(array $from, array $to): int
     {
-        return $from['symbol'] === $to['symbol'] ? 0 : (int) ceil(hypot($from['x'] - $to['x'], $from['y'] - $to['y']) * 2) + 2;
+        return $from['symbol'] === $to['symbol'] ? 0 : (int) ceil(hypot($from['x'] - $to['x'], $from['y'] - $to['y'])) + 2;
     }
 
     public static function inventory(array $ship): array

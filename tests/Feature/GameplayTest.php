@@ -446,6 +446,22 @@ class GameplayTest extends TestCase
         });
     }
 
+    public function test_live_lasers_without_optional_deposits_use_the_complete_api_ore_set(): void
+    {
+        $ship = FakeSpaceTraders::ship();
+        unset($ship['mounts'][0]['deposits']);
+        $oreSymbols = json_decode(file_get_contents(resource_path('data/mining-yields.json')), true);
+        GameObservation::where('kind', 'market')->get()->each(function ($quote) use ($oreSymbols) {
+            $data = $quote->data;
+            $data['tradeGoods'] = array_merge($data['tradeGoods'] ?? [], array_map(fn ($symbol) => ['symbol' => $symbol, 'sellPrice' => 10, 'purchasePrice' => 20, 'tradeVolume' => 4], $oreSymbols));
+            $quote->update(['data' => $data]);
+        });
+        $route = app(MiningPlanner::class)->route($this->agent->fresh(), $ship, 'X1-TEST-ROCK', 'X1-TEST-ROCK');
+        $this->assertSame($oreSymbols, $route['possible_yields']);
+        $this->assertSame([], $route['unknown_yields']);
+        $this->assertSame(332, MiningPlanner::fuelEstimate(['symbol' => 'A', 'x' => -8, 'y' => 24], ['symbol' => 'B', 'x' => -317, 'y' => 138]));
+    }
+
     public function test_missing_capabilities_and_unusable_routes_report_blockers(): void
     {
         $planner = app(MiningPlanner::class);

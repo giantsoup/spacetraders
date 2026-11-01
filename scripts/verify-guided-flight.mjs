@@ -7,13 +7,52 @@ const context = () => ({
     agent: { id: 1, reset_id: world.reset, credits: world.credits },
     ships: world.ships.map(ship => ({ symbol: ship.symbol, snapshot: structuredClone(ship) })),
     capabilities: { 'LOCAL-1': null }, observations: [
-        ...world.waypoints.map(data => ({ kind: 'waypoint', symbol: data.symbol, data })),
+        ...world.waypoints.map(data => ({ kind: 'waypoint', symbol: data.symbol, data: structuredClone(data) })),
         ...world.waypoints.map(point => ({ kind: 'market', symbol: point.symbol, data: { symbol: point.symbol, tradeGoods: structuredClone(world.goods) } })),
     ], actions: [], runs: [], selected: 'LOCAL-1', commandPreview: null, offers: [],
     form: { reserve: 0, quantity: 1, priceBound: 0, destination: '', good: '' },
 });
 const ctx = context();
+const liveShape = context();
+delete liveShape.ships[0].snapshot.mounts[0].deposits;
+const laserYields = ['QUARTZ_SAND', 'SILICON_CRYSTALS', 'PRECIOUS_STONES', 'ICE_WATER', 'AMMONIA_ICE', 'IRON_ORE', 'COPPER_ORE', 'SILVER_ORE', 'ALUMINUM_ORE', 'GOLD_ORE', 'PLATINUM_ORE', 'DIAMONDS', 'URANITE_ORE', 'MERITIUM_ORE'];
+for (const market of liveShape.observations.filter(entry => entry.kind === 'market')) market.data.tradeGoods = [...laserYields.map(symbol => ({ symbol, sellPrice: 10, purchasePrice: 20, tradeVolume: 4 })), world.goods.find(good => good.symbol === 'FUEL')];
+assert.equal(chooseFlight(liveShape).plan?.kind, 'mining', 'Live lasers omit optional deposits; use the complete API ore set');
+const incompleteLive = structuredClone(liveShape);
+incompleteLive.observations.filter(entry => entry.kind === 'market').forEach(entry => entry.data.tradeGoods = entry.data.tradeGoods.filter(good => good.symbol !== 'DIAMONDS'));
+assert.ok(chooseFlight(incompleteLive).reason, 'Fallback must retain coverage for every API ore');
+const scoutBuyer = structuredClone(liveShape);
+scoutBuyer.ships[0].snapshot.fuel = { current: 40, capacity: 40 };
+scoutBuyer.observations.find(entry => entry.kind === 'waypoint' && entry.symbol.endsWith('PORT')).data.x = 30;
+scoutBuyer.observations.find(entry => entry.kind === 'waypoint' && entry.symbol.endsWith('PORT')).data.y = 0;
+const port = scoutBuyer.observations.find(entry => entry.kind === 'market' && entry.symbol.endsWith('PORT'));
+port.data.exchange = [...laserYields, 'FUEL'].map(symbol => ({ symbol }));
+delete port.data.tradeGoods;
+scoutBuyer.observations.find(entry => entry.kind === 'market' && entry.symbol.endsWith('ROCK')).data.tradeGoods = [world.goods.find(good => good.symbol === 'FUEL')];
+assert.equal(chooseFlight(scoutBuyer).plan.site, 'X1-TEST-PORT', 'Scout a listed complete ore buyer before unrelated unknown markets');
+assert.equal(chooseFlight(scoutBuyer).plan.fuelAllowance, 10);
+scoutBuyer.agent.credits = 0;
+assert.ok(chooseFlight(scoutBuyer).reason, 'One-way scouting requires funds beyond its protected fuel allowance');
+const preparation = context();
+preparation.observations.find(entry => entry.kind === 'waypoint' && entry.symbol.endsWith('ROCK')).data.type = 'PLANET';
+preparation.observations.find(entry => entry.kind === 'waypoint' && entry.symbol.endsWith('PORT')).data.type = 'ASTEROID_FIELD';
+preparation.ships[0].snapshot.fuel.current = 1;
+preparation.observations.find(entry => entry.kind === 'market' && entry.symbol.endsWith('ROCK')).data.tradeGoods = [{ symbol: 'FUEL', purchasePrice: 1000, sellPrice: 1, tradeVolume: 4 }];
+preparation.agent.credits = 500;
+assert.notEqual(chooseFlight(preparation).plan?.kind, 'mining', 'Fund preparation at its own price before selecting a route');
+preparation.agent.credits = 100000;
+const preparedPlan = chooseFlight(preparation).plan;
+assert.equal(preparedPlan.refuelAt, 'X1-TEST-ROCK');
+const preparationSession = { ...newFlight(), plan: preparedPlan, phase: 'outbound' };
+assert.equal(flightStep(preparationSession, preparation).intent.command, 'refuel');
+preparation.ships[0].snapshot.fuel.current = 100;
+assert.equal(flightStep(preparationSession, preparation).intent.command, 'orbit', 'A full prepared ship can depart');
+preparation.ships[0].snapshot.nav.waypointSymbol = preparedPlan.site;
+preparation.ships[0].snapshot.fuel.current = 80;
+assert.equal(flightStep(preparationSession, preparation).next, 'extract', 'Arrival at the mining site must not trigger another preparation refuel');
 const plan = chooseFlight(ctx).plan;
+assert.equal(chooseFlight(ctx, [], 2000).plan.reserve, 2000, 'Replanning retains the accepted protected-credit floor');
+assert.equal(flightStep({ ...newFlight(), phase: 'plan', reserveFloor: 2000 }, ctx).plan.reserve, 2000);
 assert.deepEqual(plan, { kind: 'mining', ship: 'LOCAL-1', site: 'X1-TEST-ROCK', market: 'X1-TEST-ROCK', reserve: 1000, fuel: 0 });
 assert.deepEqual(chooseFlight({ ...ctx, observations: [...ctx.observations].reverse() }).plan, plan);
 const session = { ...newFlight(), plan, phase: 'extract' };
@@ -109,6 +148,8 @@ incompleteBuyer.observations.filter(observation => observation.kind === 'market'
 assert.ok(chooseFlight(incompleteBuyer).reason, 'Every potential yield needs a known buyer before extraction');
 assert.equal(restoreFlight({ phase: 'invented' }), null);
 assert.equal(restoreFlight({ ...newFlight(), phase: 'sell' }), null);
+assert.equal(restoreFlight({ ...newFlight(), phase: 'outbound', plan }).reserveFloor, plan.reserve, 'Existing saved routes retain their accepted reserve on upgrade');
+assert.equal(restoreFlight({ ...newFlight(), reserveFloor: -1 }), null);
 assert.deepEqual(restoreFlight(newFlight()), newFlight());
 assert.equal(new Set([guidedKey(1, ctx.agent), guidedKey(2, ctx.agent), guidedKey(1, { ...ctx.agent, id: 2 }), guidedKey(1, { ...ctx.agent, reset_id: 'new' })]).size, 4);
 console.log('PASS: deterministic planning, exact fields, approval matching, confirmed receipts, batching, refuel units, setup/scouting, blockers and progress isolation.');

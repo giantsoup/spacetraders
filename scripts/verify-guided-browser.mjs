@@ -5,11 +5,12 @@ import { once } from 'node:events';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { guidedKey } from '../resources/js/guidedFlight.js';
+import miningYields from '../resources/data/mining-yields.json' with { type: 'json' };
 
 const root = path.resolve(import.meta.dirname, '..');
 const php = process.env.PHP_BIN || 'php';
 const scenario = process.env.QA_GUIDED_SCENARIO || 'mining';
-assert.ok(['mining', 'setup', 'uncertain', 'rejected', 'recovery'].includes(scenario));
+assert.ok(['mining', 'setup', 'uncertain', 'rejected', 'recovery', 'preparation'].includes(scenario));
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const created = execFileSync(php, ['scripts/mvp-fixture.php', '--isolated'], { cwd: root, encoding: 'utf8' });
 const directory = created.match(/Owned fixture directory: (.+)/)?.[1];
@@ -33,7 +34,14 @@ const world = async mutate => {
     return value;
 };
 await world(value => {
-    if (scenario === 'setup') value.ships[0].mounts = [];
+    if (scenario === 'preparation') {
+        delete value.ships[0].mounts[0].deposits;
+        value.ships[0].fuel.current = 1;
+        value.waypoints[0].type = 'PLANET';
+        value.waypoints[1].type = 'ASTEROID_FIELD';
+        value.goods.push(...miningYields.filter(symbol => !value.goods.some(good => good.symbol === symbol)).map(symbol => ({ symbol, tradeVolume: 4, purchasePrice: 30, sellPrice: 25 })));
+        value.ships.push({ ...structuredClone(value.ships[0]), symbol: 'LOCAL-2', mounts: [], nav: { ...structuredClone(value.ships[0].nav), waypointSymbol: 'X1-TEST-PORT' } });
+    } else if (scenario === 'setup') value.ships[0].mounts = [];
     else {
         const observer = { ...structuredClone(value.ships[0]), symbol: 'LOCAL-2', mounts: [] };
         value.ships[0].nav.waypointSymbol = 'X1-TEST-PORT';
@@ -212,7 +220,7 @@ try {
             return panel && (`${panel.dataset.stepKind}:${panel.querySelector('h2')?.textContent}` !== previous);
         }, `${kind}:${title}`);
     }
-    if (['mining', 'setup', 'recovery'].includes(scenario)) {
+    if (['mining', 'setup', 'recovery', 'preparation'].includes(scenario)) {
         assert.ok(completed, 'Guided trip must finish within the bounded journey');
         const saved = await session();
         const snapshot = state();
@@ -230,6 +238,12 @@ try {
         if (scenario === 'recovery') {
             assert.ok(recovered && previewRecovered);
             assert.equal(snapshot.actions.filter(action => action.command === 'mine' && action.state === 'confirmed').length, 1, 'Lost approval response must not cause a duplicate extraction');
+        }
+        if (scenario === 'preparation') {
+            const actions = snapshot.actions.filter(action => action.state === 'confirmed').sort((a, b) => a.id - b.id);
+            assert.equal(actions[0].command, 'refuel', 'Prepare fuel before departing');
+            assert.equal(actions.filter(action => action.command === 'refuel').length, 2, 'Preparation and final refill each require a confirmed approval');
+            assert.equal(actions.filter(action => action.command === 'mine').length, 1);
         }
     } else assert.ok(injected, 'Fault injection was exercised');
     if (['mining', 'setup'].includes(scenario)) {

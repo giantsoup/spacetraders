@@ -40,7 +40,7 @@ export function useGuidedFlight(userId, context) {
     function pause() { if (session.value) update({ ...session.value, active: false }); }
     function resume() { if (session.value) update({ ...session.value, active: true }); }
     function advance() {
-        if (step.value?.kind === 'plan') update({ ...session.value, plan: step.value.plan, phase: 'briefing' });
+        if (step.value?.kind === 'plan') update({ ...session.value, plan: step.value.plan, reserveFloor: Math.max(session.value.reserveFloor || 0, step.value.plan.reserve), phase: 'briefing' });
         else if (step.value?.kind === 'read') update({ ...session.value, phase: step.value.next });
     }
     function synchronized() {
