@@ -42,7 +42,12 @@ class LocalAutomationController extends Controller
     {
         $investigation = $this->investigation($agent, $request->validated('investigation_id'));
         $record = $draft ? AutomationDraft::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->findOrFail($draft) : null;
-        $limits = array_map(intval(...), $request->validated('limits'));
+        $limits = $request->validated('limits');
+        foreach ($limits as $key => $value) {
+            if ($key !== 'survey_signature') {
+                $limits[$key] = (int) $value;
+            }
+        }
 
         return $response->result(function () use ($record, $request, $staging, $agent, $investigation, $limits) {
             return $staging->save($agent, $investigation, $request->validated('candidate_id'), $limits, $record, $request->validated('revision'));

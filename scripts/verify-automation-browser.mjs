@@ -62,8 +62,7 @@ try {
     const button = name => page.getByRole('button', { name, exact: true });
     const post = async (name, suffix, status = 202) => {
         const response = page.waitForResponse(r => new URL(r.url()).pathname.endsWith(suffix) && r.request().method() === 'POST');
-        await button(name).click();
-        const received = await response;
+        const [received] = await Promise.all([response, button(name).click()]);
         assert.equal(received.status(), status, await received.text());
         return received.json();
     };

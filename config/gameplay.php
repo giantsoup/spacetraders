@@ -16,4 +16,9 @@ return [
     'max_observations' => 24,
     'preview_seconds' => 120,
     'snapshot_seconds' => 180,
+    'route_evidence' => env('SPACETRADERS_ROUTE_EVIDENCE', 'conservative'),
+    'fuel_reserve_units' => 2,
+    'opportunity_limit' => 120,
+    'evidence_travel_limit' => 2000,
+    'evidence_run_limit' => 500,
 ];

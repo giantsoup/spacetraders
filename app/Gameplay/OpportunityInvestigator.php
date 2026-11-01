@@ -111,7 +111,7 @@ class OpportunityInvestigator
             $done = $coverage['phase'] === 'done' || $cancelled;
             $complete = $done && ! $cancelled && $coverage['limits_reached'] === [];
             $observations['history'] = AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('strategy', 'mining')->where('state', 'completed')->where('updated_at', '>=', now()->subDays(7))->limit(100)->get()
-                ->filter(fn ($run) => isset($run->plan['equipment'], $run->totals['elapsed_seconds'], $run->totals['cash_contribution']) && ($run->totals['cycles'] ?? 0) === 1)
+                ->filter(fn ($run) => isset($run->plan['equipment'], $run->totals['elapsed_seconds'], $run->totals['cash_contribution']) && ($run->totals['cycles'] ?? 0) === 1 && ($run->plan['max_extractions'] ?? 1) === 1)
                 ->map(fn ($run) => ['site' => $run->plan['site'], 'market' => $run->plan['market'], 'equipment' => $run->plan['equipment'], 'quote_signature' => $run->plan['market_quote_signature'] ?? null, 'initial_waypoint' => $run->plan['initial_waypoint'], 'initial_fuel' => $run->plan['initial_fuel'], 'seconds' => $run->totals['elapsed_seconds'], 'contribution' => $run->totals['cash_contribution'], 'at' => $run->updated_at->toIso8601String()])->values()->all();
             $record->update(['coverage' => $coverage, 'observations' => $observations, 'status' => $cancelled ? 'cancelled' : ($done ? ($complete ? 'complete' : 'partial') : 'investigating'),
                 'finished_at' => $done ? now() : null, 'candidates' => $done ? $this->evaluator->evaluate($observations, $record->strategy, CarbonImmutable::now(), $complete) : []]);

@@ -27,4 +27,9 @@ final readonly class AutomationStep
     {
         return new self('trip');
     }
+
+    public static function depart(): self
+    {
+        return new self('depart');
+    }
 }

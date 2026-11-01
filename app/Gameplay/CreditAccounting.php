@@ -49,12 +49,22 @@ class CreditAccounting
                 $totals['deliveries']++;
             }
         } else {
-            if ($action->command === 'mine') {
+            if (in_array($action->command, ['mine', 'mine_survey'], true)) {
                 $yield = $outcome['yield'];
                 $totals['extracted'][$yield['symbol']] = ($totals['extracted'][$yield['symbol']] ?? 0) + $yield['units'];
                 $totals['attempts']++;
-                $totals['phase'] = 'sell';
+                $totals['load_attempts'] = ($totals['load_attempts'] ?? 0) + 1;
+                $totals['load_started_at'] ??= $action->sent_at->toIso8601String();
+                $totals['phase'] = $totals['load_attempts'] >= ($run->plan['max_extractions'] ?? 1) ? 'sell' : 'mine';
                 $totals['no_progress'] = $yield['units'] === 0 ? $totals['no_progress'] + 1 : 0;
+            }
+            if ($action->command === 'buy' && $run->strategy === 'trade') {
+                $symbol = $action->arguments['symbol'];
+                $totals['purchased'][$symbol] = ($totals['purchased'][$symbol] ?? 0) + $action->arguments['units'];
+                $totals['purchase_cost'] = ($totals['purchase_cost'] ?? 0) + $price;
+                if ($totals['purchased'][$symbol] >= $run->plan['units']) {
+                    $totals['phase'] = 'sell';
+                }
             }
             if ($action->command === 'sell') {
                 $symbol = $action->arguments['symbol'];
@@ -62,8 +72,11 @@ class CreditAccounting
                 $totals['sale_proceeds'] += $price;
             }
         }
+        if ($action->command === 'navigate') {
+            $totals['travel_fuel'] = ($totals['travel_fuel'] ?? 0) + ($outcome['travel']['actual_fuel'] ?? 0);
+        }
         $run->update(['totals' => $totals, 'next_action_at' => now(), 'heartbeat_at' => now(), 'last_dispatched_at' => null]);
-        if ($outcome['price_discrepancy'] || $totals['spending'] > $run->plan['max_spend'] || ($totals['no_progress'] ?? 0) >= 1 || $totals['credit_delta'] < -$run->plan['max_loss']) {
+        if ($outcome['price_discrepancy'] || ($outcome['fuel_discrepancy'] ?? false) || (isset($run->plan['max_fuel']) && ($totals['travel_fuel'] ?? 0) > $run->plan['max_fuel']) || $totals['spending'] > $run->plan['max_spend'] || ($totals['no_progress'] ?? 0) >= 1 || $totals['credit_delta'] < -$run->plan['max_loss']) {
             $run->update(['state' => 'blocked', 'blocked_reason' => 'Execution price, spending, loss or no-progress limit reached.']);
         }
     }

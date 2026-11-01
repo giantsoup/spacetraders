@@ -34,9 +34,18 @@ class SpaceTradersClient
         $response = $request->send(strtoupper($method), $path, $data === [] ? [] : [
             strtolower($method) === 'get' ? 'query' : 'json' => $data,
         ]);
-        if ($response->status() === 429 || $response->serverError()) {
+        $exhausted = $response->header('X-RateLimit-Remaining') === '0';
+        if ($response->status() === 429 || $response->serverError() || $exhausted) {
             $header = $response->header('Retry-After');
             $delay = is_numeric($header) ? (int) $header : (strtotime($header ?: '') ?: time()) - time();
+            if ($exhausted) {
+                $reset = $response->header('X-RateLimit-Reset');
+                // Accept an absolute Unix timestamp or HTTP date; ambiguous units fall back to backoff.
+                $resetAt = is_numeric($reset) && (float) $reset >= 1000000000 && (float) $reset < 10000000000 ? (int) $reset : (is_numeric($reset) ? null : strtotime($reset ?: ''));
+                if ($resetAt) {
+                    $delay = max($delay, $resetAt - time());
+                }
+            }
             try {
                 app(RequestBudget::class)->defer(max($response->status() === 502 ? 180 : 5, min(3600, $delay)) + random_int(0, 2));
             } catch (GameException) {

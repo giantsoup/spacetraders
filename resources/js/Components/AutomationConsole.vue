@@ -8,7 +8,7 @@ import DataDetails from '@/Components/DataDetails.vue';
 import { formatLocalTime, localTimeZone } from '@/dateTime.js';
 import { assetName, cargoSummary, readableLabel, readableText } from '@/dataPresentation.js';
 
-const props = defineProps({ agent: Object, ships: Array, engine: Object, operator: Boolean, investigations: Array, drafts: Array, runs: Array, accounting: Object, enabled: Boolean });
+const props = defineProps({ agent: Object, ships: Array, engine: Object, operator: Boolean, investigations: Array, drafts: Array, runs: Array, accounting: Object, enabled: Boolean, observations: { type: Array, default: () => [] } });
 const emit = defineEmits(['refresh']);
 const strategy = ref(props.drafts[0]?.candidate.strategy || props.investigations[0]?.strategy || 'mining');
 const system = ref(props.ships[0]?.snapshot.nav.systemSymbol || '');
@@ -23,9 +23,9 @@ const active = computed(() => props.runs.find(r => r.active_agent_id));
 const outcome = computed(() => active.value || props.runs.find(r => r.state !== 'preview'));
 const runShip = computed(() => props.ships.find(s => s.symbol === outcome.value?.ship_symbol)?.snapshot);
 const candidates = computed(() => [...(investigation.value?.candidates || [])].sort((a, b) => sort.value === 'net' ? ((b.estimated_net ?? -Infinity) - (a.estimated_net ?? -Infinity) || (a.working_capital ?? Infinity) - (b.working_capital ?? Infinity) || (a.duration_seconds ?? Infinity) - (b.duration_seconds ?? Infinity) || a.id.localeCompare(b.id)) : 0));
-const limits = ref({ reserve: 2000, max_spend: 100, max_loss: 100, minutes: 60, cycles: 1, delivery_limit: 10, purchase_limit: 40 });
-watch(() => draft.value?.id, () => { if (draft.value) limits.value = { ...draft.value.limits }; }, { immediate: true });
-const dirty = computed(() => draft.value && Object.keys(limits.value).some(key => Number(limits.value[key]) !== draft.value.limits[key]));
+const limits = ref({ reserve: 2000, max_spend: 100, max_loss: 100, minutes: 60, cycles: 1, delivery_limit: 10, purchase_limit: 40, max_extractions: 1, extraction_headroom: 40, site_seconds: 300, survey_signature: '' });
+watch(() => draft.value?.id, () => { if (draft.value) limits.value = { max_extractions: 1, extraction_headroom: 40, site_seconds: 300, survey_signature: '', ...draft.value.limits }; }, { immediate: true });
+const dirty = computed(() => draft.value && Object.keys(limits.value).some(key => (key === 'survey_signature' ? (limits.value[key] || '') !== (draft.value.limits[key] || '') : Number(limits.value[key]) !== Number(draft.value.limits[key] ?? ({ max_extractions: 1, extraction_headroom: 40, site_seconds: 300 }[key])))));
 const staleDraft = computed(() => draft.value && Date.now() - Date.parse(draft.value.updated_at) > 180000);
 const engineHealthy = computed(() => props.engine?.state === 'running' && props.engine.gate_open);
 const busy = ref(false);
@@ -46,7 +46,7 @@ const credit = value => value === null || value === undefined ? 'Unknown' : `${N
 const classifications = { ready: 'Ready to stage', needs_preparation: 'Needs preparation', needs_information: 'Needs information', unsupported: 'Unsupported' };
 const utc = value => formatLocalTime(value, 'Unknown');
 const hasError = key => !!errors.value[`limits.${key}`];
-const numericLimits = () => Object.fromEntries(Object.entries(limits.value).map(([key, value]) => [key, Number(value)]));
+const numericLimits = () => Object.fromEntries(Object.entries(limits.value).map(([key, value]) => [key, key === 'survey_signature' ? value : Number(value)]));
 watch(() => preview.value?.id, () => { acceptContract.value = false; });
 onBeforeUnmount(() => { cancelled.value = true; });
 async function refresh() {
@@ -100,7 +100,7 @@ async function cancelInvestigation() {
 function selectCandidate(candidate) {
     chosen.value = candidate.id;
     draftId.value = null;
-    limits.value = { reserve: Math.max(2000, candidate.minimum_reserve || 0), max_spend: Math.max(100, candidate.working_capital || 0), max_loss: Math.max(100, candidate.working_capital || 0), minutes: 60, cycles: 1, delivery_limit: 10, purchase_limit: 40 };
+    limits.value = { reserve: Math.max(2000, candidate.minimum_reserve || 0), max_spend: Math.max(100, candidate.working_capital || 0), max_loss: Math.max(100, candidate.working_capital || 0), minutes: 60, cycles: 1, delivery_limit: 10, purchase_limit: 40, max_extractions: 1, extraction_headroom: props.ships.find(ship => ship.symbol === candidate.ship_symbol)?.snapshot.cargo.capacity || 40, site_seconds: 300, survey_signature: '' };
 }
 async function stage(update = false) {
     const record = await post(update ? `drafts/${draft.value.id}/update` : 'drafts', {
@@ -197,6 +197,12 @@ async function reviewBalance() {
                     <label>Automation maximum loss<input v-model="limits.max_loss" type="number" min="0" step="1" :aria-invalid="hasError('max_loss')"></label>
                     <label>Automation duration in minutes<input v-model="limits.minutes" type="number" min="1" max="60" step="1" :aria-invalid="hasError('minutes')"></label>
                     <label>Mining trip limit<input v-model="limits.cycles" type="number" min="1" max="10" step="1" :aria-invalid="hasError('cycles')"></label>
+                    <template v-if="(draft?.candidate?.strategy || investigation?.strategy) === 'mining'">
+                        <label>Maximum extractions per load<input v-model="limits.max_extractions" type="number" min="1" max="10"></label>
+                        <label>Extraction headroom in cargo units<input v-model="limits.extraction_headroom" type="number" min="1"></label>
+                        <label>Maximum extraction-site seconds<input v-model="limits.site_seconds" type="number" min="1" max="900"></label>
+                        <label>Signed survey for staged mining<select v-model="limits.survey_signature" aria-label="Signed survey for staged mining"><option value="">Extract without a survey</option><option v-for="survey in observations.filter(row => row.kind === 'survey' && row.data.signed.symbol === draft?.candidate?.site && !row.data.exhausted && !row.data.unavailable_reason && Date.parse(row.data.signed.expiration) > Date.now())" :key="survey.id" :value="survey.symbol">{{ survey.symbol }} · {{ utc(survey.data.signed.expiration) }}</option></select></label>
+                    </template>
                     <label>Contract delivery limit<input v-model="limits.delivery_limit" type="number" min="1" max="10" step="1" :aria-invalid="hasError('delivery_limit')"></label>
                     <label>Contract purchase batch limit<input v-model="limits.purchase_limit" type="number" min="0" max="40" step="1" :aria-invalid="hasError('purchase_limit')"></label>
                 </div>

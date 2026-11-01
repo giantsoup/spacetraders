@@ -122,23 +122,68 @@ class CommandRules
                 if ($ship['nav']['flightMode'] !== 'CRUISE') {
                     throw new GameException('Navigation preview requires CRUISE mode.');
                 }
-                $estimate['fuel_estimate'] = MiningPlanner::fuelEstimate($from, $target);
-                if ($ship['fuel']['current'] < $estimate['fuel_estimate']) {
-                    throw new GameException('Insufficient fuel for the conservative navigation estimate.');
+                if (in_array('MARKETPLACE', array_column($from['traits'], 'symbol'), true)) {
+                    $this->sync->observe($agent, 'market', $from['symbol'], $this->api->market($agent, $from['symbol']));
+                }
+                $estimate['route'] = app(FuelPlanner::class)->leg($agent, $ship, $target['symbol'], $floor, policy: $run ? null : 'conservative');
+                $estimate['fuel_estimate'] = $estimate['route']['outbound_fuel'];
+                if ($run && isset($run->plan['max_fuel']) && ($run->totals['travel_fuel'] ?? 0) + $estimate['fuel_estimate'] > $run->plan['max_fuel']) {
+                    throw new GameException('Navigation exceeds the remaining approved travel-fuel budget. Replan; do not repeat a failed rescue route.');
                 }
                 break;
             case 'mine':
+            case 'mine_survey':
                 $this->orbit($ship);
                 if ($reason = $this->planner->capability($ship)) {
                     throw new GameException($reason);
                 }
                 $point = $this->waypoint($agent, $ship['nav']['waypointSymbol']);
-                if (! in_array($point['type'], ['ASTEROID', 'ASTEROID_FIELD', 'ENGINEERED_ASTEROID'], true)) {
-                    throw new GameException('This waypoint is not an ore extraction candidate.');
+                $point = $this->api->waypoint($agent, $point['symbol']);
+                $this->sync->observe($agent, 'waypoint', $point['symbol'], $point, 'read', $symbol);
+                if ($reason = MiningPlanner::hazard($point)) {
+                    throw new GameException($reason);
+                }
+                if ($run) {
+                    $this->planner->route($agent, $ship, $run->plan['site'], $run->plan['market']);
                 }
                 if (now()->lt($ship['cooldown']['expiration']) || $ship['cargo']['units'] >= $ship['cargo']['capacity']) {
                     throw new GameException('Extraction requires an expired cooldown and free cargo.');
                 }
+                if ($command === 'mine_survey') {
+                    if ($arguments['surveyWaypoint'] !== $ship['nav']['waypointSymbol']) {
+                        throw new GameException('Survey location differs from the current waypoint.');
+                    }
+                    $signed = app(SurveyPool::class)->usable($agent, $arguments['surveySignature'], $ship['nav']['waypointSymbol']);
+                    $estimate['survey_summary'] = app(SurveyPool::class)->assess($agent, $signed, $ship);
+                }
+                break;
+            case 'survey':
+                $this->orbit($ship);
+                if (! collect($ship['mounts'])->contains(fn ($mount) => str_starts_with($mount['symbol'], 'MOUNT_SURVEYOR_')) || now()->lt($ship['cooldown']['expiration'])) {
+                    throw new GameException('Survey creation requires a Surveyor mount and expired cooldown.');
+                }
+                $point = $this->api->waypoint($agent, $ship['nav']['waypointSymbol']);
+                $this->sync->observe($agent, 'waypoint', $point['symbol'], $point, 'read', $symbol);
+                if ($reason = MiningPlanner::hazard($point)) {
+                    throw new GameException($reason);
+                }
+                break;
+            case 'transfer':
+                $target = Ship::where('agent_id', $agent->id)->where('symbol', $arguments['targetShip'])->first();
+                if (! $target || $target->symbol === $symbol || ($active && $active->ship_symbol === $target->symbol && $active->id !== $run?->id)) {
+                    throw new GameException('Transfer target must be another owned ship available for manual control.');
+                }
+                $target = $this->sync->refreshShip($agent, $target->symbol)->snapshot;
+                if ($target['nav']['waypointSymbol'] !== $ship['nav']['waypointSymbol'] || $target['nav']['status'] !== $ship['nav']['status'] || $target['nav']['status'] === 'IN_TRANSIT') {
+                    throw new GameException('Transfers require the same waypoint and matching docked or orbiting states.');
+                }
+                if (now()->lt($ship['cooldown']['expiration']) || now()->lt($target['cooldown']['expiration'])) {
+                    throw new GameException('Wait for both cooldowns before transferring.');
+                }
+                if ($arguments['units'] > (MiningPlanner::inventory($ship)[$arguments['symbol']] ?? 0) || $arguments['units'] > $target['cargo']['capacity'] - $target['cargo']['units']) {
+                    throw new GameException('Transfer exceeds source inventory or receiving cargo capacity.');
+                }
+                $estimate['target_ship'] = $target;
                 break;
             case 'buy_ship':
                 if (ShipAction::where('agent_id', $agent->id)->where('command', 'buy_ship')->get()->contains(fn ($a) => ! empty($a->outcome['delivered_ship']) || ! empty($a->outcome['unresolved_adjustment']))) {
@@ -207,6 +252,16 @@ class CommandRules
                 } else {
                     $cost = ($command === 'refuel' ? (int) ceil($units / 100) : $units) * $good['purchasePrice'];
                 }
+                if ($run?->strategy === 'trade' && $command === 'buy') {
+                    $observer = Ship::where('agent_id', $agent->id)->get()->contains(fn ($owned) => $owned->snapshot['nav']['waypointSymbol'] === $run->plan['market'] && $owned->snapshot['nav']['status'] !== 'IN_TRANSIT');
+                    if ($observer) {
+                        $this->sync->observe($agent, 'market', $run->plan['market'], $this->api->market($agent, $run->plan['market']));
+                    }
+                    $next = app(OperationPlanner::class)->next($agent, $ship, $run->plan, $run->totals, now()->toImmutable());
+                    if ($next->command !== 'buy' || $units > ($next->arguments['units'] ?? 0)) {
+                        throw new GameException($next->reason ?? 'Trade batch changed. Reassess the remaining cargo before buying.');
+                    }
+                }
                 break;
             case 'orbit':
             case 'dock':
@@ -217,6 +272,9 @@ class CommandRules
         $estimate['cost_estimate'] = $cost;
         if ($cost > 0 && ($cost > ($arguments['maxTotal'] ?? 0) || $agent->credits - $cost < $floor)) {
             throw new GameException('The quote exceeds the approved spending ceiling or protected reserve.');
+        }
+        if ($run && $cost > 0 && (($run->totals['purchase_cost'] ?? 0) + $run->totals['fuel_cost'] + $cost > $run->plan['max_spend'] || -$run->plan['max_loss'] > $run->totals['credit_delta'] - $cost)) {
+            throw new GameException('Dispatch would exceed the remaining run spending or cash-loss limit.');
         }
 
         if ($run && $cost > $run->plan['max_spend'] - ($run->totals['spending'] ?? $run->totals['fuel_cost'] ?? 0)) {
