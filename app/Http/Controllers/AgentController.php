@@ -21,8 +21,21 @@ class AgentController extends Controller
 {
     public function index(Request $request): Response
     {
+        $resetCheckError = null;
+        $candidates = $request->user()->agents()->unarchived()->whereNotNull('reset_id')->get();
+        if ($candidates->isNotEmpty()) {
+            try {
+                $reset = app(SpaceTradersApi::class)->status();
+                app(AgentSynchronizer::class)->archivePreviousWorlds($candidates, $reset);
+            } catch (GameException) {
+                $resetCheckError = 'Could not finish checking for a world reset. Some agents may belong to a previous world. Refresh to try again.';
+            }
+        }
+
         return Inertia::render('Agent/Agents', [
-            'agents' => $request->user()->agents()->get(),
+            'agents' => $request->user()->agents()->unarchived()->orderBy('name')->orderBy('id')->get(),
+            'archivedAgents' => $request->user()->agents()->archived()->orderByDesc('reset_id')->orderBy('name')->orderByDesc('id')->get(),
+            'resetCheckError' => $resetCheckError,
         ]);
     }
 
@@ -40,7 +53,7 @@ class AgentController extends Controller
             'email' => ['nullable', 'email', 'max:255'],
         ]);
 
-        $reset = $this->reset();
+        $reset = $this->reset($request);
         $payload = $client->register(array_filter([
             'symbol' => strtoupper($data['symbol']),
             'faction' => strtoupper($data['faction']),
@@ -58,7 +71,7 @@ class AgentController extends Controller
             'token' => ['required', 'string', 'regex:/\A[A-Za-z0-9\-._~+\/]+=*\z/'],
         ]);
 
-        $reset = $this->reset();
+        $reset = $this->reset($request);
         $agent = $client->agent($data['token']);
 
         $saved = $this->save($request, $agent, $data['token'], $reset);
@@ -66,10 +79,14 @@ class AgentController extends Controller
         return $request->boolean('guided') ? redirect()->route('agents.show', ['agent' => $saved->id, 'guided' => 1]) : redirect()->route('agents.index');
     }
 
-    private function reset(): string
+    private function reset(Request $request): string
     {
         try {
-            return app(SpaceTradersApi::class)->status();
+            $candidates = $request->user()->agents()->unarchived()->whereNotNull('reset_id')->get();
+            $reset = app(SpaceTradersApi::class)->status();
+            app(AgentSynchronizer::class)->archivePreviousWorlds($candidates, $reset);
+
+            return $reset;
         } catch (GameException $e) {
             throw ValidationException::withMessages(['api' => $e->getMessage()]);
         }

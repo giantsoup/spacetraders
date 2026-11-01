@@ -205,6 +205,9 @@ try {
         const stored = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), key);
         assert.deepEqual(stored.completed, ['orientation']);
         cli("App\\Models\\Agent::first()->update(['reset_id'=>'2026-11-01']); echo json_encode(true);");
+        const nextWorld = JSON.parse(await fs.readFile(`${directory}/world.json`, 'utf8'));
+        nextWorld.reset = '2026-11-01';
+        await fs.writeFile(`${directory}/world.json`, JSON.stringify(nextWorld));
         await page.reload();
         await course().getByText('0 of 10 lessons checked off', { exact: true }).waitFor();
         const blockedContext = await browser.newContext();

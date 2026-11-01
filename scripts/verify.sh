@@ -36,5 +36,6 @@ node --check scripts/verify-modal.mjs
     config/gameplay.php config/database.php config/queue.php \
     database/migrations/2026_10_31_00000*_*.php \
     tests/Feature/GameplayTest.php tests/Feature/PlayerGuideTest.php tests/Feature/GameConnectionTest.php app/Http/Controllers/PlayerGuideController.php tests/Support tests/TestCase.php \
+    tests/Feature/AgentArchiveTest.php \
     scripts/mvp-fixture.php scripts/verify-mvp-worker.php scripts/verify-environment.php
 git diff --check

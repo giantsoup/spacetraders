@@ -14,6 +14,14 @@ The integration targets [SpaceTraders API v2.3.0](https://docs.spacetraders.io/o
 
 SpaceTraders resets invalidate agent tokens. An account token and an agent token have different purposes and are not interchangeable. See the [official authentication definitions](https://docs.spacetraders.io/openapi).
 
+## Current and archived agents
+
+The Agents page separates **Current agents** from **Archived agents**. It checks the current world when the page opens and archives owned records with a different known world ID. Registration and import perform the same check. Gameplay reset detection also archives the affected agent. An unavailable status check leaves saved records unchanged and displays a retry message. Agents with an unknown world ID remain unarchived until synchronization establishes their identity.
+
+Archived agents retain their tokens, saved fleet, balance, and activity history. Active automation receives a stop request. Their flight decks show an archive notice and disable gameplay controls, and archived records are excluded from tutorial choices. Register or import an agent for the current world to play again; a reused name creates a separate record for that world.
+
+Run `node scripts/verify-agents-browser.mjs` with the existing Playwright setup to check same-name current and archived agents, automatic world-change detection, archived flight decks, empty states, and mobile layouts. The check creates an isolated offline fixture and does not use live game credentials.
+
 ## Gameplay command boundary
 
 The authenticated legacy forwarder now accepts only public `GET /` and `GET /factions` requests, with bounded pagination. Caller credentials and every upstream mutation are rejected. This deliberate compatibility change closes the command-ownership bypass. Gameplay uses owner-scoped saved-agent routes, server credentials, previews and the shared durable executor.

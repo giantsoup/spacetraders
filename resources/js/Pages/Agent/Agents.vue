@@ -3,13 +3,23 @@ import AppShell from '@/Layouts/AppShell.vue';
 import { Head, Link } from '@inertiajs/vue3';
 import GameConnection from '@/Components/GameConnection.vue';
 import { formatLocalTime, localTimeZone } from '@/dateTime.js';
+import { computed } from 'vue';
 
-defineProps({ agents: { type: Array, required: true } });
+const props = defineProps({
+    agents: { type: Array, required: true },
+    archivedAgents: { type: Array, required: true },
+    resetCheckError: { type: String, default: null },
+});
+
+const groups = computed(() => [
+    { id: 'current-agents', title: 'Current agents', agents: props.agents, archived: false },
+    { id: 'archived-agents', title: 'Archived agents', agents: props.archivedAgents, archived: true },
+]);
 
 const connectionStates = {
     connected: { label: 'Synchronized', tone: 'good', help: 'Open the flight deck to review your fleet and synchronize the latest game state.' },
     unsynchronized: { label: 'Not synchronized', tone: 'neutral', help: 'Open the flight deck and synchronize to discover your fleet and balance.' },
-    reset: { label: 'World reset', tone: 'warning', help: 'Import your current agent token after the world reset before issuing more commands.', reconnect: true },
+    reset: { label: 'Archived · World reset', tone: 'neutral', help: 'This agent belongs to a previous world. Its saved snapshot and activity are retained for reference.' },
     invalid_credential: { label: 'Token needs attention', tone: 'warning', help: 'Import a current agent token to restore access to this agent.', reconnect: true },
 };
 const unknownConnection = { label: 'Connection not verified', tone: 'neutral', help: 'Open the flight deck to check this agent’s connection.' };
@@ -36,6 +46,7 @@ const credits = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
             </div>
 
             <GameConnection />
+            <p v-if="resetCheckError" class="reset-warning" role="status">{{ resetCheckError }}</p>
 
             <section class="flight-school" aria-labelledby="new-player-heading">
                 <div>
@@ -46,14 +57,15 @@ const credits = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
                 <Link :href="route('guide')" class="action secondary">Start the new player guide <span aria-hidden="true">→</span></Link>
             </section>
 
-            <section aria-labelledby="saved-agents-heading">
+            <section v-for="group in groups" :id="group.id" :key="group.id" class="agent-section" :aria-labelledby="`${group.id}-heading`">
                 <div class="section-heading">
-                    <h2 id="saved-agents-heading">Your agents <span class="count">{{ agents.length }}</span></h2>
+                    <h2 :id="`${group.id}-heading`">{{ group.title }} <span class="count">{{ group.agents.length }}</span></h2>
                     <p class="muted">Saved snapshots · Times shown in {{ localTimeZone }}</p>
                 </div>
+                <p v-if="group.archived" class="archive-help muted">Agents from previous worlds are archived automatically. Their snapshots and activity remain available, but they cannot play in the current world.</p>
 
-                <ul v-if="agents.length" class="agent-grid">
-                    <li v-for="agent in agents" :key="agent.id" class="agent-card">
+                <ul v-if="group.agents.length" class="agent-grid">
+                    <li v-for="agent in group.agents" :key="agent.id" class="agent-card" :class="{ archived: group.archived }">
                         <div class="card-heading">
                             <h3>{{ agent.name }}</h3>
                             <span class="status" :class="connection(agent).tone">{{ connection(agent).label }}</span>
@@ -66,18 +78,19 @@ const credits = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
                         </dl>
                         <p class="connection-help" :class="{ warning: connection(agent).reconnect }">{{ connection(agent).help }}</p>
                         <div class="card-actions">
-                            <Link :href="route('agents.show', agent.id)" class="action secondary" :aria-label="`Open flight deck for ${agent.name}`">Open flight deck <span aria-hidden="true">→</span></Link>
+                            <Link :href="route('agents.show', agent.id)" class="action secondary" :aria-label="group.archived ? `View archived record for ${agent.name} from ${agent.reset_id || 'unknown world'}` : `Open flight deck for ${agent.name}`">{{ group.archived ? 'View archived record' : 'Open flight deck' }} <span aria-hidden="true">→</span></Link>
                             <Link v-if="connection(agent).reconnect" :href="route('agents.create', { existing: 1 })" class="reconnect" :aria-label="`Import current token for ${agent.name}`">Import current token</Link>
                         </div>
                     </li>
                 </ul>
 
-                <div v-else class="empty-state">
+                <div v-else-if="!group.archived" class="empty-state">
                     <p class="eyebrow">READY FOR YOUR FIRST FLIGHT</p>
-                    <h3>No agents connected yet</h3>
-                    <p class="muted">Your client login is ready. Import an existing SpaceTraders agent or register a new one to start building your fleet.</p>
+                    <h3>{{ archivedAgents.length ? 'No current agents' : 'No agents connected yet' }}</h3>
+                    <p class="muted">{{ archivedAgents.length ? 'Your previous agents are archived below. Register or import an agent for the current world to start a new fleet.' : 'Your client login is ready. Import an existing SpaceTraders agent or register a new one to start building your fleet.' }}</p>
                     <Link :href="route('agents.create', { guided: 1 })" class="action primary">Begin guided agent setup <span aria-hidden="true">→</span></Link>
                 </div>
+                <p v-else class="empty-archive muted">No archived agents. Agents will appear here after a world reset is detected.</p>
             </section>
         </main>
     </AppShell>
@@ -105,6 +118,12 @@ const credits = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 .flight-school > div { flex: 1 1 460px; }
 .flight-school h2 { margin: 6px 0 8px; }
 .section-heading { margin-bottom: 18px; }
+.agent-section + .agent-section { margin-top: 40px; padding-top: 32px; border-top: 1px solid var(--color-line); }
+.agent-section { scroll-margin-top: 24px; }
+.archive-help { margin-bottom: 20px; font-size: 13px; max-width: 850px; }
+.empty-archive { padding: 20px; border: 1px dashed var(--color-line); font-size: 13px; }
+.reset-warning { margin-bottom: 24px; padding: 16px; background: #302819; border: 1px solid #bd9e61; color: #ffe09a; }
+.agent-card.archived { box-shadow: none; border-style: dashed; }
 .section-heading p { font-size: 12px; }
 .count { display: inline-block; margin-left: 8px; padding: 0 8px; border: 1px solid var(--color-line); color: var(--color-muted); font-size: 13px; }
 .agent-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; list-style: none; padding: 0; }

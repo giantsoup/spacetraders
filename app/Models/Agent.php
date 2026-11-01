@@ -4,6 +4,8 @@ namespace App\Models;
 
 use App\Gameplay\GameException;
 use Illuminate\Contracts\Encryption\DecryptException;
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -26,6 +28,23 @@ class Agent extends Model
     ];
 
     protected $casts = ['token' => 'encrypted', 'token_version' => 'integer', 'credits' => 'integer', 'synced_at' => 'immutable_datetime'];
+
+    public function isArchived(): bool
+    {
+        return $this->connection_state === 'reset';
+    }
+
+    #[Scope]
+    protected function archived(Builder $query): void
+    {
+        $query->where('connection_state', 'reset');
+    }
+
+    #[Scope]
+    protected function unarchived(Builder $query): void
+    {
+        $query->where('connection_state', '!=', 'reset');
+    }
 
     public function setTokenAttribute(string $value): void
     {

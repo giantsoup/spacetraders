@@ -6,11 +6,12 @@ use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\GameObservation;
 use App\Models\Ship;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
 class AgentSynchronizer
 {
-    public function __construct(private SpaceTradersApi $api) {}
+    public function __construct(private SpaceTradersApi $api, private HostLock $lock) {}
 
     public static function identity(string $reset, string $symbol): string
     {
@@ -19,16 +20,12 @@ class AgentSynchronizer
 
     public function guardReset(Agent $agent): void
     {
-        $reset = $this->api->status();
-        if ($agent->reset_id !== null && $agent->reset_id !== $reset) {
-            $agent->update(['connection_state' => 'reset']);
-            AutomationRun::where('agent_id', $agent->id)->whereNotNull('active_agent_id')->update([
-                'state' => 'blocked', 'stop_requested_at' => now(), 'blocked_reason' => 'World reset. Import current credentials and create a new preview.',
-            ]);
-            throw new GameException('World reset detected. Import current credentials; old intentions cannot run.');
+        if ($agent->isArchived()) {
+            throw new GameException('World reset. This agent is archived. Register or import an agent for the current world.');
         }
-        if ($agent->connection_state === 'reset') {
-            throw new GameException('Import current credentials after the world reset.');
+        $reset = $this->api->status();
+        if ($this->archiveForReset($agent, $reset)) {
+            throw new GameException('World reset detected. Import current credentials; old intentions cannot run.');
         }
         if (! $agent->reset_id) {
             $identity = self::identity($reset, $agent->name);
@@ -37,6 +34,39 @@ class AgentSynchronizer
             }
             $agent->update(['reset_id' => $reset, 'canonical_identity' => $identity]);
         }
+    }
+
+    /** @param Collection<int, Agent> $candidates Records captured before the status request. */
+    public function archivePreviousWorlds(Collection $candidates, string $reset): void
+    {
+        foreach ($candidates as $agent) {
+            if ($agent->reset_id === $reset) {
+                continue;
+            }
+            $savedReset = $agent->reset_id;
+            $this->lock->run('agent-'.$agent->id, function () use ($agent, $reset, $savedReset) {
+                $agent->refresh();
+                if ($agent->reset_id === $savedReset) {
+                    $this->archiveForReset($agent, $reset);
+                }
+            });
+        }
+    }
+
+    // Caller holds the agent lock; keep snapshots and intentions as historical records.
+    private function archiveForReset(Agent $agent, string $reset): bool
+    {
+        if ($agent->reset_id === null || $agent->reset_id === $reset) {
+            return false;
+        }
+        DB::transaction(function () use ($agent) {
+            $agent->update(['connection_state' => 'reset']);
+            AutomationRun::where('agent_id', $agent->id)->whereNotNull('active_agent_id')->whereNull('stop_requested_at')->update([
+                'state' => 'blocked', 'stop_requested_at' => now(), 'blocked_reason' => 'World reset. Agent archived; old intentions cannot run.',
+            ]);
+        });
+
+        return true;
     }
 
     // Caller holds the agent lock for synchronization, previews and gameplay writes.

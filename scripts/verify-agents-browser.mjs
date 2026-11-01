@@ -25,9 +25,13 @@ const cli = code => JSON.parse(execFileSync(php, ['-r', `require 'vendor/autoloa
 const auth = JSON.parse(await fs.readFile(`${directory}/browser.json`, 'utf8'));
 cli(`$owner=App\\Models\\Agent::first()->user_id;
     foreach (['reset'=>'RESET_PILOT','invalid_credential'=>'TOKEN_PILOT','unsynchronized'=>'NEW_PILOT'] as $state=>$name) {
-        App\\Models\\Agent::create(['user_id'=>$owner,'name'=>$name,'token'=>'synthetic-offline-only','account_id'=>'synthetic-account','faction'=>'COSMIC','connection_state'=>$state,'reset_id'=>'2026-10-25']);
+        App\\Models\\Agent::create(['user_id'=>$owner,'name'=>$name,'token'=>'synthetic-offline-only','account_id'=>'synthetic-account','faction'=>'COSMIC','connection_state'=>$state,'reset_id'=>$state === 'reset' ? '2026-10-18' : '2026-10-25']);
     }
+    $old=App\\Models\\Agent::create(['user_id'=>$owner,'name'=>'LOCAL','token'=>'synthetic-old-world','account_id'=>'synthetic-account','faction'=>'COSMIC','connection_state'=>'connected','reset_id'=>'2026-10-18','canonical_identity'=>App\\Gameplay\\AgentSynchronizer::identity('2026-10-18','LOCAL'),'credits'=>50000,'synced_at'=>now()]);
+    $saved=App\\Models\\Ship::first();
+    App\\Models\\Ship::create(['agent_id'=>$old->id,'symbol'=>$saved->symbol,'snapshot'=>$saved->snapshot,'observed_at'=>now()]);
     echo json_encode(true);`);
+const oldAgentId = cli("echo json_encode(App\\Models\\Agent::where('name','LOCAL')->where('reset_id','2026-10-18')->sole()->id);");
 const output = path.resolve(process.env.QA_ARTIFACT_DIR || path.join(root, 'storage/app/mvp-evidence/agents'));
 await fs.mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE } : {}) });
@@ -49,17 +53,23 @@ try {
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
     page.on('response', response => { if (response.status() >= 400) errors.push(`${response.status()} ${new URL(response.url()).pathname}`); });
-    const card = name => page.getByRole('listitem').filter({ has: page.getByRole('heading', { name, exact: true }) });
+    const current = page.getByRole('region', { name: /^Current agents/ });
+    const archived = page.getByRole('region', { name: /^Archived agents/ });
+    const card = name => current.getByRole('listitem').filter({ has: page.getByRole('heading', { name, exact: true }) });
     await page.goto(`${origin}/login`);
     await page.getByLabel('Email', { exact: true }).fill(auth.email);
     await page.getByLabel('Password', { exact: true }).fill(auth.password);
     await page.getByRole('button', { name: 'Log in', exact: true }).click();
     await page.waitForURL('**/agents');
     await page.getByRole('heading', { name: 'Agents', exact: true }).waitFor();
-    assert.equal(await page.getByRole('listitem').count(), 4);
+    assert.equal(await current.getByRole('listitem').count(), 3);
+    assert.equal(await archived.getByRole('listitem').count(), 2);
     await card('LOCAL').getByText('Synchronized', { exact: true }).waitFor();
     await card('LOCAL').getByText('100,000 CR', { exact: true }).waitFor();
-    await card('RESET_PILOT').getByText('World reset', { exact: true }).first().waitFor();
+    assert.equal(await archived.getByText('Archived · World reset', { exact: true }).count(), 2);
+    await current.getByRole('heading', { name: 'LOCAL', exact: true }).waitFor();
+    await archived.getByRole('heading', { name: 'LOCAL', exact: true }).waitFor();
+    assert.equal(await archived.getByRole('link', { name: /Import current token/ }).count(), 0);
     await card('TOKEN_PILOT').getByText('Token needs attention', { exact: true }).waitFor();
     await card('NEW_PILOT').getByText('Never', { exact: true }).waitFor();
     assert.equal(await card('NEW_PILOT').getByText('0 CR', { exact: true }).count(), 0);
@@ -75,7 +85,7 @@ try {
     assert.equal(await page.locator('main').evaluate(element => element === document.activeElement), true);
     await page.getByRole('heading', { name: 'Agents', exact: true }).click();
     assert.equal(await page.locator('.skip').evaluate(element => element.getBoundingClientRect().bottom <= 0), true, 'Skip link hides when focus moves into the page');
-    steps.push('Owned login, all four connection states, unknown balance, UTC/local time, dark mode in a light browser, keyboard skip link');
+    steps.push('Owned login, automatic archival, separate current/archived same-name agents, invalid credentials remain current, unknown balance, UTC/local time, dark mode and keyboard skip link');
 
     await page.goto(`${origin}/agents`);
     for (const width of [1440, 768, 390, 320]) {
@@ -91,11 +101,33 @@ try {
     steps.push('Desktop, tablet, 390px and 320px layouts without clipping');
 
     await page.setViewportSize({ width: 1440, height: 1100 });
+    await archived.getByRole('link', { name: 'View archived record for LOCAL from 2026-10-18', exact: true }).click();
+    await page.waitForURL(`**/agents/${oldAgentId}`);
+    await page.getByRole('heading', { name: 'Archived agent · World reset', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Synchronize', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: 'Preview orbit', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: 'Start guided flight', exact: true }).count(), 0);
+    await page.screenshot({ path: path.join(output, 'archived-record-desktop.png'), fullPage: true });
+    await page.setViewportSize({ width: 320, height: 900 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({ path: path.join(output, 'archived-record-mobile.png'), fullPage: true });
+    await page.getByRole('link', { name: 'Back to current and archived agents', exact: false }).click();
+    await page.waitForURL('**/agents#archived-agents');
+    await page.reload();
+    assert.equal(await archived.getByRole('listitem').count(), 2);
+    await page.goto(`${origin}/guide`);
+    assert.equal(await page.getByRole('navigation', { name: 'Tutorial agent' }).getByRole('link', { name: 'LOCAL', exact: true }).count(), 1);
+    await page.goto(`${origin}/agents/${oldAgentId}/guide`);
+    await page.waitForURL('**/agents#archived-agents');
+    steps.push('Archived same-name record is clearly labelled, preserves fleet snapshots, disables gameplay, survives reload, and is excluded from guide choices');
+
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await page.goto(`${origin}/agents`);
     await page.getByRole('link', { name: 'Open flight deck for LOCAL', exact: true }).click();
     await page.waitForURL(`**/agents/${auth.agent_id}`);
     await page.getByRole('heading', { name: 'LOCAL', exact: true }).waitFor();
     await page.goto(`${origin}/agents`);
-    await page.getByRole('link', { name: 'Import current token for RESET_PILOT', exact: true }).click();
+    await page.getByRole('link', { name: 'Import current token for TOKEN_PILOT', exact: true }).click();
     await page.getByLabel('Agent token', { exact: true }).waitFor();
     assert.equal(await page.getByLabel('Account token', { exact: true }).count(), 0);
     await page.getByRole('button', { name: 'Back to Create New Agent', exact: true }).click();
@@ -104,7 +136,8 @@ try {
     await page.getByLabel('Agent token', { exact: true }).fill('synthetic-offline-only');
     await page.getByRole('button', { name: 'Save Existing Agent', exact: true }).click();
     await page.waitForURL('**/agents');
-    assert.equal(await page.getByRole('listitem').count(), 4, 'Import updates the same agent without duplicates');
+    assert.equal(await current.getByRole('listitem').count(), 3, 'Import updates the current-world agent without duplicates');
+    assert.equal(await archived.getByRole('listitem').count(), 2, 'Import preserves the archived same-name record');
     steps.push('Flight deck navigation, direct recovery/import link, form switching, successful offline import');
 
     await page.getByRole('link', { name: 'Register new agent', exact: true }).click();
@@ -117,6 +150,29 @@ try {
     await page.getByRole('link', { name: 'Profile', exact: true }).click();
     await page.waitForURL('**/profile');
     steps.push('Registration, player guide and profile navigation');
+
+    const worldFile = path.join(directory, 'world.json');
+    const world = JSON.parse(await fs.readFile(worldFile, 'utf8'));
+    world.reset = null;
+    await fs.writeFile(worldFile, JSON.stringify(world));
+    await page.goto(`${origin}/agents`);
+    await page.getByText('Could not finish checking for a world reset.', { exact: false }).waitFor();
+    assert.equal(await current.getByRole('listitem').count(), 3);
+    assert.equal(await archived.getByRole('listitem').count(), 2);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: path.join(output, 'agents-status-unavailable.png'), fullPage: true });
+    steps.push('An invalid upstream status keeps both saved sections available and shows a readable retry message');
+    world.reset = '2026-11-01';
+    await fs.writeFile(worldFile, JSON.stringify(world));
+    await page.goto(`${origin}/agents`);
+    await page.getByRole('heading', { name: 'No current agents', exact: true }).waitFor();
+    assert.equal(await current.getByRole('listitem').count(), 0);
+    assert.equal(await archived.getByRole('listitem').count(), 5);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: path.join(output, 'agents-all-archived.png'), fullPage: true });
+    await page.reload();
+    assert.equal(await archived.getByRole('listitem').count(), 5);
+    steps.push('A changed upstream world automatically archives every known old-world agent on list load; archive-only state persists after reload');
 
     cli('App\\Models\\Agent::query()->delete(); echo json_encode(true);');
     await page.goto(`${origin}/agents`);
