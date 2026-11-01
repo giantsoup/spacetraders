@@ -4,7 +4,7 @@ Plan audit task **OPS04**. Status: unimplemented CI. Audited local source `221fb
 
 ## Source requirements
 
-- `docs/server-deployment-plan.md:55`, reviewed local plan published with DOC01.
+- [docs/server-deployment-plan.md:55](https://github.com/giantsoup/spacetraders/blob/plan/doc01-reconcile-automation-documentation-and-cooldown-preview-wording/docs/server-deployment-plan.md#L55)
 - [package.json:1](https://github.com/giantsoup/spacetraders/blob/98b8792ffc0ce36a50ba5b9149b3049f5bd1e6fb/package.json#L1)
 - [scripts/verify-mvp-browser.mjs:1](https://github.com/giantsoup/spacetraders/blob/98b8792ffc0ce36a50ba5b9149b3049f5bd1e6fb/scripts/verify-mvp-browser.mjs#L1)
 
@@ -21,7 +21,7 @@ Plan audit task **OPS04**. Status: unimplemented CI. Audited local source `221fb
 
 ## Dependencies
 
-OPS01, OPS02, OPS03, QA01
+[OPS01](https://github.com/giantsoup/spacetraders/issues/7), [OPS02](https://github.com/giantsoup/spacetraders/issues/9), [OPS03](https://github.com/giantsoup/spacetraders/issues/11), [QA01](https://github.com/giantsoup/spacetraders/issues/3), [OPS05](https://github.com/giantsoup/spacetraders/issues/15)
 
 ## Execution boundary
 
