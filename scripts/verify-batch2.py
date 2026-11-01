@@ -25,6 +25,8 @@ checks = [
     ('deployment-wall-timeout', 'core', [php, 'scripts/verify-deployment.php', 'wall-timeout']),
     ('local-engine', 'core', [php, 'scripts/verify-local-engine.php']),
     ('private-account-browser', 'browser', ['node', 'scripts/verify-private-account-browser.mjs']),
+    ('pages-browser', 'browser', ['node', 'scripts/verify-pages-browser.mjs']),
+    ('native-ship-browser', 'browser', ['node', 'scripts/verify-native-ship-browser.mjs']),
     ('deployment-browser', 'browser', ['node', 'scripts/verify-deployment-browser.mjs']),
     ('adviser-browser', 'browser', ['node', 'scripts/verify-adviser-browser.mjs']),
     ('exploration-browser', 'browser', ['node', 'scripts/verify-exploration-browser.mjs']),
