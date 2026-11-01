@@ -2,7 +2,7 @@
 import AppShell from '@/Layouts/AppShell.vue';
 import { Head, Link } from '@inertiajs/vue3';
 
-defineProps({ canLogin: Boolean, canRegister: Boolean });
+defineProps({ canLogin: Boolean });
 </script>
 
 <template>
@@ -17,10 +17,9 @@ defineProps({ canLogin: Boolean, canRegister: Boolean });
             <section class="app-panel" aria-labelledby="first-flight-heading">
                 <p class="app-eyebrow">FLIGHT SCHOOL</p>
                 <h2 id="first-flight-heading" class="mt-2">Start with your first flight</h2>
-                <p class="app-muted mt-3">Create a client login or sign in, then follow the new player guide from connecting an agent to selling your first cargo.</p>
+                <p class="app-muted mt-3">Sign in with your private client login, then follow the new player guide from connecting an agent to selling your first cargo.</p>
                 <div class="app-form-actions justify-start">
                     <Link v-if="canLogin" :href="route('login')" class="app-button app-button-primary">Log in</Link>
-                    <Link v-if="canRegister" :href="route('register')" class="app-button app-button-secondary">Create client login</Link>
                     <Link :href="route('guide')" class="app-link">New player guide →</Link>
                 </div>
             </section>

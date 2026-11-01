@@ -60,11 +60,31 @@ touch database/database.sqlite
 pnpm build
 ```
 
-Copy the environment template and generate a key only for a new environment. For an existing environment, retain its key, database, session cookie, and cache prefixes. The template uses an owned local SQLite database, file sessions/cache, database queues, and log mail. Select and verify your database before migrations. Serve the application through Herd at `http://spacetraders.test`; use `pnpm dev` for Vite HMR. Herd can manage that Vite process.
+Copy the environment template and generate a key only for a new environment. For an existing environment, retain its key, database, session cookie, and cache prefixes. The template uses an owned local SQLite database, file sessions/cache, database queues, and non-delivering array mail. Select and verify your database before migrations. Serve the application through Herd at `http://spacetraders.test`; use `pnpm dev` for Vite HMR. Herd can manage that Vite process.
 
 The MVP retains the existing kernels, providers and authentication screens, with additive gameplay and queue migrations. Session serialization stays `php` to preserve existing sessions. Cache object unserialization is disabled. Inertia SSR and request-recording devtools are disabled because this application does not use them. Ziggy loads from Composer's package through Vite, with `@routes` providing route metadata.
 
 The frontend uses Tailwind 4 and requires Safari 16.4+, Chrome 111+, or Firefox 128+. Older browsers are outside this build's support. Inertia uses its own HTTP client; `window.axios` remains available separately.
+
+## Private account access
+
+Public client signup, password-reset links, and email verification are disabled, including direct requests. SpaceTraders agent registration after login is separate and remains available. Mail is fixed to the in-memory array transport, even when an older environment selects `log` or `smtp`. No transport delivers or logs mail.
+
+On a separately authorized, migrated SQLite environment, select the explicit PHP runtime above and run:
+
+```bash
+"$PHP_BIN" artisan spacetraders:operator create
+# Recover an existing account instead:
+"$PHP_BIN" artisan spacetraders:operator recover
+```
+
+Use an interactive terminal with recording disabled. The command prompts for the account email, the name on creation, confirmation, and a hidden password twice. Passwords require at least 12 characters and at most 72 bytes. There are no password flags, file inputs, generated passwords, or mail links. Hidden input fails closed without a terminal; `--no-interaction` is rejected. Never put passwords in shell arguments, environment variables, transcripts, or reports.
+
+Creation refuses any existing account and rechecks inside an immediate SQLite transaction. Recovery requires an exact existing email. It changes only that account's password, rotates its remember token, and deletes its old reset tokens. Active signed-in sessions remain available. Login throttling, authenticated password changes, CSRF, and gameplay ownership still apply. The command does not set the local-engine operator ID, import agents, start automation, or provision infrastructure.
+
+After deploying these source changes under a separately approved procedure, rebuild configuration and route caches. An old cached route/config file retains old behavior until rebuilt. Preserve APP_KEY, existing database, and session files. Returning to earlier code reopens public account flows and mail settings, so review access before a rollback.
+
+Run `PHP_BIN="$PWD/scripts/herd-php" PLAYWRIGHT_BROWSERS_PATH="$PWD/storage/app/mvp-evidence/browsers" node scripts/verify-private-account-browser.mjs` for disposable terminal and browser verification. It owns its SQLite database, key, storage, caches, locks, fake provider, and loopback port. Passwords exist only in process memory and terminal input; the fixture is removed afterward. Screenshots are saved under `storage/app/mvp-evidence/ops02`. The terminal driver uses Python 3's standard library.
 
 ## Verify changes
 
@@ -84,7 +104,7 @@ Playwright 1.64.1 is locked as a development dependency. Install its owned brows
 
 A focused browser regression is available with `node scripts/verify-modal.mjs`. Use an existing Playwright installation, or set `PLAYWRIGHT_MODULE` to its module path. Set `QA_URL`, `QA_EMAIL`, and `QA_PASSWORD` for an owned local `.test` account. The check waits for modal transitions to finish, verifies pointer access, submits an intentionally incorrect password, and checks Cancel and Escape. Set `QA_ARTIFACT_DIR` to retain screenshots. It does not delete the account.
 
-PHPUnit uses disposable in-memory SQLite and an isolated test key. External API regression tests fake SpaceTraders responses and prevent stray requests. Upgrade regressions exercise normal request-forgery middleware and Sanctum bearer authentication. The suite covers authentication, profiles, registration, import, validation, token handling, owner-only listings, connection failures, malformed responses, forwarding, pagination, and rate limits. It does not prove live authenticated SpaceTraders acceptance.
+PHPUnit uses disposable in-memory SQLite and an isolated test key. External API regression tests fake SpaceTraders responses and prevent stray requests. Upgrade regressions exercise normal request-forgery middleware and Sanctum bearer authentication. The suite covers authentication, profiles, closed public account routes, secure operator provisioning, agent registration/import, validation, token handling, owner-only listings, connection failures, malformed responses, forwarding, pagination, and rate limits. It does not prove live authenticated SpaceTraders acceptance.
 
 The approved scope and acceptance requirements are in [the migration plan](docs/laravel13-upgrade-plan.md). The historical Laravel upgrade baseline commit `a3ea1d4` remains its rollback point for code and locks. Its old dependencies require PHP 8.2, so it is not a PHP 8.4 fallback. The PHP 8.5 migration has its own [tested PHP 8.4 rollback instructions](docs/issue-7/php85-runtime.md#rollback). It adds no schema migration.
 

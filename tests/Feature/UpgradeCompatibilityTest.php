@@ -41,13 +41,9 @@ class UpgradeCompatibilityTest extends TestCase
     {
         return [
             ['POST', '/login'],
-            ['POST', '/register'],
-            ['POST', '/forgot-password'],
-            ['POST', '/reset-password'],
             ['POST', '/confirm-password'],
             ['PUT', '/password'],
             ['POST', '/logout'],
-            ['POST', '/email/verification-notification'],
             ['POST', '/agents'],
             ['POST', '/agents/storeExisting'],
             ['POST', '/forward'],

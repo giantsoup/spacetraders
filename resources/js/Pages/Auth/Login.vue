@@ -5,12 +5,9 @@ import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import TextInput from '@/Components/TextInput.vue';
-import { Head, Link, useForm } from '@inertiajs/vue3';
+import { Head, useForm } from '@inertiajs/vue3';
 
 defineProps({
-    canResetPassword: {
-        type: Boolean,
-    },
     status: {
         type: String,
     },
@@ -81,13 +78,7 @@ const submit = () => {
             </div>
 
             <div class="app-form-actions">
-                <Link
-                    v-if="canResetPassword"
-                    :href="route('password.request')"
-                    class="app-link text-sm"
-                >
-                    Forgot your password?
-                </Link>
+                <p class="text-sm text-muted">Account access and password recovery are managed by the operator.</p>
 
                 <PrimaryButton :class="{ 'opacity-25': form.processing }" :disabled="form.processing">
                     Log in

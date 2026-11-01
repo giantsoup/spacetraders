@@ -89,9 +89,6 @@ try {
         pages.push(name);
     };
     await capture('welcome', '/');
-    await capture('register', '/register');
-    await capture('forgot-password', '/forgot-password');
-    await capture('reset-password', '/reset-password/synthetic-token?email=pilot%40example.test');
     await capture('login', '/login');
     if (!baseline) {
         assert.equal((await page.goto(origin + '/missing-style-test-page')).status(), 404);
@@ -124,7 +121,6 @@ try {
     await capture('profile', '/profile');
     await capture('confirm-password', '/confirm-password');
     cli('App\\Models\\User::query()->update(["email_verified_at"=>null]); echo json_encode(true);');
-    await capture('verify-email', '/verify-email');
     await capture('guide', '/guide');
     await capture('agent-guide', `/agents/${auth.agent_id}/guide`);
     await capture('flight-deck', `/agents/${auth.agent_id}`);
@@ -212,41 +208,18 @@ try {
         await page.getByLabel('Password', { exact: true }).fill(auth.password);
         await page.getByRole('button', { name: 'Confirm', exact: true }).click();
         await page.waitForURL('**/agents');
-        await page.goto(origin + '/verify-email');
-        await page.getByRole('button', { name: 'Resend Verification Email', exact: true }).click();
-        await page.getByText('A new verification link has been sent to the email address you provided during registration.', { exact: true }).waitFor();
-        steps.push('Password confirmation error/success and verification-email feedback through local handlers; email captured by array transport');
-
-        await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Log out', exact: true }).click();
-        await page.waitForURL(origin + '/');
-        await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Register', exact: true }).click();
-        await page.getByLabel('Name', { exact: true }).fill('New Style QA Pilot');
-        await page.getByLabel('Email', { exact: true }).fill('style-new-pilot@example.test');
-        await page.getByLabel('Password', { exact: true }).fill('style-qa-new-password');
-        await page.getByLabel('Confirm Password', { exact: true }).fill('mismatched-password');
-        await page.getByRole('button', { name: 'Register', exact: true }).click();
-        await page.getByText('The password field confirmation does not match.', { exact: true }).waitFor();
-        await page.getByLabel('Password', { exact: true }).fill('style-qa-new-password');
-        await page.getByLabel('Confirm Password', { exact: true }).fill('style-qa-new-password');
-        await page.getByRole('button', { name: 'Register', exact: true }).click();
-        await page.waitForURL('**/agents');
-        await page.getByRole('heading', { name: 'No agents connected yet', exact: true }).waitFor();
+        steps.push('Password confirmation error and success through the authenticated handler');
         await page.getByRole('button', { name: 'Log out', exact: true }).click();
         await page.waitForURL(origin + '/');
-        await page.goto(origin + '/forgot-password');
-        await page.getByLabel('Email', { exact: true }).fill(auth.email);
-        await page.getByRole('button', { name: 'Email Password Reset Link', exact: true }).click();
-        await page.getByText('We have emailed your password reset link.', { exact: true }).waitFor();
-        const token = cli('echo json_encode(Illuminate\\Support\\Facades\\Password::createToken(App\\Models\\User::where("email", "mvp-pilot@example.test")->firstOrFail()));');
-        await page.goto(`${origin}/reset-password/${token}?email=${encodeURIComponent(auth.email)}`);
-        await page.getByLabel('Password', { exact: true }).fill('style-qa-reset-password');
-        await page.getByLabel('Confirm Password', { exact: true }).fill('style-qa-reset-password');
-        await page.getByRole('button', { name: 'Reset Password', exact: true }).click();
-        await page.waitForURL('**/login');
-        await page.getByText('Your password has been reset.', { exact: true }).waitFor();
-        auth.password = 'style-qa-reset-password';
+        assert.equal(await page.locator('a[href*="register"],a[href*="forgot-password"]').count(), 0);
+        for (const uri of ['/register', '/forgot-password', '/reset-password/synthetic-token', '/verify-email']) {
+            assert.equal((await context.request.get(origin + uri)).status(), 404);
+        }
+        for (const uri of ['/register', '/forgot-password', '/reset-password', '/email/verification-notification']) {
+            assert.equal((await context.request.post(origin + uri)).status(), 404);
+        }
         await login();
-        steps.push('Registration validation/success, empty agent list, POST logout, password-reset request/success and login with the new password');
+        steps.push('Private login navigation, closed registration/reset/verification requests and existing-account login');
     }
     if (baseline) {
         await page.goto(origin + '/agents/create');

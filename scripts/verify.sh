@@ -24,6 +24,8 @@ node --check scripts/verify-mvp-browser.mjs
 node --check scripts/verify-pages-browser.mjs
 node --check scripts/verify-presentation-browser.mjs
 node --check scripts/verify-agents-browser.mjs
+node --check scripts/verify-private-account-browser.mjs
+python3 -c "import ast; ast.parse(open('scripts/verify-operator-terminal.py').read())"
 node --check scripts/verify-modal.mjs
 node --check scripts/verify-automation-browser.mjs
 node --check scripts/verify-opportunities-browser.mjs
@@ -36,6 +38,7 @@ node --check scripts/verify-opportunities-browser.mjs
     app/Models/Agent.php app/Exceptions/Handler.php routes/web.php \
     app/Http/Kernel.php app/Http/Middleware/HandleInertiaRequests.php \
     app/Http/Middleware/PreventRequestForgery.php \
+    routes/auth.php config/mail.php app/Http/Controllers/Auth/AuthenticatedSessionController.php tests/Feature/Auth/PrivateAccountTest.php tests/Feature/Auth/OperatorAccountTest.php \
     config/cache.php config/inertia.php config/sanctum.php config/session.php \
     tests/Feature/AgentTest.php tests/Feature/ForwarderTest.php \
     tests/Feature/UpgradeCompatibilityTest.php \
