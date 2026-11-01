@@ -5,6 +5,16 @@ import SecondaryButton from '@/Components/SecondaryButton.vue';
 
 const props = defineProps({ evidence: Object });
 const number = value => value === null || value === undefined ? 'Unknown' : Number(value).toLocaleString(undefined, { maximumFractionDigits: 3 });
+const requestUsage = computed(() => Object.fromEntries(Object.entries(props.evidence?.request_usage || {}).map(([scope, value]) => {
+    if (!value || typeof value !== 'object') return [scope, value];
+    return [scope, { ...value,
+        available: number(value.available),
+        wait_seconds: number(value.wait_seconds),
+        deferred_seconds: number(value.deferred_seconds),
+        requests_per_second_last_60: number(value.requests_per_second_last_60),
+        blocked_until: value.blocked_until > Date.now() / 1000 ? new Date(value.blocked_until * 1000).toISOString() : 'No active pause',
+    }];
+})));
 const routes = computed(() => (props.evidence?.travel || []).slice(-100));
 const plotted = computed(() => routes.value.filter(row => row.distance !== null && row.fuel_error_mean !== null));
 const maxDistance = computed(() => Math.max(1, ...plotted.value.map(row => row.distance)));
@@ -29,7 +39,7 @@ function download() {
         <SecondaryButton @click="download">Download evidence summary</SecondaryButton>
         <details v-if="evidence.request_usage"><summary>API request usage</summary>
             <p>Host and account budgets share a conservative 1.9 requests per second with a 10-request burst. Server headers can lower these limits. Writes and their preflight reads have reserved capacity ahead of discovery. Counts include manual and automated requests from cooperating local checkouts; other devices remain outside this budget.</p>
-            <DataDetails :value="evidence.request_usage" />
+            <DataDetails :value="requestUsage" />
         </details>
         <details><summary>Travel calibration · {{ evidence.travel.length }} route/configuration groups</summary>
             <p>{{ evidence.travel_limits }}</p>

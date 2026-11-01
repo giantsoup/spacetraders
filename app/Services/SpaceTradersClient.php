@@ -64,10 +64,15 @@ class SpaceTradersClient
         $response = $request->send(strtoupper($method), $path, $data === [] ? [] : [
             strtolower($method) === 'get' ? 'query' : 'json' => $data,
         ]);
+        $budget = app(RequestBudget::class);
         try {
-            app(RequestBudget::class)->observe($response, $token, $account);
-        } catch (GameException) {
-            throw new GameException('Could not save upstream budget. Reconcile before another write.', uncertain: strtolower($method) !== 'get', retryAfter: 10);
+            $budget->observe($response, $token, $account);
+        } catch (\Throwable) {
+            $budget->recordingFailed($response);
+            if ($response->status() === 429 || $response->serverError()) {
+                throw new GameException('Could not save upstream budget. Reconcile before another write.', uncertain: ! $read, retryAfter: 10);
+            }
+            // Budget recording cannot discard a successful write or a known upstream rejection.
         }
 
         if ($read && $this->scopeDepth > 0 && $response->successful()) {

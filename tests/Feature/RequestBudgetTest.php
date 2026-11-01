@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Gameplay\GameException;
 use App\Gameplay\RequestBudget;
 use App\Gameplay\RequestDeferred;
 use App\Services\SpaceTradersClient;
 use GuzzleHttp\Psr7\Response;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
@@ -164,6 +166,101 @@ class RequestBudgetTest extends TestCase
         } catch (RequestDeferred) {
             Http::assertNothingSent();
         }
+    }
+
+    public function test_usage_is_a_side_effect_free_atomic_snapshot_even_while_the_writer_lock_is_held(): void
+    {
+        $budget = $this->budget();
+        $directory = config('gameplay.request_budget_path');
+        $budget->usage('a');
+        $this->assertDirectoryDoesNotExist($directory);
+        $budget->reserve('a', null, 'write');
+        $file = $directory.'/budget.json';
+        $bytes = file_get_contents($file);
+        touch($file, time() - 60);
+        clearstatcache(true, $file);
+        $mtime = filemtime($file);
+        $handle = fopen($directory.'/budget.lock', 'c');
+        flock($handle, LOCK_EX);
+        try {
+            $this->assertSame(1, $budget->usage('a')['host']['requests']);
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+        }
+        clearstatcache(true, $file);
+        $this->assertSame($mtime, filemtime($file));
+        $this->assertSame($bytes, file_get_contents($file));
+    }
+
+    public function test_three_process_response_recording_has_no_losses_or_lock_failures(): void
+    {
+        $directory = config('gameplay.request_budget_path');
+        mkdir($directory, 0700, true);
+        $code = 'require "vendor/autoload.php"; $app=require "bootstrap/app.php"; $app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap();'
+            .'config(["gameplay.request_budget_path"=>$argv[1], "gameplay.request_budget_enabled"=>false]); $b=new App\\Gameplay\\RequestBudget;'
+            .'$r=new Illuminate\\Http\\Client\\Response(new GuzzleHttp\\Psr7\\Response(200, [], "{}")); $failed=0;'
+            .'for($i=0;$i<400;$i++){try{$b->observe($r,"token-".$argv[2],"account-".$argv[2]);}catch(Throwable){$failed++;}usleep(2000);}echo $failed;';
+        $processes = [];
+        foreach ([1, 2, 3] as $number) {
+            $process = new Process([PHP_BINARY, '-r', $code, $directory, (string) $number], base_path(), ['APP_ENV' => 'testing', 'APP_CONFIG_CACHE' => $directory.'/no-config.php']);
+            $process->start();
+            $processes[] = $process;
+        }
+        foreach ($processes as $process) {
+            $process->wait();
+            $this->assertTrue($process->isSuccessful(), $process->getErrorOutput());
+            $this->assertSame('0', trim($process->getOutput()));
+        }
+        $this->assertSame(1200, app(RequestBudget::class)->usage()['host']['responses']);
+    }
+
+    public static function unsavedResponseGuidance(): array
+    {
+        return [[429], [502], [200]];
+    }
+
+    #[DataProvider('unsavedResponseGuidance')]
+    public function test_unsaved_response_guidance_holds_transport_for_the_server_interval(int $status): void
+    {
+        $clock = new RequestBudgetClock;
+        app()->instance(RequestBudget::class, $clock);
+        $file = config('gameplay.request_budget_path').'/budget.json';
+        $saved = null;
+        $headers = $status === 200 ? ['X-RateLimit-Remaining' => '0', 'X-RateLimit-Reset' => (string) ($clock->time + 90)] : ['Retry-After' => '90'];
+        Http::preventStrayRequests();
+        Http::fake(function ($request) use ($file, &$saved, $status, $headers) {
+            if ($request->method() === 'POST') {
+                $saved = file_get_contents($file);
+                file_put_contents($file, '{broken');
+
+                return Http::response(['accepted' => true], $status, $headers);
+            }
+
+            return Http::response(['ok' => true]);
+        });
+        try {
+            $result = app(SpaceTradersClient::class)->request('post', '/my/ships/A/orbit', token: 'a');
+            $this->assertSame(200, $status, 'An unsaved error pause must preserve uncertainty.');
+            $this->assertTrue($result->json('accepted'));
+        } catch (GameException $e) {
+            $this->assertNotSame(200, $status, 'A valid 2xx response must be retained.');
+            $this->assertTrue($e->uncertain);
+        }
+        file_put_contents($file, $saved);
+        $next = new RequestBudgetClock;
+        $next->time = $clock->time + 20;
+        app()->instance(RequestBudget::class, $next);
+        try {
+            app(SpaceTradersClient::class)->request('get', '/');
+            $this->fail('The process hold ended before server guidance allowed.');
+        } catch (RequestDeferred $e) {
+            $this->assertGreaterThanOrEqual($status === 502 ? 160 : 70, $e->retryAfter);
+            Http::assertSentCount(1);
+        }
+        $next->time += 200;
+        $this->assertTrue(app(SpaceTradersClient::class)->request('get', '/')->successful());
+        Http::assertSentCount(2);
     }
 
     private function response(int $status, array $headers): \Illuminate\Http\Client\Response

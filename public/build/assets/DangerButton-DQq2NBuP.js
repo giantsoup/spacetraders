@@ -1,0 +1,1 @@
+import{A as e,O as t,x as n}from"./app-C3sgw9mf.js";import{t as r}from"./_plugin-vue_export-helper-BDNMzG2s.js";var i={},a={class:`app-button app-button-danger`};function o(r,i){return t(),n(`button`,a,[e(r.$slots,`default`)])}var s=r(i,[[`render`,o]]);export{s as t};

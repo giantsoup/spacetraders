@@ -39,6 +39,6 @@ node --check scripts/verify-opportunities-browser.mjs
     config/gameplay.php config/database.php config/queue.php \
     database/migrations/2026_10_31_00000*_*.php database/migrations/2026_11_01_*.php \
     tests/Feature/GameplayTest.php tests/Feature/PlayerGuideTest.php tests/Feature/GameConnectionTest.php app/Http/Controllers/PlayerGuideController.php tests/Support tests/TestCase.php \
-    tests/Feature/AgentArchiveTest.php tests/Feature/LocalAutomationTest.php tests/Feature/OpportunityTest.php tests/Feature/RequestBudgetTest.php tests/Feature/SQLiteConcurrencyTest.php \
+    tests/Feature/AgentArchiveTest.php tests/Feature/LocalAutomationTest.php tests/Feature/OpportunityTest.php tests/Feature/RequestBudgetTest.php tests/Feature/SQLiteConcurrencyTest.php tests/Feature/BudgetResponseTest.php \
     scripts/mvp-fixture.php scripts/verify-mvp-worker.php scripts/verify-environment.php scripts/verify-local-engine.php scripts/verify-automation-worker.php
 git diff --check

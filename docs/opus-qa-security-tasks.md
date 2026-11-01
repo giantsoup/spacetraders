@@ -230,3 +230,187 @@ Latest local results:
 - All four original input documents retain their recorded SHA-256 values. The dirty source checkout was not changed. No service remains installed.
 
 D1 retains uncertain-write reconciliation because the public guide does not guarantee nonexecution. D2 retains the 180-second executable-price policy; the remaining observer/visit limitation is documented. Neither decision silently relaxes live risk or authorizes a live run.
+
+---
+
+## Round 2: independent re-review
+
+| Item | Value |
+| --- | --- |
+| Reviewed head | `05910dca4ff4a530c5b823daa9b68f95efcd2775` (`Fix mining continuation and coordinate local API budgets`) |
+| Correction base | `ae78240e4a4a04543d9cc5e4fd9ae1406a35227e` (round 1 head) |
+| Overall implementation base | `032b822dffab2353189ea683eea81e707702356b` |
+| Reviewer | Claude Opus 5.5, single independent reviewer with no delegation |
+| Date | 2026-11-01 |
+
+### Round 2 verdicts
+
+| Stage | Verdict | Basis |
+| --- | --- | --- |
+| **QA** | **CHANGES REQUESTED** | T1, T2, T4 and T5 are closed. T3 is closed except for one confirmed regression it introduced: T6. Lock contention on the shared host budget, *after* a write has succeeded upstream, turns that write into `uncertain` and blocks the run. |
+| **Security** | **No confirmed vulnerabilities in scope** | The new host store, the account hashing, the log line, the usage telemetry and the export were reviewed and probed. No token is written to disk and no cross-user exposure was found. See below. |
+| **Overall** | **Not accepted at `05910dc`** | Fix T6, then send a new review at the new exact revision. Everything else is acceptable for local fixture scope. |
+
+### Round 2 executed evidence
+
+All of it is synthetic. Every check ran against owned temporary SQLite or in-memory databases, the `FakeSpaceTraders` provider with stray HTTP prevented, and owned loopback servers.
+- No authenticated or live SpaceTraders request.
+- No `.env`, game database, credentials or Herd app touched.
+- `/Users/Taylor/Sites/spacetraders` not modified.
+
+Evidence is in `storage/app/opus-review-r2/`, which git ignores.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| `PNPM_BIN=… bash scripts/verify.sh` (build determinism, store/gameplay/time/tutorial/guided checks, environment and Ignition controls, script syntax, PHPUnit, Pint, `git diff --check`) | **Pass.** 275 tests / 1,425 assertions. Tree unchanged after the rebuild. | `verify-sh.txt` |
+| Round-1 probes rerun at HEAD | P1 now extracts after 181 s with a remote buyer and no observer. The probe "fails" only because it asserted the old blocking behavior, so this inversion is the expected fix. P1 control pass. P2 measured routing rejects 0-fuel samples. P3 preview rejects headroom 500. P4 access controls pass. | `round1-probes-at-head.txt` |
+| Round-2 probes (`ReviewProbeR2Test.php`) | **P5: T6 confirmed.** The upstream orbit executed (1 write, ship `IN_ORBIT`), but the action became `uncertain` ("Could not save upstream budget…"). P5 control: the same write is `confirmed` with no contention. **P5b:** 3 real processes sharing the host store, 1,200 `observe()` calls, 207 and 296 busy-lock failures in two runs; this is an aggressive stress case. P9 is informational (see D3). | `probe-run-1.txt`, `probe-run-2.txt` |
+| `verify-automation-browser.mjs`, **3 serial isolated runs**, each with its own `QA_ARTIFACT_DIR` | **3/3 pass.** `passed=true`, `errors=[]`, `serviceRemoved=true`. No launchd job after each run. Screenshots inspected; dark theme at 1440/390/320. | `browser-automation-{1,2,3}/`, `browser-serial.txt` |
+| `verify-opportunities-browser.mjs` | **Pass.** Scout and 4/4/2 trade journey, evidence export, API-usage panel; dark layout at 1440/390 inspected. | `browser-opportunities/` |
+| `scripts/verify-automation-worker.php` | **Pass.** 5 cases: complete, buy, contract accept/deliver/fulfill. | `automation-worker.txt` |
+| `scripts/verify-mvp-worker.php` | **Pass.** Duplicate delivery, non-replay of uncertain writes, offline Stop, no failed jobs. | `mvp-worker.txt` |
+| Inputs and cleanup | The four untracked inputs match `/tmp/spacetraders-preserved-docs.json`. `git status` is unchanged apart from this report. `launchctl list` shows no SpaceTraders job and `~/Library/LaunchAgents` has no SpaceTraders plist. | `inputs-before.sha256`, `status-before.txt` |
+
+Reproduce the probes:
+
+```sh
+cd /Users/Taylor/.t3/worktrees/spacetraders/feature-local-automation
+php vendor/bin/phpunit --display-all-issues storage/app/opus-review-r2/ReviewProbeR2Test.php
+```
+
+### Round 1 task closure
+
+- [x] **T1 closed.**
+  - **Source:** `CommandRules::inspect`, `mine`/`mine_survey` (`app/Gameplay/CommandRules.php:135-152`) still checks, before the write:
+    - capability;
+    - a fresh hazard read of the waypoint;
+    - continuation fuel and protected credits through `FuelPlanner::miningLeg`;
+    - approved headroom;
+    - cooldown and free cargo.
+  - It no longer requires a buyer quote that cannot be refreshed remotely.
+  - `MiningPlanner::next()` still blocks on outputs with no known buyer (line 125). The sell and refuel steps still use the fresh quote at the buyer.
+  - Navigation in a mining run is limited to the approved site or buyer, in CRUISE, within the same system.
+  - **Tests:** the new 4-case data-provider test (unstaged and staged v2, max 1 and max 3, 181 s travel, 80 s cooldown) passes. The inverted round-1 P1 probe confirms the behavior. The existing hazard-change regressions pass in the full suite.
+- [x] **T2 closed.**
+  - **Root cause:** a DEFERRED SQLite transaction in WAL mode that reads the engine gate and then writes fails with a busy-snapshot error (SQLITE_BUSY_SNAPSHOT) if another connection commits between the read and the write. `busy_timeout` cannot recover from that. This is a known SQLite behavior and is consistent with a rejected `orbit` during preflight.
+  - `transaction_mode=IMMEDIATE` (`config/database.php:47`) is supported by the installed Laravel `SQLiteConnection`.
+  - `SQLiteConcurrencyTest` commits a real competing write on a disk database, giving a deterministic red/green check.
+  - The sanitized log carries only class, relative file, line and action ID, with no message or payload, in a 0600 file.
+  - The heartbeat `upsert` fix is reasonable.
+  - My **3 serial** browser runs all passed. The parent's runs were concurrent, so these serial runs add separate evidence for the acceptance criterion.
+- [~] **T3 closed except T6.**
+  - **Verified:**
+    - host and hashed-account buckets;
+    - type-aware 429 handling: account-only pause versus host pause;
+    - restart and cross-process sharing;
+    - a 60 s simulation within 1.9/s plus burst 10;
+    - header correction that only ever lowers limits;
+    - reserved write/critical capacity;
+    - telemetry with no raw keys;
+    - fail-closed handling of relative or unsafe paths;
+    - read reuse limited to the agent-locked scope and cleared by any write, including rejected ones.
+  - Calls fell from 236 to 227 (−4%). The criterion asked only for a measurable drop, so this meets it, but the gain is small; see O4.
+  - Pacing is disabled in fixtures, which is why the panel shows 3.78 req/s. That is disclosed.
+- [x] **T4 closed.** `FuelPlanner::validSample` is shared by measured routing and the analysis. The data-provider cases cover 0, negative, mismatched and malformed `reported_consumed`. P2 rerun confirms it.
+- [x] **T5 closed.** Both `prepare()` (`AutomationRunner.php:221`) and `compose()` (`:356`) reject headroom outside 1..capacity. Unstaged and staged tests exist, and the P3 rerun confirms it.
+- **D1 and D2:** I accept the documented decisions. Neither weakens live safety.
+
+### Round 2 blocking task
+
+- [ ] **T6. Host-budget lock contention after a successful write marks the write uncertain and blocks the run.** Medium · Confirmed (deterministic probe plus real multi-process stress) · QA regression introduced by the T3 fix
+  - **Source:**
+    - `app/Gameplay/RequestBudget.php:184`: `change()` takes the shared lock with `flock(LOCK_EX | LOCK_NB)` and throws `RequestDeferred('…busy.')` immediately if the lock is held.
+    - `observe()` (`:68`) now runs after **every** response, not only after 429/5xx as at `ae78240`.
+    - `app/Services/SpaceTradersClient.php:67-71` turns any failure in `observe()` into `GameException('Could not save upstream budget. Reconcile before another write.', uncertain: true)` for non-GET requests.
+    - `ShipCommandExecutor::execute` then marks the `sending` action `Uncertain` and blocks the run, even though upstream returned 2xx and the body was valid.
+  - **Contenders on the same lock:**
+    - any other worker's `reserve()`/`observe()`, including other checkouts, which is now by design;
+    - every dashboard poll: `usePoll(5000…'intelligence')` (`resources/js/Pages/Agent/Dashboard.vue:99`) → `EvidenceAnalysis::report` → `RequestBudget::usage()` (`app/Gameplay/EvidenceAnalysis.php:59`), which takes the same lock and rewrites the file every 5 s.
+
+    An operator watching a running automation is therefore a regular contender.
+  - **Reproduction:**
+    - `ReviewProbeR2Test::test_p5_budget_lock_contention_after_successful_write_marks_it_uncertain`: the upstream orbit is applied (`writes=1`, `IN_ORBIT`) and the local action is `uncertain`. The control without contention confirms.
+    - `test_p5b_real_multi_process_contention_rate`: 3 OS processes on one store got 207/1,200 and 296/1,200 immediate busy failures. That is a stress rate, not a live estimate, but a nonzero rate is enough for long runs to hit it.
+  - **Why it matters:**
+    - No write is replayed, because the failure happens after transport, so it fails safe.
+    - But each occurrence discards a valid response: credits, cargo, transaction. It needs manual reconciliation and stops automation.
+    - That is the same class of availability failure T3 was meant to remove.
+    - It contradicts `docs/exploration-implementation.md:135` ("A … busy store defers transport") and README:143, which describe busy only as a pre-transport deferral.
+  - **Required fix:**
+    - Acquire the budget lock with a bounded blocking wait. For example, retry `LOCK_NB` with short sleeps up to about 1–2 s, or use `LOCK_EX` under a short timeout. The critical section is a few milliseconds.
+    - After a 2xx write, telemetry or budget persistence failure must not discard the confirmed result. Record it best-effort and log it sanitized.
+    - If a 429/5xx pause cannot be persisted, keep the existing uncertain semantics for that non-2xx response. Also block further transport for this process, in memory, for that interval.
+    - Make `usage()` read-only. Do not rewrite the state on every dashboard poll; a shared lock or a lock-free snapshot read of the atomically replaced file is enough.
+    - Correct the docs if the behavior differs.
+  - **Acceptance:**
+    1. P5 (another holder of `budget.lock` during the post-response `observe()` of a successful write, released within the bounded wait) ends `confirmed` with one upstream write.
+    2. A holder that exceeds the bound on a **2xx** write still ends `confirmed`, with a sanitized telemetry-loss log line.
+    3. A 429/5xx write that cannot persist its pause stays `uncertain`, and no further transport starts in that process until the pause expires.
+    4. The P5b-style 3-process stress test reports 0 failures on post-transport observe.
+    5. Pre-transport `reserve()` contention still returns the intent to `pending` (the existing test passes).
+    6. `usage()` does not modify `budget.json` (check mtime or content).
+    7. Full suite, `verify.sh` and both browser scripts pass.
+
+### Decisions or live gates (not blockers)
+
+- [ ] **D3. `X-RateLimit-Remaining` semantics are unverified live.**
+  - `observe()` clamps tokens to `Remaining − 1` and holds `server_remaining` until `Reset`.
+  - If the live header reports the per-second pool (for example `Remaining: 1`, with `Reset` about 1 s later), every following request in that window defers, including writes. P9 showed write, critical and discovery all deferred.
+  - That would underuse the allowance rather than exceed it, so it fails safe.
+  - The public guide could not be fetched in readable form during this review. Before any live activation, confirm the semantics against real headers on a read-only call, or treat `Remaining` as advisory unless it is 0.
+
+### Optional enhancements (not required)
+
+- [ ] **O4.** Calls fell only 4% (236 → 227). The reset guard `GET /` and `/my/agent` still run about once per write. Reusing them within one dispatch, or caching the reset check for some seconds, would cut more.
+- [ ] **O5.** The usage panel shows raw floats and epoch seconds (`Available 0.873`, `Blocked until 0`). Formatting `blocked_until` as local time and rounding `available` would make it readable.
+- [ ] **O6.** The mining preview reads "Up to 1 extractions per trip": a pluralization issue. Dashboard synchronize runs inside `locked()`, so it gets `critical` priority rather than discovery. That is acceptable, but differs from the round-1 lane wording.
+- [ ] **O7.** A corrupt `budget.json` defers everything indefinitely, which is fail-closed. Document how an operator can recover it, distinct from "do not delete to bypass a pause".
+- O1–O3 from round 1 remain optional.
+
+### Round 2 security assessment
+
+| Component | Disposition |
+| --- | --- |
+| Host budget store | Source and test reviewed. Requires an absolute path; directory 0700, owner must equal the effective UID; no symlinks for the directory, state or lock files; file 0600 by atomic temporary-file replace. Raw tokens and account IDs are never written; buckets use unsalted SHA-256 of `account:` or `token:` identifiers. A test showed the token and account strings are absent from the file. The design is single-user and local; other OS users cannot read the store. |
+| Account isolation | An account-type 429 pauses only that bucket; IP, unknown and 5xx pause the host (tests plus source). A missing `account_id` falls back to the token hash, which is acceptable. |
+| Read reuse | The key includes path, query and token, so nothing crosses agents. Reuse exists only inside `locked()`/`guarded()` scopes and is cleared by any write and at scope exit. The client and API are `scoped` singletons, reset between queue jobs and requests. Error responses are not cached. |
+| Usage telemetry and export | Owner-only Inertia prop and client-side export. Contains counts, rates and timestamps only, with no keys or hashes. Host totals aggregate every local agent, which is acceptable for the single-operator scope (README:170). |
+| `gameplay.log` | Class, relative path, line and action ID only. No exception message, payload or token. File mode 0600 at creation. |
+| Engine propagation | `SPACETRADERS_REQUEST_BUDGET_PATH` is passed to the engine environment explicitly. No secret is added to the plist environment. |
+| Routes, authorization, dependencies | No route or dependency change since `ae78240`. The round-1 P4 rerun passes. |
+
+T6 is a robustness and availability defect, not a confidentiality or authorization vulnerability.
+
+### Round 2 decision
+
+**CHANGES REQUESTED at `05910dca4ff4a530c5b823daa9b68f95efcd2775`.** The only open blocking task is T6. Once T6 meets its acceptance cases, request a fresh review at the new exact SHA. D3 must be resolved before any live activation, which remains unauthorized.
+
+
+## Parent response to round 2, pending independent re-review
+
+Opus's round-2 verdict and T6 checkbox remain unchanged above. The next local correction implements T6; this section records evidence for the next review rather than claiming acceptance.
+
+| T6 acceptance case | Implementation and evidence |
+| --- | --- |
+| Short contention after a 2xx write | Writers retry the nonblocking lock with 5 ms sleeps for at most 1.5 seconds, measured by a monotonic clock. A real competing process holds it for 150 ms; the orbit confirms once, with all response counters recorded. |
+| Contention exceeds the bound after a 2xx write | A real holder runs for 1.9 seconds. The valid orbit still confirms once. Its one missing response counter is visible in the test, a private warning records only the HTTP status, and further process transport pauses. Redispatch adds no write. |
+| Unsaved 429/5xx pause | The action remains uncertain. An in-memory hold, shared by subsequent budget instances in the same PHP process for that store, blocks all further transport for at least ten seconds or the required response pause, whichever is later. Tests cover 429, 503, a 502 three-minute minimum, Retry-After 90 s and a 2xx exhausted/reset response. The hold expires under a simulated clock. Healthy persisted account pauses retain the existing account isolation. |
+| Three-process stress | The suite runs 1,200 actual response recordings across three processes, asserts zero failures and all 1,200 counters present. Opus's original P5b scratch probe also now reports 0/1,200 busy failures. |
+| Pre-transport contention | The existing pending-intent test now holds the budget lock before execution rather than during a GET response. It still returns to pending with no mutation, then confirms once after release. |
+| Side-effect-free usage | Usage reads the atomically replaced snapshot without locking or writing. A test verifies no store creation for an empty read, unchanged bytes and mtime, and successful reading while the writer lock is held. |
+| Application checks | Final standard verification passes **286 tests / 1,491 assertions**, asset build determinism, application checks, environment controls, Pint and diff checks. Browser and worker evidence is recorded below. |
+
+The client treats response-budget recording as an optional post-response operation. Its exception boundary catches budget errors of any class, then retains successful responses and known non-rate-limit rejections. It continues normal game-response validation: a malformed 2xx extraction still becomes uncertain. A regression proves both the valid and malformed cases. Warning failures cannot override an upstream result either.
+
+Successful-result preservation does not erase the failed budget write. It logs the failure without message, token, account ID, payload or SQL, and uses the process-local hold. This unsaved hold is not inherited by other processes or a restart; the durable pre-transport admission still accounts for the attempt. A 429/5xx response whose pause cannot persist retains uncertain-write handling. This is documented explicitly.
+
+Small optional review items were addressed alongside T6:
+
+- O5: usage values round for display and active pause dates use the existing local-time presentation; no active pause is labeled. Exported numeric source values are unchanged.
+- O6: the one-extraction preview now uses the singular wording.
+- O7: documented a stopped-process, preserved-evidence and cooldown-based corrupt-file recovery procedure. It does not clear action uncertainty or authorize gameplay.
+- D3 remains a live validation gate. No authenticated header discovery occurred and no throughput guarantee is claimed. O4 read reduction remains optional; dispatch keeps its fresh reset and balance checks.
+
+Evidence is under `storage/app/review-fixes-r3/`: standard verification log, T6 red/green tests, Opus P5b rerun, both real-worker suites, and browser artifact directories. All calls used synthetic fixtures and owned databases. Original input checksums and cleanup are checked again before the next review.
+
+Final parent reruns for the T6 correction: both browser journeys pass with no console errors, the existing engine journey reports serviceRemoved=true, and both real-worker suites pass. The 390px dark usage panel and mining preview were visually inspected. All four protected input hashes still match. Fresh independent acceptance remains pending.

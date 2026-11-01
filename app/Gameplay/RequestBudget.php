@@ -3,11 +3,20 @@
 namespace App\Gameplay;
 
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Log;
 
 class RequestBudget
 {
+    private static array $processPauses = [];
+
     public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery'): void
     {
+        $key = $this->storeKey();
+        $localDelay = (self::$processPauses[$key] ?? 0) - $this->now();
+        if ($localDelay > 0) {
+            throw new RequestDeferred('SpaceTraders transport is paused after response-budget recording failed.', (int) ceil($localDelay));
+        }
+        unset(self::$processPauses[$key]);
         $waited = 0.0;
         do {
             $delay = $this->change(function (&$state) use ($token, $account, $priority, $waited) {
@@ -89,10 +98,7 @@ class RequestBudget
                 $bucket['capacity'] = min($bucket['capacity'], max(1, (int) $burst - 1));
             }
             $remaining = $response->header('X-RateLimit-Remaining');
-            $reset = $response->header('X-RateLimit-Reset');
-            $resetAt = is_numeric($reset)
-                ? ((float) $reset >= 1000000000 && (float) $reset < 10000000000 ? (float) $reset : 0)
-                : (strtotime($reset ?: '') ?: 0);
+            $resetAt = $this->resetAt($response);
             if (is_numeric($remaining) && (float) $remaining >= 0) {
                 $bucket['tokens'] = min($bucket['tokens'], max(0, (float) $remaining - 1));
                 if ($resetAt > $now && $resetAt <= $now + 3600) {
@@ -103,15 +109,12 @@ class RequestBudget
             $bucket['tokens'] = min($bucket['tokens'], $bucket['capacity']);
             $exhausted = is_numeric($remaining) && (float) $remaining <= 0;
             if ($response->status() === 429 || $response->serverError() || $exhausted) {
-                $retry = $response->header('Retry-After');
-                $delay = is_numeric($retry) ? max(0, (float) $retry) : max(0, (strtotime($retry ?: '') ?: 0) - $now);
                 // Unknown cloud limits and 5xx affect the host. Explicit account limits affect only that account.
                 if ($response->serverError() || ($response->status() === 429 && $type !== 'account')) {
                     $scope = 'host';
                     $bucket = &$state['buckets'][$scope];
                 }
-                $minimum = $response->status() === 502 ? 180 : 5;
-                $bucket['blocked_until'] = max($bucket['blocked_until'], $now + min(3600, max($minimum, $delay, $resetAt - $now)) + 0.25);
+                $bucket['blocked_until'] = max($bucket['blocked_until'], $this->pauseUntil($response));
                 $bucket['tokens'] = 0;
                 $bucket['updated_at'] = $bucket['blocked_until'];
             }
@@ -120,19 +123,18 @@ class RequestBudget
 
     public function usage(?string $token = null, ?string $account = null): array
     {
-        return $this->change(function (&$state) use ($token, $account) {
-            $result = [];
-            foreach ($this->keys($token, $account) as $index => $key) {
-                $bucket = $this->refill($state['buckets'][$key] ?? [], $this->now());
-                $result[$index === 0 ? 'host' : 'account'] = $bucket['usage'] + [
-                    'requests_last_60_seconds' => count($bucket['recent']), 'requests_per_second_last_60' => count($bucket['recent']) / 60,
-                    'sustained_per_second' => $bucket['rate'], 'burst_capacity' => $bucket['capacity'],
-                    'available' => $bucket['tokens'], 'blocked_until' => $bucket['blocked_until'],
-                ];
-            }
+        $state = $this->readState($this->directory(false).'/budget.json');
+        $result = [];
+        foreach ($this->keys($token, $account) as $index => $key) {
+            $bucket = $this->refill($state['buckets'][$key] ?? [], $this->now());
+            $result[$index === 0 ? 'host' : 'account'] = $bucket['usage'] + [
+                'requests_last_60_seconds' => count($bucket['recent']), 'requests_per_second_last_60' => count($bucket['recent']) / 60,
+                'sustained_per_second' => $bucket['rate'], 'burst_capacity' => $bucket['capacity'],
+                'available' => $bucket['tokens'], 'blocked_until' => $bucket['blocked_until'],
+            ];
+        }
 
-            return $result;
-        });
+        return $result;
     }
 
     private function keys(?string $token, ?string $account): array
@@ -165,34 +167,110 @@ class RequestBudget
         usleep((int) ceil($seconds * 1000000));
     }
 
-    private function change(callable $work): mixed
+    public function recordingFailed(Response $response): void
+    {
+        $key = $this->storeKey();
+        self::$processPauses[$key] = max(self::$processPauses[$key] ?? 0, $this->now() + 10, $this->pauseUntil($response));
+        try {
+            Log::build(['driver' => 'single', 'path' => storage_path('logs/gameplay.log'), 'permission' => 0600])
+                ->warning('SpaceTraders response budget recording failed. Process transport paused.', ['http_status' => $response->status()]);
+        } catch (\Throwable) {
+            // Logging is best-effort; it must not discard an upstream result either.
+        }
+    }
+
+    private function storeKey(): string
+    {
+        return hash('sha256', serialize(config('gameplay.request_budget_path')));
+    }
+
+    private function pauseUntil(Response $response): float
+    {
+        $remaining = $response->header('X-RateLimit-Remaining');
+        $exhausted = is_numeric($remaining) && (float) $remaining <= 0;
+        if ($response->status() !== 429 && ! $response->serverError() && ! $exhausted) {
+            return 0;
+        }
+        $now = $this->now();
+        $retry = $response->header('Retry-After');
+        $delay = is_numeric($retry) ? max(0, (float) $retry) : max(0, (strtotime($retry ?: '') ?: 0) - $now);
+
+        return $now + min(3600, max($response->status() === 502 ? 180 : 5, $delay, $this->resetAt($response) - $now)) + 0.25;
+    }
+
+    private function resetAt(Response $response): float
+    {
+        $reset = $response->header('X-RateLimit-Reset');
+
+        return is_numeric($reset)
+            ? ((float) $reset >= 1000000000 && (float) $reset < 10000000000 ? (float) $reset : 0)
+            : (float) (strtotime($reset ?: '') ?: 0);
+    }
+
+    private function directory(bool $create): string
     {
         $directory = config('gameplay.request_budget_path');
         if (! is_string($directory) || ! str_starts_with($directory, '/')) {
             throw new RequestDeferred('Host request-budget storage requires an absolute shared path.', 10);
         }
-        if ((! is_dir($directory) && ! @mkdir($directory, 0700, true) && ! is_dir($directory)) || is_link($directory) || fileowner($directory) !== posix_geteuid()) {
-            throw new RequestDeferred('Host request-budget storage is unavailable.', 10);
-        }
-        @chmod($directory, 0700);
-        $file = $directory.'/budget.json';
-        $lock = $directory.'/budget.lock';
-        if (is_link($file) || is_link($lock)) {
+        if (is_link($directory)) {
             throw new RequestDeferred('Host request-budget storage is unsafe.', 10);
         }
-        $handle = @fopen($lock, 'c');
-        if (! $handle || ! flock($handle, LOCK_EX | LOCK_NB)) {
-            if ($handle) {
-                fclose($handle);
+        if (! is_dir($directory)) {
+            if (! $create) {
+                return $directory;
             }
-            throw new RequestDeferred('Host request-budget storage is busy.', 1);
+            if (! @mkdir($directory, 0700, true) && ! is_dir($directory)) {
+                throw new RequestDeferred('Host request-budget storage is unavailable.', 10);
+            }
         }
+        if (fileowner($directory) !== posix_geteuid()) {
+            throw new RequestDeferred('Host request-budget storage is unavailable.', 10);
+        }
+        if ($create) {
+            @chmod($directory, 0700);
+        }
+        if (is_link($directory.'/budget.json') || is_link($directory.'/budget.lock')) {
+            throw new RequestDeferred('Host request-budget storage is unsafe.', 10);
+        }
+
+        return $directory;
+    }
+
+    private function readState(string $file): array
+    {
         try {
-            @chmod($lock, 0600);
             $state = is_file($file) ? json_decode(file_get_contents($file), true, flags: JSON_THROW_ON_ERROR) : ['buckets' => []];
             if (! is_array($state) || ! isset($state['buckets']) || ! is_array($state['buckets'])) {
                 throw new \RuntimeException('Invalid request-budget state.');
             }
+
+            return $state;
+        } catch (\Throwable) {
+            throw new RequestDeferred('Host request-budget state could not be read.', 10);
+        }
+    }
+
+    private function change(callable $work): mixed
+    {
+        $directory = $this->directory(true);
+        $file = $directory.'/budget.json';
+        $lock = $directory.'/budget.lock';
+        $handle = @fopen($lock, 'c');
+        if (! $handle) {
+            throw new RequestDeferred('Host request-budget storage is unavailable.', 10);
+        }
+        $deadline = hrtime(true) + 1500000000;
+        while (! flock($handle, LOCK_EX | LOCK_NB)) {
+            if (hrtime(true) >= $deadline) {
+                fclose($handle);
+                throw new RequestDeferred('Host request-budget storage is busy.', 1);
+            }
+            usleep(5000);
+        }
+        try {
+            @chmod($lock, 0600);
+            $state = $this->readState($file);
             $result = $work($state);
             $temporary = tempnam($directory, '.budget-');
             if (! $temporary || file_put_contents($temporary, json_encode($state, JSON_THROW_ON_ERROR)) === false || ! chmod($temporary, 0600) || ! rename($temporary, $file)) {

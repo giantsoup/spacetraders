@@ -706,15 +706,8 @@ class GameplayTest extends TestCase
         $run = $this->miningRun();
         app(AutomationRunner::class)->advance($run->id);
         $action = ShipAction::where('state', 'pending')->firstOrFail();
-        $held = null;
-        Http::globalRequestMiddleware(function ($request) use (&$held) {
-            if ($request->getMethod() === 'GET' && str_ends_with((string) $request->getUri(), '/my/ships/LOCAL-1') && ! $held) {
-                $held = fopen(config('gameplay.request_budget_path').'/budget.lock', 'c');
-                flock($held, LOCK_EX | LOCK_NB);
-            }
-
-            return $request;
-        });
+        $held = fopen(config('gameplay.request_budget_path').'/budget.lock', 'c');
+        flock($held, LOCK_EX | LOCK_NB);
         try {
             app(ShipCommandExecutor::class)->execute($action->id);
             $this->assertSame(ActionState::Pending, $action->fresh()->state);

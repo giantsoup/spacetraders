@@ -375,7 +375,7 @@ class AutomationRunner
             if ($limits['reserve'] < $route['minimum_reserve'] || $limits['max_spend'] < $route['fuel_ceiling']) {
                 throw new GameException('Mining reserve or fuel spending ceiling is below the verified route requirement.');
             }
-            $plan['ordered_actions'] = ['Orbit and travel to the selected extraction site if needed', 'Up to '.$limits['max_extractions'].' extractions per trip within approved headroom and site-time limits', 'Wait for server cooldown and travel to the approved buyer', 'Dock and sell only attributable yields in fresh-quote batches', 'Refuel within approved bounds; check each cycle contribution before any approved repeat'];
+            $plan['ordered_actions'] = ['Orbit and travel to the selected extraction site if needed', 'Up to '.$limits['max_extractions'].' '.($limits['max_extractions'] === 1 ? 'extraction' : 'extractions').' per trip within approved headroom and site-time limits', 'Wait for server cooldown and travel to the approved buyer', 'Dock and sell only attributable yields in fresh-quote batches', 'Refuel within approved bounds; check each cycle contribution before any approved repeat'];
             $sameQuote = ($candidate['quote_signature'] ?? null) === $plan['market_quote_signature'];
             $plan['estimated_net'] = $sameQuote ? $candidate['estimated_net'] : null;
             $plan['trial_required'] = ! $sameQuote || $candidate['trial_required'];
