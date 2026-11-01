@@ -121,6 +121,9 @@ final class FakeSpaceTraders
             if ($path === '/my/ships' || preg_match('~/waypoints$~', $path)) {
                 $rows = $path === '/my/ships' ? $world['ships'] : $world['waypoints'];
                 $page = (int) ($args['page'] ?? 1);
+                if ($path !== '/my/ships' && ($world['fail_waypoint_page'] ?? null) === $page) {
+                    return [['error' => ['code' => 503]], 503];
+                }
                 // Deliberately small pages exercise pagination even with few fixtures.
                 $size = $world['page_size'];
 
@@ -129,13 +132,17 @@ final class FakeSpaceTraders
             if (str_ends_with($path, '/market')) {
                 $symbol = explode('/', $path)[4];
                 $visible = collect($world['ships'])->contains(fn ($s) => $s['nav']['waypointSymbol'] === $symbol);
+                $goods = $world['market_goods'][$symbol] ?? $world['goods'];
 
-                return [['data' => ['symbol' => $symbol, 'imports' => [], 'exports' => [], 'exchange' => array_map(fn ($g) => ['symbol' => $g['symbol']], $world['goods']), 'transactions' => $world['transactions']] + ($visible ? ['tradeGoods' => $world['goods']] : [])], 200];
+                return [['data' => ['symbol' => $symbol, 'imports' => [], 'exports' => [], 'exchange' => array_map(fn ($g) => ['symbol' => $g['symbol']], $goods), 'transactions' => $world['transactions']] + ($visible ? ['tradeGoods' => $goods] : [])], 200];
             }
             if (str_ends_with($path, '/shipyard')) {
                 $symbol = explode('/', $path)[4];
 
                 return [['data' => ['symbol' => $symbol, 'shipTypes' => [['type' => 'SHIP_MINING_DRONE']], 'ships' => [$world['offer']], 'transactions' => $world['transactions']]], 200];
+            }
+            if (preg_match('~^/systems/[^/]+/waypoints/([^/]+)$~', $path, $matches)) {
+                return [['data' => collect($world['waypoints'])->firstWhere('symbol', $matches[1])], 200];
             }
             if (preg_match('~^/my/ships/([^/]+)$~', $path, $matches)) {
                 foreach ($world['ships'] as &$ship) {
@@ -161,7 +168,7 @@ final class FakeSpaceTraders
 
             return [['data' => ['ship' => $ship, 'agent' => ['credits' => $world['credits']], 'transaction' => ['price' => $price]]], 201];
         }
-        if (! preg_match('~^/my/ships/([^/]+)/([^/]+)$~', $path, $match)) {
+        if (! preg_match('~^/my/ships/([^/]+)/(.+)$~', $path, $match)) {
             return [['error' => ['code' => 404]], 404];
         }
         foreach ($world['ships'] as &$ship) {
@@ -169,6 +176,21 @@ final class FakeSpaceTraders
                 continue;
             }
             $command = $match[2];
+            if ($command === 'survey') {
+                $ship['cooldown'] = ['remainingSeconds' => $world['cooldown_seconds'], 'expiration' => now()->addSeconds($world['cooldown_seconds'])->toIso8601String()];
+
+                return [['data' => ['cooldown' => $ship['cooldown'], 'surveys' => $world['surveys'] ?? []]], 201];
+            }
+            if ($command === 'transfer') {
+                self::cargo($ship, $args['tradeSymbol'], -$args['units']);
+                foreach (array_keys($world['ships']) as $index) {
+                    if ($world['ships'][$index]['symbol'] === $args['shipSymbol']) {
+                        self::cargo($world['ships'][$index], $args['tradeSymbol'], $args['units']);
+
+                        return [['data' => ['cargo' => $ship['cargo'], 'targetCargo' => $world['ships'][$index]['cargo']]], 200];
+                    }
+                }
+            }
             if (in_array($command, ['orbit', 'dock'], true)) {
                 $ship['nav']['status'] = $command === 'orbit' ? 'IN_ORBIT' : 'DOCKED';
 
@@ -178,11 +200,14 @@ final class FakeSpaceTraders
                 $ship['nav']['waypointSymbol'] = $args['waypointSymbol'];
                 $ship['nav']['status'] = 'IN_TRANSIT';
                 $ship['nav']['route']['arrival'] = now()->addSeconds($world['travel_seconds'])->toIso8601String();
-                $ship['fuel']['current'] -= 5;
+                $ship['fuel']['current'] -= $world['fuel_consumption'] ?? 5;
 
                 return [['data' => ['nav' => $ship['nav'], 'fuel' => $ship['fuel']]], 200];
             }
-            if ($command === 'extract') {
+            if (in_array($command, ['extract', 'extract/survey'], true)) {
+                if ($command === 'extract/survey' && ($world['survey_exhausted'] ?? false)) {
+                    return [['error' => ['code' => 4224]], 400];
+                }
                 $yield = $world['yields'][count(array_filter($world['writes'], fn ($w) => str_ends_with($w['path'], '/extract'))) % count($world['yields'])];
                 self::cargo($ship, $yield['symbol'], $yield['units']);
                 $ship['cooldown'] = ['remainingSeconds' => $world['cooldown_seconds'], 'expiration' => now()->addSeconds($world['cooldown_seconds'])->toIso8601String()];
@@ -196,7 +221,7 @@ final class FakeSpaceTraders
                 return [['data' => ['cargo' => $ship['cargo'], 'cooldown' => $ship['cooldown'], 'extraction' => ['yield' => $yield]]], 200];
             }
             $symbol = $args['symbol'] ?? 'FUEL';
-            $good = collect($world['goods'])->firstWhere('symbol', $symbol);
+            $good = collect($world['market_goods'][$ship['nav']['waypointSymbol']] ?? $world['goods'])->firstWhere('symbol', $symbol);
             if (! $good) {
                 return [['error' => ['code' => 4600]], 400];
             }

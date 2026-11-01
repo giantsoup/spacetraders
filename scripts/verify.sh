@@ -19,6 +19,7 @@ node --check scripts/verify-pages-browser.mjs
 node --check scripts/verify-presentation-browser.mjs
 node --check scripts/verify-agents-browser.mjs
 node --check scripts/verify-modal.mjs
+node --check scripts/verify-opportunities-browser.mjs
 "$php_bin" scripts/verify-environment.php
 "$php_bin" vendor/bin/phpunit --display-all-issues
 "$php_bin" vendor/bin/pint --test \
@@ -36,7 +37,9 @@ node --check scripts/verify-modal.mjs
     app/Http/Controllers/ProfileController.php app/Http/Controllers/AutomationRunController.php app/Models app/Providers/AppServiceProvider.php app/Providers/RouteServiceProvider.php \
     config/gameplay.php config/database.php config/queue.php \
     database/migrations/2026_10_31_00000*_*.php \
+    database/migrations/2026_11_01_000001_add_observation_history.php \
     tests/Feature/GameplayTest.php tests/Feature/PlayerGuideTest.php tests/Feature/GameConnectionTest.php app/Http/Controllers/PlayerGuideController.php tests/Support tests/TestCase.php \
     tests/Feature/AgentArchiveTest.php \
+    tests/Feature/OpportunityTest.php \
     scripts/mvp-fixture.php scripts/verify-mvp-worker.php scripts/verify-environment.php
 git diff --check
