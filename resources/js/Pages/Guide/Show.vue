@@ -6,7 +6,7 @@ import TutorialCourse from '@/Components/TutorialCourse.vue';
 import GameConnection from '@/Components/GameConnection.vue';
 import { glossary } from '@/tutorial.js';
 
-defineProps({ agent: { type: Object, default: null }, agents: { type: Array, required: true } });
+defineProps({ localAutomation: Boolean, agent: { type: Object, default: null }, agents: { type: Array, required: true } });
 </script>
 
 <template>
@@ -44,15 +44,29 @@ defineProps({ agent: { type: Object, default: null }, agents: { type: Array, req
                 <details>
                     <summary>When a command does not move forward</summary>
                     <p>Preview means awaiting your approval. Pending means saved for the local worker. Sending means the upstream request may be in flight. Confirmed means the action was accepted. Failed or blocked needs the displayed reason resolved. Uncertain means inspect and reconcile before more writes.</p>
-                    <p>Run the queue worker from this project’s folder if approved commands stay pending. Optional mining automation also needs the scheduler and SPACETRADERS_AUTOMATION_ENABLED=true in the local environment. Leave automation disabled until you are ready for a bounded trip.</p>
-                    <pre>php artisan queue:work database --queue=spacetraders --sleep=1 --tries=1 --timeout=120</pre>
-                    <pre>php artisan schedule:work</pre>
-                    <p>Use separate terminals for these processes. Stop automation in the flight deck and let in-flight work settle before stopping the processes. Closing a tab does not stop them. Mac sleep pauses execution. A stale heartbeat can also mean an idle worker, so inspect the action status.</p>
+                    <template v-if="localAutomation">
+                        <p>Start local engine starts this checkout’s owned worker and scheduler. It approves no gameplay. Create a fresh preview and approve the exact run or manual command afterward.</p>
+                        <p>Stop automation keeps the engine available for manual play after reserved work settles. End session cancels unsent approvals and waits for owned processes to exit. A restart requires fresh previews.</p>
+                        <p>Closing a tab leaves the engine running. Sleep pauses new commands while accepted travel continues on the game server. A missed contract deadline cannot be recovered by replaying commands.</p>
+                    </template>
+                    <template v-else>
+                        <p>Run the queue worker from this project’s folder if approved commands stay pending. Optional mining automation also needs the scheduler and SPACETRADERS_AUTOMATION_ENABLED=true in the local environment. Leave automation disabled until you are ready for a bounded trip.</p>
+                        <pre>php artisan queue:work database --queue=spacetraders --sleep=1 --tries=1 --timeout=120</pre>
+                        <pre>php artisan schedule:work</pre>
+                        <p>Use separate terminals for these processes. Stop automation and let in-flight work settle before stopping the processes. Closing a tab does not stop them.</p>
+                    </template>
+                </details>
+                <details v-if="localAutomation">
+                    <summary>Investigate and approve an automated run</summary>
+                    <p>Choose Mining or Contracts in New automated run. Investigation only reads game state. Missing prices require a separate manual scouting preview. A mining trial has unknown earnings until useful confirmed yield history exists.</p>
+                    <p>Select an observed candidate and Stage plan with explicit reserve, spending, loss, duration and strategy limits. Staging saves a draft and queues no gameplay. Preview automation refreshes that selected opportunity. Changed state, limits, reset, or engine session requires a new preview.</p>
+                    <p>Approve and start authorizes the exact preview once. Offered contracts require explicit acceptance acknowledgement. Stopping an accepted contract does not remove its delivery obligation. Contract goods come only from explicitly included cargo or verified purchases.</p>
+                    <p>Run monitor separates confirmed receipts, acquisition and fuel spending, operating cash contribution, remaining cargo and fuel. Credit accounting separately shows total balance change from the first locally observed or user-supplied starting balance. Cash contribution is not full economic profit.</p>
                 </details>
                 <details>
                     <summary>What this client supports, and what comes later</summary>
-                    <p>Available now: agent registration and import, local observation, same-system navigation, docking, orbit, mining, cargo trades, refueling, one-time complete-miner setup, and bounded mining automation.</p>
-                    <p>Later work: mid-game and late-game courses, contracts, surveys, equipment management, repairs, intersystem travel, and general fleet expansion. Some official quickstart steps use those features and cannot be followed in this client yet.</p>
+                    <p>Available now: agent registration and import, local observation, same-system navigation, docking, orbit, mining, cargo trades, refueling, one-time complete-miner setup, and bounded mining automation. The optional local automation flow also supports one existing delivery contract per run.</p>
+                    <p>Later work: mid-game and late-game courses, surveys, equipment management, repairs, intersystem travel, and general fleet expansion. Some official quickstart steps use those features and cannot be followed in this client yet.</p>
                     <p>World resets invalidate old agent credentials. Import current credentials and synchronize. Checklists are kept separately for each agent and observed reset. Clearing browser data removes checklists; they are not account backups.</p>
                 </details>
                 <p class="sources">Game concepts checked against the <a href="https://docs.spacetraders.io/quickstart/new-game" target="_blank" rel="noopener noreferrer">official new-game guide<span class="sr-only">, opens in a new tab</span></a> and <a href="https://docs.spacetraders.io/openapi" target="_blank" rel="noopener noreferrer">SpaceTraders API documentation<span class="sr-only">, opens in a new tab</span></a>. Instructions follow the controls available in this client.</p>

@@ -21,3 +21,9 @@ Results and screenshots are saved under `storage/app/mvp-evidence/style-refactor
 ## Framework references
 
 The shared tokens follow [Tailwind theme variables](https://tailwindcss.com/docs/theme). Semantic landmarks, labelled fields, skip links, and focus feedback follow [Vue accessibility guidance](https://vuejs.org/guide/best-practices/accessibility.html).
+
+## Local automation flow
+
+`AutomationConsole.vue` uses the command-deck tokens and shared buttons. Its engine controls, read-only investigation, candidate cards, saved draft, expiring preview and outcome report remain dark under both system themes. Server validation focuses the error and marks invalid fields. Approval and contract-acceptance acknowledgement are separate controls.
+
+Run `node scripts/verify-automation-browser.mjs` for both complete workflows with an owned temporary launchd service. It retains full-page and focused panel screenshots at 1440px, 390px and 320px, checks keyboard focus, validation, reload, stale prices, Stop, End session and restart. All upstream responses are synthetic. The script removes its service, server and browser before exiting.

@@ -6,7 +6,7 @@ Researched November 1, 2026, Pacific time. Source checkout: `9c3d555`. This is a
 
 Hosting this client at `spacetraders.tayloroyer.com` on the existing Linode is a reasonable next step for personal use. Try the existing machine before buying more capacity. A 1 GB instance is plausible with a small PHP process pool, one queue worker, SQLite, and production assets built elsewhere. Its existing workload determines whether that is comfortable. A 2 GB instance offers more room when the main site also runs a database or other applications. These are engineering judgments, not measured requirements.
 
-SpaceTraders hosts the game and API. The Linode would host this Laravel client and execute its approved actions. Travel does not require a dedicated process per ship. The local runner saves an arrival or cooldown deadline and returns from the job; a scheduled pass dispatches the next step when due. See [MiningPlanner](../app/Gameplay/MiningPlanner.php), [MiningRunner](../app/Gameplay/MiningRunner.php), and the separate [gameplay research](travel-and-manual-play-research.md).
+SpaceTraders hosts the game and API. The Linode would host this Laravel client and execute its approved actions. Travel does not require a dedicated process per ship. The local runner saves an arrival or cooldown deadline and returns from the job; a scheduled pass dispatches the next step when due. See [MiningPlanner](../app/Gameplay/MiningPlanner.php), [AutomationRunner](../app/Gameplay/AutomationRunner.php), and the separate [gameplay research](travel-and-manual-play-research.md).
 
 ## The saved trip took four minutes
 
@@ -60,7 +60,7 @@ This project currently documents a single-operator local deployment. Before publ
 
 Existing agent tokens are encrypted with `APP_KEY`. Moving existing data requires its matching key and a consistent SQLite backup. Use one active command executor for the migrated agents, and stop and reconcile work before the move. Host-local locks in [HostLock](../app/Gameplay/HostLock.php) do not coordinate a Mac and Linode that each have their own database and lock directory.
 
-An always-on server also does not remove the current runner's approval bounds. [GameplayRequest](../app/Http/Requests/GameplayRequest.php) limits a preview to 1–60 minutes and 1–10 trips, and [MiningRunner](../app/Gameplay/MiningRunner.php) honors expiry. Hosting the current code will not create an unattended overnight miner without an explicitly designed change to those bounds.
+An always-on server also does not remove the current runner's approval bounds. [GameplayRequest](../app/Http/Requests/GameplayRequest.php) limits a preview to 1–60 minutes and 1–10 trips, and [AutomationRunner](../app/Gameplay/AutomationRunner.php) honors expiry. Hosting the current code will not create an unattended overnight miner without an explicitly designed change to those bounds.
 
 ## Evidence limits
 

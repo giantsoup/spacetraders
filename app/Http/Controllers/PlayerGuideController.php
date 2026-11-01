@@ -18,6 +18,7 @@ class PlayerGuideController extends Controller
         }
 
         return Inertia::render('Guide/Show', [
+            'localAutomation' => (bool) config('gameplay.local_engine_enabled'),
             'agent' => $agent?->only(['id', 'name', 'reset_id']),
             'agents' => $request->user()->agents()->unarchived()->orderBy('name')->get(['id', 'name', 'reset_id']),
         ]);

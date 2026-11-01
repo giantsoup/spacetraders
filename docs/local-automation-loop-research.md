@@ -44,7 +44,7 @@ After one confirmed positive trip, increase the cycle limit modestly. Then impro
 
 ## Local session controls
 
-Current source already has mining preview/start/stop, bounded runs, durable intents, and worker/scheduler activity timestamps. Each mining trip currently makes one extraction before selling and refueling. It does not fill the hold through repeated extractions. Operation currently requires a database queue worker and `schedule:work` in two terminals. These are source observations, not a live process or browser check. See [local operation](../README.md#local-operation), [MiningRunner](../app/Gameplay/MiningRunner.php), and [MiningPlanner](../app/Gameplay/MiningPlanner.php).
+Current source already has mining preview/start/stop, bounded runs, durable intents, and worker/scheduler activity timestamps. Each mining trip currently makes one extraction before selling and refueling. It does not fill the hold through repeated extractions. Operation currently requires a database queue worker and `schedule:work` in two terminals. These are source observations, not a live process or browser check. See [local operation](../README.md#local-operation), [AutomationRunner](../app/Gameplay/AutomationRunner.php), and [MiningPlanner](../app/Gameplay/MiningPlanner.php).
 
 Proposed session behavior:
 

@@ -1,4 +1,5 @@
 <script setup>
+import AutomationConsole from '@/Components/AutomationConsole.vue';
 import AppShell from '@/Layouts/AppShell.vue';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { Head, Link, router, usePage, usePoll } from '@inertiajs/vue3';
@@ -14,7 +15,7 @@ import GuidedFlight from '@/Components/GuidedFlight.vue';
 import GameConnection from '@/Components/GameConnection.vue';
 import { useGuidedFlight } from '@/Composables/useGuidedFlight.js';
 
-const props = defineProps({ agent: Object, ships: Array, capabilities: Object, observations: Array, actions: Array, runs: Array, health: Object, automationEnabled: Boolean, synthetic: Boolean, guidedOffers: { type: Array, default: () => [] } });
+const props = defineProps({ agent: Object, ships: Array, capabilities: Object, observations: Array, actions: Array, runs: Array, health: Object, automationEnabled: Boolean, synthetic: Boolean, localAutomation: Boolean, engine: Object, engineOperator: Boolean, investigations: { type: Array, default: () => [] }, drafts: { type: Array, default: () => [] }, accounting: Object, guidedOffers: { type: Array, default: () => [] } });
 const archived = computed(() => props.agent.connection_state === 'reset');
 const selected = ref(props.ships[0]?.symbol || '');
 const page = usePage();
@@ -65,6 +66,9 @@ const notice = ref('');
 const error = ref(false);
 const commandPreview = ref(null);
 const runPreview = ref(null);
+watch(() => props.actions, actions => {
+    if (commandPreview.value && actions.find(a => a.id === commandPreview.value.id)?.state !== 'preview') commandPreview.value = null;
+});
 const previewPanel = ref(null);
 const note = ref('');
 const reconciliation = ref(null);
@@ -81,8 +85,8 @@ const cash = value => value === null || value === undefined ? 'Unknown' : Number
 const age = value => value ? `${Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 1000))}s ago` : 'Never observed';
 const healthy = value => value && Date.now() - Date.parse(value) < 90000;
 const url = suffix => `/agents/${props.agent.id}/${suffix}`;
-const reload = () => new Promise(resolve => router.reload({ only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers'], onFinish: resolve }));
-usePoll(5000, { only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers'] });
+const reload = () => new Promise(resolve => router.reload({ only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'engine', 'investigations', 'drafts', 'accounting'], onFinish: resolve }));
+usePoll(5000, { only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'engine', 'investigations', 'drafts', 'accounting'] });
 const guided = useGuidedFlight(() => page.props.auth.user.id, () => ({
     ...props, selected: selected.value, offers: offers.value, commandPreview: commandPreview.value,
     form: { destination: destination.value, good: good.value, quantity: quantity.value, priceBound: priceBound.value, reserve: reserve.value, site: site.value, buyer: buyer.value, offerIndex: offerIndex.value },
@@ -188,7 +192,7 @@ function distance(point) {
             </div>
             <p v-if="notice" :role="error ? 'alert' : 'status'" class="notice" :class="{ fault: error }">{{ readableText(notice) }}</p>
             <p class="muted">Times shown in {{ localTimeZone }} (your local timezone).</p>
-            <p v-if="!archived" class="health">Worker: {{ healthy(health.worker) ? 'recent step' : 'idle or offline' }} · last {{ age(health.worker) }}. Scheduler: {{ healthy(health.scheduler) ? 'recent pass' : 'stale or offline' }} · last {{ age(health.scheduler) }}. Closing this page does not stop the worker. Mac sleep pauses execution.</p>
+            <p v-if="!archived && !localAutomation" class="health">Worker: {{ healthy(health.worker) ? 'recent step' : 'idle or offline' }} · last {{ age(health.worker) }}. Scheduler: {{ healthy(health.scheduler) ? 'recent pass' : 'stale or offline' }} · last {{ age(health.scheduler) }}. Closing this page does not stop the worker. Mac sleep pauses execution.</p>
 
             <GuidedFlight v-if="!archived && !guidedFinished" :session="guidedSession" :step="guidedStep" :storage-available="guidedStorage" :busy="busy" @start="guided.start" @pause="guided.pause" @resume="guided.resume" @finish="finishTutorial" @advance="guided.advance" @sync="synchronize" @recover="commandPreview = actions.find(action => action.id === guidedSession.pending.id && action.state === 'preview')" @clear-expired="guided.clearExpired(); commandPreview = null" />
             <TutorialCourse v-if="!archived && !guiding && !guidedFinished" :agent="agent" compact />
@@ -210,6 +214,7 @@ function distance(point) {
                 </aside>
 
                 <div class="work-panels">
+                    <AutomationConsole v-if="localAutomation && !archived" :agent="agent" :ships="ships" :engine="engine" :operator="engineOperator" :investigations="investigations" :drafts="drafts" :runs="runs" :accounting="accounting" :enabled="automationEnabled" @refresh="async done => { await reload(); done(); }" />
                     <section v-if="!archived && (commandPreview || runPreview)" ref="previewPanel" tabindex="-1" class="panel approval" aria-labelledby="approval-heading">
                         <h2 id="approval-heading">Review {{ commandPreview?.command === 'buy_ship' ? 'one-time ship purchase' : commandPreview ? 'manual command' : 'mining trip' }}</h2>
                         <template v-if="commandPreview">
@@ -248,7 +253,7 @@ function distance(point) {
                         <p class="muted">Every command is checked again by the server. Transit, cargo, cooldown, ownership and spending failures appear before send where known.</p>
                     </section>
 
-                    <section id="automation" class="panel" aria-labelledby="automation-heading">
+                    <section v-if="!localAutomation" id="automation" class="panel" aria-labelledby="automation-heading">
                         <h2 id="automation-heading">03 / Mining automation</h2>
                         <p v-if="!automationEnabled" class="warning">Starts are disabled in local configuration. Preview remains available.</p>
                         <p v-if="latestRun">Run #{{ latestRun.id }} · {{ readableLabel(latestRun.state) }} · Next due {{ formatLocalTime(latestRun.next_action_at, 'none') }} · Last step {{ age(latestRun.heartbeat_at) }}</p>

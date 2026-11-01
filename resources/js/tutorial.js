@@ -126,13 +126,13 @@ export const lessons = [
         explanation: 'You now have the manual loop: observe → orbit → navigate → mine → navigate → dock → sell → refuel. Skip movement when the mine and buyer share a waypoint. Completing this checklist is your own learning record, not a server-verified achievement.',
         steps: [
             'Check that the actions you approved have settled, your reserve is intact, and you know what cargo remains. Repeat a small manual trip only when you can explain each step.',
-            'For optional automation, start with an empty operational miner in Cruise mode and enough fuel. Choose Mining site, Sale and refueling market, Protected credit reserve, Maximum fuel spending, Maximum credit loss, a duration cap, and Trips = 1.',
-            'Choose Preview mining run and review the route, quotes, limits, and unknown yields. Start approved mining run is available only when automation is enabled locally. The worker and scheduler must be running. Manual basics do not require automation.',
-            'Read Recorded outcomes after the run. Unknown cargo, zero yield, exceeded limits, uncertainty, or nonpositive observed cash contribution can stop it. Use Stop automation before taking manual control and wait for any in-flight action to settle.',
+            'For optional mining automation, start with a stationary, empty operational miner in Cruise mode and enough fuel. With New automated run, choose Mining, Investigate opportunities, select a bounded trial, and Stage plan with explicit limits and one trip.',
+            'Start local engine authorizes no gameplay. Preview automation and review fresh state, ordered actions, limits and unknown yields. Approve and start approves that exact preview once. If local automation is not enabled, the earlier Preview mining run controls remain available.',
+            'Read Run monitor and outcome, or Recorded outcomes with the earlier controls, after the run. Unknown cargo, zero yield, exceeded limits, uncertainty, or nonpositive observed cash contribution can stop it. Use Stop automation before taking manual control and wait for any in-flight action to settle.',
             'For an uncertain action, use Reconcile in Activity history and inspect the evidence. Do not resubmit the same purchase, sale, or extraction. Acknowledge only an outcome you have reviewed. Closing the browser does not stop workers.',
         ],
         checkpoint: 'I can complete the manual loop, verify results, and explain when to stop or reconcile.',
-        recovery: 'Contracts, surveys, outfitting, repairs, intersystem travel, and general fleet expansion belong to later client work. Mid-game and late-game tutorials are not available yet. There is no automatic next-stage purchase or restart.',
+        recovery: 'The optional Contracts strategy handles one existing same-system delivery contract, using explicitly included cargo or verified purchases. Surveys, outfitting, repairs, intersystem travel, and general fleet expansion belong to later work. Mid-game and late-game tutorials are not available yet. There is no automatic next-stage purchase or restart.',
     },
 ];
 

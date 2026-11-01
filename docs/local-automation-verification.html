@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Local automation · Offline acceptance</title>
+<style>
+:root{color-scheme:dark;background:#0a111c;color:#e4edf7;font-family:ui-sans-serif,system-ui,sans-serif}*{box-sizing:border-box}body{margin:0;line-height:1.65}main{max-width:1060px;margin:auto;padding:40px 24px 72px}h1{font-size:clamp(28px,5vw,42px);line-height:1.2;margin:12px 0 22px}h2{font-size:21px;color:#a6f3d0;margin:30px 0 12px}h3{font-size:16px;margin:18px 0 6px}p{margin:10px 0}.eyebrow,.pass{color:#a6f3d0}.eyebrow{font:13px ui-monospace,monospace;letter-spacing:.08em}.muted{color:#aebed2}.scope{border-left:4px solid #eacb83;padding:14px 20px;background:#242839;color:#f8e5b4}.panel{border:1px solid #415773;background:#101b2b;padding:18px 22px;margin:20px 0}a{color:#b4f5dc;text-decoration:underline;text-underline-offset:4px}a:focus-visible{outline:3px solid #f7dc91;outline-offset:4px}code{font:13px/1.6 ui-monospace,monospace;color:#d2e5fa;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1523;border:1px solid #415773;padding:16px}.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;padding:12px;border-bottom:1px solid #34455d}th{color:#b3d8ec;background:#142338}ul,ol{padding-left:24px}li{margin:7px 0}.checks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.check{padding:18px;background:#142338;border:1px solid #415773}.check strong{display:block;font-size:25px;color:#a6f3d0}.check span{color:#aebed2;font-size:13px}.caption{font-size:13px;color:#aebed2}footer{border-top:1px solid #34455d;padding-top:20px;margin-top:32px;color:#aebed2;font-size:13px}@media(max-width:640px){main{padding:24px 16px 40px}.checks{grid-template-columns:1fr}.panel{padding:16px}th,td{padding:9px}table{min-width:580px}}
+</style>
+</head>
+<body><main>
+<p class="eyebrow">ST // LOCAL AUTOMATION · 2026-11-01</p>
+<h1>Mining and Contracts, with exact approval and local engine control</h1>
+<p id="verdict" class="pass">Verified locally. Both complete flows and recovery checks passed.</p>
+<p class="scope">Synthetic local evidence only. No authenticated live reads, agent registration/import, real credit spending, live gameplay, persistent live service, push, PR, merge or deployment. The original checkout’s environment, key, database and running processes were not changed.</p>
+<div class="checks"><div class="check"><strong>215 tests</strong><span>1,124 assertions; complete backend suite</span></div><div class="check"><strong>Two strategies</strong><span>Investigation → draft → preview → approval → outcome</span></div><div class="check"><strong>Owned processes</strong><span>Temporary launchd identities, with removal verified</span></div></div>
+
+<h2>What is implemented</h2>
+<p>The dark flight deck separates engine state from run approval. Investigation reads one bounded system and explains observed candidates, prerequisites and missing information. Staging saves a revisioned draft. A 120-second preview binds fresh state, limits, reset and engine session. Duplicate approval starts that row once; material changes require a new preview.</p>
+<p>Mining keeps one extraction per trip and checks each cycle’s confirmed contribution. Contracts support one existing offered or accepted procurement contract, one ship, same-system verified routes, explicitly included cargo and verified purchases. Acceptance, delivery and fulfillment use the same durable executor as manual commands. Timeouts preserve uncertainty and fresh contract evidence without replay.</p>
+<p>Confirmed receipts, acquisitions, fuel costs and run cash contribution stay separate from total change from the recorded starting balance, manual activity and reviewed or unexplained changes. Unknown yield, price or duration stays unknown. Existing cargo’s direct-sale alternative and differences in fuel inventory remain visible.</p>
+
+<h2>Executed checks</h2>
+<div class="table-wrap"><table><thead><tr><th>Boundary</th><th>Evidence</th><th>Result</th></tr></thead><tbody>
+<tr><td>Locked runtime and full regression</td><td>PHP 8.4.27, Node 26.13.0, pnpm 12.16.1. <a href="../scripts/verify.sh">verify.sh</a> includes deterministic builds, JavaScript/local-time checks, environment safeguards, backend suite, Pint and whitespace. Composer strict validation and platform requirements pass. Lockfiles are unchanged.</td><td class="pass">Passed</td></tr>
+<tr><td>Read-only investigation and evaluation</td><td><a href="../tests/Feature/LocalAutomationTest.php">LocalAutomationTest</a>: cancellation, elapsed/request/page bounds, stale and partial data, unknown yields/prices, unsupported routes, unpaid rewards, delivered quantities and deterministic ranking.</td><td class="pass">Passed</td></tr>
+<tr><td>Original mining worker boundary</td><td><a href="../scripts/verify-mvp-worker.php">Real-worker check</a>: two workers, duplicate jobs, complete trip, SIGKILL after an upstream commit, uncertain recovery and offline Stop.</td><td class="pass">Passed</td></tr>
+<tr><td>Contracts across workers and crashes</td><td><a href="../scripts/verify-automation-worker.php">Contract worker check</a>: a complete batched contract and separate process-death cases after acceptance, purchase, delivery and fulfillment. Duplicate jobs produce one write per intent and one accounting entry per confirmation. The test driver supplies a synthetic healthy gate for finite worker cases; actual supervisor behavior is checked separately.</td><td class="pass">Passed</td></tr>
+<tr><td>Herd user-domain assumption</td><td><a href="../scripts/verify-herd-launchd.py">Actual PHP-FPM probe</a>: Herd PHP 8.4.27 runs as UID 503 and can bootstrap, kickstart, print and bootout a temporary inert job in gui/503. Removal is checked after launchd settles.</td><td class="pass">Passed</td></tr>
+<tr><td>Real local lifecycle</td><td><a href="../scripts/verify-local-engine.php">Lifecycle check</a>: actual owned supervisor, worker and scheduler; repeated Start; idle health; graceful End; new session; stale legacy intent rejection; child and supervisor death; simulated heartbeat gap; acknowledged force stop. An unrelated PHP sentinel survives. The grace deadline and sleep gap are modeled, not an actual Mac sleep trial.</td><td class="pass">Passed</td></tr>
+<tr><td>Existing presentation</td><td><a href="../storage/app/mvp-evidence/presentation/result.json">Browser result</a>: manual preview, setup configuration, readable evidence, keyboard focus, local DST timestamps and responsive spacing.</td><td class="pass">Passed</td></tr>
+<tr><td>Both complete product flows</td><td><a href="../storage/app/mvp-evidence/local-automation/result.json">Browser result</a>: engine-off investigation, saved draft reload, stale price rejection, keyboard review, mining, explicit contract acceptance, batched purchases, delivery, fulfillment, validation, Stop, End and restart. Screenshots cover 1440px, 390px and 320px under a light OS preference while retaining the dark app theme.</td><td id="browser-verdict" class="pass">Passed</td></tr>
+</tbody></table></div>
+
+<h2>Security review of the changed boundaries</h2>
+<p>The review covers the new routes, process control and shared mutation path. It is a source and synthetic-runtime assessment, not a full external penetration test or a new dependency audit.</p>
+<ul>
+<li>Every new POST uses authentication and request-forgery middleware. Tests exercise real CSRF rejection, other owners, same-owner sibling agents and wrong resets. Nested records are queried through the selected agent and reset.</li>
+<li>Engine operations require the configured local operator, exact local host and loopback address. The browser cannot choose a command, executable, PID or label. Fixed argument arrays invoke launchctl. The private service file is outside login LaunchAgents, with RunAtLoad and KeepAlive disabled.</li>
+<li>Process liveness and the current session gate are checked before reservation. Gate closure and action reservation contend in a database transaction. End cancels unsent work; reserved or uncertain work remains evidence for reconciliation.</li>
+<li>The executor checks fresh credits, protected cargo, location, fuel, equipment, approved contract step and progress. Each operation returns only its validated response fields. A delivery cannot invent an agent payment from extra response fields.</li>
+<li>Agent credentials and the application key are absent from new responses and jobs. Vue renders evidence as escaped text. The service’s necessary application key stays in a private mode-0600 plist beneath a mode-0700 directory.</li>
+</ul>
+<p>Issues corrected during implementation included launchd restart throttling, asynchronous removal confirmation, heartbeat-only health checks, changes between dispatch and reservation, per-cycle losses hidden by cumulative gains, and cross-operation response fields. Regression checks cover the corrected behavior. No unresolved security blocker was found within this scope.</p>
+
+<h2>Inspect the actual UI evidence</h2>
+<ul>
+<li>Mining preview: <a href="../storage/app/mvp-evidence/local-automation/mining-preview-panel-1440.png">desktop</a>, <a href="../storage/app/mvp-evidence/local-automation/mining-preview-panel-390.png">390px</a>, <a href="../storage/app/mvp-evidence/local-automation/mining-preview-panel-320.png">320px</a>.</li>
+<li>Contract preview and acceptance: <a href="../storage/app/mvp-evidence/local-automation/contract-preview-panel-1440.png">desktop</a>, <a href="../storage/app/mvp-evidence/local-automation/contract-preview-panel-390.png">390px</a>, <a href="../storage/app/mvp-evidence/local-automation/contract-preview-panel-320.png">320px</a>.</li>
+<li>Contract outcome: <a href="../storage/app/mvp-evidence/local-automation/contract-outcome-panel-1440.png">desktop</a>, <a href="../storage/app/mvp-evidence/local-automation/contract-outcome-panel-390.png">390px</a>. <a href="../storage/app/mvp-evidence/local-automation/stopped-run-panel-390.png">Stopped run</a>.</li>
+<li><a href="../storage/app/mvp-evidence/local-automation/backend-build.log">Final backend/build log</a>; <a href="../storage/app/mvp-evidence/local-automation/acceptance.log">runtime acceptance log and owned evidence directories</a>.</li>
+</ul>
+<p class="caption">Panel crops hide the floating command strip and skip link only while capturing; full-page screenshots retain the actual page chrome. Screenshots and raw test artifacts are retained locally and ignored by Git. The committed report and verification scripts remain reviewable and rerunnable.</p>
+
+<h2>Local delivery and remaining limits</h2>
+<p>Bound branch <code>feature/local-automation</code> was clean at <code>88bc0262b65b70e611e2fdc37e64a5225591d5c0</code> before edits. Local commits separate the engine and data gate (<code>ed0b6a7</code>), investigation/shared strategies (<code>52bf6c4</code>), boundary hardening (<code>dbe6c12</code>) and final UI/documentation. Main remains at the starting commit.</p>
+<ul>
+<li>Both flags remain disabled in the environment template. A later live trial needs separate explicit approval, a backed-up cutover and an owned service installation. Nothing was installed into the existing live local environment.</li>
+<li>Contracts must fit the observed fuel tank and supported bounds: ten deliveries, 40 purchase batches, 150 actions and 60 minutes. Refueling preparation uses a separate preview. Negotiation, intersystem routes, contract mining, automatic follow-on work and fleet expansion remain outside scope.</li>
+<li>Live API acceptance, profitability, real sleep/wake, power loss and a clean-machine install are unverified. Request and scheduling allowances cannot guarantee a deadline while the Mac sleeps. Local quote ceilings are checked before transport; the upstream API has no hard execution-price ceiling.</li>
+<li>The original first-observed balance is retained. A supplied earlier balance is labeled separately. Cash contribution excludes unpriced cargo, wear and time, and is not full economic profit.</li>
+<li>Apply additive migrations before enabling the flow. Drain old serialized mining jobs before cutover. Code rollback needs a compatible database; restoring local history never undoes game transactions.</li>
+</ul>
+<p>Re-run <code>bash scripts/verify-local-automation.sh</code> with the locked runtime and existing Playwright/Chrome paths. See <a href="../README.md#local-mining-and-contracts-automation">the operating instructions</a> and <a href="local-automation-data.md">the data contract</a>.</p>
+<footer>Source for contract operation shapes: <a href="https://raw.githubusercontent.com/SpaceTradersAPI/api-docs/main/reference/SpaceTraders.json">official SpaceTraders API specification</a>. This report describes local synthetic application behavior. No live profitability claim is made.</footer>
+</main></body></html>

@@ -1,6 +1,6 @@
 # SpaceTraders client
 
-A Laravel 13, Inertia 3, Vue 3, and Pinia 4 client for SpaceTraders. Register or import an agent, then open its flight deck. The flight deck provides previewed manual commands and a bounded local mining runner.
+A Laravel 13, Inertia 3, Vue 3, and Pinia 4 client for SpaceTraders. Register or import an agent, then open its flight deck. The flight deck provides previewed manual commands and opt-in local Mining and Contracts automation.
 
 ## API compatibility
 
@@ -133,7 +133,7 @@ php artisan up
 
 The resumable converter checks the backup's integrity, matching key and legacy credential rows, encrypts each row atomically and verifies decryption. Existing APP_KEY is required forever for those credentials. A code-only rollback to the plaintext implementation is incompatible. Restore compatible code and data together after stopping and reconciling all work. Never delete action history to clear an uncertain write.
 
-Automation defaults to disabled. After owned-data backup, conversion and local verification, set `SPACETRADERS_AUTOMATION_ENABLED=true` in that environment, then run these in two terminals from this checkout:
+The earlier terminal flow remains available while `SPACETRADERS_LOCAL_ENGINE_ENABLED=false`. Automation defaults to disabled. After owned-data backup, conversion and local verification, set `SPACETRADERS_AUTOMATION_ENABLED=true` in that environment, then run these in two terminals from this checkout:
 
 ```bash
 php artisan queue:work database --queue=spacetraders --sleep=1 --tries=1 --timeout=120
@@ -142,11 +142,11 @@ php artisan schedule:work
 
 Request-budget contention before HTTP transport safely returns the intent to pending. A rate limit or lost response after dispatch still requires reconciliation. The feature jobs always use the `database` connection and `spacetraders` queue. HTTP timeout is 30 seconds, job timeout 120 seconds, queue retry-after 180 seconds. OS file locks serialize shared commands and a persisted global request budget on this Mac; no expiring lock can be stolen while a process still runs. Keep the same database and lock directory for every worker. A scheduler pass dispatches due work every five seconds, bounds redispatch frequency and recovers lost dispatch and stale senders. Closing the browser leaves those processes running. Mac sleep/shutdown pauses them. Restarting reconciles saved state and honors expiry/Stop rather than replaying missed writes.
 
-To stop: click **Stop automation**, wait for the status to settle or reconcile an uncertain action, then press Ctrl-C in the worker and scheduler terminals. Set `SPACETRADERS_AUTOMATION_ENABLED=false` to disable new starts. Pending manual commands still need to settle. `php artisan spacetraders:dispatch-due` runs one recovery/dispatch pass when using finite worker sessions. No launchd service is installed.
+To stop: click **Stop automation**, wait for the status to settle or reconcile an uncertain action, then press Ctrl-C in the worker and scheduler terminals. Set `SPACETRADERS_AUTOMATION_ENABLED=false` to disable new starts. Pending manual commands still need to settle. `php artisan spacetraders:dispatch-due` runs one recovery/dispatch pass when using finite worker sessions. No launchd service is installed by this terminal flow.
 
 ### Evidence boundary
 
-The acceptance contract is in [mvp-implementation.md](docs/mvp-implementation.md). Local fake-provider workflows prove application behavior, not live SpaceTraders acceptance, fresh-agent economics or profitability. No live agent creation, credit spending, recurring service, push or deployment is part of this work. General outfitting, contracts, surveys, repairs, intersystem travel and fleet expansion remain outside this MVP. Conservative fuel estimates and missing observations can block an otherwise viable live route; inspect the visible reason and scout manually.
+The acceptance contract is in [mvp-implementation.md](docs/mvp-implementation.md). Local fake-provider workflows prove application behavior, not live SpaceTraders acceptance, fresh-agent economics or profitability. No live agent creation, credit spending, recurring service, push or deployment is part of this work. General outfitting, surveys, repairs, intersystem travel and fleet expansion remain outside this release. The opt-in flow below adds one existing same-system delivery contract per run. Conservative fuel estimates and missing observations can block an otherwise viable live route; inspect the visible reason and scout manually.
 
 A repeatable browser journey is available as `node scripts/verify-mvp-browser.mjs` using an existing Playwright installation via `PLAYWRIGHT_MODULE`. It requires a fresh owned database from `php scripts/mvp-fixture.php --isolated` and this checkout's explicitly configured synthetic fixture. Configure that isolated environment only on an owned local test checkout; preserve any existing environment and history. The journey refuses a previously recorded setup purchase or unsettled gameplay before changing fixture state, never starts a web server, blocks external browser traffic and writes per-step results and state screenshots. It requests Stop and drains queued work on failure, retains a redacted original stack, and reports any unverified cleanup. It resets only the owned fake upstream world, then drives real previews, approvals, database workers, manual mining, batch sales, reload, Stop, a complete trip, uncertainty/reconciliation and the one-time purchase. Treat it as a fixture reset, not a command for live or shared environments. Set `QA_ARTIFACT_DIR` for output and optionally `PLAYWRIGHT_EXECUTABLE` for a matching installed Chromium binary.
 
@@ -159,3 +159,62 @@ This MVP targets one operator on this Mac. Game POST routes are limited to 60 re
 SQLite uses WAL with `synchronous=FULL` and macOS `fullfsync` support to flush saved intents at commit. The real-worker check reads both settings inside a separate queue worker and exercises process death/restart. No actual power-loss or hardware-storage trial is claimed. See [SQLite's durability documentation](https://www.sqlite.org/pragma.html#pragma_synchronous). Discovery prioritizes owned-ship locations within the same 24-observation cap, so a large system cannot spend that budget entirely on unvisited markets first.
 
 An explicit offline-fixture banner distinguishes synthetic responses from gameplay. The browser replay check uses accessible select names and redacts its synthetic login password from failure messages. Retain a separate encrypted backup of APP_KEY. The converter's private verification directory needs a temporary matching key copy; remove that temporary copy after conversion while preserving the original key and its separate backup.
+
+## Local Mining and Contracts automation
+
+The implementation and its offline checks are local to `feature/local-automation`. Both feature flags remain disabled in the template. No live service, existing database migration, agent import, authenticated live read or gameplay trial was performed. See [the verification report](docs/local-automation-verification.html) and [the approved implementation plan](docs/local-automation-implementation-plan.md).
+
+### Use the staged flow
+
+With the opt-in flow enabled in an owned environment:
+
+1. Choose **Mining** or **Contracts** under **New automated run**, select an owned system, and **Investigate opportunities**. Investigation only reads game state and saves local observations. It works with the engine off. Coverage and cancellation survive reloads. Each investigation caps reads at 40, elapsed time at 45 seconds, each collection at ten pages, markets at 24, and candidate evaluation at 200. A request uses only the remaining time allowance.
+2. Read the classifications, missing information, observed prices and prerequisites. **Best observed opportunity** compares feasible priced candidates by estimated net credits per hour, then working capital and duration. You can sort by estimated total net credits. Unknown mining yields show **Trial required**. Estimates from at least three recent matching trips require the same equipment, route, starting fuel and quotes. Missing prices require a separately previewed manual scouting move.
+3. Select the exact ship and candidate, set reserve, spending, loss, duration and strategy limits, then **Stage plan**. This saves a revisioned draft and queues nothing. Change ships or supply sources by choosing another candidate. Existing contract cargo is a separate explicit candidate, with its direct-sale alternative shown. Other cargo stays protected.
+4. **Start local engine**, then **Preview automation**. The preview refreshes the selected ship, credits, cargo, equipment, fuel, route, prices and contract. It expires after 120 seconds. Edits require a saved draft revision and a new preview. A preview created before an engine restart cannot approve work afterward.
+5. Read the ordered actions and bounds, then **Approve and start** once. Offered contracts require an explicit acceptance acknowledgement. Accepted contracts omit the already paid acceptance reward from future receipts. Stopping does not remove an accepted contract’s obligation.
+6. Follow **Run monitor and outcome** and **Activity history**. **Stop automation** prevents new reservations and leaves the engine available for manual play once reserved work settles. **End session** closes the action gate, cancels unsent approvals, stops runs and waits for owned processes to exit. After a failed 40-second shutdown, an explicit acknowledged force stop can remove the owned service. An interrupted request may still have committed upstream.
+
+Mining retains one extraction per trip, one trip by default, at most ten trips within 60 minutes. Each nonpositive cycle stops repetition even if earlier gains keep the cumulative contribution positive. Unknown cargo stays aboard.
+
+Contracts support one existing procurement contract, one ship and one system. Every destination must be observed. The entire itinerary must fit the current tank; preparation refueling needs a separate manual approval. Supply comes from explicitly included existing cargo, verified market purchases, or both. A contract plan supports at most ten deliveries, 40 purchase batches and 150 actions. Fresh price checks enforce per-batch bounds and market volume. Deadline checks include travel and a displayed scheduling allowance. Mac sleep or an offline engine can still miss a deadline. Contract mining, negotiation, automatic follow-on contracts and intersystem routes are unsupported.
+
+Confirmed receipts, acquisitions, fuel spending and operating cash contribution stay separate from total change from the identified starting balance. The first local balance remains recorded. You can identify an earlier user-supplied balance or review an external adjustment after stopping and settling work. Reviews never become confirmed operating earnings. Unexplained changes block attribution and further approval. Unpriced inventory, wear, time and differences in fuel inventory prevent a full economic-profit claim.
+
+### Prepare a later local cutover
+
+These are instructions for a separately authorized installation, not changes made by verification. Keep Herd as the HTTP server. Stop and settle earlier terminal workers before cutover. Back up SQLite with its matching application key and verify restoration on a disposable copy. Apply both additive `2026_11_01` migrations to the chosen database. Do not change the existing key.
+
+Configure the verified PHP 8.4 executable, exact Herd host, local operator user ID and an absolute SQLite path. Set `SPACETRADERS_LOCAL_ENGINE_ENABLED=true`; set `SPACETRADERS_AUTOMATION_ENABLED=true` only when run approval should be available. The same database and private lock directory must be used by web and worker processes. Retain empty `SPACETRADERS_FIXTURE_PATH` only for a separately approved live environment.
+
+The local operator can install the owned service from that configured checkout:
+
+```bash
+php artisan spacetraders:engine-service install
+```
+
+The service identity hashes the checkout and SQLite path. Installation writes a private plist beneath the configured lock directory and bootstraps that one user-domain job. It does not write `~/Library/LaunchAgents`, start at login or use KeepAlive. Start launches a supervisor with one worker and one scheduler. The private plist contains the configured application key, so retain its directory at mode 0700 and plist at 0600. Do not share it or include it in reports.
+
+Engine endpoints require authentication, the configured operator, the exact local host and loopback remote address. They accept no executable, PID or service label from the browser. The supervisor checks actual child processes and heartbeat, and reservation checks process liveness again. Missing processes, a heartbeat gap or a restart close old approval. Legacy queue commands use the same gate when this flow is enabled.
+
+After **End session** confirms exit, remove only this checkout’s service with:
+
+```bash
+php artisan spacetraders:engine-service uninstall
+```
+
+A failure to control Herd’s user launchd domain is a design checkpoint. Do not report the engine as running from a successful HTTP response alone. `python3 scripts/verify-herd-launchd.py` probes the actual Herd PHP-FPM process using a temporary inert service and verifies its removal.
+
+### Re-run offline acceptance
+
+Use the locked dependencies and existing Playwright/Chrome executables. Set `PHP_BIN`, `PNPM_BIN`, `PLAYWRIGHT_MODULE` and `PLAYWRIGHT_EXECUTABLE` when necessary. Run:
+
+```bash
+bash scripts/verify-local-automation.sh
+```
+
+The script runs the full verification entry point, Composer validation/platform checks, actual Herd-domain probe, original mining worker check, new two-worker contract/recovery cases, temporary launchd lifecycle checks, existing presentation journey and both new browser flows. Every runtime case owns a disposable SQLite database, key, fake provider, locks and temporary service identity. Browser checks start private loopback fixture servers and remove them afterward. They do not use the Herd website or alter this checkout’s environment.
+
+For focused checks, use `php scripts/verify-automation-worker.php`, `php scripts/verify-local-engine.php`, or `node scripts/verify-automation-browser.mjs`. Browser results and desktop, 390px and 320px screenshots are in `storage/app/mvp-evidence/local-automation`. Worker and lifecycle scripts print their owned evidence directories. These synthetic results do not establish live acceptance or profitability.
+
+A code rollback after version 2 data requires a compatible code/database pair. Drain old serialized mining jobs before cutover. Never delete uncertain action history to unblock work, and never assume restoring an older database undoes upstream game actions.

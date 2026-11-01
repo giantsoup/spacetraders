@@ -1,6 +1,6 @@
 # Local automation implementation plan
 
-Status: proposed for Taylor's review. Application implementation has not started.
+Status: approved and implemented locally. See [offline acceptance evidence](local-automation-verification.html). Live installation and gameplay remain a separate approval.
 
 Prepared 2026-11-01 against the current working tree on `feature/early-game-player-guide`, based on commit `6a99cfe`. The checkout contains existing uncommitted frontend, verification, and build changes. Preserve that work.
 
@@ -16,7 +16,7 @@ This document proposes implementation scope and defaults. Reviewing it does not 
 
 The current source already provides:
 
-- Mining previews, explicit Start and Stop, duration and cycle limits, reserves, and spending limits in [MiningRunner](../app/Gameplay/MiningRunner.php).
+- Mining previews, explicit Start and Stop, duration and cycle limits, reserves, and spending limits in [AutomationRunner](../app/Gameplay/AutomationRunner.php).
 - One extraction per mining trip, followed by sale and refueling in [MiningPlanner](../app/Gameplay/MiningPlanner.php). Repeated extraction until the hold fills is not implemented.
 - Durable action intents, agent locks, confirmation, and uncertainty handling in [ShipCommandExecutor](../app/Gameplay/ShipCommandExecutor.php).
 - Fleet and waypoint discovery, market observations, reset handling, and a shared upstream request budget.
@@ -178,8 +178,8 @@ Proposed responsibilities:
 
 - `OpportunityInvestigator` collects a bounded set of validated observations and evaluates candidates. Persist investigation status and coverage so reloads and cancellation work.
 - `OpportunityEvaluator` calculates feasibility, economics, and ranking from supplied observations without network calls or writes.
-- `AutomationRunner` owns common preview, start, stop, recovery, and scheduling behavior. Migrate mining lifecycle calls from `MiningRunner` when the contract strategy is introduced.
-- `MiningPlanner` and a new `ContractPlanner` choose the next action from confirmed state and approved limits. Generalize `MiningStep` to a shared step value only where both strategies need it.
+- `AutomationRunner` owns common preview, start, stop, recovery, and scheduling behavior. Migrate mining lifecycle calls from `AutomationRunner` when the contract strategy is introduced.
+- `MiningPlanner` and a new `ContractPlanner` choose the next action from confirmed state and approved limits. Generalize `AutomationStep` to a shared step value only where both strategies need it.
 - `ShipCommandExecutor` remains the mutation boundary. Extend its explicit command allowlist with contract acceptance, delivery, and fulfillment. Validate each operation's distinct response shape.
 - `LocalEngineManager` controls the fixed local service. A supervisor CLI command owns the worker and scheduler lifecycle.
 
