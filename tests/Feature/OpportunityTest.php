@@ -31,6 +31,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Psr\Http\Message\RequestInterface;
 use Tests\Support\FakeSpaceTraders;
 use Tests\TestCase;
 
@@ -554,11 +555,31 @@ class OpportunityTest extends TestCase
 
     public function test_local_mutation_invalidates_a_quote_without_renewing_its_age(): void
     {
+        $this->travelTo(now()->setDate(2026, 11, 1)->setTime(12, 0, 0));
         app(AgentSynchronizer::class)->sync($this->agent);
         $quote = GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-ROCK')->sole();
+        $this->travel(1)->seconds();
+        $preflightAt = now()->toImmutable();
+        $lastPriceObservation = null;
+        $historyBeforeMutation = null;
+        Http::globalRequestMiddleware(function (RequestInterface $request) use ($quote, &$lastPriceObservation, &$historyBeforeMutation) {
+            if ($request->getMethod() === 'POST' && str_ends_with($request->getUri()->getPath(), '/purchase')) {
+                $lastPriceObservation = $quote->fresh();
+                $historyBeforeMutation = ObservationHistory::where('kind', 'market')->where('symbol', $quote->symbol)->count();
+                $this->travel(1)->seconds();
+            }
+
+            return $request;
+        });
         $action = $this->command('buy', ['symbol' => 'IRON_ORE', 'units' => 1, 'maxTotal' => 30]);
+        $this->assertSame(ActionState::Confirmed, $action->state);
+        $this->assertNotNull($lastPriceObservation);
+        $this->assertTrue($lastPriceObservation->observed_at->equalTo($preflightAt));
+        $this->assertTrue($lastPriceObservation->observed_at->gt($quote->observed_at));
+        $this->assertTrue(now()->greaterThan($lastPriceObservation->observed_at));
         $this->assertSame($action->id, $quote->fresh()->data['invalidated_by_action']);
-        $this->assertTrue($quote->observed_at->equalTo($quote->fresh()->observed_at));
+        $this->assertTrue($lastPriceObservation->observed_at->equalTo($quote->fresh()->observed_at));
+        $this->assertSame($historyBeforeMutation, ObservationHistory::where('kind', 'market')->where('symbol', $quote->symbol)->count());
         $report = app(OpportunityAssessor::class)->report($this->agent->fresh());
         $this->assertSame('priced_stale', collect($report['markets'])->firstWhere('symbol', $quote->symbol)['state']);
         $this->command('orbit');

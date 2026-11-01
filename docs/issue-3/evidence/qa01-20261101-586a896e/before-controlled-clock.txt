@@ -1,0 +1,21 @@
+$ php vendor/bin/phpunit --colors=never --filter test_local_mutation_invalidates_a_quote_without_renewing_its_age tests/Feature/OpportunityTest.php
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.4.27
+Configuration: <worktree>/phpunit.xml
+
+F                                                                   1 / 1 (100%)
+
+Time: 00:00.969, Memory: 65.00 MB
+
+There was 1 failure:
+
+1) Tests\Feature\OpportunityTest::test_local_mutation_invalidates_a_quote_without_renewing_its_age
+Failed asserting that false is true.
+
+<worktree>/tests/Feature/OpportunityTest.php:563
+
+FAILURES!
+Tests: 1, Assertions: 2, Failures: 1.
+
+Exit status: 1

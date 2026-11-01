@@ -1,0 +1,38 @@
+Negative control: mutation-skipped-price-refresh
+Temporary mutation, restored after this run.
+
+diff --git a/app/Gameplay/CommandRules.php b/app/Gameplay/CommandRules.php
+index b64c73b..ec3985e 100644
+--- a/app/Gameplay/CommandRules.php
++++ b/app/Gameplay/CommandRules.php
+@@ -229,7 +229,7 @@ class CommandRules
+                     throw new GameException('Dock before trading or refueling.');
+                 }
+                 $market = $this->api->market($agent, $ship['nav']['waypointSymbol']);
+-                $this->sync->observe($agent, 'market', $ship['nav']['waypointSymbol'], $market);
++                // Negative control: skip the actual price observation.
+                 $good = collect($market['tradeGoods'] ?? [])->firstWhere('symbol', $command === 'refuel' ? 'FUEL' : $arguments['symbol']);
+                 if (! $good) {
+                     throw new GameException('Price is unknown or this market does not trade the good.');
+
+$ php vendor/bin/phpunit --colors=never --filter test_local_mutation_invalidates_a_quote_without_renewing_its_age tests/Feature/OpportunityTest.php
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.4.27
+Configuration: <worktree>/phpunit.xml
+
+F                                                                   1 / 1 (100%)
+
+Time: 00:00.678, Memory: 65.00 MB
+
+There was 1 failure:
+
+1) Tests\Feature\OpportunityTest::test_local_mutation_invalidates_a_quote_without_renewing_its_age
+Failed asserting that false is true.
+
+<worktree>/tests/Feature/OpportunityTest.php:577
+
+FAILURES!
+Tests: 1, Assertions: 3, Failures: 1.
+
+Exit status: 1
