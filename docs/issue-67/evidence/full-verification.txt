@@ -1,0 +1,136 @@
+PASS PHP 8.5.12 matches Composer, lockfile and CI pin; worker/SQLite extensions loaded.
+PASS real selected PHP and matching runtime pins
+PASS stale Composer lock pin rejected
+PASS untested PHP patch rejected even when manifest pins agree
+PASS executable PHP_BIN wrapper preserves paths and literal arguments with spaces
+PASS missing Herd executable fails without falling back to global PHP
+npm notice run npx
+npm notice run 'pnpm' --version
+npm notice run npx
+npm notice run 'pnpm' build
+$ vite build
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 720 modules transformed.
+rendering chunks...
+computing gzip size...
+public/build/manifest.json                                     10.53 kB │ gzip:  1.36 kB
+public/build/assets/Welcome-CmoIjcH2.css                        0.15 kB │ gzip:  0.13 kB
+public/build/assets/dateTime-05q_TOSW.css                       0.66 kB │ gzip:  0.34 kB
+public/build/assets/GuidedFlight-CPCUKnB1.css                   1.17 kB │ gzip:  0.53 kB
+public/build/assets/AppShell-CGlwTphf.css                       1.39 kB │ gzip:  0.61 kB
+public/build/assets/Show-DVouwzbK.css                           2.82 kB │ gzip:  0.91 kB
+public/build/assets/Agents-UQeWFSxe.css                         4.70 kB │ gzip:  1.27 kB
+public/build/assets/TutorialCourse-DQR4gQuP.css                 5.69 kB │ gzip:  1.58 kB
+public/build/assets/Dashboard-DeOSE7id.css                     18.65 kB │ gzip:  3.86 kB
+public/build/assets/app-D6bvJ2S7.css                           33.25 kB │ gzip:  7.44 kB
+public/build/assets/_plugin-vue_export-helper-BDNMzG2s.js       0.08 kB │ gzip:  0.09 kB
+public/build/assets/DangerButton-5KWqnN4o.js                    0.26 kB │ gzip:  0.22 kB
+public/build/assets/PrimaryButton--btJL-gk.js                   0.26 kB │ gzip:  0.22 kB
+public/build/assets/SecondaryButton-CBd0OM55.js                 0.27 kB │ gzip:  0.21 kB
+public/build/assets/AuthenticatedLayout-CF47NNE3.js             0.43 kB │ gzip:  0.30 kB
+public/build/assets/Checkbox-BK_tmG5S.js                        0.45 kB │ gzip:  0.32 kB
+public/build/assets/GuestLayout-BDbagb7a.js                     0.63 kB │ gzip:  0.43 kB
+public/build/assets/TextInput-7SMO6-g-.js                       0.93 kB │ gzip:  0.52 kB
+public/build/assets/Edit-BkcbsJ_s.js                            0.99 kB │ gzip:  0.56 kB
+public/build/assets/VerifyEmail-hwpDOj94.js                     1.37 kB │ gzip:  0.79 kB
+public/build/assets/ConfirmPassword-FieiA_OB.js                 1.43 kB │ gzip:  0.76 kB
+public/build/assets/ForgotPassword-BAimNhEy.js                  1.59 kB │ gzip:  0.87 kB
+public/build/assets/dateTime-BLEsismt.js                        1.71 kB │ gzip:  0.86 kB
+public/build/assets/Welcome-g8GNw_pm.js                         1.99 kB │ gzip:  1.00 kB
+public/build/assets/dataPresentation-CuI5zl7P.js                2.20 kB │ gzip:  1.17 kB
+public/build/assets/Login-08IfoNkb.js                           2.39 kB │ gzip:  1.05 kB
+public/build/assets/ResetPassword-C55EPw9M.js                   2.56 kB │ gzip:  0.89 kB
+public/build/assets/UpdateProfileInformationForm-BJr3eI2s.js    2.70 kB │ gzip:  1.18 kB
+public/build/assets/Register-DBurY1OU.js                        3.02 kB │ gzip:  0.96 kB
+public/build/assets/UpdatePasswordForm-grjdlDY_.js              3.08 kB │ gzip:  1.05 kB
+public/build/assets/DeleteUserForm-BzHzZ0dA.js                  3.69 kB │ gzip:  1.65 kB
+public/build/assets/AppShell-hRjsSPR5.js                        4.05 kB │ gzip:  1.65 kB
+public/build/assets/Agents-CCnxEOeP.js                          6.00 kB │ gzip:  2.38 kB
+public/build/assets/GuidedFlight-VVM4IBXE.js                    6.07 kB │ gzip:  2.50 kB
+public/build/assets/Show-D1qVKMEH.js                            7.81 kB │ gzip:  3.46 kB
+public/build/assets/CreateAgent-DX567m_Q.js                     9.18 kB │ gzip:  3.23 kB
+public/build/assets/TutorialCourse-Be1TflPa.js                 23.48 kB │ gzip:  9.04 kB
+public/build/assets/Dashboard-CaiCPdty.js                     128.25 kB │ gzip: 38.24 kB
+public/build/assets/app-CBKCHsqx.js                           284.10 kB │ gzip: 97.54 kB
+
+✓ built in 460ms
+npm notice run npx
+npm notice run 'pnpm' build
+$ vite build
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 720 modules transformed.
+rendering chunks...
+computing gzip size...
+public/build/manifest.json                                     10.53 kB │ gzip:  1.36 kB
+public/build/assets/Welcome-CmoIjcH2.css                        0.15 kB │ gzip:  0.13 kB
+public/build/assets/dateTime-05q_TOSW.css                       0.66 kB │ gzip:  0.34 kB
+public/build/assets/GuidedFlight-CPCUKnB1.css                   1.17 kB │ gzip:  0.53 kB
+public/build/assets/AppShell-CGlwTphf.css                       1.39 kB │ gzip:  0.61 kB
+public/build/assets/Show-DVouwzbK.css                           2.82 kB │ gzip:  0.91 kB
+public/build/assets/Agents-UQeWFSxe.css                         4.70 kB │ gzip:  1.27 kB
+public/build/assets/TutorialCourse-DQR4gQuP.css                 5.69 kB │ gzip:  1.58 kB
+public/build/assets/Dashboard-DeOSE7id.css                     18.65 kB │ gzip:  3.86 kB
+public/build/assets/app-D6bvJ2S7.css                           33.25 kB │ gzip:  7.44 kB
+public/build/assets/_plugin-vue_export-helper-BDNMzG2s.js       0.08 kB │ gzip:  0.09 kB
+public/build/assets/DangerButton-5KWqnN4o.js                    0.26 kB │ gzip:  0.22 kB
+public/build/assets/PrimaryButton--btJL-gk.js                   0.26 kB │ gzip:  0.22 kB
+public/build/assets/SecondaryButton-CBd0OM55.js                 0.27 kB │ gzip:  0.21 kB
+public/build/assets/AuthenticatedLayout-CF47NNE3.js             0.43 kB │ gzip:  0.30 kB
+public/build/assets/Checkbox-BK_tmG5S.js                        0.45 kB │ gzip:  0.32 kB
+public/build/assets/GuestLayout-BDbagb7a.js                     0.63 kB │ gzip:  0.43 kB
+public/build/assets/TextInput-7SMO6-g-.js                       0.93 kB │ gzip:  0.52 kB
+public/build/assets/Edit-BkcbsJ_s.js                            0.99 kB │ gzip:  0.56 kB
+public/build/assets/VerifyEmail-hwpDOj94.js                     1.37 kB │ gzip:  0.79 kB
+public/build/assets/ConfirmPassword-FieiA_OB.js                 1.43 kB │ gzip:  0.76 kB
+public/build/assets/ForgotPassword-BAimNhEy.js                  1.59 kB │ gzip:  0.87 kB
+public/build/assets/dateTime-BLEsismt.js                        1.71 kB │ gzip:  0.86 kB
+public/build/assets/Welcome-g8GNw_pm.js                         1.99 kB │ gzip:  1.00 kB
+public/build/assets/dataPresentation-CuI5zl7P.js                2.20 kB │ gzip:  1.17 kB
+public/build/assets/Login-08IfoNkb.js                           2.39 kB │ gzip:  1.05 kB
+public/build/assets/ResetPassword-C55EPw9M.js                   2.56 kB │ gzip:  0.89 kB
+public/build/assets/UpdateProfileInformationForm-BJr3eI2s.js    2.70 kB │ gzip:  1.18 kB
+public/build/assets/Register-DBurY1OU.js                        3.02 kB │ gzip:  0.96 kB
+public/build/assets/UpdatePasswordForm-grjdlDY_.js              3.08 kB │ gzip:  1.05 kB
+public/build/assets/DeleteUserForm-BzHzZ0dA.js                  3.69 kB │ gzip:  1.65 kB
+public/build/assets/AppShell-hRjsSPR5.js                        4.05 kB │ gzip:  1.65 kB
+public/build/assets/Agents-CCnxEOeP.js                          6.00 kB │ gzip:  2.38 kB
+public/build/assets/GuidedFlight-VVM4IBXE.js                    6.07 kB │ gzip:  2.50 kB
+public/build/assets/Show-D1qVKMEH.js                            7.81 kB │ gzip:  3.46 kB
+public/build/assets/CreateAgent-DX567m_Q.js                     9.18 kB │ gzip:  3.23 kB
+public/build/assets/TutorialCourse-Be1TflPa.js                 23.48 kB │ gzip:  9.04 kB
+public/build/assets/Dashboard-CaiCPdty.js                     128.25 kB │ gzip: 38.24 kB
+public/build/assets/app-CBKCHsqx.js                           284.10 kB │ gzip: 97.54 kB
+
+✓ built in 372ms
+Production assets are identical with unrelated Markdown and generated-view fixtures.
+Pinia restores and persists the existing elementsStore key and JSON state.
+PASS: HTTP-origin submission keys are valid independent UUIDs without randomUUID.
+PASS: America/Los_Angeles timestamps, guided waits, nested evidence, and unchanged UTC source values.
+PASS: America/New_York timestamps, guided waits, nested evidence, and unchanged UTC source values.
+PASS: Asia/Tokyo timestamps, guided waits, nested evidence, and unchanged UTC source values.
+PASS: UTC timestamps, guided waits, nested evidence, and unchanged UTC source values.
+PASS absolute deadlines, observation-confirmed readiness, unknowns, zero-capacity meters and freshness
+PASS: course structure, malformed progress recovery, deduplication, and user/agent/reset isolation.
+PASS: deterministic planning, exact fields, approval matching, confirmed receipts, batching, refuel units, setup/scouting, blockers and progress isolation.
+PASS template defaults: HTTP 404, key changed no
+PASS local debug with solutions disabled: HTTP 404, key changed no
+PASS production control: HTTP 404, key changed no
+PASS isolated vulnerable positive control: HTTP 204, key changed only in disposable positive control
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.5.12
+Configuration: /Users/Taylor/.t3/worktrees/spacetraders/implement-issue-67-cycl-57b8b6dde1f4501f/phpunit.xml
+
+...............................................................  63 / 334 ( 18%)
+............................................................... 126 / 334 ( 37%)
+............................................................... 189 / 334 ( 56%)
+............................................................... 252 / 334 ( 75%)
+............................................................... 315 / 334 ( 94%)
+...................                                             334 / 334 (100%)
+
+Time: 00:31.597, Memory: 83.00 MB
+
+OK (334 tests, 1799 assertions)
+{"tool":"pint","result":"passed"}

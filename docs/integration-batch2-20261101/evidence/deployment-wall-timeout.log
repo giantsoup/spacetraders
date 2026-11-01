@@ -1,0 +1,5 @@
+Owned evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-gykk8rhs/spacetraders-deployment-b0dd4b97a72f
+PASS real ten-minute controller aborts within measured tolerance
+PASS timeout restores admission and persistent pickup
+PASS timeout neither kills nor cancels the active web writer
+PASS active writer completes normally after abort

@@ -1,0 +1,2 @@
+Owned OPS02 browser origin: http://127.0.0.1:60940
+PASS: cached config/routes, redirected-input refusal, real hidden-terminal one-time creation and recovery, no echoed/logged secrets, no-interaction refusal, closed direct routes, existing file session, recovered login, authenticated password change, dark desktop/mobile UI.

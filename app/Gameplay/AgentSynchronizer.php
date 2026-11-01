@@ -152,6 +152,21 @@ class AgentSynchronizer
             if ($kind === 'waypoint' && in_array($source, ['listing', 'scan', 'chart'], true)) {
                 $this->observe($agent, 'waypoint_'.$source, $symbol, $data, $source, $observer);
             }
+            if ($kind === 'waypoint') {
+                $known = ExplorationPolicy::traitsKnown($data) || in_array($source, ['scan', 'chart'], true);
+                $old = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->where('symbol', $symbol)->first();
+                if (! $known && $old && ExplorationPolicy::traitsKnown($old->data)) {
+                    foreach (['traits', 'traits_observed', 'traits_observed_at', 'traits_source'] as $field) {
+                        if (array_key_exists($field, $old->data)) {
+                            $data[$field] = $old->data[$field];
+                        }
+                    }
+                } else {
+                    $data['traits_observed'] = $known;
+                    $data['traits_observed_at'] = $known ? now()->toIso8601String() : null;
+                    $data['traits_source'] = $known ? $source : null;
+                }
+            }
             if ($kind === 'market') {
                 $listing = array_intersect_key($data, array_flip(['symbol', 'imports', 'exports', 'exchange']));
                 $this->observe($agent, 'market_listing', $symbol, $listing, $source, $observer);

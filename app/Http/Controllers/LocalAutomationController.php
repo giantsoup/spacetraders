@@ -44,7 +44,7 @@ class LocalAutomationController extends Controller
         $record = $draft ? AutomationDraft::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->findOrFail($draft) : null;
         $limits = $request->validated('limits');
         foreach ($limits as $key => $value) {
-            if ($key !== 'survey_signature') {
+            if ($key !== 'survey_signature' && $value !== null) {
                 $limits[$key] = (int) $value;
             }
         }

@@ -18,7 +18,7 @@ Run `node scripts/verify-pages-browser.mjs` after building production assets. Se
 
 The check creates a private SQLite fixture and a temporary loopback server. It uses real local handlers and synthetic SpaceTraders responses. It keeps the checkout's environment and live game data unchanged. Browser requests to external services are blocked. Email uses the array transport.
 
-The check renders every Inertia page at 1440px, 390px, and 320px. It fails if a new page has no coverage entry, omits the shared shell, contains duplicate element IDs, or causes horizontal page overflow. It checks both system color preferences and exercises authentication, registration, password recovery, profile updates, agent import, and the deletion dialog's keyboard behavior. It does not delete an account.
+The check renders every Inertia page at 1440px, 390px, and 320px. It fails if a new page has no coverage entry, omits the shared shell, contains duplicate element IDs, or causes horizontal page overflow. It checks both system color preferences and exercises authentication, closed public account routes, profile updates, agent import, and the deletion dialog's keyboard behavior. It does not delete an account.
 
 Results and screenshots are saved under `storage/app/mvp-evidence/style-refactor/after`. Set `QA_ARTIFACT_DIR` to use a different output directory. The existing agents, tutorial, and guided-flight browser scripts cover the related game journeys. `bash scripts/verify.sh` runs the production-build checks, frontend logic checks, backend suite, and code formatting checks.
 

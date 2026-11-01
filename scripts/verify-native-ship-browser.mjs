@@ -119,7 +119,7 @@ try {
     for (const state of ['pending', 'sending', 'uncertain', 'confirmed']) {
         cli(`App\\Models\\ShipAction::first()->update(['state'=>'${state}','review_required'=>${state === 'confirmed' ? 'true' : 'false'}]); echo '{}';`);
         await page.goto(deck); await button(state === 'uncertain' || state === 'confirmed' ? 'Review unresolved action' : 'View pending command').waitFor(); await capture(`action-${state}`);
-        await shipView(page, 'commands'); assert.equal(await page.locator('#manual fieldset').evaluate(el => el.disabled), true);
+        await shipView(page, 'commands'); assert.equal(await page.locator('#manual fieldset').evaluateAll(els => els.length > 0 && els.every(el => el.matches(':disabled'))), true);
     }
     await shipView(page, 'activity'); await post(`Reconcile #${action.id}`, `/commands/${action.id}/reconcile`);
     await page.locator('#activity').getByText('Confirmed · Review required', { exact: false }).waitFor();
@@ -175,7 +175,7 @@ try {
     await page.addStyleTag({content: 'html { font-size: 24px; } .app-shell, .app-button, .resource-row, .home-link { font-size: 24px; }'});
     await page.locator('.cargo-row').scrollIntoViewIfNeeded(); await page.locator('.cargo-row').click(); await button('Done').click(); await capture('enlarged-text', true);
     cli("App\\Models\\Ship::query()->delete(); echo '{}';"); await page.goto(deck); await page.getByText('No ship observed', {exact:true}).waitFor(); await button('Refresh observations').waitFor(); await capture('no-ship');
-    cli("App\\Models\\Agent::first()->update(['connection_state'=>'reset']); echo '{}';"); await page.reload(); await page.getByText('Archived agent · World reset.', {exact:false}).waitFor(); await shipView(page,'commands'); assert.equal(await page.locator('#manual fieldset').evaluate(el=>el.disabled),true); await capture('archived');
+    cli("App\\Models\\Agent::first()->update(['connection_state'=>'reset']); echo '{}';"); await page.reload(); await page.getByText('Archived agent · World reset.', {exact:false}).waitFor(); await shipView(page,'commands'); assert.equal(await page.locator('#manual fieldset').evaluateAll(els => els.length > 0 && els.every(el => el.matches(':disabled'))),true); await capture('archived');
     steps.push('Missing fields, zero-capacity fuel, long symbols, landscape/wide/enlarged text scrolling, no-ship and archive states verified.');
     assert.deepEqual(await page.locator('[id]').evaluateAll(els => { const ids=els.map(e=>e.id); return ids.filter((id,i)=>ids.indexOf(id)!==i); }), []);
     assert.deepEqual(errors, []);

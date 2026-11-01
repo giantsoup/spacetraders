@@ -35,7 +35,6 @@ const signedIn = computed(() => Boolean(page.props.auth?.user));
                     </template>
                     <template v-else>
                         <Link :href="route('login')" :aria-current="route().current('login') ? 'page' : undefined">Log in</Link>
-                        <Link :href="route('register')" :aria-current="route().current('register') ? 'page' : undefined">Register</Link>
                     </template>
                 </slot>
             </nav>

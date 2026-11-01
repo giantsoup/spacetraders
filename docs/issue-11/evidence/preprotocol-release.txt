@@ -1,0 +1,14 @@
+Historical main 5c1990696811554d03a752dae2cfec6259fcc36c
+Owned artifact /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-ops03-preprotocol-_j4okg2o
+Exit 1
+
+   ERROR  Command "spacetraders:deployment" is not defined. Did you mean one of these?
+
+  ⇂ spacetraders:dispatch-due
+  ⇂ spacetraders:encrypt-tokens
+  ⇂ spacetraders:engine-schedule
+  ⇂ spacetraders:engine-service
+  ⇂ spacetraders:engine-supervise
+
+
+Expected incompatible release: no deployment contract. No rollout or automatic rollback to this artifact is safe.

@@ -2,6 +2,9 @@
 
 namespace App\Gameplay;
 
+use App\Models\Agent;
+use App\Models\AutomationRun;
+use App\Models\Ship;
 use Carbon\CarbonImmutable;
 
 class OpportunityEvaluator
@@ -16,6 +19,24 @@ class OpportunityEvaluator
         }
 
         return hash('sha256', json_encode($parts));
+    }
+
+    public function investment(Agent $agent, array $case): array
+    {
+        $reference = AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->findOrFail($case['reference_run']);
+        $owned = Ship::where('agent_id', $agent->id)->get()->keyBy('symbol');
+        $alternatives = AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('state', 'completed')
+            ->whereIn('ship_symbol', $owned->keys())->whereNotNull('started_at')->latest('id')->limit(config('gameplay.evidence_run_limit'))->get()
+            ->filter(fn ($run) => in_array($run->totals['accounting']['state'] ?? null, ['realized_comparable', 'estimated_comparable'], true)
+                && ($run->plan['equipment'] ?? null) === self::equipment($owned[$run->ship_symbol]->snapshot)
+                && ($run->totals['accounting']['net_credits_per_hour'] ?? null) !== null
+                && collect(['initial_waypoint', 'initial_fuel', 'initial_inventory', 'site', 'market'])->every(fn ($key) => ($run->plan[$key] ?? null) === ($reference->plan[$key] ?? null)))
+            ->sortByDesc(fn ($run) => $run->totals['accounting']['net_credits_per_hour']);
+        $best = $alternatives->first();
+        $result = app(CycleAccounting::class)->fleetInvestment($case, $best?->totals['accounting']['net_credits_per_hour']);
+
+        return $result + ['alternative_run' => $best?->id, 'alternatives_in_window' => $alternatives->count(), 'inputs' => $case,
+            'basis' => 'Entered base and conservative fleet net must include all operating costs and wear over the same closed cycle as the reference. Baseline is the best measured current-assets result in this bounded evidence window with matching endpoints, fuel and inventory. Unobserved alternatives remain unknown. No gameplay or purchase is authorized.'];
     }
 
     public static function quoteSignature(array $market): string
@@ -49,6 +70,10 @@ class OpportunityEvaluator
                             try {
                                 $candidate['contract_plan'] = $plan = $this->contracts->plan($ship, $contract, $points, $markets, $source, $cargo, $now);
                                 $candidate = array_merge($candidate, array_intersect_key($plan, array_flip(['estimated_net', 'estimated_per_hour', 'duration_seconds', 'working_capital', 'fuel_estimate', 'setup_cost'])));
+                                $candidate['estimate_kind'] = 'contract_cash_contribution';
+                                $candidate['estimates'] = ['state' => 'partial_estimate', 'base' => ['cash_contribution' => $plan['estimated_net'], 'net_per_hour' => null],
+                                    'conservative' => ['cash_contribution' => $plan['fuel_adjustment_estimate'] === null ? null : -$plan['purchase_cost'] - $plan['fuel_adjustment_estimate'], 'net_per_hour' => null],
+                                    'unresolved' => ['Contract cash ranking is not comparable complete-cycle income. Empty return, wear, fuel normalization and inventory acquisition basis remain unresolved.']];
                                 $candidate['reasons'][] = 'Unpaid contract receipts minus verified acquisitions and estimated fuel consumption. Queue and API allowance included; sleep can miss deadlines.';
                                 if ($credits === null || $credits < $plan['working_capital']) {
                                     throw new GameException('Insufficient observed working capital.');
@@ -80,14 +105,16 @@ class OpportunityEvaluator
                             $candidate['fuel_estimate'] = $route['fuel_estimate'];
                             $candidate['minimum_reserve'] = $route['minimum_reserve'];
                             $candidate['reasons'][] = 'Trial required. One extraction per trip; unknown yields and duration do not establish an earnings estimate.';
-                            $samples = array_values(array_filter($observations['history'] ?? [], fn ($h) => $h['site'] === $site['symbol'] && $h['market'] === $market && $h['equipment'] === self::equipment($ship) && ($h['quote_signature'] ?? null) === self::quoteSignature($quote) && ($h['initial_waypoint'] ?? null) === $ship['nav']['waypointSymbol'] && ($h['initial_fuel'] ?? null) === $ship['fuel']['current'] && CarbonImmutable::parse($h['at'])->gte($now->subDays(7))));
+                            $samples = array_values(array_filter($observations['history'] ?? [], fn ($h) => $h['site'] === $site['symbol'] && $h['market'] === $market && $h['equipment'] === self::equipment($ship) && ($h['quote_signature'] ?? null) === self::quoteSignature($quote) && ($h['initial_waypoint'] ?? null) === $ship['nav']['waypointSymbol'] && ($h['initial_fuel'] ?? null) === $ship['fuel']['current'] && CarbonImmutable::parse($h['at'])->betweenIncluded($now->subDays(7), $now)));
                             $candidate['yield_history'] = ['site' => $site['symbol'], 'equipment' => self::equipment($ship), 'sample_count' => count($samples), 'oldest_at' => $samples ? min(array_column($samples, 'at')) : null];
-                            if (count($samples) >= 3 && array_sum(array_column($samples, 'seconds')) > 0) {
+                            $candidate['estimates'] = app(CycleAccounting::class)->forecast($samples);
+                            if ($candidate['estimates']['state'] === 'estimate') {
                                 $candidate['trial_required'] = false;
-                                $candidate['estimated_net'] = (int) floor(array_sum(array_column($samples, 'contribution')) / count($samples));
-                                $candidate['duration_seconds'] = (int) ceil(array_sum(array_column($samples, 'seconds')) / count($samples));
-                                $candidate['estimated_per_hour'] = (int) floor($candidate['estimated_net'] * 3600 / $candidate['duration_seconds']);
-                                $candidate['reasons'] = ['Estimate uses '.count($samples).' confirmed trips at this site with this equipment within seven days. Cash contribution excludes ship wear and time.'];
+                                $candidate['estimated_net'] = $candidate['estimates']['base']['net'];
+                                $candidate['duration_seconds'] = $candidate['estimates']['base']['seconds'];
+                                $candidate['estimated_per_hour'] = $candidate['estimates']['base']['net_per_hour'];
+                                $candidate['conservative_per_hour'] = $candidate['estimates']['conservative']['net_per_hour'];
+                                $candidate['reasons'] = [$candidate['estimates']['basis']];
                             }
                         } catch (GameException $e) {
                             $candidate['classification'] = $this->classification($e->getMessage());
@@ -120,7 +147,7 @@ class OpportunityEvaluator
     {
         return ['strategy' => $strategy, 'ship_symbol' => $ship['symbol'], 'market' => $market, 'classification' => 'ready', 'reasons' => [], 'estimated_net' => null,
             'estimated_per_hour' => null, 'duration_seconds' => null, 'working_capital' => null, 'fuel_estimate' => null, 'setup_cost' => 0, 'observed_at' => $observations['observed_at'] ?? null,
-            'required_equipment' => $strategy === 'mining' ? ['Mining laser', 'Mineral processor', 'Cargo capacity'] : ['Operational ship', 'Cargo capacity']];
+            'estimate_kind' => 'complete_cycle_net', 'required_equipment' => $strategy === 'mining' ? ['Mining laser', 'Mineral processor', 'Cargo capacity'] : ['Operational ship', 'Cargo capacity']];
     }
 
     private function finish(array $candidate, bool $complete): array

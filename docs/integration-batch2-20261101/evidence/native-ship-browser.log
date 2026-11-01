@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "steps": [
+    "Measured ship identity, Fuel, Cargo and primary action fully inside all three portrait viewports in docked, orbit, transit and cooldown states.",
+    "Report and ship share the report; Fuel/Cargo deep links, explicit Done, Escape, native focus containment/return, browser Back/Forward and Menu verified.",
+    "Manual preview, exact approval, queued intent, real finite worker, confirmed persistence and activity navigation verified.",
+    "Pending/sending/uncertain/confirmed-with-review states block duplicates. Read-only reconciliation retains confirmed review. History retains all 95 synthetic commands across a 50-command polling update, refreshes older states and keeps older saved previews open.",
+    "Active-run approved limits and real Stop request retain Stop requested while ownership settles.",
+    "Arrival due remains Checking; presentation pause/resume and lifecycle events preserve deadlines and issue no gameplay writes; reduced motion disables animation.",
+    "Missing fields, zero-capacity fuel, long symbols, landscape/wide/enlarged text scrolling, no-ship and archive states verified."
+  ],
+  "layouts": 12,
+  "errors": [],
+  "browser": "156.0.8078.4",
+  "origin": "http://127.0.0.1:65234",
+  "fixture": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-x35dh6jv/spacetraders-fixture-19eea1b687da",
+  "output": "/Users/Taylor/.t3/worktrees/spacetraders/integrate-completed-batch2-20261101/storage/app/integration-evidence/native-ship-browser"
+}

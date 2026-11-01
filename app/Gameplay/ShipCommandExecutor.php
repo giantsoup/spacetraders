@@ -8,6 +8,7 @@ use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\LocalEngine;
+use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Services\SpaceTradersClient;
 use Carbon\CarbonImmutable;
@@ -57,12 +58,54 @@ class ShipCommandExecutor
             if ($action->expires_at->isPast() || $action->reset_id !== $agent->reset_id) {
                 throw new GameException('Preview expired. Create a fresh preview.');
             }
-            $this->rules->inspect($agent, $action->ship_symbol, $action->command, $action->arguments);
-            DB::transaction(function () use ($action) {
-                $this->gate->check($action->engine_session_id);
-                $action->update(['state' => ActionState::Pending, 'last_dispatched_at' => now()]);
-            });
+            try {
+                $before = $this->rules->inspect($agent, $action->ship_symbol, $action->command, $action->arguments);
+                $this->unchangedExploration($action, $before);
+                DB::transaction(function () use ($action) {
+                    $this->gate->check($action->engine_session_id);
+                    if (! ShipAction::whereKey($action->id)->where('state', 'preview')->update(['state' => 'pending', 'last_dispatched_at' => now()])) {
+                        throw new GameException('Preview was stopped or already approved.');
+                    }
+                    $action->refresh();
+                });
+            } catch (\Throwable $e) {
+                if (ExplorationPolicy::command($action->command)) {
+                    ShipAction::whereKey($action->id)->where('state', 'preview')->update(['state' => 'rejected', 'message' => 'Exploration approval preflight failed. Create a fresh preview; no automatic retry.', 'settled_at' => now()]);
+                }
+                throw $e;
+            }
             ExecuteShipCommand::dispatch($action->id)->afterCommit();
+
+            return $action;
+        });
+    }
+
+    private function unchangedExploration(ShipAction $action, array $before): void
+    {
+        if (! ExplorationPolicy::command($action->command)) {
+            return;
+        }
+        $saved = $action->before_state['ship'];
+        $current = $before['ship'];
+        if ($saved['nav']['waypointSymbol'] !== $current['nav']['waypointSymbol'] || $saved['fuel'] !== $current['fuel'] || FuelPlanner::configuration($saved) !== FuelPlanner::configuration($current)) {
+            throw new GameException('Exploration location, fuel or equipment changed. Create a fresh preview.');
+        }
+    }
+
+    public function stopExploration(ShipAction $action): ShipAction
+    {
+        return DB::transaction(function () use ($action) {
+            $action->refresh();
+            if (! ExplorationPolicy::command($action->command)) {
+                throw new GameException('This Stop control applies to one-shot exploration actions.');
+            }
+            if (in_array($action->state, [ActionState::Preview, ActionState::Pending, ActionState::Sending], true)) {
+                $reserved = $action->state === ActionState::Sending;
+                $action->update(['state' => $reserved ? ActionState::Sending : ActionState::Rejected,
+                    'outcome' => array_merge($action->outcome ?? [], ['stop_requested_at' => now()->toIso8601String()]),
+                    'message' => $reserved ? 'Stop requested after reservation. This action may settle; no follow-up is authorized.' : 'Stopped before reservation. No exploration request was sent.',
+                    'settled_at' => $reserved ? null : now()]);
+            }
 
             return $action;
         });
@@ -102,6 +145,7 @@ class ShipCommandExecutor
                     throw new GameException('Intent expired, reset or stopped before execution.');
                 }
                 $before = $this->rules->inspect($agent, $action->ship_symbol, $action->command, $action->arguments, $run);
+                $this->unchangedExploration($action, $before);
                 // Stop and reservation contend on a database transaction, independently of the host lock.
                 DB::transaction(function () use ($action, $run, $before) {
                     $this->gate->check($action->engine_session_id);
@@ -121,12 +165,12 @@ class ShipCommandExecutor
                 $this->confirm($agent, $action, $data, $before, $run);
             } catch (RequestDeferred $e) {
                 // This exception is emitted only before HTTP transport starts. Returning to pending cannot replay a write.
-                if ($action->expires_at->isFuture()) {
+                if ($action->expires_at->isFuture() && ! ExplorationPolicy::command($action->command)) {
                     $action->update(['state' => ActionState::Pending, 'sent_at' => null, 'message' => $e->getMessage()]);
                 } else {
-                    $action->update(['state' => ActionState::Rejected, 'message' => 'Intent expired while waiting for the request budget.', 'settled_at' => now()]);
+                    $action->update(['state' => ActionState::Rejected, 'message' => ExplorationPolicy::command($action->command) ? 'Exploration stopped at the request budget. Create a fresh preview; no automatic retry.' : 'Intent expired while waiting for the request budget.', 'settled_at' => now()]);
                     if ($run) {
-                        $this->block($run, 'Intent expired while waiting for the request budget.');
+                        $this->block($run, ExplorationPolicy::command($action->command) ? 'Exploration stopped at the request budget. Create a fresh preview; no automatic retry.' : 'Intent expired while waiting for the request budget.');
                     }
                 }
             } catch (GameException $e) {
@@ -135,7 +179,7 @@ class ShipCommandExecutor
                     app(SurveyPool::class)->invalidate($agent, $action->arguments['surveySignature'], $e->apiCode === 4224);
                 }
                 // Rate-budget failure before transport is safe to retry only while pending.
-                if ($action->state === ActionState::Pending && $e->retryAfter > 0 && $action->expires_at->isFuture()) {
+                if ($action->state === ActionState::Pending && ! ExplorationPolicy::command($action->command) && $e->retryAfter > 0 && $action->expires_at->isFuture()) {
                     $action->update(['message' => $e->getMessage()]);
 
                     return;
@@ -226,6 +270,9 @@ class ShipCommandExecutor
             $payment = $before['contract']['terms']['payment'][$action->command === 'contract_accept' ? 'onAccepted' : 'onFulfilled'];
             $discrepancy = $delta !== $payment || $credits < $before['estimate']['reserve'];
         }
+        $discrepancy = $discrepancy || ($action->command === 'chart' && $delta < 0);
+        $cooldownDiscrepancy = $action->command === 'scan_waypoints' && $data['cooldown']['totalSeconds'] > $action->arguments['maxCooldownSeconds'];
+        $discrepancy = $discrepancy || $cooldownDiscrepancy;
         $discrepancy = $discrepancy || ($action->command === 'refuel' && $actualShip['fuel']['current'] <= $before['ship']['fuel']['current']);
         $fuelDiscrepancy = false;
         if ($action->command === 'navigate') {
@@ -236,7 +283,7 @@ class ShipCommandExecutor
         if (in_array($action->command, ['buy', 'sell'], true) && (($data['transaction']['units'] ?? null) !== $action->arguments['units'] || ($data['transaction']['tradeSymbol'] ?? null) !== $action->arguments['symbol'])) {
             throw new GameException('Trade response does not match the reserved intent.', uncertain: true);
         }
-        DB::transaction(function () use ($agent, $action, $data, $actualShip, $credits, $price, $delta, $discrepancy, $fuelDiscrepancy, $configurationMismatch, $run, $target) {
+        DB::transaction(function () use ($agent, $action, $data, $actualShip, $credits, $price, $delta, $discrepancy, $fuelDiscrepancy, $configurationMismatch, $cooldownDiscrepancy, $run, $target) {
             $this->sync->saveShip($agent, $actualShip);
             if ($target) {
                 $this->sync->saveShip($agent, $target);
@@ -251,7 +298,21 @@ class ShipCommandExecutor
                 $this->sync->invalidateMarket($agent, $actualShip['nav']['waypointSymbol'], $action->id);
             }
             $outcome = ['contract' => $data['contract'] ?? null, 'credit_delta' => $delta, 'transaction_total' => $price, 'yield' => $data['extraction']['yield'] ?? null,
-                'units' => $data['transaction']['units'] ?? null, 'price_discrepancy' => $discrepancy && ! $fuelDiscrepancy, 'fuel_discrepancy' => $fuelDiscrepancy, 'delivered_ship' => $data['ship']['symbol'] ?? null, 'configuration_mismatch' => $configurationMismatch];
+                'units' => $data['transaction']['units'] ?? null, 'price_discrepancy' => $discrepancy && ! $fuelDiscrepancy && ! $cooldownDiscrepancy, 'cooldown_discrepancy' => $cooldownDiscrepancy, 'fuel_discrepancy' => $fuelDiscrepancy, 'delivered_ship' => $data['ship']['symbol'] ?? null, 'configuration_mismatch' => $configurationMismatch];
+            if (ExplorationPolicy::command($action->command)) {
+                $source = $action->command === 'chart' ? 'chart' : 'scan';
+                $points = $source === 'chart' ? [$data['waypoint']] : $data['waypoints'];
+                foreach ($points as $point) {
+                    $this->sync->observe($agent, 'waypoint', $point['symbol'], $point, $source, $actualShip['symbol']);
+                }
+                $target = collect($points)->firstWhere('symbol', $action->arguments['waypointSymbol']);
+                $outcome['exploration'] = ['question' => ExplorationPolicy::QUESTIONS[$action->arguments['question']],
+                    'target' => $action->arguments['waypointSymbol'], 'coverage' => 'Only returned waypoints; no catalogue completeness claim.',
+                    'returned_symbols' => array_column($points, 'symbol'), 'answered' => $target !== null,
+                    'trait_present' => $target === null ? null : in_array($action->arguments['question'], array_column($target['traits'], 'symbol'), true),
+                    'cooldown' => isset($data['cooldown']) ? $actualShip['cooldown'] : null, 'chart' => $data['chart'] ?? null,
+                    'next' => $target ? 'Question answered. Reassess directories and routes under a new approval.' : 'Target was not returned. Traits remain unknown. Stop and reassess; no automatic rescan.'];
+            }
             if (in_array($action->command, ['mine', 'mine_survey'], true)) {
                 $this->sync->observe($agent, 'extraction', $actualShip['nav']['waypointSymbol'], [
                     'action_id' => $action->id, 'configuration' => FuelPlanner::configuration($actualShip), 'yield' => $outcome['yield'],
@@ -274,7 +335,7 @@ class ShipCommandExecutor
                     'reported_consumed' => $data['fuel']['consumed'] ?? null, 'server_route' => $actualShip['nav']['route'], 'events' => $data['events'] ?? []];
                 $this->sync->observe($agent, 'travel', $actualShip['symbol'], $outcome['travel'], 'navigation', $actualShip['symbol']);
             }
-            $action->update(['state' => ActionState::Confirmed, 'review_required' => $discrepancy, 'outcome' => $outcome, 'settled_at' => now(), 'message' => $fuelDiscrepancy ? 'Actual fuel differed from the approved prediction. Reconcile and replan before further commands.' : ($discrepancy ? 'Execution differed from approved quote or reserve. Further work is paused.' : 'Confirmed by SpaceTraders.')]);
+            $action->update(['state' => ActionState::Confirmed, 'review_required' => $discrepancy, 'outcome' => array_merge($action->fresh()->outcome ?? [], $outcome), 'settled_at' => now(), 'message' => $fuelDiscrepancy ? 'Actual fuel differed from the approved prediction. Reconcile and replan before further commands.' : ($discrepancy ? (ExplorationPolicy::command($action->command) ? 'Exploration exceeded the cooldown review threshold or changed credits unexpectedly. Review before further work.' : 'Execution differed from approved quote or reserve. Further work is paused.') : 'Confirmed by SpaceTraders.')]);
             app(CreditAccounting::class)->record($agent, $action, $delta);
             if (isset($data['contract'])) {
                 $this->sync->observe($agent, 'contract', $data['contract']['id'], $data['contract']);
@@ -317,6 +378,10 @@ class ShipCommandExecutor
             if (in_array($action->command, ['sell', 'buy', 'refuel'], true)) {
                 $evidence['transactions'] = $this->api->market($agent, $ship['nav']['waypointSymbol'])['transactions'] ?? [];
             }
+            if (ExplorationPolicy::command($action->command)) {
+                $evidence['waypoint'] = $this->api->waypoint($agent, $action->arguments['waypointSymbol']);
+                $this->sync->observe($agent, 'waypoint', $action->arguments['waypointSymbol'], $evidence['waypoint'], 'read', $ship['symbol']);
+            }
             $contractId = $action->arguments['contractId'] ?? ($action->automation_run_id ? AutomationRun::find($action->automation_run_id)?->plan['contract_plan']['contract']['id'] ?? null : null);
             if ($contractId) {
                 $evidence['contract'] = $this->api->contract($agent, $contractId);
@@ -335,5 +400,7 @@ class ShipCommandExecutor
     public function block(AutomationRun $run, string $reason): void
     {
         $run->update(['state' => RunState::Blocked, 'blocked_reason' => $reason]);
+        $ship = Ship::where('agent_id', $run->agent_id)->where('symbol', $run->ship_symbol)->first()?->snapshot;
+        app(CycleAccounting::class)->record($run, $ship);
     }
 }

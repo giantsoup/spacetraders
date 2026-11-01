@@ -24,19 +24,38 @@ class GameplayRequest extends FormRequest
     public function rules(): array
     {
         $name = $this->route()->getName();
+        if ($name === 'game.economics.investment') {
+            return [
+                'reference_run' => ['required', 'integer', 'min:1'],
+                'basis_note' => ['required', 'string', 'min:10', 'max:500'],
+                'costs_complete' => ['required', 'accepted'],
+                'base_net' => ['nullable', 'integer', 'between:-1000000000,1000000000'],
+                'conservative_net' => ['nullable', 'integer', 'between:-1000000000,1000000000', 'lte:base_net'],
+                'elapsed_seconds' => ['required', 'integer', 'between:1,31536000'],
+                'ship_seconds' => ['nullable', 'integer', 'gte:elapsed_seconds', 'max:3153600000'],
+                'ship_capital' => ['nullable', 'integer', 'between:0,1000000000'],
+                'equipment_capital' => ['nullable', 'integer', 'between:0,1000000000'],
+                'production_units' => ['nullable', 'integer', 'between:0,1000000000'],
+                'round_trip_seconds' => ['nullable', 'integer', 'between:1,31536000'],
+                'hauler_capacity' => ['nullable', 'integer', 'between:0,1000000000'],
+                'buyer_capacity' => ['nullable', 'integer', 'between:0,1000000000'],
+            ];
+        }
         if ($name === 'game.commands.preview') {
             $command = $this->input('command');
 
             return [
                 'key' => ['required', 'uuid'], 'ship_symbol' => ['required', 'string', 'max:80', 'regex:/^[A-Z0-9_-]+$/'],
-                'command' => ['required', Rule::in(['navigate', 'orbit', 'dock', 'refuel', 'mine', 'mine_survey', 'survey', 'transfer', 'buy', 'sell', 'buy_ship'])],
-                'arguments' => ['present', 'array:units,symbol,waypointSymbol,shipType,maxTotal,minTotal,reserve,site,market,require_guaranteed_price,targetShip,surveySignature,surveyWaypoint'],
+                'command' => ['required', Rule::in(['navigate', 'orbit', 'dock', 'refuel', 'mine', 'mine_survey', 'survey', 'scan_waypoints', 'chart', 'transfer', 'buy', 'sell', 'buy_ship'])],
+                'arguments' => ['present', 'array:units,symbol,waypointSymbol,shipType,maxTotal,minTotal,reserve,site,market,require_guaranteed_price,targetShip,surveySignature,surveyWaypoint,question,maxCooldownSeconds'],
                 'arguments.units' => [Rule::requiredIf(in_array($command, ['buy', 'sell', 'refuel', 'transfer'], true)), 'integer', 'between:1,100000'],
                 'arguments.symbol' => [Rule::requiredIf(in_array($command, ['buy', 'sell', 'transfer'], true)), 'string', 'regex:/^[A-Z0-9_]+$/', 'max:80'],
                 'arguments.targetShip' => [Rule::requiredIf($command === 'transfer'), 'string', 'regex:/^[A-Z0-9_-]+$/', 'max:80'],
                 'arguments.surveySignature' => [Rule::requiredIf($command === 'mine_survey'), 'string', 'max:255'],
                 'arguments.surveyWaypoint' => [Rule::requiredIf($command === 'mine_survey'), 'string', 'regex:/^[A-Z0-9-]+$/', 'max:80'],
-                'arguments.waypointSymbol' => [Rule::requiredIf(in_array($command, ['navigate', 'buy_ship'], true)), 'string', 'regex:/^[A-Z0-9-]+$/', 'max:80'],
+                'arguments.waypointSymbol' => [Rule::requiredIf(in_array($command, ['navigate', 'buy_ship', 'scan_waypoints', 'chart'], true)), 'string', 'regex:/^[A-Z0-9-]+$/', 'max:80'],
+                'arguments.question' => [Rule::requiredIf(in_array($command, ['scan_waypoints', 'chart'], true)), Rule::in(['MARKETPLACE', 'SHIPYARD'])],
+                'arguments.maxCooldownSeconds' => [Rule::requiredIf(in_array($command, ['scan_waypoints', 'chart'], true)), 'integer', 'between:0,900'],
                 'arguments.shipType' => [Rule::requiredIf($command === 'buy_ship'), 'string', 'regex:/^SHIP_[A-Z0-9_]+$/', 'max:80'],
                 'arguments.maxTotal' => [Rule::requiredIf(in_array($command, ['buy', 'buy_ship', 'refuel'], true)), 'integer', 'between:0,1000000000'],
                 'arguments.minTotal' => [Rule::requiredIf($command === 'sell'), 'integer', 'between:0,1000000000'],
@@ -70,6 +89,7 @@ class GameplayRequest extends FormRequest
                 'extraction_headroom' => [Rule::requiredIf((int) $this->input('max_extractions', 1) > 1), 'integer', 'between:1,100000'],
                 'site_seconds' => [Rule::requiredIf((int) $this->input('max_extractions', 1) > 1), 'integer', 'between:1,900'],
                 'survey_signature' => ['sometimes', 'nullable', 'string', 'max:255'],
+                'wear_allowance' => ['sometimes', 'nullable', 'integer', 'between:0,1000000000'],
             ];
         }
         if ($name === 'game.runs.start') {

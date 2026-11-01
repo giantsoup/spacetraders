@@ -31,7 +31,7 @@
             <section aria-labelledby="error-heading">
                 <p class="code">REQUEST STATUS // @yield('code')</p>
                 <h1 id="error-heading">@yield('title')</h1>
-                <p>This request could not be completed. Return to the command terminal to continue.</p>
+                <p>@yield('message', 'This request could not be completed. Return to the command terminal to continue.')</p>
                 <a href="/" class="return">Return to command →</a>
             </section>
         </main>

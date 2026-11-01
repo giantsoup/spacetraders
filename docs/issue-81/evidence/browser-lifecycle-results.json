@@ -1,0 +1,126 @@
+[
+  {
+    "processes": {
+      "browser": 48920,
+      "server": 48935
+    },
+    "engineShutdown": {
+      "processesExited": [
+        49224,
+        49274,
+        49275
+      ],
+      "serviceRemoved": true,
+      "serviceLabel": "io.spacetraders.engine.dad04030d795513208ccf153"
+    },
+    "passed": false,
+    "shutdown": {
+      "service": "verified",
+      "server": "verified",
+      "browserConnection": "verified",
+      "browser": "verified"
+    },
+    "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-nJRJnk",
+    "fixtureRemoved": false,
+    "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-nJRJnk",
+    "failures": [
+      "Verification interrupted by SIGTERM"
+    ],
+    "scenario": "SIGTERM"
+  },
+  {
+    "processes": {
+      "browser": 47581,
+      "server": 47601
+    },
+    "engineShutdown": {
+      "processesExited": [
+        47931,
+        47988,
+        47989
+      ],
+      "serviceRemoved": true,
+      "serviceLabel": "io.spacetraders.engine.5c855693e83668e6a3258b1d"
+    },
+    "passed": false,
+    "shutdown": {
+      "service": "verified",
+      "server": "verified",
+      "browserConnection": "verified",
+      "browser": "verified"
+    },
+    "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-DutcHs",
+    "fixtureRemoved": false,
+    "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-DutcHs",
+    "failures": [
+      "Intentional failure after real engine startup"
+    ],
+    "scenario": "assertion"
+  },
+  {
+    "passed": false,
+    "shutdown": {},
+    "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-lE0sa9",
+    "fixtureRemoved": false,
+    "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-lE0sa9",
+    "failures": [
+      "Owned PHP command failed, exit 17"
+    ],
+    "scenario": "fixture-failure"
+  },
+  {
+    "passed": false,
+    "shutdown": {},
+    "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-8Lq2fL",
+    "fixtureRemoved": false,
+    "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-8Lq2fL",
+    "failures": [
+      "Failed to launch chromium because executable doesn't exist at /Users/Taylor/.t3/worktrees/spacetraders/implement-issue-81-fixt-db345b8ae25c516a/storage/app/mvp-evidence/opt02/browser-lifecycle-complete/run-PO0Yet/missing-browser Failed to launch browser."
+    ],
+    "scenario": "launch-failure"
+  },
+  {
+    "processes": {
+      "browser": 50177,
+      "server": 50194
+    },
+    "engineShutdown": {
+      "processesExited": [],
+      "serviceRemoved": true,
+      "serviceLabel": "io.spacetraders.engine.21783e7d3a3af107025db54c"
+    },
+    "passed": false,
+    "shutdown": {
+      "service": "verified",
+      "server": "verified",
+      "browserConnection": "verified",
+      "browser": "verified"
+    },
+    "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-V4akq7",
+    "fixtureRemoved": false,
+    "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-V4akq7",
+    "failures": [
+      "Owned PHP command failed, exit 17"
+    ],
+    "scenario": "partial-install"
+  },
+  {
+    "processes": {
+      "browser": 46921,
+      "server": 46999
+    },
+    "browser": "156.0.8078.4",
+    "evidence": "/Users/Taylor/.t3/worktrees/spacetraders/implement-issue-81-fixt-db345b8ae25c516a/storage/app/mvp-evidence/opt02/browser-lifecycle-complete/run-PO0Yet/success",
+    "passed": true,
+    "shutdown": {
+      "server": "verified",
+      "browserConnection": "verified",
+      "browser": "verified"
+    },
+    "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-sgkTjZ",
+    "fixtureRemoved": true,
+    "diagnostics": null,
+    "failures": [],
+    "scenario": "success"
+  }
+]

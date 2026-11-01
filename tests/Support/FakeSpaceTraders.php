@@ -3,7 +3,9 @@
 namespace Tests\Support;
 
 use App\Gameplay\AutomationRunner;
+use App\Gameplay\ShipCommandExecutor;
 use App\Models\AutomationRun;
+use App\Models\ShipAction;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
@@ -79,6 +81,9 @@ final class FakeSpaceTraders
                 }
                 if ($request->method() === 'POST' && ($world['verify_worker_storage'] ?? false)) {
                     $world['worker_storage'] = ['pid' => getmypid(), 'synchronous' => (int) DB::selectOne('PRAGMA synchronous')->synchronous, 'fullfsync' => (int) DB::selectOne('PRAGMA fullfsync')->fullfsync];
+                }
+                if ($request->method() === 'POST' && isset($world['write_stop_action_id'])) {
+                    app(ShipCommandExecutor::class)->stopExploration(ShipAction::findOrFail($world['write_stop_action_id']));
                 }
                 if ($request->method() === 'POST' && isset($world['write_stop_run_id'])) {
                     app(AutomationRunner::class)->stop(AutomationRun::findOrFail($world['write_stop_run_id']));
@@ -237,6 +242,34 @@ final class FakeSpaceTraders
                 continue;
             }
             $command = $match[2];
+            if ($command === 'scan/waypoints') {
+                if (! collect($ship['mounts'])->contains(fn ($m) => str_starts_with($m['symbol'], 'MOUNT_SENSOR_ARRAY_'))) {
+                    return [['error' => ['code' => 4250]], 400];
+                }
+                $seconds = $world['cooldown_seconds'];
+                $ship['cooldown'] = ['shipSymbol' => $ship['symbol'], 'totalSeconds' => $seconds, 'remainingSeconds' => $seconds, 'expiration' => now()->addSeconds($seconds)->toIso8601String()];
+                $rows = $world['scan_waypoints'] ?? [];
+
+                return [['data' => ['cooldown' => $ship['cooldown'], 'waypoints' => $rows]], 201];
+            }
+            if ($command === 'chart') {
+                foreach ($world['waypoints'] as &$point) {
+                    if ($point['symbol'] !== $ship['nav']['waypointSymbol']) {
+                        continue;
+                    }
+                    if (! in_array('UNCHARTED', array_column($point['traits'], 'symbol'), true)) {
+                        return [['error' => ['code' => 4230]], 400];
+                    }
+                    $point['traits'] = $world['chart_traits'] ?? [];
+                    $chart = ['waypointSymbol' => $point['symbol'], 'submittedBy' => $world['symbol'], 'submittedOn' => now()->toIso8601String()];
+                    $point['chart'] = $chart;
+                    $world['credits'] += $world['chart_reward'] ?? 100;
+
+                    return [['data' => ['chart' => $chart, 'waypoint' => $point, 'agent' => ['symbol' => $world['symbol'], 'credits' => $world['credits']]]], 201];
+                }
+
+                return [['error' => ['code' => 404]], 404];
+            }
             if ($command === 'survey') {
                 $ship['cooldown'] = ['remainingSeconds' => $world['cooldown_seconds'], 'expiration' => now()->addSeconds($world['cooldown_seconds'])->toIso8601String()];
 

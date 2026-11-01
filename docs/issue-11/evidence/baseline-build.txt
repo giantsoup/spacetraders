@@ -1,0 +1,49 @@
+npm notice run npx
+npm notice run 'pnpm' build
+$ vite build
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 716 modules transformed.
+rendering chunks...
+computing gzip size...
+public/build/manifest.json                                     10.53 kB │ gzip:  1.37 kB
+public/build/assets/Welcome-CmoIjcH2.css                        0.15 kB │ gzip:  0.13 kB
+public/build/assets/dateTime-05q_TOSW.css                       0.66 kB │ gzip:  0.34 kB
+public/build/assets/GuidedFlight-CPCUKnB1.css                   1.17 kB │ gzip:  0.53 kB
+public/build/assets/AppShell-CGlwTphf.css                       1.39 kB │ gzip:  0.61 kB
+public/build/assets/Show-DVouwzbK.css                           2.82 kB │ gzip:  0.91 kB
+public/build/assets/Agents-UQeWFSxe.css                         4.70 kB │ gzip:  1.27 kB
+public/build/assets/TutorialCourse-DQR4gQuP.css                 5.69 kB │ gzip:  1.58 kB
+public/build/assets/Dashboard-BdF4d4h8.css                     16.59 kB │ gzip:  3.55 kB
+public/build/assets/app-D6bvJ2S7.css                           33.25 kB │ gzip:  7.44 kB
+public/build/assets/_plugin-vue_export-helper-BDNMzG2s.js       0.08 kB │ gzip:  0.09 kB
+public/build/assets/DangerButton-Bn_aJaRP.js                    0.26 kB │ gzip:  0.21 kB
+public/build/assets/PrimaryButton-Bu34V8Zk.js                   0.26 kB │ gzip:  0.22 kB
+public/build/assets/SecondaryButton-D1pvpP9z.js                 0.27 kB │ gzip:  0.21 kB
+public/build/assets/AuthenticatedLayout-DaubPuQF.js             0.43 kB │ gzip:  0.30 kB
+public/build/assets/Checkbox-Cza9Meh4.js                        0.45 kB │ gzip:  0.32 kB
+public/build/assets/GuestLayout-B3ROc-uq.js                     0.63 kB │ gzip:  0.43 kB
+public/build/assets/TextInput-DIzpCMWz.js                       0.93 kB │ gzip:  0.52 kB
+public/build/assets/Edit-BxV1ECwz.js                            0.99 kB │ gzip:  0.56 kB
+public/build/assets/VerifyEmail-QqBdPSZf.js                     1.37 kB │ gzip:  0.79 kB
+public/build/assets/ConfirmPassword-BmRWXMkY.js                 1.43 kB │ gzip:  0.76 kB
+public/build/assets/ForgotPassword-Cvnd-6sA.js                  1.59 kB │ gzip:  0.87 kB
+public/build/assets/dateTime-CReSc4K4.js                        1.71 kB │ gzip:  0.86 kB
+public/build/assets/Welcome-BJwQVBGc.js                         1.99 kB │ gzip:  0.99 kB
+public/build/assets/dataPresentation-bur-Y67u.js                2.20 kB │ gzip:  1.17 kB
+public/build/assets/Login-DPiBBdK8.js                           2.39 kB │ gzip:  1.05 kB
+public/build/assets/ResetPassword-1ZqXyI7G.js                   2.56 kB │ gzip:  0.89 kB
+public/build/assets/UpdateProfileInformationForm-BD2lqS8k.js    2.70 kB │ gzip:  1.18 kB
+public/build/assets/Register-BPHOY-Eg.js                        3.02 kB │ gzip:  0.96 kB
+public/build/assets/UpdatePasswordForm-C-Bjlk3g.js              3.08 kB │ gzip:  1.05 kB
+public/build/assets/DeleteUserForm-Cz8kke47.js                  3.69 kB │ gzip:  1.65 kB
+public/build/assets/AppShell-Dh6b5o3s.js                        4.05 kB │ gzip:  1.65 kB
+public/build/assets/Agents-CBjfH39y.js                          6.00 kB │ gzip:  2.38 kB
+public/build/assets/GuidedFlight-BiITp1TZ.js                    6.07 kB │ gzip:  2.50 kB
+public/build/assets/Show-BTDvzne9.js                            7.81 kB │ gzip:  3.47 kB
+public/build/assets/CreateAgent--q4K7CyR.js                     9.18 kB │ gzip:  3.23 kB
+public/build/assets/TutorialCourse-DZZCRXiZ.js                 23.48 kB │ gzip:  9.04 kB
+public/build/assets/Dashboard-D22bonrj.js                     118.58 kB │ gzip: 35.68 kB
+public/build/assets/app-Dk9_rwFs.js                           284.10 kB │ gzip: 97.55 kB
+
+✓ built in 637ms

@@ -4,6 +4,7 @@ namespace App\Gameplay;
 
 use App\Models\Agent;
 use App\Services\SpaceTradersClient;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Validator;
@@ -184,7 +185,7 @@ class SpaceTradersApi
                 'contract_accept' => 'accept', 'contract_deliver' => 'deliver', 'contract_fulfill' => 'fulfill', default => throw new GameException('Unsupported contract command.')
             }
         : ($command === 'buy_ship' ? '/my/ships' : '/my/ships/'.$ship.'/'.match ($command) {
-            'mine' => 'extract', 'mine_survey' => 'extract/survey', 'survey' => 'survey', 'transfer' => 'transfer', 'buy' => 'purchase', 'sell' => 'sell', 'navigate' => 'navigate', 'dock' => 'dock', 'orbit' => 'orbit', 'refuel' => 'refuel',
+            'scan_waypoints' => 'scan/waypoints', 'chart' => 'chart', 'mine' => 'extract', 'mine_survey' => 'extract/survey', 'survey' => 'survey', 'transfer' => 'transfer', 'buy' => 'purchase', 'sell' => 'sell', 'navigate' => 'navigate', 'dock' => 'dock', 'orbit' => 'orbit', 'refuel' => 'refuel',
             default => throw new GameException('Unsupported command.'),
         });
         $body = match ($command) {
@@ -205,6 +206,8 @@ class SpaceTradersApi
             'orbit' => ['nav' => 'required|array', 'nav.status' => 'required|in:IN_ORBIT'],
             'navigate' => ['nav' => 'required|array', 'nav.status' => 'required|in:IN_TRANSIT', 'nav.route.arrival' => 'required|date', 'fuel.current' => 'required|integer|min:0'],
             'mine', 'mine_survey' => ['cargo' => 'required|array', 'cooldown.remainingSeconds' => 'required|integer|min:0', 'cooldown.expiration' => 'sometimes|nullable|date', 'extraction.yield.symbol' => 'required|string|max:80', 'extraction.yield.units' => 'required|integer|min:0'],
+            'scan_waypoints' => ['cooldown.shipSymbol' => 'required|in:'.$ship, 'cooldown.totalSeconds' => 'required|integer|min:0', 'cooldown.remainingSeconds' => 'required|integer|min:0', 'cooldown.expiration' => 'sometimes|nullable|date', 'waypoints' => 'present|array|max:1000', 'waypoints.*.symbol' => 'required|string|distinct'],
+            'chart' => ['chart' => 'present|array', 'chart.waypointSymbol' => 'sometimes|in:'.$arguments['waypointSymbol'], 'chart.submittedBy' => 'sometimes|in:'.$agent->name, 'chart.submittedOn' => 'sometimes|date', 'waypoint' => 'required|array', 'agent.symbol' => 'required|in:'.$agent->name, 'agent.credits' => 'required|integer|min:0'],
             'survey' => ['cooldown.remainingSeconds' => 'required|integer|min:0', 'surveys' => 'required|array', 'surveys.*.signature' => 'required|string|max:255', 'surveys.*.symbol' => 'required|string|max:80', 'surveys.*.expiration' => 'required|date', 'surveys.*.size' => 'required|in:SMALL,MODERATE,LARGE', 'surveys.*.deposits' => 'required|array', 'surveys.*.deposits.*.symbol' => 'required|string|max:80'],
             'transfer' => ['cargo' => 'required|array', 'targetCargo' => 'required|array'],
             'buy_ship' => ['ship' => 'required|array', 'ship.symbol' => 'required|string', 'agent.credits' => 'required|integer|min:0', 'transaction.price' => 'required|integer|min:0'],
@@ -212,6 +215,33 @@ class SpaceTradersApi
             default => ['cargo' => 'required|array', 'agent.credits' => 'required|integer|min:0', 'transaction.totalPrice' => 'required|integer|min:0', 'transaction.units' => 'required|integer|min:1', 'transaction.tradeSymbol' => 'required|string'],
         };
         $this->validate($data, $rules, true);
+
+        if (ExplorationPolicy::command($command)) {
+            try {
+                $system = implode('-', array_slice(explode('-', $arguments['waypointSymbol']), 0, 2));
+                if ($command === 'scan_waypoints') {
+                    $data['waypoints'] = $this->waypointRows($data['waypoints'], $system);
+                    foreach ($data['waypoints'] as $point) {
+                        if (! str_starts_with($point['symbol'], $system.'-')) {
+                            throw new GameException('Scan waypoint symbol does not match its system.');
+                        }
+                    }
+                    $data['cooldown']['expiration'] = isset($data['cooldown']['expiration'])
+                        ? CarbonImmutable::parse($data['cooldown']['expiration'])->utc()->toIso8601String()
+                        : now()->addSeconds($data['cooldown']['remainingSeconds'])->utc()->toIso8601String();
+                    if ($data['cooldown']['remainingSeconds'] > $data['cooldown']['totalSeconds']) {
+                        throw new GameException('Inconsistent scan cooldown.');
+                    }
+                } else {
+                    $data['waypoint'] = $this->waypointRows([$data['waypoint']], $system)[0];
+                    if ($data['waypoint']['symbol'] !== $arguments['waypointSymbol'] || ! ExplorationPolicy::traitsKnown($data['waypoint'])) {
+                        throw new GameException('Chart did not return the approved waypoint with revealed traits.');
+                    }
+                }
+            } catch (GameException $e) {
+                throw new GameException($e->getMessage(), uncertain: true);
+            }
+        }
 
         if (str_starts_with($command, 'contract_')) {
             $data['contract'] = $this->contractData($data['contract'], true);
@@ -226,6 +256,8 @@ class SpaceTradersApi
             'orbit', 'dock' => ['nav'],
             'navigate' => ['nav', 'fuel', 'events'],
             'mine', 'mine_survey' => ['cargo', 'cooldown', 'extraction', 'events', 'modifiers'],
+            'scan_waypoints' => ['cooldown', 'waypoints'],
+            'chart' => ['chart', 'waypoint', 'agent'],
             'survey' => ['cooldown', 'surveys'],
             'transfer' => ['cargo', 'targetCargo'],
             'buy_ship' => ['ship', 'agent', 'transaction'],

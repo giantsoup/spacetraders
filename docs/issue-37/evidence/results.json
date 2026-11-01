@@ -1,0 +1,53 @@
+{
+  "baseline_backend": {
+    "tests": 321,
+    "assertions": 1711,
+    "result": "pass"
+  },
+  "final_backend": {
+    "tests": 338,
+    "assertions": 1823,
+    "result": "pass"
+  },
+  "focused_adviser": {
+    "tests": 17,
+    "assertions": 112,
+    "result": "pass"
+  },
+  "build_and_frontend": "Production assets built twice with identical output; frontend logic and PHP formatting passed.",
+  "browser": {
+    "result": "pass",
+    "steps": [
+      "Reviewed one-ship grant persisted with explicit bounds; cross-site request without CSRF rejected with 419.",
+      "Real bounded observation handlers and immutable assessment show unknown mining returns and named blocked exploration; no jobs, writes or commands.",
+      "Explicit replacement revoked the old grant and selected a named, funded, bounded exploration question.",
+      "Pause left the existing approved run running; Stop persisted separately and a real finite database worker released it without gameplay writes.",
+      "The shared executor still confirmed one separately approved synthetic manual orbit through a real worker after policy Pause."
+    ],
+    "errors": [],
+    "php": "8.5.12"
+  },
+  "native_ship_browser": {
+    "result": "pass",
+    "layouts": 12,
+    "errors": []
+  },
+  "workers": {
+    "mvp": "Passed mining, duplicate intent, abandoned sending, uncertain restart and offline Stop checks.",
+    "contracts": [
+      "complete: 28",
+      "contract_accept: 14",
+      "buy: 16",
+      "contract_deliver: 28",
+      "contract_fulfill: 30"
+    ]
+  },
+  "dependencies": "Composer validate/platform checks passed; Composer and pnpm audits reported no known vulnerabilities.",
+  "limits": [
+    "Offline synthetic evidence only.",
+    "No policy-executed actions, model calls, paid API calls, live game actions, remote publication or deployment.",
+    "No independent model review or physical-phone verification."
+  ],
+  "base": "5c1990696811554d03a752dae2cfec6259fcc36c",
+  "branch": "implement/issue-37-adviser-policy-20261101"
+}

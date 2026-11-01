@@ -1,0 +1,1 @@
+PASS superseded waiting controller fails without opening its successor

@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "layouts": [
+    {
+      "width": 1440,
+      "colorScheme": "dark",
+      "pageOverflow": false
+    },
+    {
+      "width": 390,
+      "colorScheme": "dark",
+      "pageOverflow": false
+    }
+  ],
+  "linksPresent": true,
+  "errors": []
+}

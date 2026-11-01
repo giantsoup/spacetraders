@@ -1,0 +1,5 @@
+PASS complete; 28 checks. Owned offline evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-fixture-ed06df6bce4c
+PASS contract_accept; 14 checks. Owned offline evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-fixture-e8959ad45fe1
+PASS buy; 16 checks. Owned offline evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-fixture-ad7aea15d1d8
+PASS contract_deliver; 28 checks. Owned offline evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-fixture-d13b60839509
+PASS contract_fulfill; 30 checks. Owned offline evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-fixture-4b151a456fab

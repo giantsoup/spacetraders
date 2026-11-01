@@ -1,0 +1,38 @@
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.5.12
+Configuration: /Users/Taylor/.t3/worktrees/spacetraders/implement-issue-67-cycl-57b8b6dde1f4501f/phpunit.xml
+
+FFE                                                                 3 / 3 (100%)
+
+Time: 00:00.772, Memory: 65.00 MB
+
+There was 1 error:
+
+1) Tests\Feature\CycleEconomicsTest::test_repairs_and_allowance_cover_the_same_wear_only_once
+ErrorException: Undefined array key "net_after_wear"
+
+/Users/Taylor/.t3/worktrees/spacetraders/implement-issue-67-cycl-57b8b6dde1f4501f/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/HandleExceptions.php:265
+/Users/Taylor/.t3/worktrees/spacetraders/implement-issue-67-cycl-57b8b6dde1f4501f/tests/Feature/CycleEconomicsTest.php:109
+
+--
+
+There were 2 failures:
+
+1) Tests\Feature\CycleEconomicsTest::test_runner_report_and_evaluator_keep_cash_separate_from_allowance_estimates
+Failed asserting that two strings are identical.
+--- Expected
++++ Actual
+@@ @@
+-'estimated_comparable'
++'unresolved'
+
+/Users/Taylor/.t3/worktrees/spacetraders/implement-issue-67-cycl-57b8b6dde1f4501f/tests/Feature/CycleEconomicsTest.php:70
+
+2) Tests\Feature\CycleEconomicsTest::test_missing_wear_unmatched_fuel_and_unsold_cargo_never_become_profit
+Failed asserting that actual size 4 matches expected size 3.
+
+/Users/Taylor/.t3/worktrees/spacetraders/implement-issue-67-cycl-57b8b6dde1f4501f/tests/Feature/CycleEconomicsTest.php:100
+
+ERRORS!
+Tests: 3, Assertions: 6, Errors: 1, Failures: 2.

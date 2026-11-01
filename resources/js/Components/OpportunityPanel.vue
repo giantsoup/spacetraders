@@ -29,6 +29,7 @@ const questions = computed(() => props.report?.observation_tasks.filter(row => r
                 <td>{{ readableLabel(market.state) }}</td><td>{{ formatLocalTime(market.price_at, 'Unknown') }}<br>{{ market.observer_ship || 'Observer unknown' }}</td><td>{{ formatLocalTime(market.listing_at) }}</td>
             </tr></tbody>
         </table></div>
+        <details v-if="report.exploration_evidence?.length"><summary>Listing, scan and chart evidence</summary><p>Each source keeps its own observation time in this reset. Listings with UNCHARTED leave hidden traits unknown. A scan covers only the returned waypoints.</p><div class="table-scroll"><table><thead><tr><th>Waypoint</th><th>Source</th><th>Observed</th><th>Observer</th></tr></thead><tbody><tr v-for="row in report.exploration_evidence" :key="row.id"><td>{{ row.symbol }}</td><td>{{ row.source }}</td><td>{{ formatLocalTime(row.observed_at) }}</td><td>{{ row.observer_ship || 'Unknown' }}</td></tr></tbody></table></div></details>
         <h3>Candidate complete cycles</h3>
         <p v-if="report.candidate_limit_reached" class="warning">Candidate display reached its bounded limit. This shortlist is not a complete ranking.</p>
         <p>Estimates include empty returns where stated. Unpriced cargo, wear and unmeasured time keep earnings unresolved. Cash margin alone does not rank earnings per hour.</p>
@@ -36,7 +37,7 @@ const questions = computed(() => props.report?.observation_tasks.filter(row => r
         <details v-for="(candidate, index) in opportunities" :key="index">
             <summary>{{ readableLabel(candidate.strategy) }} · {{ candidate.site || candidate.source }} → {{ candidate.market }} {{ candidate.good ? assetName(candidate.good) : '' }} · {{ readableLabel(candidate.state) }}</summary>
             <p>{{ candidate.reason }}</p>
-            <p v-if="candidate.samples !== undefined">{{ candidate.samples }} extraction samples for this configuration. Estimated net credits/hour: unknown.</p>
+            <p v-if="candidate.samples !== undefined">{{ candidate.samples }} extraction samples for this configuration. Base / conservative net credits per hour: {{ candidate.net_credits_per_hour ?? 'Unknown' }} / {{ candidate.conservative_net_per_hour ?? 'Unknown' }}. Forecasts remain separate from realized outcomes.</p>
             <p v-if="candidate.estimated_cash_margin !== undefined">Base cash margin {{ candidate.estimated_cash_margin }} CR · adverse case {{ candidate.conservative_cash_margin }} CR · inventory exposure {{ candidate.inventory_exposure }} CR. Neither is realized income.</p>
             <DataDetails :value="candidate" />
         </details>
@@ -46,7 +47,7 @@ const questions = computed(() => props.report?.observation_tasks.filter(row => r
         <h3 v-if="report.cargo_options?.some(row => row.ship === selected)">Plan for owned cargo</h3>
         <details v-for="cargo in report.cargo_options?.filter(row => row.ship === selected) || []" :key="cargo.good"><summary>{{ assetName(cargo.good) }} · {{ cargo.units }} units · retain pending approval</summary><DataDetails :value="cargo.choices" /></details>
         <p class="muted">{{ report.fleet_gate }}</p>
-        <EvidencePanel :evidence="report.evidence" />
+        <EvidencePanel :evidence="report.evidence" :agent-id="report.agent_id" />
     </section>
 </template>
 

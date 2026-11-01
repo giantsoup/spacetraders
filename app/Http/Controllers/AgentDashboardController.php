@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Gameplay\Adviser;
 use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\CreditAccounting;
 use App\Gameplay\GameException;
 use App\Gameplay\LocalEngineManager;
 use App\Gameplay\MiningPlanner;
 use App\Gameplay\OpportunityAssessor;
+use App\Gameplay\OpportunityEvaluator;
 use App\Gameplay\ShipCommandExecutor;
 use App\Http\Requests\GameplayRequest;
 use App\Models\Agent;
@@ -48,6 +50,7 @@ class AgentDashboardController extends Controller
             'investigations' => OpportunityInvestigation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->latest('id')->limit(5)->get(),
             'drafts' => AutomationDraft::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->latest('id')->limit(10)->get(),
             'accounting' => app(CreditAccounting::class)->summary($agent),
+            'adviser' => fn () => app(Adviser::class)->history($agent),
             'synthetic' => (bool) config('gameplay.fixture_path'),
         ]);
     }
@@ -59,6 +62,18 @@ class AgentDashboardController extends Controller
         $actions = ShipAction::where('agent_id', $agent->id)->where('id', '<', $input['before'])->latest('id')->limit(41)->get();
 
         return response()->json(['actions' => $actions->take(40)->values(), 'has_more' => $actions->count() > 40])->header('Cache-Control', 'no-store');
+    }
+
+    public function investment(GameplayRequest $request, Agent $agent, OpportunityEvaluator $evaluator)
+    {
+        $case = $request->validated();
+        foreach ($case as $key => $value) {
+            if (! in_array($key, ['costs_complete', 'basis_note'], true) && $value !== null) {
+                $case[$key] = (int) $value;
+            }
+        }
+
+        return response()->json($evaluator->investment($agent, $case))->header('Cache-Control', 'no-store');
     }
 
     public function sync(GameplayRequest $request, Agent $agent, ShipCommandExecutor $executor, AgentSynchronizer $sync)

@@ -15,7 +15,7 @@ class AgentCommandController extends Controller
     public function preview(GameplayRequest $request, Agent $agent, ShipCommandExecutor $executor, AgentDashboardController $responses)
     {
         $data = $request->validated();
-        foreach (['units', 'maxTotal', 'minTotal', 'reserve'] as $field) {
+        foreach (['units', 'maxTotal', 'minTotal', 'reserve', 'maxCooldownSeconds'] as $field) {
             if (isset($data['arguments'][$field])) {
                 $data['arguments'][$field] = (int) $data['arguments'][$field];
             }
@@ -29,6 +29,13 @@ class AgentCommandController extends Controller
         $intent = ShipAction::where('agent_id', $agent->id)->findOrFail($action);
 
         return $responses->result(fn () => $executor->approve($agent, $intent));
+    }
+
+    public function stop(GameplayRequest $request, Agent $agent, int $action, ShipCommandExecutor $executor, AgentDashboardController $responses)
+    {
+        $intent = ShipAction::where('agent_id', $agent->id)->findOrFail($action);
+
+        return $responses->result(fn () => $executor->stopExploration($intent));
     }
 
     public function reconcile(GameplayRequest $request, Agent $agent, int $action, ShipCommandExecutor $executor, AgentDashboardController $responses)

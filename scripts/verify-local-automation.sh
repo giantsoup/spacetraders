@@ -12,5 +12,7 @@ python3 scripts/verify-herd-launchd.py
 "$php_bin" scripts/verify-mvp-worker.php
 "$php_bin" scripts/verify-automation-worker.php
 "$php_bin" scripts/verify-local-engine.php
+node --test scripts/verify-browser-lifecycle.mjs
 node scripts/verify-presentation-browser.mjs
 node scripts/verify-automation-browser.mjs
+node scripts/verify-opportunities-browser.mjs
