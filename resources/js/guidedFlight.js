@@ -194,7 +194,7 @@ export function flightStep(session, context, now = Date.now()) {
     if (session.phase === 'extract') {
         if (ship.nav.waypointSymbol !== plan.site) return blocked(`The selected miner moved away from ${plan.site}. Pause guidance and inspect the route.`, 'fleet');
         if (ship.nav.status === 'DOCKED') intent = { command: 'orbit', args: {}, next: 'extract' };
-        else if (Date.parse(ship.cooldown.expiration) > now) return { kind: 'wait', target: 'fleet', title: 'Wait for the mining cooldown', body: `Mining becomes available after ${formatLocalTime(ship.cooldown.expiration)}. Do not submit another extraction before then.` };
+        else if (Date.parse((ship.cooldown.readyAt || ship.cooldown.expiration)) > now) return { kind: 'wait', target: 'fleet', title: 'Wait for the mining cooldown', body: `Mining becomes available after ${formatLocalTime((ship.cooldown.readyAt || ship.cooldown.expiration))}. Do not submit another extraction before then.` };
         else if (ship.cargo.units !== 0) return blocked('Mining starts with an empty hold. Cargo changed outside this guided trip. Inspect it before continuing.', 'market');
         else intent = { command: 'mine', args: {}, next: 'inbound' };
     }

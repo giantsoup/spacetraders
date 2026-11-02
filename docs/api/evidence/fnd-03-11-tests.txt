@@ -1,0 +1,8 @@
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.5.12
+Configuration: /Users/Taylor/.t3/worktrees/spacetraders/implement-base-api-foundation-20261101/phpunit.xml
+
+Time: 00:08.816, Memory: 77.00 MB
+
+[30;42mOK (151 tests, 873 assertions)[0m

@@ -192,6 +192,12 @@ final class FakeSpaceTraders
             return [['error' => ['code' => $code, 'message' => 'Never expose raw synthetic error']], $code];
         }
         $world['writes'][] = ['path' => $path, 'arguments' => $args];
+        if ($world['foundation'] ?? false) {
+            $response = self::foundationWrite($world, $path, $args, $request->method());
+            if ($response !== null) {
+                return $response;
+            }
+        }
         if (preg_match('~^/my/contracts/([^/]+)/(accept|deliver|fulfill)$~', $path, $m)) {
             foreach ($world['contracts'] as &$contract) {
                 if ($contract['id'] !== $m[1]) {
@@ -236,6 +242,11 @@ final class FakeSpaceTraders
         }
         if ($path === '/my/ships') {
             $ship = self::ship('LOCAL-'.(count($world['ships']) + 1), $args['waypointSymbol']);
+            if ($world['foundation'] ?? false) {
+                foreach (['frame', 'reactor', 'engine', 'mounts', 'modules', 'crew'] as $field) {
+                    $ship[$field] = $world['offer'][$field];
+                }
+            }
             $world['ships'][] = $ship;
             $price = $world['offer']['purchasePrice'];
             $world['credits'] -= $price;
@@ -348,15 +359,148 @@ final class FakeSpaceTraders
         return [['error' => ['code' => 404]], 404];
     }
 
+    private static function foundationWrite(array &$world, string $path, array $args, string $method): ?array
+    {
+        if (str_ends_with($path, '/construction/supply')) {
+            foreach ($world['ships'] as &$supplying) {
+                if ($supplying['symbol'] !== $args['shipSymbol']) {
+                    continue;
+                }
+                self::cargo($supplying, $args['tradeSymbol'], -$args['units']);
+                $world['construction'] ??= ['symbol' => $supplying['nav']['waypointSymbol'], 'isComplete' => false, 'materials' => [['tradeSymbol' => 'IRON_ORE', 'required' => 100, 'fulfilled' => 0]]];
+                foreach ($world['construction']['materials'] as &$material) {
+                    if ($material['tradeSymbol'] === $args['tradeSymbol']) {
+                        $material['fulfilled'] += $args['units'];
+                    }
+                }
+                $world['construction']['isComplete'] = ! collect($world['construction']['materials'])->contains(fn ($item) => $item['fulfilled'] < $item['required']);
+
+                return [['data' => ['cargo' => $supplying['cargo'], 'construction' => $world['construction']]], 201];
+            }
+        }
+        if (! preg_match('~^/my/ships/([^/]+)/(.*)$~', $path, $match)) {
+            return null;
+        }
+        foreach ($world['ships'] as &$ship) {
+            if ($ship['symbol'] !== $match[1]) {
+                continue;
+            }
+            $command = $match[2];
+            if (in_array($command, ['scan/systems', 'scan/ships'], true)) {
+                $ship['cooldown'] = ['shipSymbol' => $ship['symbol'], 'totalSeconds' => 0, 'remainingSeconds' => 0];
+                $field = $command === 'scan/systems' ? 'systems' : 'ships';
+
+                return [['data' => ['cooldown' => $ship['cooldown'], $field => $world['scan_'.$field] ?? []]], 201];
+            }
+            if (in_array($command, ['jump', 'warp'], true)) {
+                $ship['nav']['systemSymbol'] = implode('-', array_slice(explode('-', $args['waypointSymbol']), 0, 2));
+                $ship['nav']['waypointSymbol'] = $args['waypointSymbol'];
+                $ship['nav']['status'] = $command === 'jump' ? 'IN_ORBIT' : 'IN_TRANSIT';
+                $ship['nav']['route'] = ['departureTime' => now()->toIso8601String(), 'arrival' => now()->addSeconds($command === 'jump' ? 0 : 30)->toIso8601String()];
+                if ($command === 'warp') {
+                    $ship['fuel']['current'] -= 10;
+
+                    return [['data' => ['nav' => $ship['nav'], 'fuel' => $ship['fuel']]], 200];
+                }
+                $price = $world['jump_price'] ?? 100;
+                $world['credits'] -= $price;
+                $ship['cooldown'] = ['shipSymbol' => $ship['symbol'], 'totalSeconds' => 0, 'remainingSeconds' => 0];
+
+                return [['data' => ['nav' => $ship['nav'], 'cooldown' => $ship['cooldown'], 'agent' => ['credits' => $world['credits']], 'transaction' => ['totalPrice' => $price, 'shipSymbol' => $ship['symbol'], 'timestamp' => now()->toIso8601String()]]], 200];
+            }
+            if ($command === 'refuel') {
+                $units = min($args['units'] ?? ($ship['fuel']['capacity'] - $ship['fuel']['current']), $ship['fuel']['capacity'] - $ship['fuel']['current']);
+                $cargo = $args['fromCargo'] ?? false;
+                $price = $cargo ? 0 : (int) ceil($units / 100) * 5;
+                $ship['fuel']['current'] += $units;
+                if ($cargo) {
+                    self::cargo($ship, 'FUEL', -(int) ceil($units / 100));
+                }
+                $world['credits'] -= $price;
+
+                return [['data' => ['fuel' => $ship['fuel'], 'cargo' => $ship['cargo'], 'agent' => ['credits' => $world['credits']], 'transaction' => ['shipSymbol' => $ship['symbol'], 'waypointSymbol' => $ship['nav']['waypointSymbol'], 'totalPrice' => $price, 'tradeSymbol' => 'FUEL', 'units' => $units, 'timestamp' => now()->toIso8601String()]]], 200];
+            }
+            if ($command === 'siphon') {
+                $yield = $world['siphon_yield'] ?? ['symbol' => 'HYDROCARBON', 'units' => 10];
+                self::cargo($ship, $yield['symbol'], $yield['units']);
+                $ship['cooldown'] = ['shipSymbol' => $ship['symbol'], 'totalSeconds' => 0, 'remainingSeconds' => 0];
+
+                return [['data' => ['cargo' => $ship['cargo'], 'cooldown' => $ship['cooldown'], 'siphon' => ['shipSymbol' => $ship['symbol'], 'yield' => $yield], 'events' => []]], 201];
+            }
+            if ($command === 'refine') {
+                $input = $world['refine_input'] ?? 'IRON_ORE';
+                self::cargo($ship, $input, -100);
+                self::cargo($ship, $args['produce'], 10);
+                $ship['cooldown'] = ['shipSymbol' => $ship['symbol'], 'totalSeconds' => 0, 'remainingSeconds' => 0];
+
+                return [['data' => ['cargo' => $ship['cargo'], 'cooldown' => $ship['cooldown'], 'consumed' => [['tradeSymbol' => $input, 'units' => 100]], 'produced' => [['tradeSymbol' => $args['produce'], 'units' => 10]]]], 201];
+            }
+            if ($command === 'repair') {
+                foreach (['frame', 'engine', 'reactor'] as $part) {
+                    $ship[$part]['condition'] = 1;
+                    $ship[$part]['integrity'] = max(0, $ship[$part]['integrity'] - 0.01);
+                }
+                $price = $world['repair_price'] ?? 100;
+                $world['credits'] -= $price;
+
+                return [['data' => ['ship' => $ship, 'agent' => ['credits' => $world['credits']], 'transaction' => ['shipSymbol' => $ship['symbol'], 'waypointSymbol' => $ship['nav']['waypointSymbol'], 'totalPrice' => $price, 'timestamp' => now()->toIso8601String()]]], 200];
+            }
+            if (preg_match('~^(mounts|modules)/(install|remove)$~', $command, $equipment)) {
+                $field = $equipment[1];
+                $install = $equipment[2] === 'install';
+                $symbol = $args['symbol'];
+                if ($install) {
+                    $component = $world['equipment_catalog'][$symbol] ?? ['symbol' => $symbol, 'requirements' => ['power' => 1, 'crew' => 1, 'slots' => $field === 'modules' ? 1 : 0]];
+                    $ship[$field][] = $component;
+                    self::cargo($ship, $symbol, -1);
+                } else {
+                    foreach ($ship[$field] as $index => $component) {
+                        if ($component['symbol'] === $symbol) {
+                            unset($ship[$field][$index]);
+                            break;
+                        }
+                    }
+                    $ship[$field] = array_values($ship[$field]);
+                    self::cargo($ship, $symbol, 1);
+                }
+                if (str_starts_with($symbol, 'MODULE_CARGO_HOLD_') && isset($component['capacity'])) {
+                    $ship['cargo']['capacity'] += ($install ? 1 : -1) * $component['capacity'];
+                }
+                $price = $world['equipment_price'] ?? 100;
+                $world['credits'] -= $price;
+
+                return [['data' => [$field => $ship[$field], 'cargo' => $ship['cargo'], 'agent' => ['credits' => $world['credits']], 'transaction' => ['shipSymbol' => $ship['symbol'], 'waypointSymbol' => $ship['nav']['waypointSymbol'], 'totalPrice' => $price, 'timestamp' => now()->toIso8601String()]]], 201];
+            }
+            if ($command === 'jettison') {
+                self::cargo($ship, $args['symbol'], -$args['units']);
+
+                return [['data' => ['cargo' => $ship['cargo']]], 200];
+            }
+            if ($command === 'nav' && $method === 'PATCH') {
+                $ship['nav']['flightMode'] = $args['flightMode'] ?? $ship['nav']['flightMode'];
+
+                return [['data' => ['nav' => $ship['nav'], 'fuel' => $ship['fuel'], 'events' => []]], 200];
+            }
+            if ($command === 'negotiate/contract') {
+                $contract = self::contract('new-contract-'.(count($world['contracts']) + 1));
+                $world['contracts'][] = $contract;
+
+                return [['data' => ['contract' => $contract]], 201];
+            }
+        }
+
+        return null;
+    }
+
     private static function foundationRead(array $world, string $path, array $args): ?array
     {
         $system = ['symbol' => 'X1-TEST', 'sectorSymbol' => 'X1', 'type' => 'RED_STAR', 'x' => 0, 'y' => 0, 'waypoints' => $world['waypoints'], 'factions' => [['symbol' => 'COSMIC']]];
         $faction = ['symbol' => 'COSMIC', 'name' => 'Cosmic', 'description' => 'Synthetic faction', 'headquarters' => 'X1-TEST-ROCK', 'traits' => [], 'isRecruiting' => true];
         $profile = ['symbol' => 'LOCAL', 'credits' => $world['credits'], 'shipCount' => count($world['ships']), 'headquarters' => 'X1-TEST-ROCK', 'startingFaction' => 'COSMIC', 'accountId' => 'synthetic-account'];
         $lists = ['/systems' => [$system], '/agents' => [$profile], '/factions' => [$faction], '/my/ships' => $world['ships'], '/my/contracts' => $world['contracts']];
-        if (preg_match('~^/systems/([^/]+)/waypoints$~', $path)) {
-            $lists[$path] = array_values(array_filter($world['waypoints'], function ($point) use ($args) {
-                return (! isset($args['type']) || $point['type'] === $args['type']) && (! isset($args['traits']) || ! array_diff((array) $args['traits'], array_column($point['traits'], 'symbol')));
+        if (preg_match('~^/systems/([^/]+)/waypoints$~', $path, $listingSystem)) {
+            $lists[$path] = array_values(array_filter($world['waypoints'], function ($point) use ($args, $listingSystem) {
+                return $point['systemSymbol'] === $listingSystem[1] && (! isset($args['type']) || $point['type'] === $args['type']) && (! isset($args['traits']) || ! array_diff((array) $args['traits'], array_column($point['traits'], 'symbol')));
             }));
         }
         if (isset($lists[$path])) {

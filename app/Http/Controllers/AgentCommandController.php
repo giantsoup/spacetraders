@@ -15,13 +15,13 @@ class AgentCommandController extends Controller
     public function preview(GameplayRequest $request, Agent $agent, ShipCommandExecutor $executor, AgentDashboardController $responses)
     {
         $data = $request->validated();
-        foreach (['units', 'maxTotal', 'minTotal', 'reserve', 'maxCooldownSeconds'] as $field) {
+        foreach (['units', 'maxTotal', 'minTotal', 'reserve', 'maxCooldownSeconds', 'term_index'] as $field) {
             if (isset($data['arguments'][$field])) {
                 $data['arguments'][$field] = (int) $data['arguments'][$field];
             }
         }
 
-        return $responses->result(fn () => $executor->preview($agent, $data['ship_symbol'], $data['command'], $data['arguments'], $data['key']));
+        return $responses->result(fn () => $executor->preview($agent, $data['ship_symbol'] ?? '', $data['command'], $data['arguments'], $data['key']));
     }
 
     public function approve(GameplayRequest $request, Agent $agent, int $action, ShipCommandExecutor $executor, AgentDashboardController $responses)
