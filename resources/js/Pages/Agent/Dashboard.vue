@@ -9,6 +9,7 @@ import ShipReport from '@/Components/ShipReport.vue';
 import { shipPresentation, observedNumber, meterPercent } from '@/shipPresentation.js';
 import AutomationConsole from '@/Components/AutomationConsole.vue';
 import AppShell from '@/Layouts/AppShell.vue';
+import { shipSelectionKey } from '@/shipSelection.js';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Head, Link, router, usePage, usePoll } from '@inertiajs/vue3';
 import { submissionKey } from '@/gameplay.js';
@@ -32,11 +33,12 @@ const archived = computed(() => props.agent.connection_state === 'reset');
 const manualFlightMode = ref('CRUISE');
 const selected = ref(props.ships[0]?.symbol || '');
 const page = usePage();
-const selectionKey = computed(() => `spacetraders:ship:${page.props.auth.user.id}:${props.agent.id}:${props.agent.reset_id || 'unknown'}`);
+const selectionKey = computed(() => shipSelectionKey(page.props.auth.user.id, props.agent));
 function restoreSelection() {
     let saved;
     try { saved = window.sessionStorage.getItem(selectionKey.value); } catch { /* Selection remains usable without browser storage. */ }
-    selected.value = props.ships.find(entry => entry.symbol === saved)?.symbol || props.ships.find(entry => entry.symbol === selected.value)?.symbol || props.ships[0]?.symbol || '';
+    const requested = new URLSearchParams(window.location.search).get('ship');
+    selected.value = props.ships.find(entry => entry.symbol === requested)?.symbol || props.ships.find(entry => entry.symbol === saved)?.symbol || props.ships.find(entry => entry.symbol === selected.value)?.symbol || props.ships[0]?.symbol || '';
 }
 onMounted(restoreSelection);
 watch([selectionKey, () => props.ships.map(entry => entry.symbol).join(',')], restoreSelection);
@@ -298,7 +300,7 @@ function distance(point) {
 
 <template>
     <Head :title="`${agent.name} · Ship`" />
-    <AppShell compact brand="SPACETRADERS" skip-to="ship-home" skip-label="Skip to selected ship" :guide-href="archived ? route('guide') : route('agents.guide', agent.id)" class="bridge" :class="{ guiding }">
+    <AppShell compact brand="SPACETRADERS" :agent-id="agent.id" :ship-symbol="selected" skip-to="ship-home" skip-label="Skip to selected ship" :guide-href="archived ? route('guide') : route('agents.guide', agent.id)" class="bridge" :class="{ guiding }">
         <main :aria-busy="busy">
             <section id="ship-home" class="ship-home" tabindex="-1" aria-labelledby="ship-title">
                 <header class="ship-identity">
@@ -326,7 +328,7 @@ function distance(point) {
                 <div class="home-action"><PrimaryButton :disabled="busy" @click="primary.sync ? synchronize() : openView(primary.view)">{{ primary.label }}</PrimaryButton><DangerButton v-if="activeRun && !archived && !view" :disabled="!!activeRun.stop_requested_at" @click="post(`runs/${activeRun.id}/stop`, {}, true)">{{ activeRun.stop_requested_at ? 'Stop requested' : 'Stop automation' }}</DangerButton></div>
             </section>
             <p v-if="notice" :role="error ? 'alert' : 'status'" class="notice" :class="{ fault: error }">{{ readableText(notice) }}</p>
-            <nav class="home-destinations" aria-label="Ship destinations"><button v-for="key in ['commands', 'manualApi', 'library', 'automation', 'adviser', 'intelligence', 'activity', 'guide']" :key="key" type="button" @click="openView(key)">{{ key === 'activity' && actions[0] ? `Activity · ${readableLabel(actions[0].state)}` : views[key] }}</button></nav>
+            <nav class="home-destinations" aria-label="Ship destinations"><Link :href="route('agents.map', { agent: agent.id, ship: selected || undefined })">System map</Link><button v-for="key in ['commands', 'manualApi', 'library', 'automation', 'adviser', 'intelligence', 'activity', 'guide']" :key="key" type="button" @click="openView(key)">{{ key === 'activity' && actions[0] ? `Activity · ${readableLabel(actions[0].state)}` : views[key] }}</button></nav>
             <FocusSheet :open="!!view" :title="views[view] || 'Ship'" @ready="sheetReady" @close="openView('')">
                 <nav class="sheet-tabs" aria-label="Flight deck destinations"><button type="button" @click="openView('')">Back to ship</button><SecondaryButton v-if="['commands', 'intelligence', 'guide'].includes(view)" data-guide="sync" :disabled="archived || busy || (guiding && guidedStep?.kind !== 'sync' && !guidedStep?.canSync && !(guidedStep?.kind === 'blocked' && guidedStep?.target === 'sync'))" @click="synchronize">Synchronize</SecondaryButton></nav>
                 <p v-if="notice" :role="error ? 'alert' : 'status'" class="notice" :class="{ fault: error }">{{ readableText(notice) }}</p>
@@ -479,7 +481,7 @@ h1 { min-width: 0; font-size: 20px; font-weight: 650; line-height: 1.25; overflo
 .home-action { display: grid; gap: 12px; margin-top: auto; padding-top: 12px; }
 .home-action .app-button { width: 100%; min-height: 52px; border-radius: 16px; }
 .home-destinations { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 16px; padding: 20px 0 4px; border-top: 1px solid var(--color-line); margin-top: 16px; }
-.home-destinations button { background: none; border: 0; color: var(--color-muted); min-height: 44px; padding: 8px 0; }
+.home-destinations button, .home-destinations > a { background: none; border: 0; color: var(--color-muted); min-height: 44px; padding: 8px 0; }
 .panel { padding: 16px 0; min-width: 0; border-bottom: 1px solid var(--color-line); }
 .bridge h2 { font-size: 20px; font-weight: 650; margin: 0 0 16px; }
 .bridge h3 { font-size: 18px; font-weight: 650; margin: 20px 0 12px; }

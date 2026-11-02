@@ -1,0 +1,88 @@
+{
+  "desktop": {
+    "camera": {
+      "scale": 1.1924586187214612,
+      "x": 10,
+      "y": -34
+    },
+    "checks": [
+      "Map canvas rendered",
+      "Wheel event changes map zoom",
+      "Arrow key pans map",
+      "Two-pointer pinch enlarges map",
+      "Touch pointer drag pans both axes",
+      "Cancelled touch cannot keep dragging",
+      "No horizontal page overflow",
+      "Map controls and markers have 44px touch targets",
+      "Map controls do not overlap location directory"
+    ],
+    "pointerChecks": "Synthetic two-pointer events; native capture tested with real T3 drag separately",
+    "viewport": {
+      "height": 900,
+      "width": 1440
+    }
+  },
+  "phone": {
+    "camera": {
+      "scale": 0.5975609756097561,
+      "x": 10,
+      "y": -34
+    },
+    "checks": [
+      "Map canvas rendered",
+      "Wheel event changes map zoom",
+      "Arrow key pans map",
+      "Two-pointer pinch enlarges map",
+      "Touch pointer drag pans both axes",
+      "Cancelled touch cannot keep dragging",
+      "No horizontal page overflow",
+      "Map controls and markers have 44px touch targets",
+      "Map controls do not overlap location directory"
+    ],
+    "pointerChecks": "Synthetic two-pointer events; native capture tested with real T3 drag separately",
+    "viewport": {
+      "height": 844,
+      "width": 390
+    }
+  },
+  "manualJourneys": [
+    "Native drag and zoom buttons, fit, center on ship on desktop and phone",
+    "Keyboard pan/zoom/fit, Tab and Enter location selection, Escape focus restore, card PageDown",
+    "Overlapping PORT/TWIN individually selectable",
+    "Unknown traits, unplotted manual waypoint, confirmed empty traits/goods/shipyard, stale invalidated quotes",
+    "Empty fleet and empty plotted system",
+    "In-transit departure and unconfirmed arrival",
+    "Ship LOCAL-2 preserved map -> flight deck -> map, and generic session-restoring map link",
+    "Light appearance retains dark map and card"
+  ],
+  "audit": {
+    "game_table_hashes": {
+      "agents": "893896d9f2b9859baf94286036a2e56e317aca7b13e52f1dfe82c26b44d0057f",
+      "ships": "535865e27f1dc35337f2dc71166652e7c3e723c8ac48ada15b18538d647515e8",
+      "game_observations": "0a0094a743c21c491bfbdfc54ef0f2099887606c99bf214d940286fa648b61ef",
+      "observation_history": "86569d58deaa2e83adb8d4e603050c082538cbec230abfb96e9736ff52d7f0fb",
+      "ship_actions": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "automation_runs": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "jobs": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "fake_transport_calls": 8,
+    "fake_gameplay_writes": 0,
+    "world_hash": "d828b90fbe19b3c737e804f3bdcca38c79a8535972e9cba8b8238150ebabc1ab"
+  },
+  "audit_unchanged": true,
+  "served_build": {
+    "resources/js/Pages/Agent/SystemMap.vue": "assets/SystemMap-RlkCRNRC.js",
+    "resources/js/app.js": "assets/app-BCVVfZZD.js"
+  },
+  "source_hashes": {
+    "app/Maps/SystemMapKnowledge.php": "6bc1c3d4d719a3ab3ed5f0654caa70300e96dd2e5fae43cce9fbd3b3afb65467",
+    "app/Http/Controllers/SystemMapController.php": "721f89d3361747523806b6eb6642df0fc16933952fe7bc7f88b8bb15e6e229d4",
+    "resources/js/Components/SystemMap/ObservationStamp.vue": "789f84ce829027f3eb5103fbbad9c911243ec7252e8221cb9aeb9b46cdd0f7f1",
+    "resources/js/Components/SystemMap/WaypointSprite.vue": "d295fb10923216546e59ee619fb795d5004402c1a4195d43a1164604c5e9cf76",
+    "resources/js/Components/SystemMap/LocationCard.vue": "2eaea2e23a2b04eb367483c599c6c901ab89d72ebb1188eaf0179846d0b91ea6",
+    "resources/js/Pages/Agent/SystemMap.vue": "646166c22d3ea8788b979c70391d5a24a84a09b2a6b053a4d22516b91eb00705",
+    "resources/js/systemMap.js": "cfef5e4816d964363060e05f3ce8b9e6b79880aad68f89e1de965bb1fbcdee9f",
+    "resources/js/waypointSprites.js": "3bf53d274ace99e47020acbf73b20e5a5a8c2244e27d565c0c13235b6fa237ea",
+    "resources/js/systemMap.css": "f2357f78f2f6ce7fe3aea98e84aeaaa5670b47943465ef0c67c49e9d7beab759"
+  }
+}
