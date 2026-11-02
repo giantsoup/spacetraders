@@ -4,7 +4,7 @@ Delivered for [issue #90](https://github.com/giantsoup/spacetraders/issues/90) i
 
 ## Latest mobile, zoom and real API checks
 
-The [mobile and zoom report](interactive-system-map/mobile/qa.html) records the final UI source hashes, screenshots and browser checks after Claude Sonnet 5.5’s requested design pass. The phone map fills 743px of a 390×844 viewport, with compact controls and an expandable coverage chip. Artwork grows from 40px to 160px; wheel, keyboard, buttons and emulated touch stop at the close-up limit. Parent QA reproduced and fixed Escape closing the card beneath the coverage panel.
+The [mobile and zoom report](interactive-system-map/mobile/qa.html) records the final UI source hashes, screenshots and browser checks after Claude Sonnet 5.5’s requested design pass. The phone map fills 743px of a 390×844 viewport, with compact controls and an expandable coverage chip. Artwork grows from 40px to 160px; wheel, keyboard, buttons and emulated touch stop at the close-up limit. Parent QA reproduced and fixed Escape closing the card beneath the coverage panel. The final card pass leads with stored prices, shipyard offers and market goods. Overlap choices expand on demand, and terrain descriptions and lore sit below gameplay information. All 26 native browser scenarios pass.
 
 Taylor subsequently authorized real API reads, small commands and spending. Fourteen GET requests returned HTTP 200 and stored a complete 94-location catalogue plus current-location/market/shipyard observations. Two manual commands, orbit and dock, confirmed through the application preview/approval/queue path. The ship returned to its original dock with unchanged fuel, cargo and credits. No spending was needed.
 
@@ -34,7 +34,7 @@ Herd's dedicated `spacetraders-map-90.test` site points to this feature worktree
 | Full PHP suite | 518 tests, 3,041 assertions passed |
 | `SystemMapTest` | 6 tests, 74 assertions passed. Authentication, ownership, ship scope, reset isolation, no writes or HTTP, manual system records, null traits, service-only locations, empty fleet, transit, coverage, and separate directory/quote ages |
 | `node --test scripts/verify-system-map.mjs` | 7 tests passed. Growth/cap, projection, fit, anchored zoom, overlap grouping, published sprite families, deterministic identity, and terrain refinements |
-| Native Chromium at desktop, phone and short viewport sizes | 25 scenarios passed, including mobile coverage disclosure/map area, trusted wheel/touch input, all locations, keyboard, cards, tracker, navigation, and screenshot inspection |
+| Native Chromium at desktop, phone and short viewport sizes | 26 scenarios passed, including card information order, mobile coverage disclosure/map area, trusted wheel/touch input, all locations, keyboard, cards, tracker, navigation, and screenshot inspection |
 | Initial T3 event probes | 9 checks at each size passed; the follow-up native browser suite supersedes the original simulated gesture evidence |
 | Browser gameplay audit | Gameplay table hashes and fake transport file unchanged; zero additional upstream calls or gameplay writes |
 

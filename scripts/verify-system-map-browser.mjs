@@ -122,9 +122,18 @@ try {
         await map();const labels=await page.locator('.map-marker').evaluateAll(nodes=>nodes.map(n=>n.getAttribute('aria-label')));
         for(const label of labels){await page.locator(`.map-marker[aria-label="${label}"]`).click();await page.locator('#location-title').waitFor();await page.keyboard.press('Escape');}
         await page.locator('.map-marker[aria-label="2 locations near X1-TEST-PORT"]').click();
+        await page.locator('.nearby-locations summary').click();
         for(const symbol of ['X1-TEST-TWIN','X1-TEST-PORT']){await page.locator('.nearby-locations').getByRole('button',{name:symbol,exact:true}).click();assert.equal(await page.locator('#location-title').textContent(),symbol);}
         await page.keyboard.press('Escape');assert.equal(await page.locator('.location-card').count(),0);assert.match(await page.locator(':focus').getAttribute('aria-label'),/2 locations near/);
         return `${labels.length} map markers and both co-located locations individually selectable; Escape restores marker focus`;
+    });
+    await check('location-card-information-order',async()=>{
+        await map();await openLocation('X1-TEST-PORT');
+        const headings=await page.locator('.location-scroll h3').allTextContents();assert.deepEqual(headings.slice(0,3),['Stored prices','Shipyard','Market goods']);assert.ok(headings.indexOf('Traits & terrain')>headings.indexOf('Market goods'));if(headings.includes('Descriptions & lore'))assert.ok(headings.indexOf('Descriptions & lore')>headings.indexOf('Traits & terrain'));assert.ok((await page.locator('.location-card').innerText()).indexOf('Deep blue oceans')>(await page.locator('.location-card').innerText()).indexOf('Stored prices'));
+        assert.ok(!await page.locator('.nearby-locations').evaluate(el=>el.open),'Overlap picker starts compact so prices remain visible');
+        const prices=await page.locator('.location-prices').boundingBox(),scroll=await page.locator('.location-scroll').boundingBox();assert.ok(prices.y<scroll.y+180,'Prices start near the top of the card');
+        await page.locator('.nearby-locations summary').click();await page.locator('.nearby-locations').getByRole('button',{name:'X1-TEST-TWIN',exact:true}).click();assert.equal(await page.locator('#location-title').innerText(),'X1-TEST-TWIN');
+        return 'Prices, shipyard and goods precede terrain/lore; overlap choices expand on demand and retain selection';
     });
     await check('desktop-card-states-scroll',async()=>{
         await map();await openLocation('X1-TEST-PORT');const text=await page.locator('.location-card').innerText();
@@ -155,7 +164,7 @@ try {
         return 'Zoom, pan, Fit and Center retain the location card and control focus; ship picker works while a card was open';
     });
     await check('nearby-keyboard-and-scroll-reset',async()=>{
-        await map();await openLocation('X1-TEST-PORT');const twin=page.locator('.nearby-locations').getByRole('button',{name:'X1-TEST-TWIN',exact:true});await twin.focus();await page.keyboard.press('Enter');assert.equal(await page.locator('#location-title').innerText(),'X1-TEST-TWIN');assert.ok(await twin.evaluate(el=>el===document.activeElement),'Nearby selection must retain focus on its button');
+        await map();await openLocation('X1-TEST-PORT');await page.locator('.nearby-locations summary').click();const twin=page.locator('.nearby-locations').getByRole('button',{name:'X1-TEST-TWIN',exact:true});await twin.focus();await page.keyboard.press('Enter');assert.equal(await page.locator('#location-title').innerText(),'X1-TEST-TWIN');assert.ok(await twin.evaluate(el=>el===document.activeElement),'Nearby selection must retain focus on its button');
         await openLocation('X1-TEST-PORT');await page.locator('.location-scroll').evaluate(el=>el.scrollTop=450);await page.locator('.map-directory summary').click();await page.locator('.map-directory-list button').filter({has:page.locator('span',{hasText:/^X1-TEST-TWIN$/})}).click();assert.equal(await page.locator('.location-scroll').evaluate(el=>el.scrollTop),0,'New location must start at the top of its details');
         return 'Nearby keyboard selection retains button focus and replacing a scrolled card resets details to the top';
     });
@@ -270,7 +279,7 @@ try {
         await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await page.waitForFunction(scale=>JSON.parse(document.querySelector('.system-canvas').dataset.camera).scale>scale*1.5,before.scale);
         await button('Fit system').tap();const initial=await camera();
         await client.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:195,y:b.map.top+150,id:3}]});await client.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:245,y:b.map.top+180,id:3}]});await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});assert.notEqual((await camera()).x,initial.x);
-        await button('Fit system').tap();await page.locator('.map-marker[aria-label="2 locations near X1-TEST-PORT"]').tap();await page.locator('#location-title').waitFor();await page.locator('.nearby-locations').getByRole('button',{name:'X1-TEST-TWIN',exact:true}).tap();assert.equal(await page.locator('#location-title').innerText(),'X1-TEST-TWIN');await button('Close location information').tap();assert.equal(await page.locator('.location-card').count(),0);
+        await button('Fit system').tap();await page.locator('.map-marker[aria-label="2 locations near X1-TEST-PORT"]').tap();await page.locator('#location-title').waitFor();await page.locator('.nearby-locations summary').tap();await page.locator('.nearby-locations').getByRole('button',{name:'X1-TEST-TWIN',exact:true}).tap();assert.equal(await page.locator('#location-title').innerText(),'X1-TEST-TWIN');await button('Close location information').tap();assert.equal(await page.locator('.location-card').count(),0);
         for(let i=0;i<18 && await button('Zoom in').isEnabled();i++)await button('Zoom in').tap();
         const maximum=Number(await page.locator('.system-canvas').getAttribute('data-max-zoom'));assert.equal((await camera()).scale,maximum);
         await button('Center on ship').tap();await page.screenshot({path:path.join(output,'phone-close-up.png')});

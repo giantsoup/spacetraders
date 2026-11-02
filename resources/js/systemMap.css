@@ -92,8 +92,14 @@
 .map-price-table th:first-child { text-align: left; white-space: normal; }
 .map-price-table th { font-weight: 400; color: #c1d3e5; }
 .map-price-table small { display: block; font-size: 9px; color: #a2b3c8; }
-.nearby-locations { margin: 0 -18px; padding: 8px 12px; background: #1a2940; border-bottom: 1px solid #33445d; }
-.nearby-locations p { color: #afc5db; font-size: 10px; margin: 0 0 6px; }
+.nearby-locations { margin: 0 -18px; padding: 0 12px; background: #1a2940; border-bottom: 1px solid #33445d; }
+.nearby-locations summary { display: flex; align-items: center; min-height: 44px; color: #bdd4e7; font-size: 11px; cursor: pointer; gap: 8px; }
+.nearby-locations summary::before { content: "+"; font: 16px ui-monospace, monospace; }
+.nearby-locations[open] summary::before { content: "−"; }
+.nearby-options { display: flex; gap: 4px; overflow-x: auto; padding: 2px 0 6px; }
+.nearby-options button { flex: 0 0 auto; white-space: nowrap; }
+.location-faction { color: #a8bad0; font-size: 11px; }
+.location-scroll .location-prices { margin-top: 10px; }
 .nearby-locations button { display: inline-block; font-size: 11px; min-height: 44px; padding: 6px 10px; border: 1px solid #526681; border-radius: 6px; margin: 2px; }
 .nearby-locations button[aria-pressed=true] { background: #3a526e; border-color: #aacce3; }
 /* Compact chrome: phones in any orientation and short landscape windows give the map every spare pixel. */
@@ -144,7 +150,7 @@
     .location-heading { padding: 8px 10px; }
     .location-heading h2 { font-size: 14px; }
     .location-scroll { padding: 0 14px 16px; }
-    .nearby-locations { margin: 0 -14px; padding: 6px 10px; }
+    .nearby-locations { margin: 0 -14px; padding: 0 10px; }
 }
 @media (max-width: 360px) {
     .map-button .map-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
