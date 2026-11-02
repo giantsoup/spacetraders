@@ -1,0 +1,172 @@
+{
+  "verified_at_utc": "2026-11-02T00:13:02.495098+00:00",
+  "base_url": "https://api.spacetraders.io/v2",
+  "authentication": "none",
+  "operations": "GET only",
+  "checks": [
+    {
+      "url": "https://api.spacetraders.io/v2",
+      "http_status": 200,
+      "observed_at_utc": "2026-11-02T00:13:03.711460+00:00",
+      "summary": {
+        "version": "v2.3.0",
+        "reset_date": "2026-11-01",
+        "reported_agents": 86,
+        "leaderboard_lengths": {
+          "mostCredits": 15,
+          "mostSubmittedCharts": 0
+        }
+      }
+    },
+    {
+      "url": "https://api.spacetraders.io/v2/documentation/json",
+      "http_status": 200,
+      "observed_at_utc": "2026-11-02T00:13:05.397300+00:00",
+      "summary": {
+        "openapi_version": "v2.3.0",
+        "agent_list_parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "example": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 10,
+              "example": 10
+            }
+          }
+        ],
+        "anonymous_list_supported": true,
+        "anonymous_lookup_supported": true,
+        "public_agent_schema": {
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string",
+              "description": "Symbol of the agent.",
+              "maxLength": 14,
+              "minLength": 3
+            },
+            "headquarters": {
+              "type": "string",
+              "description": "The headquarters of the agent.",
+              "minLength": 1
+            },
+            "credits": {
+              "type": "integer",
+              "description": "The number of credits the agent has available. Credits can be negative if funds have been overdrawn.",
+              "format": "int64"
+            },
+            "startingFaction": {
+              "type": "string",
+              "description": "The faction the agent started with.",
+              "minLength": 1
+            },
+            "shipCount": {
+              "type": "integer",
+              "description": "How many ships are owned by the agent."
+            }
+          },
+          "required": [
+            "symbol",
+            "headquarters",
+            "credits",
+            "startingFaction",
+            "shipCount"
+          ],
+          "description": "Public agent details."
+        },
+        "rank_or_leaderboard_paths": []
+      }
+    },
+    {
+      "url": "https://api.spacetraders.io/v2/agents?limit=20&page=1",
+      "http_status": 200,
+      "observed_at_utc": "2026-11-02T00:13:06.549317+00:00",
+      "summary": {
+        "meta": {
+          "total": 87,
+          "page": 1,
+          "limit": 20
+        },
+        "row_count": 20,
+        "returned_fields": [
+          "credits",
+          "headquarters",
+          "shipCount",
+          "startingFaction",
+          "symbol"
+        ],
+        "all_rows_have_integer_credits": true
+      }
+    },
+    {
+      "url": "https://api.spacetraders.io/v2/agents?limit=20&page=2",
+      "http_status": 200,
+      "observed_at_utc": "2026-11-02T00:13:07.759310+00:00",
+      "summary": {
+        "meta": {
+          "total": 87,
+          "page": 2,
+          "limit": 20
+        },
+        "row_count": 20,
+        "returned_fields": [
+          "credits",
+          "headquarters",
+          "shipCount",
+          "startingFaction",
+          "symbol"
+        ],
+        "all_rows_have_integer_credits": true
+      }
+    },
+    {
+      "url": "https://api.spacetraders.io/v2/agents/A73",
+      "http_status": 200,
+      "observed_at_utc": "2026-11-02T00:13:08.947453+00:00",
+      "summary": {
+        "requested_symbol": "A73",
+        "returned_symbol": "A73",
+        "returned_fields": [
+          "credits",
+          "headquarters",
+          "shipCount",
+          "startingFaction",
+          "symbol"
+        ],
+        "credits_integer": true,
+        "rank_field_present": false
+      }
+    },
+    {
+      "url": "https://api.spacetraders.io/v2",
+      "http_status": 200,
+      "observed_at_utc": "2026-11-02T00:13:10.095500+00:00",
+      "summary": {
+        "reset_date": "2026-11-01",
+        "reported_agents": 86
+      }
+    }
+  ],
+  "sample_page_overlap": [],
+  "same_reset_during_probe": true,
+  "limitations": [
+    "Sampled two pages only, not a complete global crawl.",
+    "No authentication, private agent data, or gameplay writes used.",
+    "No undocumented search parameter or sort behavior assumed.",
+    "Pagination and credit changes are not an atomic snapshot.",
+    "GET / status leaderboard is a limited list; a missing symbol has no rank there."
+  ]
+}
