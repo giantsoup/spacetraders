@@ -48,7 +48,11 @@ class SpaceTradersClient
             // Even rejected or ambiguous writes invalidate every read in this preflight scope.
             $this->reads = [];
         }
-        app(RequestBudget::class)->reserve($token, $account, strtolower($method) === 'get' ? $this->priority : 'write');
+        $maxWait = $read ? 2.0 : 0.75;
+        if ($deadline !== null) {
+            $maxWait = min($maxWait, max(0, $deadline - microtime(true) - 0.1));
+        }
+        app(RequestBudget::class)->reserve($token, $account, $read ? $this->priority : 'write', $maxWait);
         $timeout = $deadline === null ? 30 : min(30, $deadline - microtime(true));
         if ($timeout < 0.1) {
             throw new GameException('Investigation elapsed-time limit reached before transport.');

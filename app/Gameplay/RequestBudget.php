@@ -9,7 +9,7 @@ class RequestBudget
 {
     private static array $processPauses = [];
 
-    public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery'): void
+    public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75): void
     {
         $key = $this->storeKey();
         $localDelay = (self::$processPauses[$key] ?? 0) - $this->now();
@@ -19,7 +19,7 @@ class RequestBudget
         unset(self::$processPauses[$key]);
         $waited = 0.0;
         do {
-            $delay = $this->change(function (&$state) use ($token, $account, $priority, $waited) {
+            $delay = $this->change(function (&$state) use ($token, $account, $priority, $waited, $maxWait) {
                 $now = $this->now();
                 $keys = $this->keys($token, $account);
                 $floor = match ($priority) {
@@ -36,7 +36,7 @@ class RequestBudget
                     }
                 }
                 if ($delay > 0.001) {
-                    if ($delay + $waited > 0.75) {
+                    if ($delay + $waited > $maxWait) {
                         foreach ($keys as $key) {
                             $stats = &$state['buckets'][$key]['usage'];
                             $stats['deferrals']++;
@@ -60,7 +60,7 @@ class RequestBudget
             if ($delay <= 0.001) {
                 return;
             }
-            if ($delay + $waited > 0.75) {
+            if ($delay + $waited > $maxWait) {
                 throw new RequestDeferred('SpaceTraders request budget is cooling down.', max(1, (int) ceil($delay)));
             }
             $this->pause($delay);
@@ -104,8 +104,10 @@ class RequestBudget
                     $bucket = &$state['buckets'][$scope];
                 }
                 $bucket['blocked_until'] = max($bucket['blocked_until'], $this->pauseUntil($response));
-                $bucket['tokens'] = 0;
-                $bucket['updated_at'] = $bucket['blocked_until'];
+                if (! $response->successful()) {
+                    $bucket['tokens'] = 0;
+                    $bucket['updated_at'] = $bucket['blocked_until'];
+                }
             }
         });
     }
@@ -181,7 +183,13 @@ class RequestBudget
         $retry = $response->header('Retry-After');
         $delay = is_numeric($retry) ? max(0, (float) $retry) : max(0, (strtotime($retry ?: '') ?: 0) - $now);
 
-        return $now + min(3600, max($response->status() === 502 ? 180 : 5, $delay, $this->resetAt($response) - $now)) + 0.25;
+        $resetDelay = $this->resetAt($response) - $now;
+        $minimum = $response->status() === 502 ? 180 : 5;
+        if ($response->successful() && ($delay > 0 || $resetDelay > 0)) {
+            $minimum = 0;
+        }
+
+        return $now + min(3600, max($minimum, $delay, $resetDelay)) + 0.25;
     }
 
     private function resetAt(Response $response): float

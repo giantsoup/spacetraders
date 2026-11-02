@@ -90,6 +90,88 @@ class RequestBudgetTest extends TestCase
         $budget->reserve('a', null, 'write');
     }
 
+    public function test_successful_exhaustion_uses_the_short_server_retry_instead_of_error_backoff(): void
+    {
+        $budget = $this->budget();
+        $budget->observe($this->response(200, ['X-RateLimit-Type' => 'IP Address', 'X-RateLimit-Remaining' => '0',
+            'X-RateLimit-Reset' => gmdate('c', (int) $budget->time + 1), 'Retry-After' => '1']), 'a');
+
+        $this->assertEqualsWithDelta($budget->time + 1.25, $budget->usage('a')['host']['blocked_until'], 0.001);
+    }
+
+    public function test_read_sequence_waits_through_short_successful_exhaustion_without_restarting(): void
+    {
+        $budget = $this->budget();
+        app()->instance(RequestBudget::class, $budget);
+        $start = $budget->time;
+        Http::preventStrayRequests();
+        Http::fake(['*' => Http::sequence()
+            ->push(['status' => 'online'], 200, ['X-RateLimit-Remaining' => '1'])
+            ->push(['data' => ['credits' => 10000]], 200, ['X-RateLimit-Type' => 'IP Address', 'X-RateLimit-Remaining' => '0', 'Retry-After' => '1'])
+            ->push(['data' => []])]);
+        $client = app(SpaceTradersClient::class);
+        $client->request('get', '/');
+        $client->request('get', '/my/agent', token: 'a');
+        $this->assertTrue($client->request('get', '/my/ships', token: 'a')->successful());
+
+        $this->assertGreaterThanOrEqual(1.25, $budget->time - $start);
+        $this->assertLessThanOrEqual(2, $budget->time - $start);
+        Http::assertSentCount(3);
+        Http::assertNotSent(fn ($request) => $request->method() !== 'GET');
+    }
+
+    public static function upstreamBackoffs(): array
+    {
+        return [[429], [502], [503]];
+    }
+
+    #[DataProvider('upstreamBackoffs')]
+    public function test_reads_still_defer_actual_upstream_error_backoffs(int $status): void
+    {
+        $budget = $this->budget();
+        app()->instance(RequestBudget::class, $budget);
+        $budget->observe($this->response($status, ['Retry-After' => '1']), 'a');
+        Http::preventStrayRequests();
+        Http::fake();
+        try {
+            app(SpaceTradersClient::class)->request('get', '/my/ships', token: 'a');
+            $this->fail('Read bypassed upstream backoff.');
+        } catch (RequestDeferred $e) {
+            $this->assertGreaterThanOrEqual($status === 502 ? 180 : 5, $e->retryAfter);
+            Http::assertNothingSent();
+        }
+    }
+
+    public function test_short_read_wait_cannot_exceed_its_collection_deadline(): void
+    {
+        $budget = $this->budget();
+        app()->instance(RequestBudget::class, $budget);
+        $budget->observe($this->response(200, ['X-RateLimit-Remaining' => '0', 'Retry-After' => '1']), 'a');
+        Http::preventStrayRequests();
+        Http::fake();
+        try {
+            app(SpaceTradersClient::class)->request('get', '/my/ships', token: 'a', deadline: microtime(true) + 0.5);
+            $this->fail('Read waited beyond its collection deadline.');
+        } catch (RequestDeferred) {
+            Http::assertNothingSent();
+        }
+    }
+
+    public function test_write_does_not_inherit_the_longer_read_wait(): void
+    {
+        $budget = $this->budget();
+        app()->instance(RequestBudget::class, $budget);
+        $budget->observe($this->response(200, ['X-RateLimit-Remaining' => '0', 'Retry-After' => '1']), 'a');
+        Http::preventStrayRequests();
+        Http::fake();
+        try {
+            app(SpaceTradersClient::class)->request('post', '/my/ships/A/orbit', token: 'a');
+            $this->fail('Write inherited the longer read wait.');
+        } catch (RequestDeferred) {
+            Http::assertNothingSent();
+        }
+    }
+
     public static function requestPriorities(): array
     {
         return [['write'], ['critical'], ['discovery']];

@@ -13,7 +13,7 @@
     "app/Gameplay/SpaceTradersApi.php": "95a7f3f9613cc49a73957f6973137942af3bf763ef8b9a6e59d988d7b4b09df5",
     "app/Gameplay/CommandRules.php": "89e0cd88c16ed1064f473d9c8111fa1a0162a54fb0f3923c14364c6bee653410",
     "app/Http/Requests/GameplayRequest.php": "a1d9512304d06aefabf5c83e3571c7784a4a22a5d2ce5ec94ea41c831d6b89e4",
-    "app/Services/SpaceTradersClient.php": "d379c65dca8a3ed534048be899a737d5f0181d61c9774b309648e8d8e474a704",
+    "app/Services/SpaceTradersClient.php": "165b43c2692d2d12dd427a97464a0c618cc71df42243463f43be35066a7c8abf",
     "app/Http/Controllers/AgentController.php": "3b29992032b3a206e64092008a5f81f446ce52f0a441eb7d383cf2fdd1301b72",
     "app/Http/Controllers/ForwarderController.php": "dcbf9dbb894fa723d211e133302bf49e7e642ff9dc8f05189c500a08c9dcc7c4",
     "routes/web.php": "7b91d1376ffceaf549d50a0326b3f043602bde382919ff250bdfc08dc63e81e6",
