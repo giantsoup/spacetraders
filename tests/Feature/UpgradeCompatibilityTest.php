@@ -7,11 +7,32 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 class UpgradeCompatibilityTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_exception_traces_omit_credential_arguments(): void
+    {
+        $credential = 'synthetic-private-credential';
+        $probe = new Process([PHP_BINARY, '-d', 'zend.exception_ignore_args=0', '-r', <<<'PHP'
+require 'vendor/autoload.php';
+require 'bootstrap/app.php';
+        try {
+    (function (string $token): void {
+        throw new RuntimeException('Sanitized transport failure.');
+    })('synthetic-private-credential');
+} catch (RuntimeException $error) {
+    echo json_encode(['message' => $error->getMessage(), 'trace' => $error->getTrace()]);
+        }
+PHP
+        ], base_path());
+        $probe->setTimeout(10)->mustRun();
+        $this->assertStringNotContainsString($credential, $probe->getOutput());
+        $this->assertStringContainsString('Sanitized transport failure.', $probe->getOutput());
+    }
 
     protected function setUp(): void
     {

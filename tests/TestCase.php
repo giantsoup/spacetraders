@@ -22,6 +22,9 @@ abstract class TestCase extends BaseTestCase
     protected function tearDown(): void
     {
         parent::tearDown();
+        if ($this->isolatedTestStorage && is_dir($this->isolatedTestStorage)) {
+            File::deleteDirectory($this->isolatedTestStorage);
+        }
         if ($this->gameLockDirectory && is_dir($this->gameLockDirectory)) {
             if (is_dir($this->gameLockDirectory.'/deployment')) {
                 File::deleteDirectory($this->gameLockDirectory.'/deployment');

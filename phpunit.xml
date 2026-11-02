@@ -25,6 +25,8 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing" force="true"/>
+        <env name="APP_CONFIG_CACHE" value="storage/framework/testing-config.php" force="true"/>
+        <env name="APP_ROUTES_CACHE" value="storage/framework/testing-routes.php" force="true"/>
         <env name="APP_KEY" value="base64:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=" force="true"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_DRIVER" value="array" force="true"/>

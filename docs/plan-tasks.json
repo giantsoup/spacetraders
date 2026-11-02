@@ -1363,8 +1363,8 @@
       "kind": "optional O3 cleanup",
       "sources": [
         "docs/opus-qa-security-tasks.md:175",
-        "scripts/verify-automation-browser.mjs:191",
-        "scripts/verify-opportunities-browser.mjs:146"
+        "scripts/verify-automation-browser.mjs:10",
+        "scripts/verify-opportunities-browser.mjs:10"
       ],
       "evidence": [
         "Browser scripts stop their service/server/browser but retain temporary fixture directories on success."

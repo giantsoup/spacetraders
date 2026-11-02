@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\ActionState;
 use App\Gameplay\AgentSynchronizer;
+use App\Gameplay\EngineGate;
 use App\Gameplay\GameException;
 use App\Gameplay\ShipCommandExecutor;
 use App\Gameplay\SpaceTradersApi;
@@ -23,19 +24,33 @@ class FoundationBoundaryTest extends TestCase
 
     public static function legacyReceiptEntryPoints(): array
     {
-        return [['execute'], ['stop']];
+        $cases = [];
+        foreach (['execute', 'stop', 'engine-close', 'engine-restart', 'engine-fault'] as $entry) {
+            foreach (['body_sha256', 'response_received_at'] as $receipt) {
+                $cases[$entry.'-'.$receipt] = [$entry, $receipt];
+            }
+        }
+
+        return $cases;
     }
 
     #[DataProvider('legacyReceiptEntryPoints')]
-    public function test_pending_intent_with_a_legacy_write_receipt_cannot_preflight_or_replay(string $entry): void
+    public function test_pending_intent_with_a_legacy_write_receipt_cannot_preflight_or_replay(string $entry, string $receipt): void
     {
         $agent = User::factory()->create()->agents()->create(['name' => 'LOCAL', 'token' => 'synthetic', 'account_id' => 'synthetic-account', 'faction' => 'COSMIC']);
-        $action = ShipAction::create(['agent_id' => $agent->id, 'reset_id' => '2026-10-25', 'key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'origin' => 'manual', 'command' => 'install_mount', 'arguments' => [], 'before_state' => [], 'state' => ActionState::Pending, 'sent_at' => now(), 'outcome' => ['http_status' => 201, 'body_sha256' => 'retained-proof'], 'expires_at' => now()->addMinute()]);
+        $action = ShipAction::create(['agent_id' => $agent->id, 'reset_id' => '2026-10-25', 'key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'origin' => 'manual', 'command' => 'install_mount', 'arguments' => [], 'before_state' => [], 'state' => ActionState::Pending, 'sent_at' => now(), 'outcome' => ['http_status' => 201, $receipt => 'retained-proof'], 'expires_at' => now()->addMinute()]);
         Http::preventStrayRequests();
         $executor = app(ShipCommandExecutor::class);
-        $entry === 'stop' ? $executor->stopManual($action) : $executor->execute($action->id);
+        match ($entry) {
+            'execute' => $executor->execute($action->id),
+            'stop' => $executor->stopManual($action),
+            'engine-close' => app(EngineGate::class)->close(),
+            'engine-restart' => app(EngineGate::class)->begin(),
+            'engine-fault' => app(EngineGate::class)->close('faulted', 'Engine heartbeat lost.'),
+        };
+        $executor->execute($action->id);
         $this->assertSame(ActionState::Uncertain, $action->fresh()->state);
-        $this->assertSame('retained-proof', $action->fresh()->outcome['body_sha256']);
+        $this->assertSame('retained-proof', $action->fresh()->outcome[$receipt]);
         $this->assertNotNull($action->fresh()->sent_at);
         Http::assertNothingSent();
     }
