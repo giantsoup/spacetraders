@@ -13,12 +13,32 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\FakeSpaceTraders;
 use Tests\TestCase;
 
 class FoundationBoundaryTest extends TestCase
 {
     use RefreshDatabase;
+
+    public static function legacyReceiptEntryPoints(): array
+    {
+        return [['execute'], ['stop']];
+    }
+
+    #[DataProvider('legacyReceiptEntryPoints')]
+    public function test_pending_intent_with_a_legacy_write_receipt_cannot_preflight_or_replay(string $entry): void
+    {
+        $agent = User::factory()->create()->agents()->create(['name' => 'LOCAL', 'token' => 'synthetic', 'account_id' => 'synthetic-account', 'faction' => 'COSMIC']);
+        $action = ShipAction::create(['agent_id' => $agent->id, 'reset_id' => '2026-10-25', 'key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'origin' => 'manual', 'command' => 'install_mount', 'arguments' => [], 'before_state' => [], 'state' => ActionState::Pending, 'sent_at' => now(), 'outcome' => ['http_status' => 201, 'body_sha256' => 'retained-proof'], 'expires_at' => now()->addMinute()]);
+        Http::preventStrayRequests();
+        $executor = app(ShipCommandExecutor::class);
+        $entry === 'stop' ? $executor->stopManual($action) : $executor->execute($action->id);
+        $this->assertSame(ActionState::Uncertain, $action->fresh()->state);
+        $this->assertSame('retained-proof', $action->fresh()->outcome['body_sha256']);
+        $this->assertNotNull($action->fresh()->sent_at);
+        Http::assertNothingSent();
+    }
 
     public function test_stop_cancels_any_unsent_manual_intent_and_duplicate_delivery_cannot_send(): void
     {

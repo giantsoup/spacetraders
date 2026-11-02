@@ -124,6 +124,10 @@ class ShipCommandExecutor
         }
         // Conditional state and JSON-path updates are atomic; never replace a concurrently saved receipt.
         $stop = ['outcome->stop_requested_at' => now()->utc()->toIso8601String()];
+        if ((isset($action->outcome['body_sha256']) || isset($action->outcome['response_received_at']))
+            && ShipAction::whereKey($action->id)->whereIn('state', ['preview', 'pending'])->update($stop + ['state' => 'uncertain', 'message' => 'A write receipt already exists. Stop cannot cancel a completed send; reconcile without replay.', 'settled_at' => now()])) {
+            return $action->refresh();
+        }
         $stopped = ShipAction::whereKey($action->id)->where('origin', 'manual')->whereNull('automation_run_id')
             ->whereIn('state', ['preview', 'pending'])->update($stop + [
                 'state' => 'rejected', 'message' => 'Stopped before reservation. No manual request was sent.', 'settled_at' => now(),
@@ -162,6 +166,14 @@ class ShipCommandExecutor
                 return;
             }
             $run = $action->automation_run_id ? AutomationRun::find($action->automation_run_id) : null;
+            if (isset($action->outcome['body_sha256']) || isset($action->outcome['response_received_at'])) {
+                $action->update(['state' => ActionState::Uncertain, 'message' => 'A write receipt already exists on this pending intent. Reconcile without replay.', 'settled_at' => now()]);
+                if ($run) {
+                    $this->block($run, 'Retained write receipt requires reconciliation before further work.');
+                }
+
+                return;
+            }
             $received = false;
             try {
                 $this->gate->check($action->engine_session_id);
