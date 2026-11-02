@@ -2,6 +2,14 @@
 
 Delivered for [issue #90](https://github.com/giantsoup/spacetraders/issues/90) in [PR #91](https://github.com/giantsoup/spacetraders/pull/91).
 
+## Matching flight deck artwork
+
+The flight deck scene and destination brief now use the map's WaypointSprite renderer and saved knowledge projection. In transit, the route's destination selects the artwork even after the reported arrival deadline passes. Docked and orbiting ships show their observed waypoint. Route-only details supply a known type without invented traits; completely unknown destinations use neutral artwork.
+
+The [dark flight deck art report](interactive-system-map/flight-deck/qa.html) records 20 passing browser scenarios, including pixel-for-pixel deck/map comparison for all 14 waypoint families, owner/reset-scoped knowledge, fleet switching, destination brief, ship report, pause, reduced motion, phone/landscape layouts and unchanged gameplay/upstream audits. Full verification passed with 520 PHP tests and 3,081 assertions. A private read-only check through the public live preview also confirmed matching deck/map art without POST requests. No personal live data was committed.
+
+The travel/discovery report below records the earlier verified implementation at commit 7721714. Its recorded asset hashes describe that commit; the flight deck report records this visual follow-up.
+
 ## Travel and discovery follow-up
 
 The new flows use the real local Vue/Inertia UI, Laravel handlers, durable actions and database queue with the owned FakeSpaceTraders fixture. No real SpaceTraders API calls or live gameplay tests were added in this follow-up. The earlier live observations and orbit/dock tests below are historical evidence only.

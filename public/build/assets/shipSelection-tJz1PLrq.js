@@ -1,1 +1,0 @@
-function e(e,t){return`spacetraders:ship:${e}:${t.id}:${t.reset_id||`unknown`}`}export{e as t};

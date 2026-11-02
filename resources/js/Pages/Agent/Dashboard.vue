@@ -6,8 +6,9 @@ import ManualReadBrowser from '@/Components/ManualReadBrowser.vue';
 import AdviserPanel from '@/Components/AdviserPanel.vue';
 import FocusSheet from '@/Components/FocusSheet.vue';
 import ShipScene from '@/Components/ShipScene.vue';
+import WaypointSprite from '@/Components/SystemMap/WaypointSprite.vue';
 import ShipReport from '@/Components/ShipReport.vue';
-import { shipPresentation, observedNumber, meterPercent } from '@/shipPresentation.js';
+import { shipPresentation, flightDeckLocation, observedNumber, meterPercent } from '@/shipPresentation.js';
 import AutomationConsole from '@/Components/AutomationConsole.vue';
 import AppShell from '@/Layouts/AppShell.vue';
 import { shipSelectionKey } from '@/shipSelection.js';
@@ -29,7 +30,7 @@ import OpportunityPanel from '@/Components/OpportunityPanel.vue';
 import OperationControls from '@/Components/OperationControls.vue';
 import { useGuidedFlight } from '@/Composables/useGuidedFlight.js';
 
-const props = defineProps({ mapTask: Object, manualReserveFloor: Number, manualCommands: Object, manualReads: Object, foundationEnums: Object, adviser: Object, agent: Object, ships: Array, capabilities: Object, observations: Array, actions: Array, runs: Array, health: Object, intelligence: Object, automationEnabled: Boolean, synthetic: Boolean, localAutomation: Boolean, engine: Object, engineOperator: Boolean, investigations: { type: Array, default: () => [] }, drafts: { type: Array, default: () => [] }, accounting: Object, guidedOffers: { type: Array, default: () => [] } });
+const props = defineProps({ sceneLocations: { type: Array, default: () => [] }, mapTask: Object, manualReserveFloor: Number, manualCommands: Object, manualReads: Object, foundationEnums: Object, adviser: Object, agent: Object, ships: Array, capabilities: Object, observations: Array, actions: Array, runs: Array, health: Object, intelligence: Object, automationEnabled: Boolean, synthetic: Boolean, localAutomation: Boolean, engine: Object, engineOperator: Boolean, investigations: { type: Array, default: () => [] }, drafts: { type: Array, default: () => [] }, accounting: Object, guidedOffers: { type: Array, default: () => [] } });
 const archived = computed(() => props.agent.connection_state === 'reset');
 const manualFlightMode = ref('CRUISE');
 const selected = ref(props.ships[0]?.symbol || '');
@@ -86,6 +87,7 @@ onUnmounted(() => {
     document.removeEventListener('visibilitychange', resumeClock);
 });
 const presentation = computed(() => shipPresentation(ship.value, shipRecord.value?.observed_at, props.agent.connection_state, now.value));
+const sceneLocation = computed(() => flightDeckLocation(ship.value, props.sceneLocations));
 const primary = computed(() => archived.value ? { label: 'Review archived activity', view: 'activity' }
     : pending.value ? { label: pending.value.state === 'uncertain' || pending.value.review_required ? 'Review unresolved action' : 'View pending command', view: 'activity' }
     : activeRun.value ? { label: 'View active run', view: 'run' }
@@ -176,7 +178,7 @@ const cash = value => value === null || value === undefined ? 'Unknown' : Number
 const age = value => value && Number.isFinite(Date.parse(value)) ? `${Math.max(0, Math.floor((now.value - Date.parse(value)) / 1000))}s ago` : 'Never observed';
 const healthy = value => value && now.value - Date.parse(value) < 90000;
 const url = suffix => `/agents/${props.agent.id}/${suffix}`;
-const reload = () => new Promise(resolve => router.reload({ only: ['mapTask', 'agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'engine', 'investigations', 'drafts', 'accounting', 'intelligence', 'adviser'], onFinish: resolve }));
+const reload = () => new Promise(resolve => router.reload({ only: ['sceneLocations', 'mapTask', 'agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'engine', 'investigations', 'drafts', 'accounting', 'intelligence', 'adviser'], onFinish: resolve }));
 async function prepareMarket(task) {
     if (archived.value || busy.value || pending.value || activeRun.value || guiding.value) return;
     selected.value = task.ship_symbol;
@@ -190,7 +192,7 @@ async function prepareMarket(task) {
         notice.value = `Destination set to ${task.market} for ${task.ship_symbol}. Enter orbit if docked, then Preview navigation and review fuel before approving. Synchronize after arrival, then investigate mining again.`;
     }
 }
-usePoll(5000, { only: ['mapTask', 'agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'engine', 'investigations', 'drafts', 'accounting', 'intelligence'] });
+usePoll(5000, { only: ['sceneLocations', 'mapTask', 'agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'engine', 'investigations', 'drafts', 'accounting', 'intelligence'] });
 const guided = useGuidedFlight(() => page.props.auth.user.id, () => ({
     ...props, selected: selected.value, offers: offers.value, commandPreview: commandPreview.value,
     form: { destination: destination.value, good: good.value, quantity: quantity.value, priceBound: priceBound.value, reserve: reserve.value, site: site.value, buyer: buyer.value, offerIndex: offerIndex.value },
@@ -319,7 +321,7 @@ function distance(point) {
                     <button type="button" class="identity-button" @click="openView('fleet')"><h1 id="ship-title">{{ selected || agent.name }}</h1><span aria-hidden="true">⌄</span><span class="sr-only">Switch owned ship</span></button>
                     <button type="button" class="home-link" @click="openView('report', 'systems')">Report</button>
                 </header>
-                <ShipScene v-if="ship" :ship-name="selected" :transit="presentation.transit" :progress="presentation.progress" :paused="paused || hidden || !!view" @report="openView('report', 'systems')" />
+                <ShipScene :location="sceneLocation" :reset="agent.reset_id" v-if="ship" :ship-name="selected" :transit="presentation.transit" :progress="presentation.progress" :paused="paused || hidden || !!view" @report="openView('report', 'systems')" />
                 <div class="ship-status">
                     <p class="status-location">{{ presentation.status }}</p>
                     <p class="ship-eta" :class="{ 'stationary-label': !presentation.transit }">{{ presentation.transit ? presentation.arrival : ship ? assetName(ship.nav?.status) : 'Synchronize fleet' }}</p>
@@ -367,7 +369,7 @@ function distance(point) {
                 </aside>
 
                     <fieldset v-show="view === 'automation'" :disabled="guiding"><legend v-if="guiding">Pause guidance before using automation.</legend><AutomationConsole v-if="localAutomation && !archived" :agent="agent" :ships="ships" :engine="engine" :operator="engineOperator" :investigations="investigations" :drafts="drafts" :runs="runs" :accounting="accounting" :observations="observations" :enabled="automationEnabled" @inspect-run="openView('run')" @prepare-market="prepareMarket" @refresh="async done => { await reload(); done(); }" /></fieldset>
-                    <section v-if="view === 'intelligence' && presentation.transit" class="panel" aria-labelledby="destination-brief-heading"><h2 id="destination-brief-heading">Destination brief</h2><p>{{ ship.nav.waypointSymbol }} · {{ assetName(arrivalPoint?.data?.type) }}</p><p>Arrival <time :datetime="ship.nav.route?.arrival">{{ formatLocalTime(ship.nav.route?.arrival) }}</time> · {{ presentation.arrival }}</p><p>{{ arrivalPoint?.data?.traits ? arrivalPoint.data.traits.map(assetName).join(', ') || 'No traits observed' : 'Traits Unknown' }} · Observed {{ age(arrivalPoint?.observed_at) }}</p><p class="muted">Destination facts are saved observations. Arrival and command eligibility require a fresh server check.</p></section>
+                    <section v-if="view === 'intelligence' && presentation.transit" class="panel" aria-labelledby="destination-brief-heading"><div class="destination-art" aria-hidden="true"><WaypointSprite :point="sceneLocation" :reset="agent.reset_id" /></div><h2 id="destination-brief-heading">Destination brief</h2><p>{{ sceneLocation.symbol }} · {{ assetName(sceneLocation.type) }}</p><p>Arrival <time :datetime="ship.nav.route?.arrival">{{ formatLocalTime(ship.nav.route?.arrival) }}</time> · {{ presentation.arrival }}</p><p>{{ sceneLocation.traits ? sceneLocation.traits.map(assetName).join(', ') || 'Confirmed empty trait list' : 'Traits Unknown' }} · {{ arrivalPoint ? `Observed ${age(arrivalPoint.observed_at)}` : 'From saved navigation or system information' }}</p><p class="muted">Destination facts are saved observations. Arrival and command eligibility require a fresh server check.</p></section>
                     <OpportunityPanel v-show="view === 'intelligence'" :report="intelligence" :selected="selected" />
                     <section v-show="view === 'review'" v-if="!archived && (commandPreview || runPreview)" ref="previewPanel" tabindex="-1" class="panel approval" aria-labelledby="approval-heading">
                         <h2 id="approval-heading">Review {{ commandPreview?.command === 'buy_ship' ? 'ship purchase' : commandPreview ? 'manual command' : `${runPreview.plan.strategy || 'mining'} operation` }}</h2>
@@ -494,6 +496,8 @@ h1 { min-width: 0; font-size: 20px; font-weight: 650; line-height: 1.25; overflo
 .motion-control { white-space: nowrap; flex-shrink: 0; min-height: 44px; min-width: 44px; background: none; color: var(--color-muted); text-decoration: underline; }
 .home-action { display: grid; gap: 12px; margin-top: auto; padding-top: 12px; }
 .home-action .app-button { width: 100%; min-height: 52px; border-radius: 16px; }
+.destination-art { float: right; width: 88px; height: 88px; margin: 0 0 12px 16px; pointer-events: none; }
+.destination-art svg { width: 100%; height: 100%; }
 .home-destinations { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 16px; padding: 20px 0 4px; border-top: 1px solid var(--color-line); margin-top: 16px; }
 .home-destinations button, .home-destinations > a { background: none; border: 0; color: var(--color-muted); min-height: 44px; padding: 8px 0; }
 .panel { padding: 16px 0; min-width: 0; border-bottom: 1px solid var(--color-line); }

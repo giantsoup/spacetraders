@@ -1,0 +1,9 @@
+{
+  "app/Http/Controllers/AgentDashboardController.php": "21cdc877daeb0b92fb990826415331e2c818fa012e36ee133016759a482b5e99",
+  "resources/js/Components/ShipScene.vue": "402e60bee3125c3a5982c7ab8dc3196f55b414ec4eca0bbdb4fe12fa5be16d02",
+  "resources/js/Pages/Agent/Dashboard.vue": "5830595a203eb42f22eb8f09a4812a161d3fc4245fe0c1ee5fc694115be437ec",
+  "resources/js/shipPresentation.js": "dd3d95d5035af17ec111d9bedda547ec13e16dbb05e48c90d66c747315b5d0b2",
+  "resources/js/Components/SystemMap/WaypointSprite.vue": "d295fb10923216546e59ee619fb795d5004402c1a4195d43a1164604c5e9cf76",
+  "resources/js/waypointSprites.js": "3bf53d274ace99e47020acbf73b20e5a5a8c2244e27d565c0c13235b6fa237ea",
+  "public/build/manifest.json": "2c38932eec6786258ef398add4a544b9d29e8e738d5569f8e4b856430769660e"
+}

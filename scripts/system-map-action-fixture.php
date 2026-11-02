@@ -28,12 +28,30 @@ if (in_array('--drain', $argv, true)) {
     exit;
 }
 $scenario = $argv[1] ?? 'travel';
-if (! in_array($scenario, ['travel', 'scan', 'chart', 'no-sensor', 'cooldown', 'transit', 'error', '--expire'], true)) {
+if (! in_array($scenario, ['travel', 'scan', 'chart', 'no-sensor', 'cooldown', 'transit', 'error', '--expire', '--scene'], true)) {
     throw new RuntimeException('Unknown synthetic scenario.');
 }
 $agent = Agent::where('name', 'LOCAL')->firstOrFail();
 if ($agent->account_id !== 'synthetic-account') {
     throw new RuntimeException('Synthetic agent required.');
+}
+if ($scenario === '--scene') {
+    $symbol = $argv[2] ?? '';
+    if (! preg_match('/^[A-Z0-9_-]+$/D', $symbol)) {
+        throw new RuntimeException('A synthetic location symbol is required.');
+    }
+    $point = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->where('symbol', $symbol)->first()?->data;
+    $ship = Ship::where('agent_id', $agent->id)->where('symbol', 'LOCAL-2')->firstOrFail();
+    $snapshot = $ship->snapshot;
+    $snapshot['nav']['status'] = ($argv[4] ?? '') === 'DOCKED' ? 'DOCKED' : 'IN_TRANSIT';
+    $snapshot['nav']['waypointSymbol'] = $symbol;
+    $snapshot['nav']['systemSymbol'] = 'X1-TEST';
+    $snapshot['nav']['route']['destination'] = ['symbol' => $symbol, 'type' => $point['type'] ?? ($argv[3] ?? null)];
+    $snapshot['nav']['route']['departureTime'] = '2019-12-31T23:00:00Z';
+    $snapshot['nav']['route']['arrival'] = '2020-01-01T00:00:00Z';
+    $ship->update(['snapshot' => $snapshot]);
+    echo "Owned scene snapshot selected.\n";
+    exit;
 }
 if ($scenario === '--expire') {
     ShipAction::where('agent_id', $agent->id)->where('state', 'preview')->update(['expires_at' => now()->subMinute()]);

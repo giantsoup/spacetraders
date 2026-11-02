@@ -112,5 +112,6 @@
     "sonnet_design": "Claude Sonnet 5.5 completed early mobile design. Accepted reserve, guarded discovery, footer, read status and Done sizing recommendations.",
     "sonnet_general_qa": "Claude Sonnet 5.5 completed independent source/screenshot QA. Accepted origin tracking, history, short cards, blank reserve, recovery link and preview-copy findings fixed with browser regressions.",
     "sol_loop": "Approved, one round with GPT-6.1 Sol on high. No blocker or should-fix findings. No usage figures returned."
-  }
+  },
+  "verified_commit": "7721714ba57ce5a316c5694bc3183d2ea435ed71"
 }

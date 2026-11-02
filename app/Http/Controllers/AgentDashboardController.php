@@ -24,6 +24,7 @@ use App\Models\OpportunityInvestigation;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -31,7 +32,7 @@ use Inertia\Response;
 
 class AgentDashboardController extends Controller
 {
-    public function show(Request $request, Agent $agent, MiningPlanner $planner, OpportunityAssessor $assessor): Response
+    public function show(Request $request, Agent $agent, MiningPlanner $planner, OpportunityAssessor $assessor, SystemMapKnowledge $knowledge): Response
     {
         abort_unless($agent->user_id === $request->user()->id, 404);
         $ships = Ship::where('agent_id', $agent->id)->get();
@@ -61,6 +62,9 @@ class AgentDashboardController extends Controller
             'foundationEnums' => config('foundation.enums'),
             'capabilities' => $ships->mapWithKeys(fn ($s) => [$s->symbol => $planner->capability($s->snapshot)]),
             'observations' => $observations,
+            'sceneLocations' => $ships->unique(fn ($ship) => $ship->snapshot['nav']['systemSymbol'] ?? null)
+                ->flatMap(fn ($ship) => collect($knowledge->forShip($agent, $ship)['locations'])
+                    ->map(fn ($point) => Arr::only($point, ['symbol', 'type', 'traits', 'description'])))->values(),
             'intelligence' => $assessor->report($agent),
             'guidedOffers' => $observations->where('kind', 'shipyard')->flatMap(fn ($yard) => collect($yard->data['ships'] ?? [])
                 ->filter(fn ($offer) => $planner->capability($offer, true) === null)
