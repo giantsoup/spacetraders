@@ -1,3 +1,4 @@
+import { shipView } from './ship-browser-navigation.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -84,6 +85,8 @@ try {
     const button = name => page.getByRole('button', { name, exact: true });
     const post = async (name, suffix) => {
         const response = page.waitForResponse(response => new URL(response.url()).pathname.endsWith(suffix) && response.request().method() === 'POST');
+        if (name === 'Synchronize') await shipView(page, 'guide');
+        else if (name.startsWith('Preview ')) await shipView(page, 'commands');
         await button(name).click();
         const received = await response;
         assert.equal(received.status(), 202, await received.text());
@@ -123,17 +126,21 @@ try {
     );
     await fs.writeFile(`${directory}/world.json`, JSON.stringify(equipmentWorld));
     await post('Synchronize', '/sync');
+    await page.getByRole('button', { name: 'Back to ship', exact: true }).click();
+    await page.getByRole('button', { name: 'Report', exact: true }).click();
     const equipment = page.locator('.equipment-list');
     await equipment.getByText('Mount: Sensor Array II', { exact: true }).waitFor();
     await equipment.getByText('Module: Crew Quarters I × 2', { exact: true }).waitFor();
     assert.equal(await equipment.locator('li').count(), 8);
     assert.doesNotMatch(await equipment.innerText(), /MOUNT_|MODULE_/);
+    await shipView(page, 'intelligence');
     assert.match(await page.locator('#market').innerText(), /Iron Ore/);
     assert.match(await page.locator('#waypoints').innerText(), /Asteroid Field/);
+    await shipView(page, 'commands');
     const tradeGood = page.getByLabel('Trade good', { exact: true });
     await tradeGood.selectOption({ label: 'Iron Ore' });
     assert.equal(await tradeGood.inputValue(), 'IRON_ORE', 'Friendly labels retain exact API values');
-    await equipment.screenshot({ path: path.join(output, 'equipment-names.png') });
+    await page.locator('#manual').screenshot({ path: path.join(output, 'equipment-names.png') });
     steps.push('Asset names preserve categories, tiers, official names, duplicate quantities and raw select values');
     await page.getByLabel('Protected credits', { exact: true }).fill('1750');
     await post('Preview orbit', '/commands/preview');
@@ -162,6 +169,7 @@ try {
     world.ships[0].mounts = [];
     await fs.writeFile(worldFile, JSON.stringify(world));
     await post('Synchronize', '/sync');
+    await shipView(page, 'commands');
     await page.getByLabel('Mining site', { exact: true }).selectOption('X1-TEST-ROCK');
     await page.getByLabel('Sale and refueling market', { exact: true }).selectOption('X1-TEST-ROCK');
     await page.getByLabel('Observed shipyard offer', { exact: true }).selectOption('0');
@@ -186,8 +194,10 @@ try {
         App\\Models\\ShipAction::create(['agent_id'=>$agent->id,'reset_id'=>$agent->reset_id,'ship_symbol'=>'LOCAL-1','key'=>'presentation-evidence','command'=>'sell','origin'=>'manual','state'=>'uncertain','arguments'=>['symbol'=>'IRON_ORE','units'=>8],'expires_at'=>now()->addHour(),'outcome'=>['reconciled_at'=>'2026-11-01T09:30:00Z','credit_delta'=>0,'price_discrepancy'=>false,'optional_note'=>null,'transactions'=>[],'operator_note'=>'A note with <b>markup</b> stays text.']]);
         echo json_encode(true);`);
     await page.reload();
+    await shipView(page, 'automation');
     await page.getByRole('heading', { name: 'Recorded outcomes', exact: true }).waitFor();
     assert.match(await page.locator('.cargo-totals').innerText(), /10 iron ore[\s\S]*8 iron ore[\s\S]*2 iron ore/);
+    await shipView(page, 'activity');
     const evidence = page.locator('#activity details');
     assert.equal(await evidence.getAttribute('open'), null);
     await evidence.locator('summary').click();

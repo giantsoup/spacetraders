@@ -1,5 +1,8 @@
 # Recommendations for future exploration, fuel, mining, and trade algorithms
 
+> Priority update, November 1, 2026: the [base API foundation plan](base-api-foundation-plan.md) supersedes this document's implementation order. Finish first-class manual coverage and acceptance for the official API before new strategy, adviser, or investment automation. Preserve the dated evidence below. Already-authorized local cutover and bounded real playtesting can continue.
+
+
 Prepared 2026-11-01 from the [exploration and opportunity research](exploration-fuel-and-opportunity-research.md). This document proposes future changes. It does not enable automation or establish profitable routes for the current fleet.
 
 Start with local information and route feasibility. Then improve the loop whose measured bottleneck matters most. Keep the existing preview, start, stop, spending, and reconciliation controls throughout.

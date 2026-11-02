@@ -3,6 +3,7 @@
 // Owns a fresh offline SQLite fixture and a temporary launchd identity. Always removes that service.
 require __DIR__.'/../vendor/autoload.php';
 
+use App\Gameplay\DeploymentGate;
 use App\Gameplay\LocalEngineManager;
 use App\Gameplay\ShipCommandExecutor;
 use App\Models\Agent;
@@ -19,7 +20,8 @@ preg_match('/Owned fixture directory: (.+)/', $fixture->getOutput(), $match);
 $directory = $match[1] ?? throw new RuntimeException('Missing owned fixture.');
 $env = Dotenv\Dotenv::parse(file_get_contents($directory.'/.env'));
 $env = array_merge($env, ['SPACETRADERS_LOCAL_ENGINE_ENABLED' => 'true', 'SPACETRADERS_OPERATOR_ID' => '1', 'SPACETRADERS_PHP_BINARY' => PHP_BINARY,
-    'APP_CONFIG_CACHE' => $directory.'/no-config.php', 'LARAVEL_STORAGE_PATH' => $directory.'/storage', 'CACHE_STORE' => 'array']);
+    'APP_CONFIG_CACHE' => $directory.'/no-config.php', 'LARAVEL_STORAGE_PATH' => $directory.'/storage', 'CACHE_STORE' => 'file',
+    'CACHE_PATH' => $directory.'/cache', 'SPACETRADERS_DEPLOYMENT_PATH' => $directory.'/deployment']);
 foreach (['framework/sessions', 'framework/views', 'framework/cache/data', 'logs'] as $child) {
     mkdir($directory.'/storage/'.$child, 0700, true);
 }
@@ -70,6 +72,12 @@ try {
     until(fn () => ShipAction::find($action->id)->state->value === 'confirmed');
     verify(count(json_decode(file_get_contents($env['SPACETRADERS_FIXTURE_PATH']), true)['writes']) === 1, 'Owned worker executes one explicitly approved fake command');
     $old = $executor->preview($agent->fresh(), 'LOCAL-1', 'dock', [], (string) Str::uuid());
+    $deployment = app(DeploymentGate::class);
+    $deployment->close('owned-engine-pause');
+    until(fn () => $deployment->status()['drained']);
+    verify($old->fresh()->state->value === 'preview' && LocalEngine::find(1)->session_id === $engine->session_id, 'Deployment drain preserves previews and the local engine session');
+    $deployment->open('owned-engine-pause');
+    verify(LocalEngine::find(1)->processes === $engine->processes && count(json_decode(file_get_contents($env['SPACETRADERS_FIXTURE_PATH']), true)['writes']) === 1, 'Shared persistent pause resumes the same owned engine without extra gameplay');
     $manager->end();
     until(fn () => LocalEngine::find(1)?->state === 'off');
     until(fn () => ! $manager->alive($engine->processes['supervisor']));

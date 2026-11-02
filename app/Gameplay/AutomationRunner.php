@@ -48,6 +48,7 @@ class AutomationRunner
                 'agent_id' => $agent->id, 'reset_id' => $agent->reset_id, 'ship_symbol' => $symbol, 'state' => RunState::Preview,
                 'expires_at' => now()->addSeconds(config('gameplay.preview_seconds')),
                 'plan' => array_merge($limits, ['route' => $route, 'initial_inventory' => MiningPlanner::inventory($ship), 'initial_credits' => $agent->credits,
+                    'participating_ships' => [$symbol], 'capital' => app(CycleAccounting::class)->capital($agent, [$symbol]),
                     'initial_configuration' => FuelPlanner::configuration($ship), 'equipment' => OpportunityEvaluator::equipment($ship), 'initial_quote_signatures' => $this->quoteSignatures($agent, $limits), 'initial_fuel' => $ship['fuel']['current'], 'initial_waypoint' => $ship['nav']['waypointSymbol'], 'initial_status' => $ship['nav']['status']]),
                 'totals' => ['phase' => match ($limits['strategy']) {
                     'scout' => 'observe', 'trade' => 'buy', default => 'mine'
@@ -201,6 +202,7 @@ class AutomationRunner
                     $this->executor->block($run, $e->getMessage());
                 }
             }
+            app(CycleAccounting::class)->record($run, $ship ?? null);
         });
     }
 
@@ -295,10 +297,6 @@ class AutomationRunner
         $totals['unsold'] = MiningPlanner::inventory($ship);
         $totals['cash_contribution'] = $totals['sale_proceeds'] - $totals['fuel_cost'] - ($totals['purchase_cost'] ?? 0);
         $totals['elapsed_seconds'] = (int) $run->started_at->diffInSeconds(now());
-        $totals['accounting'] = app(CycleAccounting::class)->summarize(
-            ['waypoint' => $run->plan['initial_waypoint'], 'fuel' => $run->plan['initial_fuel'], 'inventory' => $run->plan['initial_inventory']],
-            ['waypoint' => $ship['nav']['waypointSymbol'], 'fuel' => $ship['fuel']['current'], 'inventory' => MiningPlanner::inventory($ship)],
-            ['sales' => $totals['sale_proceeds'], 'fuel' => $totals['fuel_cost'], 'goods' => $totals['purchase_cost'] ?? 0], $totals['elapsed_seconds']);
         $lastContribution = $totals['cash_contribution'] - ($totals['previous_cash_contribution'] ?? 0);
         $totals['last_cycle_cash_contribution'] = $lastContribution;
         $totals['last_cycle_contribution'] = $lastContribution;
@@ -365,6 +363,7 @@ class AutomationRunner
             $this->sync->observe($agent, 'market', $candidate['market'], $market);
         }
         $plan = array_merge($limits, ['initial_credits' => $agent->credits, 'initial_inventory' => MiningPlanner::inventory($ship), 'initial_fuel' => $ship['fuel']['current'],
+            'participating_ships' => [$ship['symbol']], 'capital' => app(CycleAccounting::class)->capital($agent, [$ship['symbol']]),
             'initial_waypoint' => $ship['nav']['waypointSymbol'], 'initial_status' => $ship['nav']['status'], 'site' => $candidate['site'], 'market' => $candidate['market'],
             'equipment' => OpportunityEvaluator::equipment($ship), 'market_quote_signature' => OpportunityEvaluator::quoteSignature($market), 'setup_cost' => 0]);
         if ($candidate['strategy'] === 'mining') {
@@ -375,7 +374,7 @@ class AutomationRunner
             if ($limits['reserve'] < $route['minimum_reserve'] || $limits['max_spend'] < $route['fuel_ceiling']) {
                 throw new GameException('Mining reserve or fuel spending ceiling is below the verified route requirement.');
             }
-            $plan['ordered_actions'] = ['Orbit and travel to the selected extraction site if needed', 'Up to '.$limits['max_extractions'].' '.($limits['max_extractions'] === 1 ? 'extraction' : 'extractions').' per trip within approved headroom and site-time limits', 'Wait for server cooldown and travel to the approved buyer', 'Dock and sell only attributable yields in fresh-quote batches', 'Refuel within approved bounds; check each cycle contribution before any approved repeat'];
+            $plan['ordered_actions'] = ['Orbit and travel to the selected extraction site if needed', 'Up to '.$limits['max_extractions'].' '.($limits['max_extractions'] === 1 ? 'extraction' : 'extractions').' per trip within approved headroom and site-time limits', 'Depart for the approved buyer when an extraction, headroom or site-time limit is reached; travel can overlap the remaining extraction cooldown', 'Dock and sell only attributable yields in fresh-quote batches', 'Refuel within approved bounds; check each cycle contribution before any approved repeat'];
             $sameQuote = ($candidate['quote_signature'] ?? null) === $plan['market_quote_signature'];
             $plan['estimated_net'] = $sameQuote ? $candidate['estimated_net'] : null;
             $plan['trial_required'] = ! $sameQuote || $candidate['trial_required'];
@@ -458,6 +457,7 @@ class AutomationRunner
         $totals['unsold'] = $ship ? MiningPlanner::inventory($ship) : null;
         $totals['stopped_at'] = now()->toIso8601String();
         $run->update(['state' => RunState::Stopped, 'active_agent_id' => null, 'next_action_at' => null, 'totals' => $totals, 'blocked_reason' => $reason]);
+        app(CycleAccounting::class)->record($run, $ship);
     }
 
     private function rejectPreview(AutomationRun $run, string $reason): never

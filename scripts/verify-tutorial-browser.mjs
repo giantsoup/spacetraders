@@ -1,3 +1,4 @@
+import { shipView } from './ship-browser-navigation.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:net';
@@ -71,11 +72,14 @@ async function post(label, suffix) {
     ]);
     const data = await received.json();
     assert.equal(received.status(), 202, `${label}: ${data.message || JSON.stringify(data.errors)}`);
+    // Preview opens Review, where Synchronize is intentionally absent. Wait for the completed reload.
+    await page.waitForFunction(() => document.querySelector('main[aria-busy]')?.getAttribute('aria-busy') === 'false');
     return data;
 }
-async function refreshDeck() { await page.goto(deck); await page.getByRole('heading', { name: 'LOCAL', exact: true }).waitFor(); }
-async function sync() { await post('Synchronize', '/sync'); await refreshDeck(); }
+async function refreshDeck() { await page.goto(deck); await page.getByRole('heading', { name: 'LOCAL-1', exact: true }).waitFor(); await shipView(page, 'commands'); }
+async function sync() { await shipView(page, 'guide'); await post('Synchronize', '/sync'); await refreshDeck(); }
 async function command(label) {
+    await shipView(page, 'commands');
     const action = await post(label, '/commands/preview');
     await post('Approve command', `/commands/${action.id}/approve`);
     execFileSync(php, ['artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' });
@@ -109,28 +113,36 @@ try {
         await choose('observe');
         await page.getByRole('link', { name: 'Open fleet', exact: false }).click();
         await page.waitForURL('**#fleet');
+        await shipView(page, 'guide');
         await button('Show lesson').click();
         await page.getByRole('heading', { name: 'Synchronize and read your ship', exact: true }).waitFor();
         await course().getByRole('checkbox').check();
         await button('Next lesson').click();
+        await shipView(page, 'guide');
         await page.getByRole('link', { name: 'Full player guide' }).click();
         await page.getByRole('heading', { name: 'Choose a working miner', exact: true }).waitFor();
         await choose('travel');
         await page.getByRole('link', { name: 'Open manual commands', exact: false }).click();
         await sync();
+        await shipView(page, 'fleet');
         await page.getByRole('button', { name: 'LOCAL-2', exact: false }).click();
+        await shipView(page, 'guide');
         await button('Show lesson').click();
         await page.getByRole('link', { name: 'Open manual commands', exact: false }).click();
         assert.ok((await page.locator('.ship-choice.selected').textContent()).includes('LOCAL-2'));
+        await shipView(page, 'guide');
         await page.getByRole('link', { name: 'Full player guide' }).click();
         await page.getByRole('link', { name: 'Open manual commands', exact: false }).click();
         assert.ok((await page.locator('.ship-choice.selected').textContent()).includes('LOCAL-2'));
+        await shipView(page, 'fleet');
         await page.getByRole('button', { name: 'LOCAL-1', exact: false }).click();
         await command('Preview orbit');
+        await shipView(page, 'commands');
         await page.getByLabel('Destination', { exact: true }).selectOption('X1-TEST-PORT');
         await command('Preview navigation');
         await sync();
         assert.equal(state().ship.nav.waypointSymbol, 'X1-TEST-PORT');
+        await shipView(page, 'commands');
         await page.getByLabel('Destination', { exact: true }).selectOption('X1-TEST-ROCK');
         await command('Preview navigation');
         await sync();
@@ -163,6 +175,7 @@ try {
         await page.getByLabel('Maximum cost / minimum sale total', { exact: true }).fill('100');
         await command('Preview refueling');
         assert.equal(state().ship.fuel.current, state().ship.fuel.capacity);
+        await shipView(page, 'guide');
         await button('Show lesson').click();
         await shot('flight-deck-lesson.png');
     });
@@ -227,8 +240,9 @@ try {
         await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Player guide', exact: true }).click();
         await page.waitForURL('**/guide');
         await page.getByRole('navigation', { name: 'Tutorial agent' }).getByRole('link', { name: 'LOCAL', exact: true }).click();
+        await page.waitForURL(agentGuide);
         await choose('sell');
-        assert.equal(await page.locator('.guide-page').evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(10, 17, 28)');
+        assert.equal(await page.locator('.guide-page').evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(7, 13, 23)');
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
         const glossary = page.getByText('Flight-deck glossary', { exact: true });
         await glossary.focus();
@@ -239,6 +253,7 @@ try {
         await page.setViewportSize({ width: 320, height: 800 });
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
         await refreshDeck();
+        await shipView(page, 'guide');
         await button('Show lesson').click();
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
         await shot('flight-deck-mobile.png');

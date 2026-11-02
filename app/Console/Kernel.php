@@ -12,7 +12,8 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        $schedule->command('spacetraders:dispatch-due')->everyFiveSeconds();
+        $schedule->command('spacetraders:dispatch-due')->everyFiveSeconds()
+            ->createMutexNameUsing('spacetraders:dispatch-due:v1')->withoutOverlapping(2);
     }
 
     /**

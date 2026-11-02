@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "pnpm",
+    "message": "reference.startsWith is not a function"
+  }
+}

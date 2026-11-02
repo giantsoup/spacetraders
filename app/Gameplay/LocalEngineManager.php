@@ -52,13 +52,14 @@ class LocalEngineManager
             throw new GameException('Engine installation requires macOS, local mode, an operator, SQLite and the local engine feature.');
         }
         $php = realpath(config('gameplay.php_binary'));
+        $version = trim(file_get_contents(base_path('.php-version')));
         if (! $php || ! is_executable($php)) {
-            throw new GameException('Configure an absolute executable PHP 8.4 path.');
+            throw new GameException('Configure an absolute executable PHP '.$version.' path.');
         }
-        $runtime = new Process([$php, '-r', 'exit(PHP_VERSION_ID >= 80401 && PHP_VERSION_ID < 80500 ? 0 : 1);']);
-        $runtime->run();
+        $runtime = new Process([$php, base_path('scripts/runtime-preflight.php')]);
+        $runtime->setTimeout(10)->run();
         if (! $runtime->isSuccessful()) {
-            throw new GameException('Configure an absolute PHP 8.4 executable.');
+            throw new GameException('Configure a PHP '.$version.' executable with the required worker extensions and matching Composer pins.');
         }
         $this->lock->run('engine-control', function () use ($php) {
             if ($this->launchctl(['print', $this->target()])->isSuccessful()) {
@@ -73,7 +74,8 @@ class LocalEngineManager
                 'APP_ENV' => 'local', 'APP_DEBUG' => 'false', 'APP_KEY' => config('app.key'),
                 'APP_CONFIG_CACHE' => $directory.'/no-config.php', 'LARAVEL_STORAGE_PATH' => storage_path(),
                 'DB_CONNECTION' => 'sqlite', 'DB_DATABASE' => config('database.connections.sqlite.database'), 'DATABASE_URL' => '',
-                'QUEUE_CONNECTION' => 'database', 'CACHE_STORE' => 'array', 'CACHE_DRIVER' => 'array', 'LOG_CHANNEL' => 'stderr',
+                'QUEUE_CONNECTION' => 'database', 'CACHE_STORE' => 'file', 'CACHE_DRIVER' => 'file', 'CACHE_PATH' => config('cache.stores.file.path'), 'LOG_CHANNEL' => 'stderr',
+                'SPACETRADERS_DEPLOYMENT_PATH' => config('deployment.path'), 'SPACETRADERS_RELEASE' => config('deployment.release'),
                 'SPACETRADERS_LOCK_PATH' => config('gameplay.lock_path'), 'SPACETRADERS_FIXTURE_PATH' => config('gameplay.fixture_path') ?: '',
                 'SPACETRADERS_REQUEST_BUDGET_PATH' => config('gameplay.request_budget_path'),
                 'SPACETRADERS_AUTOMATION_ENABLED' => config('gameplay.enabled') ? 'true' : 'false',

@@ -1,0 +1,19 @@
+{
+  "processes": {
+    "browser": 56119,
+    "server": 56168
+  },
+  "manualPreview": true,
+  "browser": "156.0.8078.4",
+  "evidence": "/Users/Taylor/.t3/worktrees/spacetraders/implement-issue-81-fixt-db345b8ae25c516a/storage/app/mvp-evidence/opt02/preview",
+  "passed": true,
+  "shutdown": {
+    "server": "verified",
+    "browserConnection": "verified",
+    "browser": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-ipRTBl",
+  "fixtureRemoved": true,
+  "diagnostics": null,
+  "failures": []
+}

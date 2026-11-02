@@ -1,0 +1,21 @@
+{
+    "passed": true,
+    "exit": 1,
+    "status": {
+        "version": 1,
+        "phase": "draining",
+        "generation": "successor",
+        "participants": [],
+        "required": [],
+        "outcome": null,
+        "closed_at": "2026-11-01T23:09:12+00:00",
+        "deadline": "2026-11-01T23:19:12+00:00",
+        "queue_was_paused": false,
+        "runtime_identity": "c6099f16ad458c5f36eb66ad8e1ff82ea3d8296360da7512bec7a6b2af4478ef",
+        "drained": false,
+        "blockers": [
+            "worker:awaiting_live_ack",
+            "scheduler:awaiting_descendant_ack"
+        ]
+    }
+}

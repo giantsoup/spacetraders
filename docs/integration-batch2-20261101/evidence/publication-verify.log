@@ -1,0 +1,309 @@
+PASS PHP 8.5.12 matches Composer, lockfile and CI pin; worker/SQLite extensions loaded.
+PASS real selected PHP and matching runtime pins
+PASS stale Composer lock pin rejected
+PASS untested PHP patch rejected even when manifest pins agree
+PASS executable PHP_BIN wrapper preserves paths and literal arguments with spaces
+PASS missing Herd executable fails without falling back to global PHP
+$ vite build
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 720 modules transformed.
+rendering chunks...
+computing gzip size...
+public/build/manifest.json                                      8.92 kB │ gzip:  1.24 kB
+public/build/assets/Welcome-C6ZLIYTJ.css                        0.15 kB │ gzip:  0.13 kB
+public/build/assets/dateTime-05q_TOSW.css                       0.66 kB │ gzip:  0.34 kB
+public/build/assets/GuidedFlight-CPCUKnB1.css                   1.17 kB │ gzip:  0.53 kB
+public/build/assets/AppShell-CGlwTphf.css                       1.39 kB │ gzip:  0.61 kB
+public/build/assets/Show-DVouwzbK.css                           2.82 kB │ gzip:  0.91 kB
+public/build/assets/Agents-UQeWFSxe.css                         4.70 kB │ gzip:  1.27 kB
+public/build/assets/TutorialCourse-DQR4gQuP.css                 5.69 kB │ gzip:  1.58 kB
+public/build/assets/Dashboard-0fG8PfpA.css                     20.71 kB │ gzip:  4.26 kB
+public/build/assets/app-D6bvJ2S7.css                           33.25 kB │ gzip:  7.44 kB
+public/build/assets/_plugin-vue_export-helper-BDNMzG2s.js       0.08 kB │ gzip:  0.09 kB
+public/build/assets/DangerButton-BZ6YvIDk.js                    0.26 kB │ gzip:  0.22 kB
+public/build/assets/PrimaryButton-X0g2OBFH.js                   0.26 kB │ gzip:  0.22 kB
+public/build/assets/SecondaryButton-m9N_PhuB.js                 0.27 kB │ gzip:  0.22 kB
+public/build/assets/AuthenticatedLayout-BBdGcdhD.js             0.43 kB │ gzip:  0.30 kB
+public/build/assets/Checkbox-BT5s3xHW.js                        0.45 kB │ gzip:  0.32 kB
+public/build/assets/GuestLayout-Bt-J8OoG.js                     0.63 kB │ gzip:  0.43 kB
+public/build/assets/Edit-CghX6npa.js                            0.84 kB │ gzip:  0.48 kB
+public/build/assets/TextInput-BLZ3YmPK.js                       0.93 kB │ gzip:  0.52 kB
+public/build/assets/ConfirmPassword-BIPXhkRu.js                 1.43 kB │ gzip:  0.76 kB
+public/build/assets/dateTime-CXyT0DMr.js                        1.71 kB │ gzip:  0.86 kB
+public/build/assets/Welcome-tNk5NLSg.js                         1.79 kB │ gzip:  0.95 kB
+public/build/assets/UpdateProfileInformationForm-CCeLpq4Z.js    2.06 kB │ gzip:  0.91 kB
+public/build/assets/dataPresentation-Dii4-671.js                2.20 kB │ gzip:  1.17 kB
+public/build/assets/Login-BdmcrVsm.js                           2.28 kB │ gzip:  1.02 kB
+public/build/assets/UpdatePasswordForm-vLqNJtVG.js              3.08 kB │ gzip:  1.05 kB
+public/build/assets/DeleteUserForm-CskDQNAQ.js                  3.69 kB │ gzip:  1.65 kB
+public/build/assets/AppShell-uGGylqlz.js                        3.86 kB │ gzip:  1.63 kB
+public/build/assets/Agents-elBsEuKw.js                          6.00 kB │ gzip:  2.38 kB
+public/build/assets/GuidedFlight-BjM3whyA.js                    6.07 kB │ gzip:  2.51 kB
+public/build/assets/Show-CKMZMrsZ.js                            7.81 kB │ gzip:  3.47 kB
+public/build/assets/CreateAgent-_wnAgR5-.js                     9.18 kB │ gzip:  3.23 kB
+public/build/assets/TutorialCourse-BQwfDFqB.js                 23.48 kB │ gzip:  9.04 kB
+public/build/assets/Dashboard-Bt_KHpeF.js                     150.21 kB │ gzip: 44.15 kB
+public/build/assets/app-CIvHJMFq.js                           283.49 kB │ gzip: 97.36 kB
+
+✓ built in 244ms
+$ vite build
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 720 modules transformed.
+rendering chunks...
+computing gzip size...
+public/build/manifest.json                                      8.92 kB │ gzip:  1.24 kB
+public/build/assets/Welcome-C6ZLIYTJ.css                        0.15 kB │ gzip:  0.13 kB
+public/build/assets/dateTime-05q_TOSW.css                       0.66 kB │ gzip:  0.34 kB
+public/build/assets/GuidedFlight-CPCUKnB1.css                   1.17 kB │ gzip:  0.53 kB
+public/build/assets/AppShell-CGlwTphf.css                       1.39 kB │ gzip:  0.61 kB
+public/build/assets/Show-DVouwzbK.css                           2.82 kB │ gzip:  0.91 kB
+public/build/assets/Agents-UQeWFSxe.css                         4.70 kB │ gzip:  1.27 kB
+public/build/assets/TutorialCourse-DQR4gQuP.css                 5.69 kB │ gzip:  1.58 kB
+public/build/assets/Dashboard-0fG8PfpA.css                     20.71 kB │ gzip:  4.26 kB
+public/build/assets/app-D6bvJ2S7.css                           33.25 kB │ gzip:  7.44 kB
+public/build/assets/_plugin-vue_export-helper-BDNMzG2s.js       0.08 kB │ gzip:  0.09 kB
+public/build/assets/DangerButton-BZ6YvIDk.js                    0.26 kB │ gzip:  0.22 kB
+public/build/assets/PrimaryButton-X0g2OBFH.js                   0.26 kB │ gzip:  0.22 kB
+public/build/assets/SecondaryButton-m9N_PhuB.js                 0.27 kB │ gzip:  0.22 kB
+public/build/assets/AuthenticatedLayout-BBdGcdhD.js             0.43 kB │ gzip:  0.30 kB
+public/build/assets/Checkbox-BT5s3xHW.js                        0.45 kB │ gzip:  0.32 kB
+public/build/assets/GuestLayout-Bt-J8OoG.js                     0.63 kB │ gzip:  0.43 kB
+public/build/assets/Edit-CghX6npa.js                            0.84 kB │ gzip:  0.48 kB
+public/build/assets/TextInput-BLZ3YmPK.js                       0.93 kB │ gzip:  0.52 kB
+public/build/assets/ConfirmPassword-BIPXhkRu.js                 1.43 kB │ gzip:  0.76 kB
+public/build/assets/dateTime-CXyT0DMr.js                        1.71 kB │ gzip:  0.86 kB
+public/build/assets/Welcome-tNk5NLSg.js                         1.79 kB │ gzip:  0.95 kB
+public/build/assets/UpdateProfileInformationForm-CCeLpq4Z.js    2.06 kB │ gzip:  0.91 kB
+public/build/assets/dataPresentation-Dii4-671.js                2.20 kB │ gzip:  1.17 kB
+public/build/assets/Login-BdmcrVsm.js                           2.28 kB │ gzip:  1.02 kB
+public/build/assets/UpdatePasswordForm-vLqNJtVG.js              3.08 kB │ gzip:  1.05 kB
+public/build/assets/DeleteUserForm-CskDQNAQ.js                  3.69 kB │ gzip:  1.65 kB
+public/build/assets/AppShell-uGGylqlz.js                        3.86 kB │ gzip:  1.63 kB
+public/build/assets/Agents-elBsEuKw.js                          6.00 kB │ gzip:  2.38 kB
+public/build/assets/GuidedFlight-BjM3whyA.js                    6.07 kB │ gzip:  2.51 kB
+public/build/assets/Show-CKMZMrsZ.js                            7.81 kB │ gzip:  3.47 kB
+public/build/assets/CreateAgent-_wnAgR5-.js                     9.18 kB │ gzip:  3.23 kB
+public/build/assets/TutorialCourse-BQwfDFqB.js                 23.48 kB │ gzip:  9.04 kB
+public/build/assets/Dashboard-Bt_KHpeF.js                     150.21 kB │ gzip: 44.15 kB
+public/build/assets/app-CIvHJMFq.js                           283.49 kB │ gzip: 97.36 kB
+
+✓ built in 232ms
+Production assets are identical with unrelated Markdown and generated-view fixtures.
+Pinia restores and persists the existing elementsStore key and JSON state.
+PASS: HTTP-origin submission keys are valid independent UUIDs without randomUUID.
+PASS: America/Los_Angeles timestamps, guided waits, nested evidence, and unchanged UTC source values.
+PASS: America/New_York timestamps, guided waits, nested evidence, and unchanged UTC source values.
+PASS: Asia/Tokyo timestamps, guided waits, nested evidence, and unchanged UTC source values.
+PASS: UTC timestamps, guided waits, nested evidence, and unchanged UTC source values.
+PASS absolute deadlines, observation-confirmed readiness, unknowns, zero-capacity meters and freshness
+PASS: course structure, malformed progress recovery, deduplication, and user/agent/reset isolation.
+PASS: deterministic planning, exact fields, approval matching, confirmed receipts, batching, refuel units, setup/scouting, blockers and progress isolation.
+Owned lifecycle regression results: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/opt02-regression-results-AACoyB
+{
+  "passed": true,
+  "shutdown": {
+    "child": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-isS66b",
+  "fixtureRemoved": true,
+  "diagnostics": null,
+  "failures": []
+}
+✔ success waits for actual child exit, removes only its allocation and preserves durable output and an unrelated process (209.553042ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-3AnPQg
+{
+  "passed": false,
+  "shutdown": {
+    "child": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-3AnPQg",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-3AnPQg",
+  "failures": [
+    "assertion with [redacted]"
+  ]
+}
+✔ failure retains private diagnostics, redacts durable errors and still shuts down all acquired resources (105.898625ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-Ffnj5y
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-Ffnj5y",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-Ffnj5y",
+  "failures": [
+    "setup stopped before browser"
+  ]
+}
+✔ partial setup failure before acquisition retains its allocation (3.087958ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-LKOPkb
+{
+  "passed": false,
+  "shutdown": {
+    "service": "verified",
+    "browser": "failed",
+    "server": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-LKOPkb",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-LKOPkb",
+  "failures": [
+    "close failed"
+  ]
+}
+✔ one shutdown failure never skips the other cleanups or removes diagnostics (2.701417ms)
+{
+  "passed": true,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-uLED5B",
+  "fixtureRemoved": true,
+  "diagnostics": null,
+  "failures": []
+}
+✔ descendant symlinks are unlinked without traversing an external target (2.272834ms)
+Cleanup refused at /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-SUPnKL. Ownership is unverified; the original allocation may have moved.
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-SUPnKL",
+  "fixtureRemoved": false,
+  "diagnostics": null,
+  "failures": [
+    "Owned fixture was replaced by a symlink"
+  ]
+}
+✔ refuses cleanup when the owned symlink changes (2.149208ms)
+Cleanup refused at /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-h9GeFq. Ownership is unverified; the original allocation may have moved.
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-h9GeFq",
+  "fixtureRemoved": false,
+  "diagnostics": null,
+  "failures": [
+    "Owned fixture directory identity changed\n+ actual - expected\n\n+ 116940670\n- 116940668\n         ^\n"
+  ]
+}
+✔ refuses cleanup when the owned directory changes (1.723667ms)
+Cleanup refused at /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-32jQvP. Ownership is unverified; the original allocation may have moved.
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-32jQvP",
+  "fixtureRemoved": false,
+  "diagnostics": null,
+  "failures": [
+    "Owned fixture marker mismatch\n+ actual - expected\n\n+ 'unowned'\n- '4133dc035f9ba0127d45b3715b6789c9b29e76a57f68af2eccc724140ddcc165'\n"
+  ]
+}
+✔ refuses cleanup when the owned marker changes (1.568583ms)
+Cleanup refused at /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-tOP40U. Ownership is unverified; the original allocation may have moved.
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-tOP40U",
+  "fixtureRemoved": false,
+  "diagnostics": null,
+  "failures": [
+    "Owned fixture marker changed"
+  ]
+}
+✔ refuses cleanup when the owned marker-symlink changes (1.454ms)
+Cleanup refused at /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-gwa6l8. Ownership is unverified; the original allocation may have moved.
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-gwa6l8",
+  "fixtureRemoved": false,
+  "diagnostics": null,
+  "failures": [
+    "Owned fixture is no longer private\n\n493 !== 448\n"
+  ]
+}
+✔ refuses cleanup when the owned permissions changes (1.116375ms)
+✔ a child that already exited or failed to spawn cannot hang shutdown (29.661917ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-OoNO5J
+{
+  "passed": false,
+  "shutdown": {
+    "child": "failed"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-OoNO5J",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-OoNO5J",
+  "failures": [
+    "Owned process required SIGKILL; diagnostics retained"
+  ]
+}
+✔ an unresponsive owned child is reaped, and escalation fails the run (442.964708ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-dbTefI
+{
+  "passed": false,
+  "shutdown": {
+    "resource": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-dbTefI",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-dbTefI",
+  "failures": [
+    "Verification interrupted by SIGTERM"
+  ]
+}
+✔ SIGTERM enters shutdown, retains diagnostics and does not skip subsequent cleanups (2.687125ms)
+{
+  "passed": true,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-V1eBTd",
+  "fixtureRemoved": true,
+  "diagnostics": null,
+  "failures": []
+}
+✔ a user-supplied output directory is never a deletion target (2.556042ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-shGQp1
+✔ a reporting failure retains the owned fixture and still verifies resource shutdown (2.407459ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-DIYZgr
+✔ replaced durable output cannot redirect reporting into the private fixture (1.281209ms)
+✔ result filenames cannot escape the durable output directory (0.250584ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-iEjnHl
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-iEjnHl",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-cwaucj52/spacetraders-verification-iEjnHl",
+  "failures": [
+    "intentional failure"
+  ]
+}
+✔ failed-run diagnostics never follow an injected file symlink (1.26375ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 856.113583
+PASS template defaults: HTTP 404, key changed no
+PASS local debug with solutions disabled: HTTP 404, key changed no
+PASS production control: HTTP 404, key changed no
+PASS isolated vulnerable positive control: HTTP 204, key changed only in disposable positive control
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.5.12
+Configuration: /Users/Taylor/.t3/worktrees/spacetraders/integrate-completed-batch2-20261101/phpunit.xml
+
+...............................................................  63 / 391 ( 16%)
+............................................................... 126 / 391 ( 32%)
+............................................................... 189 / 391 ( 48%)
+............................................................... 252 / 391 ( 64%)
+............................................................... 315 / 391 ( 80%)
+............................................................... 378 / 391 ( 96%)
+.............                                                   391 / 391 (100%)
+
+Time: 00:27.868, Memory: 85.00 MB
+
+OK (391 tests, 2244 assertions)
+{"tool":"pint","result":"passed"}

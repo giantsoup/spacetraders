@@ -1,0 +1,46 @@
+{
+  "passed": true,
+  "baseline": false,
+  "browser": "156.0.8078.76",
+  "pages": [
+    "welcome",
+    "register",
+    "forgot-password",
+    "reset-password",
+    "login",
+    "agents",
+    "create-agent",
+    "import-agent",
+    "guided-setup",
+    "profile",
+    "confirm-password",
+    "verify-email",
+    "guide",
+    "agent-guide",
+    "flight-deck"
+  ],
+  "components": [
+    "Agent/Agents",
+    "Agent/CreateAgent",
+    "Agent/Dashboard",
+    "Auth/ConfirmPassword",
+    "Auth/ForgotPassword",
+    "Auth/Login",
+    "Auth/Register",
+    "Auth/ResetPassword",
+    "Auth/VerifyEmail",
+    "Guide/Show",
+    "Profile/Edit",
+    "Welcome"
+  ],
+  "steps": [
+    "Dark missing-page fallback at all three widths, with a working return link",
+    "Invalid login displays a readable error associated with the field",
+    "Keyboard skip link, setup/import switching clears tokens, real handler imports the offline agent",
+    "Profile save persists after reload; password error recovery and successful update",
+    "Dark deletion dialog at 320px: initial focus, keyboard navigation, inert background, invalid password, Cancel, focus return, clean reopen, Escape and backdrop dismissal",
+    "Password confirmation error/success and verification-email feedback through local handlers; email captured by array transport",
+    "Registration validation/success, empty agent list, POST logout, password-reset request/success and login with the new password"
+  ],
+  "errors": []
+}

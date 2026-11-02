@@ -41,13 +41,9 @@ class UpgradeCompatibilityTest extends TestCase
     {
         return [
             ['POST', '/login'],
-            ['POST', '/register'],
-            ['POST', '/forgot-password'],
-            ['POST', '/reset-password'],
             ['POST', '/confirm-password'],
             ['PUT', '/password'],
             ['POST', '/logout'],
-            ['POST', '/email/verification-notification'],
             ['POST', '/agents'],
             ['POST', '/agents/storeExisting'],
             ['POST', '/forward'],
@@ -61,6 +57,7 @@ class UpgradeCompatibilityTest extends TestCase
             ['POST', '/agents/1/engine/end'],
             ['POST', '/agents/1/engine/force-stop'],
             ['POST', '/agents/1/accounting/review'],
+            ['POST', '/agents/1/economics/investment'],
             ['POST', '/agents/1/sync'],
             ['POST', '/agents/1/commands/preview'],
             ['POST', '/agents/1/commands/1/approve'],

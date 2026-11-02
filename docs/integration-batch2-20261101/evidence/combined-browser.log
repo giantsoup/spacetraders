@@ -1,0 +1,29 @@
+{
+  "processes": {
+    "browser": 27215,
+    "server": 27251
+  },
+  "checks": [
+    "private login and real CSRF",
+    "reserve rejection before exploration",
+    "drain gates scan approval, adviser pause, economics and worker pickup without mutation",
+    "pending scan blocks adviser actions",
+    "partial scan and chart use finite durable workers without replay",
+    "chart reward reconciles but is excluded from cycle income",
+    "policy pause invalidates review without enabling execution",
+    "dark mobile activity and adviser under light OS"
+  ],
+  "errors": [],
+  "browser": "156.0.8078.4",
+  "evidence": "/Users/Taylor/.t3/worktrees/spacetraders/integrate-completed-batch2-20261101/storage/app/integration-evidence/combined-browser",
+  "passed": true,
+  "shutdown": {
+    "server": "verified",
+    "browserConnection": "verified",
+    "browser": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-pbq3by3w/spacetraders-verification-7R4va0",
+  "fixtureRemoved": true,
+  "diagnostics": null,
+  "failures": []
+}

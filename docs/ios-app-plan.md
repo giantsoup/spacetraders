@@ -6,7 +6,7 @@ Date: November 1, 2026.
 
 Create a personal iPhone app, distributed through TestFlight, that connects to our Laravel SpaceTraders engine on Linode. The app provides a mobile way to play manually and control automation. The engine continues approved work while the phone is locked, disconnected, or closed.
 
-This is a general plan. Frameworks, API design, hosting configuration, release tooling, estimates, and detailed screen designs remain open. Linode is the target host. The actual deployment and available capacity need verification before implementation.
+MOB01 now defines the first release scope and technical choices in [the iPhone release decision](adr/0001-first-iphone-release.md). These are design decisions for review, not an implemented mobile API or app. Linode remains the target host. Actual deployment, capacity, and hosted engine safeguards require separate verification.
 
 ## Agreed architecture
 
@@ -20,16 +20,18 @@ Keep the gameplay logic in one place. The mobile interface will require its own 
 
 ## First release experience
 
-Keep the first release focused on the existing gameplay capabilities:
+The smallest complete workflow uses an already connected agent and capable miner:
 
 - Connect securely to the personal engine and select an agent and ship.
 - View fleet status, cargo, credits, travel, cooldowns, and recent activity.
-- Preview and approve supported manual commands and purchases.
-- Preview, start, inspect, and stop supported automation runs.
+- Preview and approve orbit, dock, same-system CRUISE navigation, refuel, unsurveyed extraction, and cargo sale.
+- Investigate Mining opportunities, stage one ready candidate, approve a versioned preview, inspect the trip, and record Stop.
 - See stale data, connection problems, engine health, and actions that need review.
 - Reconnect and recover the current state without losing track of submitted commands.
 
-Use a dark interface with readable controls sized for touch. Adapt the existing SpaceTraders visual style for the phone. Detailed layouts and navigation will be designed later.
+Use one extraction and one trip by default, with explicit reserve, spending, loss, and duration limits. Preserve the server's current ceilings. Missing equipment, prices, fuel, or a buyer produces a blocker. Provision agents and equipment through the web interface. Ship purchases, cargo purchases, Contracts, surveys, transfers, scouting, and trading automation remain outside this first mobile release.
+
+Use the dark Horizon ship home, a report sheet, and pushed Actions, Mining, and Activity flows. Keep agent, account, and sign-out access in a secondary menu. The [release decision](adr/0001-first-iphone-release.md) specifies navigation, expired-work handling, recovery, and acceptance scenarios.
 
 ## Delivery phases
 
@@ -51,13 +53,13 @@ The result is a reachable engine that can continue approved work independently o
 
 Provide an authenticated API for the agreed mobile workflows. Reuse the existing gameplay services and ownership checks. Define how the app identifies requests, receives command status, refreshes observations, and handles failures.
 
-Keep the API compatible with installed app versions during routine server updates. Choose the authentication, API format, and update mechanism during detailed design.
+Keep the API compatible with installed app versions during routine server updates. Use the versioned JSON and per-device Sanctum bearer-token design in [the release decision](adr/0001-first-iphone-release.md#authentication-and-device-access). The existing Inertia routes retain their session and CSRF boundaries.
 
 The result is a verified connection that supports viewing state and controlling the existing engine.
 
 ### 4. Build the iPhone app
 
-Choose the mobile framework and project structure, then implement the first release workflows. Include secure access, clear approval steps, visible command status, and recovery after app suspension or lost connectivity.
+Build the SwiftUI client in `mobile/ios/` against the accepted mobile API. Include secure access, clear approval steps, visible command status, and recovery after app suspension or lost connectivity.
 
 Make server acceptance and upstream completion distinguishable. Show when information was last refreshed, and display timestamps in the phone's local timezone while preserving UTC in stored and exchanged values.
 
@@ -82,18 +84,27 @@ The result is a personally installed TestFlight app, with evidence of the mobile
 - Preserve existing automation bounds. Longer or overnight runs require a separate decision about approval limits and safeguards.
 - Keep operations proportionate to personal use, with one engine and a small, repeatable deployment process.
 
-## Decisions for later
+## First release decisions
 
-The detailed design will settle:
+The [MOB01 decision record](adr/0001-first-iphone-release.md) defines these choices and their release gates. This is document evidence, not an installed iPhone app.
 
-- Native framework, minimum iOS version, and support for other devices.
-- Screen layouts, navigation, and the exact first release command set.
-- Authentication, device access revocation, and network access to Linode.
-- API endpoints, compatibility policy, and how the app receives updates.
-- Notifications, cached views, and behavior during extended disconnection.
-- Linode sizing, database choice, process management, backups, and monitoring.
-- Repository organization, build automation, Apple account setup, and release cadence.
-- The ongoing role of the web interface and any changes to automation duration limits.
+| Area | Decision |
+| --- | --- |
+| Client | Native SwiftUI and Swift, iPhone on iOS 17.0 or later. Laravel and the JavaScript web stack stay unchanged. |
+| Complete workflow | Manual mining preparation and cargo sale, then one investigated, staged, approved mining trip with inspect, Stop, and recovery. |
+| Connection | Approved HTTPS engine origin. Per-device Sanctum token, 30-day expiry, Keychain storage, explicit sign-in and revocation. SpaceTraders credentials stay in Laravel. |
+| API | Proposed `/api/mobile/v1` reads, previews, approvals, status, mining staging, and Stop reuse owner-scoped services. Durable request identity resolves lost responses. |
+| Navigation | Horizon ship home, report sheet, focused Actions, Mining, and Activity pages, and a secondary account menu. No empty bottom tabs. |
+| Refresh and offline | Five-second foreground reads of saved server state. Explicit upstream synchronization. Memory-only snapshots, read-only offline view, and no queued offline writes. |
+| Compatibility | Additive v1 evolution, capability and plan-version checks, UTC exchange, and local display. Unknown states disable new gameplay approval. |
+| Repository and release | Future `mobile/ios/` project in this repository. Xcode and `xcodebuild`; manual signed archive and private TestFlight upload after authorization. Monthly replacement target before 90-day beta expiry. |
+| Run limits and web | Default one extraction and one trip. Keep 60-minute, 10-trip, and 10-extraction ceilings and all approved bounds. Web retains setup, full gameplay, and operator recovery. |
+
+## Remaining release gates
+
+MOB02 [#31](https://github.com/giantsoup/spacetraders/issues/31) owns API implementation, MOB03 [#33](https://github.com/giantsoup/spacetraders/issues/33) owns the client, and MOB04 [#35](https://github.com/giantsoup/spacetraders/issues/35) owns device and TestFlight acceptance. Hosting work must preserve engine-session invalidation and Stop while replacing the current macOS-only controls appropriately. None of those interfaces or outcomes exists because this design was written.
+
+Taylor must provide or approve the production origin and controlled host handover, Apple team and bundle identity, signing access, distribution, and any live gameplay budgets. Confirm the intended iPhone supports iOS 17 before device acceptance. Linode capacity, database operation, supervision, backup restoration, and private access remain deployment gates. No purchases or longer runs are authorized.
 
 ## Completion criteria
 

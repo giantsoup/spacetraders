@@ -1,3 +1,4 @@
+import { shipView } from './ship-browser-navigation.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:net';
@@ -67,7 +68,7 @@ await context.route('**/*', route => {
 const page = await context.newPage();
 page.setDefaultTimeout(15000);
 async function assertLocalTimes() {
-    await page.getByText('Times shown in America/Los_Angeles (your local timezone).', { exact: true }).waitFor();
+    assert.equal(await page.getByText('Times shown in America/Los_Angeles (your local timezone).', { exact: true }).count(), 1);
     const times = await page.locator('time').evaluateAll(elements => elements.map(element => ({ utc: element.dateTime, text: element.textContent })));
     assert.ok(times.length, 'The rendered page must contain a timestamp');
     for (const { utc, text } of times) {
@@ -82,6 +83,7 @@ page.on('console', message => { if (message.type() === 'error') errors.push(mess
 page.on('response', response => { if (response.status() >= 400) responses.push(`${response.status()} ${new URL(response.url()).pathname}`); });
 const coach = page.getByRole('complementary', { name: 'Guided first flight' });
 const button = name => page.getByRole('button', { name, exact: true });
+const approvalRequest = request => /\/commands\/\d+\/approve$/.test(new URL(request.url()).pathname) && request.method() === 'POST';
 const key = guidedKey(identities.user, identities.agent);
 const session = () => page.evaluate(key => JSON.parse(localStorage.getItem(key)), key);
 const state = () => cli("echo json_encode(['actions'=>App\\Models\\ShipAction::orderBy('id')->get(),'ships'=>App\\Models\\Ship::all(),'agent'=>App\\Models\\Agent::first()]);");
@@ -104,11 +106,11 @@ async function verifyScrollFreedom() {
         assert.equal(await page.locator('[data-guide="sync"]').evaluate(element => element === document.activeElement), true);
         await page.mouse.move(width - 40, 700);
         await page.mouse.wheel(0, 10000);
-        await page.waitForFunction(() => scrollY > 500);
+        await page.waitForFunction(() => { const el=document.querySelector('dialog[open]'); return !el || el.scrollHeight <= el.clientHeight || el.scrollTop > 0; });
         await page.evaluate(() => { window.guideScrolls = []; });
-        const position = await page.evaluate(() => scrollY);
+        const position = await page.locator('dialog[open]').evaluate(el => el.scrollTop);
         await page.waitForTimeout(6500);
-        const after = await page.evaluate(() => ({ y: scrollY, scrolls: window.guideScrolls }));
+        const after = await page.evaluate(() => ({ y: document.querySelector('dialog[open]')?.scrollTop || 0, scrolls: window.guideScrolls }));
         assert.deepEqual(after.scrolls, [], 'Tutorial timer and fleet polling must not scroll the same instruction again');
         assert.ok(Math.abs(after.y - position) <= 2, `User scroll must remain at ${position}px, got ${after.y}px`);
         await shot(`free-scroll-${width}.png`);
@@ -124,7 +126,7 @@ async function verifyScrollFreedom() {
     await page.locator('.guided-target').waitFor();
     await page.mouse.move(350, 700);
     await page.mouse.wheel(0, 10000);
-    await page.waitForFunction(() => scrollY > 500);
+    await page.waitForFunction(() => { const el=document.querySelector('dialog[open]'); return !el || el.scrollHeight <= el.clientHeight || el.scrollTop > 0; });
     await page.evaluate(() => { window.guideScrolls = []; });
     await page.waitForTimeout(1500);
     assert.deepEqual(await page.evaluate(() => window.guideScrolls), [], 'New steps also relinquish scroll after their initial reveal');
@@ -162,7 +164,7 @@ try {
     await coach.getByRole('heading', { name: 'Your guided first trip' }).waitFor();
     await page.getByRole('complementary', { name: 'Game connection' }).getByText('Offline practice', { exact: true }).waitFor();
     assert.equal(await page.getByText('Live SpaceTraders API', { exact: true }).count(), 0, 'An offline fixture must not present itself as live gameplay');
-    assert.equal(await button('Preview mining').isDisabled(), true, 'Unrelated commands must be disabled');
+    assert.equal(await page.locator('[data-guide="preview-mine"]').isDisabled(), true, 'Unrelated commands must be disabled');
     await shot('02-guided-start.png');
     let paused = false, reloaded = false, injected = false, completed = false, recovered = false, previewRecovered = false;
     for (let count = 0; count < 140; count++) {
@@ -175,7 +177,7 @@ try {
         if (kind === 'blocked') {
             if (['uncertain', 'rejected'].includes(scenario) && injected) {
                 assert.equal((await session()).phase, 'extract');
-                assert.equal(await button('Preview mining').isDisabled(), true);
+                assert.equal(await page.locator('[data-guide="preview-mine"]').isDisabled(), true);
                 const writes = (await world()).writes.length;
                 await shot('blocked-command.png');
                 await reload();
@@ -222,7 +224,9 @@ try {
         } else if (kind === 'approve') {
             if (scenario === 'recovery' && !previewRecovered && phase === 'outbound') {
                 await page.route('**/commands/*/approve', route => route.abort('failed'), { times: 1 });
-                await page.locator('.guided-target').click();
+                // Tracking is saved before dispatch. Wait for the injected failure before navigating.
+                await Promise.all([page.waitForEvent('requestfailed', approvalRequest), page.locator('[data-guide="approve"].guided-target').click()]);
+                await page.waitForFunction(() => document.querySelector('main')?.getAttribute('aria-busy') === 'false');
                 await page.waitForFunction(key => !!JSON.parse(localStorage.getItem(key))?.pending, key);
                 await reload();
                 await button('Restore saved preview').click();
@@ -245,8 +249,9 @@ try {
                     committed();
                     await route.abort('failed');
                 }, { times: 1 });
-                await page.locator('.guided-target').click();
+                await Promise.all([page.waitForEvent('requestfailed', approvalRequest), page.locator('[data-guide="approve"].guided-target').click()]);
                 await persisted;
+                await page.waitForFunction(() => document.querySelector('main')?.getAttribute('aria-busy') === 'false');
                 assert.ok((await session()).pending, 'Known action ID must be saved before the approval response');
                 await button('Pause guidance').click();
                 await reload();
@@ -256,7 +261,7 @@ try {
                 recovered = true;
                 continue;
             }
-            const [response] = await Promise.all([page.waitForResponse(response => /\/commands\/\d+\/approve$/.test(new URL(response.url()).pathname) && response.request().method() === 'POST'), page.locator('.guided-target').click()]);
+            const [response] = await Promise.all([page.waitForResponse(response => approvalRequest(response.request())), page.locator('[data-guide="approve"].guided-target').click()]);
             const action = await response.json();
             assert.equal(response.status(), 202, action.message);
             await page.waitForFunction(key => !!JSON.parse(localStorage.getItem(key))?.pending, key);
@@ -270,7 +275,7 @@ try {
         } else if (kind === 'sync') {
             const [response] = await Promise.all([page.waitForResponse(response => response.url().endsWith('/sync') && response.request().method() === 'POST'), page.locator('.guided-target').click()]);
             assert.equal(response.status(), 202, await response.text());
-            await page.waitForFunction(() => !document.querySelector('[data-guide="sync"]').disabled || document.querySelector('.guided-coach')?.dataset.stepKind !== 'sync');
+            await page.waitForFunction(() => !document.querySelector('[data-guide="sync"]')?.disabled || document.querySelector('.guided-coach')?.dataset.stepKind !== 'sync');
         } else if (kind === 'wait') {
             drain();
             await reload();
@@ -315,11 +320,13 @@ try {
         assert.equal(await page.getByRole('region', { name: 'Early-game tutorial', exact: true }).count(), 0, 'Finishing must not replace the completed banner with another tutorial banner');
         assert.equal(await page.locator('.guided-target').count(), 0);
         assert.equal(await page.locator('#manual').evaluate(element => element === document.activeElement), true, 'Finishing returns keyboard focus to manual controls without scrolling');
-        assert.equal(await button('Preview orbit').isEnabled(), true);
+        assert.equal(await page.locator('[data-guide="preview-orbit"]').isEnabled(), true);
+        await shipView(page, 'automation');
         assert.equal(await button('Preview mining run').isEnabled(), true);
         assert.deepEqual(await session(), { ...completedSession, active: false }, 'Keep completed trip receipts and totals when dismissing guidance');
         await page.screenshot({ path: path.join(output, '06-tutorial-finished.png'), animations: 'disabled' });
         await page.reload();
+        await shipView(page, 'guide');
         await button('Restart tutorial').waitFor();
         assert.equal(await coach.count(), 0, 'Completed banner stays dismissed after reload, including guided=1');
         assert.equal(await page.getByRole('region', { name: 'Early-game tutorial', exact: true }).count(), 0);
@@ -346,6 +353,8 @@ try {
         for (let index = 0; index < 4 && await coach.getAttribute('data-step-kind') === 'read'; index++) await button('Continue guided flight').click();
         await button('Show highlighted control').click();
         assert.equal(await visibleTarget(), true, 'Sticky instructions must not cover a highlighted field below the coach');
+        const coachBounds = await coach.evaluate(el => { const b=el.getBoundingClientRect(); const h=el.closest('dialog').querySelector('.sheet-header').getBoundingClientRect(); return {top:b.top,bottom:b.bottom,headerBottom:h.bottom,viewport:innerHeight}; });
+        assert.ok(coachBounds.top >= coachBounds.headerBottom - 1 && coachBounds.bottom <= coachBounds.viewport, `The instructions stay visible alongside the target: ${JSON.stringify(coachBounds)}`);
         await shot('05-guided-mobile.png');
     }
     assert.deepEqual(errors.filter(error => scenario !== 'recovery' || !error.includes('net::ERR_FAILED')), []);

@@ -1,0 +1,109 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>iPhone release plan</title><style>:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#070d17;color:#e8eef6;font:17px/1.6 -apple-system,BlinkMacSystemFont,Arial,sans-serif}main{max-width:1040px;margin:auto;padding:28px 36px}header{border-bottom:1px solid #34445b;padding-bottom:18px;margin-bottom:24px;color:#b1c0d3;font-size:14px}h1{font-size:30px;line-height:1.25}h2{font-size:24px;line-height:1.3;margin:28px 0 16px}h3{font-size:20px}a{color:#a6f3d0}code{font:14px/1.5 monospace;overflow-wrap:anywhere}pre{white-space:pre-wrap}table{border-collapse:collapse;width:100%;font-size:16px}th,td{padding:11px 14px;border:1px solid #34445b;text-align:left;vertical-align:top}th{background:#162337}li{margin:9px 0}#focus{padding:8px 20px 20px;background:#0d1524;border:1px solid #34445b;border-radius:12px}#focus h2{margin-top:16px}footer{color:#b1c0d3;font-size:14px;margin-top:24px}</style><main><header>MOB01 · AFTER · Rendered document evidence, not an iPhone app<br>docs/ios-app-plan.md · working document SHA-256 0856101928587c5c</header><h1 id="iphone-app-and-linode-engine-plan">iPhone app and Linode engine plan</h1>
+<p>Date: November 1, 2026.</p>
+<h2 id="goal">Goal</h2>
+<p>Create a personal iPhone app, distributed through TestFlight, that connects to our Laravel SpaceTraders engine on Linode. The app provides a mobile way to play manually and control automation. The engine continues approved work while the phone is locked, disconnected, or closed.</p>
+<p>MOB01 now defines the first release scope and technical choices in <a href="../../../adr/0001-first-iphone-release.md">the iPhone release decision</a>. These are design decisions for review, not an implemented mobile API or app. Linode remains the target host. Actual deployment, capacity, and hosted engine safeguards require separate verification.</p>
+<h2 id="agreed-architecture">Agreed architecture</h2>
+<p>The iPhone app displays fleet state, collects instructions, presents approvals, and reports results. It connects to Laravel through an authenticated HTTPS connection. It does not need to run the automation loop in the background.</p>
+<p>The Laravel engine owns gameplay rules, command execution, automation plans, credentials for the SpaceTraders API, and persistent activity records. Its scheduler and queue worker advance approved work on Linode. The mobile app uses the same gameplay services as the existing web interface.</p>
+<p>SpaceTraders hosts the actual game universe and authoritative game state. Laravel synchronizes with that API and records what it observes. Hosting our engine does not make gameplay independent of SpaceTraders availability or rate limits.</p>
+<p>Keep the gameplay logic in one place. The mobile interface will require its own development and releases, but it should not duplicate the engine's rules.</p>
+<h2 id="first-release-experience">First release experience</h2>
+<p>The smallest complete workflow uses an already connected agent and capable miner:</p>
+<ul>
+<li>Connect securely to the personal engine and select an agent and ship.</li>
+<li>View fleet status, cargo, credits, travel, cooldowns, and recent activity.</li>
+<li>Preview and approve orbit, dock, same-system CRUISE navigation, refuel, unsurveyed extraction, and cargo sale.</li>
+<li>Investigate Mining opportunities, stage one ready candidate, approve a versioned preview, inspect the trip, and record Stop.</li>
+<li>See stale data, connection problems, engine health, and actions that need review.</li>
+<li>Reconnect and recover the current state without losing track of submitted commands.</li>
+</ul>
+<p>Use one extraction and one trip by default, with explicit reserve, spending, loss, and duration limits. Preserve the server's current ceilings. Missing equipment, prices, fuel, or a buyer produces a blocker. Provision agents and equipment through the web interface. Ship purchases, cargo purchases, Contracts, surveys, transfers, scouting, and trading automation remain outside this first mobile release.</p>
+<p>Use the dark Horizon ship home, a report sheet, and pushed Actions, Mining, and Activity flows. Keep agent, account, and sign-out access in a secondary menu. The <a href="../../../adr/0001-first-iphone-release.md">release decision</a> specifies navigation, expired-work handling, recovery, and acceptance scenarios.</p>
+<h2 id="delivery-phases">Delivery phases</h2>
+<h3 id="1-confirm-scope-and-current-state">1. Confirm scope and current state</h3>
+<p>Review the engine's existing capabilities and deployment status. Choose the smallest complete mobile workflow and identify any missing backend support. Confirm what happens when approved work expires, blocks, or needs operator review.</p>
+<p>The result is an agreed first release scope and a short list of technical decisions needed to begin.</p>
+<h3 id="2-establish-reliable-linode-operation">2. Establish reliable Linode operation</h3>
+<p>Prepare or verify the Laravel engine on Linode, including private access, HTTPS, persistent storage, the scheduler, and the queue worker. Arrange automatic process recovery, backups, and a way to detect stalled execution. Check capacity alongside the box's existing workload.</p>
+<p>If moving an existing agent from the Mac, plan a controlled handover of its data and credentials. Use one active engine for that agent to avoid competing executors.</p>
+<p>The result is a reachable engine that can continue approved work independently of the phone and recover after service restarts.</p>
+<h3 id="3-define-and-expose-the-mobile-connection">3. Define and expose the mobile connection</h3>
+<p>Provide an authenticated API for the agreed mobile workflows. Reuse the existing gameplay services and ownership checks. Define how the app identifies requests, receives command status, refreshes observations, and handles failures.</p>
+<p>Keep the API compatible with installed app versions during routine server updates. Use the versioned JSON and per-device Sanctum bearer-token design in <a href="../../../adr/0001-first-iphone-release.md#authentication-and-device-access">the release decision</a>. The existing Inertia routes retain their session and CSRF boundaries.</p>
+<p>The result is a verified connection that supports viewing state and controlling the existing engine.</p>
+<h3 id="4-build-the-iphone-app">4. Build the iPhone app</h3>
+<p>Build the SwiftUI client in <code>mobile/ios/</code> against the accepted mobile API. Include secure access, clear approval steps, visible command status, and recovery after app suspension or lost connectivity.</p>
+<p>Make server acceptance and upstream completion distinguishable. Show when information was last refreshed, and display timestamps in the phone's local timezone while preserving UTC in stored and exchanged values.</p>
+<p>The result is a usable app on a physical iPhone with all gameplay decisions and execution delegated to Laravel.</p>
+<h3 id="5-verify-and-distribute-privately">5. Verify and distribute privately</h3>
+<p>Exercise the complete mobile-to-engine workflow. Cover duplicate submissions, interrupted connections, expired access, stale previews, uncertain upstream results, and engine restarts. Confirm that opening both the web interface and the app does not bypass shared command controls.</p>
+<p>Verify that approved automation continues with the phone locked or disconnected, within the run's configured limits. Confirm that stop requests and blocked states remain visible after reconnecting.</p>
+<p>Prepare signing and a private TestFlight release. Confirm Apple's current distribution requirements and establish a repeatable process for replacement builds before beta builds expire.</p>
+<p>The result is a personally installed TestFlight app, with evidence of the mobile workflows and server behavior it depends on.</p>
+<h2 id="operating-principles">Operating principles</h2>
+<ul>
+<li>Preserve explicit approvals, spending limits, and stop controls across both interfaces.</li>
+<li>Keep SpaceTraders credentials on the engine. Give the phone only the access it needs to our application.</li>
+<li>Persist command intent and status. Resolve uncertain outcomes before sending another command that could repeat a purchase or action.</li>
+<li>Treat loss of connectivity as a recoverable condition. Refresh current state before offering further actions.</li>
+<li>Preserve existing automation bounds. Longer or overnight runs require a separate decision about approval limits and safeguards.</li>
+<li>Keep operations proportionate to personal use, with one engine and a small, repeatable deployment process.</li>
+</ul>
+<h2 id="first-release-decisions">First release decisions</h2>
+<p>The <a href="../../../adr/0001-first-iphone-release.md">MOB01 decision record</a> defines these choices and their release gates. This is document evidence, not an installed iPhone app.</p>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Client</td>
+<td>Native SwiftUI and Swift, iPhone on iOS 17.0 or later. Laravel and the JavaScript web stack stay unchanged.</td>
+</tr>
+<tr>
+<td>Complete workflow</td>
+<td>Manual mining preparation and cargo sale, then one investigated, staged, approved mining trip with inspect, Stop, and recovery.</td>
+</tr>
+<tr>
+<td>Connection</td>
+<td>Approved HTTPS engine origin. Per-device Sanctum token, 30-day expiry, Keychain storage, explicit sign-in and revocation. SpaceTraders credentials stay in Laravel.</td>
+</tr>
+<tr>
+<td>API</td>
+<td>Proposed <code>/api/mobile/v1</code> reads, previews, approvals, status, mining staging, and Stop reuse owner-scoped services. Durable request identity resolves lost responses.</td>
+</tr>
+<tr>
+<td>Navigation</td>
+<td>Horizon ship home, report sheet, focused Actions, Mining, and Activity pages, and a secondary account menu. No empty bottom tabs.</td>
+</tr>
+<tr>
+<td>Refresh and offline</td>
+<td>Five-second foreground reads of saved server state. Explicit upstream synchronization. Memory-only snapshots, read-only offline view, and no queued offline writes.</td>
+</tr>
+<tr>
+<td>Compatibility</td>
+<td>Additive v1 evolution, capability and plan-version checks, UTC exchange, and local display. Unknown states disable new gameplay approval.</td>
+</tr>
+<tr>
+<td>Repository and release</td>
+<td>Future <code>mobile/ios/</code> project in this repository. Xcode and <code>xcodebuild</code>; manual signed archive and private TestFlight upload after authorization. Monthly replacement target before 90-day beta expiry.</td>
+</tr>
+<tr>
+<td>Run limits and web</td>
+<td>Default one extraction and one trip. Keep 60-minute, 10-trip, and 10-extraction ceilings and all approved bounds. Web retains setup, full gameplay, and operator recovery.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="remaining-release-gates">Remaining release gates</h2>
+<p>MOB02 <a href="https://github.com/giantsoup/spacetraders/issues/31">#31</a> owns API implementation, MOB03 <a href="https://github.com/giantsoup/spacetraders/issues/33">#33</a> owns the client, and MOB04 <a href="https://github.com/giantsoup/spacetraders/issues/35">#35</a> owns device and TestFlight acceptance. Hosting work must preserve engine-session invalidation and Stop while replacing the current macOS-only controls appropriately. None of those interfaces or outcomes exists because this design was written.</p>
+<p>Taylor must provide or approve the production origin and controlled host handover, Apple team and bundle identity, signing access, distribution, and any live gameplay budgets. Confirm the intended iPhone supports iOS 17 before device acceptance. Linode capacity, database operation, supervision, backup restoration, and private access remain deployment gates. No purchases or longer runs are authorized.</p>
+<h2 id="completion-criteria">Completion criteria</h2>
+<p>The first release is complete when Taylor can install it through TestFlight, inspect the fleet, approve a manual action, and control an automation run. Approved work must continue on Linode when the phone disconnects. Reopening the app must recover current state and clearly show failures or actions awaiting review.</p>
+<h2 id="existing-project-context">Existing project context</h2>
+<p>The <a href="../../../linode-hosting-research.md">hosting assessment</a> describes the proposed Linode runtime and migration considerations. The <a href="../../../mvp-implementation.md">MVP implementation notes</a> describe the shared command path and existing execution safeguards. The <a href="../../../app-styling.md">app styling notes</a> describe the current web presentation.</p>
+<p>This plan authorizes no implementation, deployment, credential changes, or live gameplay by itself.</p>
+<footer>Offline document rendering. No mobile client, engine deployment, or gameplay is represented.</footer></main></html>

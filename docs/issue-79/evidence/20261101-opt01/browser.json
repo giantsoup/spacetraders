@@ -1,0 +1,23 @@
+{
+  "checks": {
+    "dark_report": true,
+    "fresh_local_market": true,
+    "independent_quote_age": true,
+    "offline_fixture": true,
+    "report_heading": true,
+    "route_candidate": true,
+    "unknown_remote_prices": true
+  },
+  "path": "/agents/1",
+  "viewport": {
+    "height": 960,
+    "width": 1536
+  },
+  "console_errors_observed": 0,
+  "simulated_game_writes": 0,
+  "scope": "Owned offline fixture; normal login and synchronization; no gameplay approval",
+  "closed": {
+    "tab": true,
+    "server": true
+  }
+}

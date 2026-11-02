@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<meta name="color-scheme" content="dark"><title>Laravel QA review</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{background:#10151d;color:#edf2fa;
+font:16px/1.55 system-ui,sans-serif;margin:0 auto;padding:32px;max-width:1200px}
+a{color:#9dccff}a:focus-visible{outline:3px solid #ffdf80;outline-offset:4px}
+h1,h2{line-height:1.2}.status{display:inline-block;background:#263349;padding:8px 16px;
+border:1px solid #71839e;border-radius:8px}.table{overflow:auto}table{border-collapse:collapse;
+width:100%;background:#192230}th,td{text-align:left;padding:12px;vertical-align:top;
+border:1px solid #46566c}th{background:#253247}pre{background:#192230;padding:20px;
+white-space:pre-wrap;overflow-wrap:anywhere}code{overflow-wrap:anywhere}
+@media(max-width:600px){body{padding:16px}}
+</style>
+<main><h1>Laravel QA review</h1><p class="status">Recorded outcome: pass</p>
+<p>EXP09 / issue #67: complete-cycle economics through the runner, evaluator, reports, owned workers and browser. Offline local implementation only.</p><p>Evidence revision: <code>a91d749c4166db0bb86f9e6894815355ba58c066</code></p>
+<p>This report checks evidence bookkeeping. Inspect artifacts to assess actual behavior.</p>
+<h2>Checks</h2><div class="table"><table><thead><tr><th>ID</th><th>Layer</th>
+<th>Scenario</th><th>Status</th><th>Observed</th></tr></thead><tbody><tr><td>baseline-and-red</td><td>review</td><td>Original implementation and red-capable economics regressions</td><td>pass</td><td>Original baseline: 321 tests / 1711 assertions. New tests failed on ignored wear allowance, unmatched-cycle handling and missing wear-adjusted fields before implementation.</td></tr><tr><td>economics-and-opt01</td><td>backend</td><td>Closed/open cycles, missing wear, repairs, unsold cargo, unmatched fuel, overlapping timelines, capital, forecasts, payback and listing reuse</td><td>pass</td><td>36 focused tests / 209 assertions passed. Includes actual synthetic command purchase for capital, retained cargo, owner rejection, integer validation and report-only HTTP comparisons.</td></tr><tr><td>full-backend</td><td>backend</td><td>Full backend suite and CSRF boundary</td><td>pass</td><td>334 tests / 1799 assertions passed. New comparison route is included in the real request-forgery middleware regression. No failed/skipped test is reported.</td></tr><tr><td>frontend-runtime</td><td>frontend</td><td>Pinned runtime, production assets, frontend invariants, style and whitespace</td><td>pass</td><td>Runtime preflight, negative runtime fixtures, two deterministic builds, saved-state/gameplay/timezone/ship/tutorial/guidance checks, script syntax, Pint and diff checks passed. Generated build matches the implementation commit.</td></tr><tr><td>real-workers</td><td>backend</td><td>Finite workers, duplicate delivery, Stop, uncertain writes and process-death recovery</td><td>pass</td><td>MVP worker suite passed; staged automation worker suite passed complete and all four contract death/recovery cases. External provider was fake; local workers and persistence were real.</td></tr><tr><td>opportunities-browser</td><td>browser</td><td>Scout without wear, trade with entered wear, report/download, investment and throughput gates</td><td>pass</td><td>Passed with no console/server errors. Trade cash 295 CR, explicit allowance 25 CR, net estimate 270 CR, realized rate null. Positive and buyer-constrained cases use incremental income. 1440/390 layouts remain dark under a light browser preference.</td></tr><tr><td>staged-engine-browser</td><td>browser</td><td>Investigate, stage chosen wear, preview, stale-price rejection, real engine mining/contract, validation, Stop and session recovery</td><td>pass</td><td>Passed all seven journeys. Mining allowance 25 CR persisted and produced 215 CR estimated net from 240 CR cash. Contract cash 1300 CR remains unresolved for position/fuel. Screens checked at 1440/390/320; serviceRemoved=true, confirmed independently with launchctl print.</td></tr><tr><td>dependency-checks</td><td>review</td><td>Locked dependencies and platform compatibility</td><td>pass</td><td>Composer strict validation and platform checks pass. Composer audit and pnpm audit report no known vulnerabilities.</td></tr><tr><td>build-browser-sequencing</td><td>review</td><td>Explain initial login HTTP 500 during concurrent asset builds</td><td>pass</td><td>Owned probe reproduced HTTP 500 with Vite manifest not found while rebuilding. Login was 200 before/after; final browser suites ran with stable assets and passed. Build output remained byte-identical to the implementation commit.</td></tr></tbody></table></div>
+<h2>Evidence gaps</h2><ul><li>No mechanical gaps detected.</li></ul>
+<h2>Artifacts</h2><ul><li><a href="automation-browser.json">automation-browser.json</a></li><li><a href="automation-worker.txt">automation-worker.txt</a></li><li><a href="baseline.txt">baseline.txt</a></li><li><a href="build-login-probe.txt">build-login-probe.txt</a></li><li><a href="composer-audit.txt">composer-audit.txt</a></li><li><a href="composer-validate.txt">composer-validate.txt</a></li><li><a href="contract-outcome-panel-390.png">contract-outcome-panel-390.png</a></li><li><a href="cycle-accounting-390.png">cycle-accounting-390.png</a></li><li><a href="evidence-summary.json">evidence-summary.json</a></li><li><a href="fleet-comparison-390.png">fleet-comparison-390.png</a></li><li><a href="fleet-comparison-desktop.png">fleet-comparison-desktop.png</a></li><li><a href="fleet-comparisons.json">fleet-comparisons.json</a></li><li><a href="focused.txt">focused.txt</a></li><li><a href="full-verification.txt">full-verification.txt</a></li><li><a href="initial-regression.txt">initial-regression.txt</a></li><li><a href="mining-preview-panel-390.png">mining-preview-panel-390.png</a></li><li><a href="mvp-worker.txt">mvp-worker.txt</a></li><li><a href="opportunities-browser.json">opportunities-browser.json</a></li><li><a href="platform.txt">platform.txt</a></li><li><a href="pnpm-audit.txt">pnpm-audit.txt</a></li><li><a href="source-revision.txt">source-revision.txt</a></li></ul>
+<h2>Complete assessment</h2><pre>{
+  &quot;scope&quot;: &quot;EXP09 / issue #67: complete-cycle economics through the runner, evaluator, reports, owned workers and browser. Offline local implementation only.&quot;,
+  &quot;revision&quot;: &quot;a91d749c4166db0bb86f9e6894815355ba58c066&quot;,
+  &quot;ui_required&quot;: true,
+  &quot;checks&quot;: [
+    {
+      &quot;id&quot;: &quot;baseline-and-red&quot;,
+      &quot;layer&quot;: &quot;review&quot;,
+      &quot;scenario&quot;: &quot;Original implementation and red-capable economics regressions&quot;,
+      &quot;expected&quot;: &quot;Baseline green; new coverage exposes missing integration&quot;,
+      &quot;observed&quot;: &quot;Original baseline: 321 tests / 1711 assertions. New tests failed on ignored wear allowance, unmatched-cycle handling and missing wear-adjusted fields before implementation.&quot;,
+      &quot;command&quot;: &quot;PHP_BIN=\&quot;$PWD/scripts/herd-php\&quot;; \&quot;$PHP_BIN\&quot; vendor/bin/phpunit; \&quot;$PHP_BIN\&quot; vendor/bin/phpunit tests/Feature/CycleEconomicsTest.php&quot;,
+      &quot;evidence&quot;: [
+        &quot;baseline.txt&quot;,
+        &quot;initial-regression.txt&quot;
+      ],
+      &quot;screenshots&quot;: [],
+      &quot;status&quot;: &quot;pass&quot;,
+      &quot;revision&quot;: &quot;5c1990696811554d03a752dae2cfec6259fcc36c plus new regression test&quot;,
+      &quot;applicability&quot;: {
+        &quot;final_revision&quot;: &quot;a91d749c4166db0bb86f9e6894815355ba58c066&quot;,
+        &quot;reason&quot;: &quot;Historical baseline/red comparison only. Final-state checks below run against the implementation revision.&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;economics-and-opt01&quot;,
+      &quot;layer&quot;: &quot;backend&quot;,
+      &quot;scenario&quot;: &quot;Closed/open cycles, missing wear, repairs, unsold cargo, unmatched fuel, overlapping timelines, capital, forecasts, payback and listing reuse&quot;,
+      &quot;expected&quot;: &quot;Unknown inputs withhold normalized income/payback; meaningful values reach real report/evaluator/runner callers&quot;,
+      &quot;observed&quot;: &quot;36 focused tests / 209 assertions passed. Includes actual synthetic command purchase for capital, retained cargo, owner rejection, integer validation and report-only HTTP comparisons.&quot;,
+      &quot;command&quot;: &quot;scripts/herd-php vendor/bin/phpunit tests/Feature/CycleEconomicsTest.php tests/Feature/Opt01FuelListingBatchTest.php&quot;,
+      &quot;evidence&quot;: [
+        &quot;focused.txt&quot;
+      ],
+      &quot;screenshots&quot;: [],
+      &quot;status&quot;: &quot;pass&quot;,
+      &quot;revision&quot;: &quot;a91d749c4166db0bb86f9e6894815355ba58c066&quot;
+    },
+    {
+      &quot;id&quot;: &quot;full-backend&quot;,
+      &quot;layer&quot;: &quot;backend&quot;,
+      &quot;scenario&quot;: &quot;Full backend suite and CSRF boundary&quot;,
+      &quot;expected&quot;: &quot;Existing QA01/UI01/DOC01/OPS01/OPT01 behavior remains covered&quot;,
+      &quot;observed&quot;: &quot;334 tests / 1799 assertions passed. New comparison route is included in the real request-forgery middleware regression. No failed/skipped test is reported.&quot;,
+      &quot;command&quot;: &quot;PHP_BIN=\&quot;$PWD/scripts/herd-php\&quot; PNPM_BIN=\&quot;$PWD/storage/app/exp09-pnpm\&quot; ./scripts/verify.sh&quot;,
+      &quot;evidence&quot;: [
+        &quot;full-verification.txt&quot;
+      ],
+      &quot;screenshots&quot;: [],
+      &quot;status&quot;: &quot;pass&quot;,
+      &quot;revision&quot;: &quot;a91d749c4166db0bb86f9e6894815355ba58c066&quot;
+    },
+    {
+      &quot;id&quot;: &quot;frontend-runtime&quot;,
+      &quot;layer&quot;: &quot;frontend&quot;,
+      &quot;scenario&quot;: &quot;Pinned runtime, production assets, frontend invariants, style and whitespace&quot;,
+      &quot;expected&quot;: &quot;PHP 8.5.12 and pinned Node/pnpm; deterministic synchronized assets&quot;,
+      &quot;observed&quot;: &quot;Runtime preflight, negative runtime fixtures, two deterministic builds, saved-state/gameplay/timezone/ship/tutorial/guidance checks, script syntax, Pint and diff checks passed. Generated build matches the implementation commit.&quot;,
+      &quot;command&quot;: &quot;PHP_BIN=\&quot;$PWD/scripts/herd-php\&quot; PNPM_BIN=\&quot;$PWD/storage/app/exp09-pnpm\&quot; ./scripts/verify.sh&quot;,
+      &quot;evidence&quot;: [
+        &quot;full-verification.txt&quot;,
+        &quot;source-revision.txt&quot;
+      ],
+      &quot;screenshots&quot;: [],
+      &quot;status&quot;: &quot;pass&quot;,
+      &quot;revision&quot;: &quot;a91d749c4166db0bb86f9e6894815355ba58c066&quot;
+    },
+    {
+      &quot;id&quot;: &quot;real-workers&quot;,
+      &quot;layer&quot;: &quot;backend&quot;,
+      &quot;scenario&quot;: &quot;Finite workers, duplicate delivery, Stop, uncertain writes and process-death recovery&quot;,
+      &quot;expected&quot;: &quot;Owned SQLite/queue/locks; durable executor behavior preserved&quot;,
+      &quot;observed&quot;: &quot;MVP worker suite passed; staged automation worker suite passed complete and all four contract death/recovery cases. External provider was fake; local workers and persistence were real.&quot;,
+      &quot;command&quot;: &quot;scripts/herd-php scripts/verify-mvp-worker.php; scripts/herd-php scripts/verify-automation-worker.php&quot;,
+      &quot;evidence&quot;: [
+        &quot;mvp-worker.txt&quot;,
+        &quot;automation-worker.txt&quot;
+      ],
+      &quot;screenshots&quot;: [],
+      &quot;status&quot;: &quot;pass&quot;,
+      &quot;revision&quot;: &quot;a91d749c4166db0bb86f9e6894815355ba58c066&quot;
+    },
+    {
+      &quot;id&quot;: &quot;opportunities-browser&quot;,
+      &quot;layer&quot;: &quot;browser&quot;,
+      &quot;scenario&quot;: &quot;Scout without wear, trade with entered wear, report/download, investment and throughput gates&quot;,
+      &quot;expected&quot;: &quot;Real handlers/workers persist results; unknown realized income and capital remain visible&quot;,
+      &quot;observed&quot;: &quot;Passed with no console/server errors. Trade cash 295 CR, explicit allowance 25 CR, net estimate 270 CR, realized rate null. Positive and buyer-constrained cases use incremental income. 1440/390 layouts remain dark under a light browser preference.&quot;,
+      &quot;command&quot;: &quot;PHP_BIN=\&quot;$PWD/scripts/herd-php\&quot; PLAYWRIGHT_BROWSERS_PATH=\&quot;$PWD/storage/app/mvp-evidence/browsers\&quot; QA_ARTIFACT_DIR=\&quot;$PWD/storage/app/exp09-evidence/browser\&quot; node scripts/verify-opportunities-browser.mjs&quot;,
+      &quot;evidence&quot;: [
+        &quot;opportunities-browser.json&quot;,
+        &quot;evidence-summary.json&quot;,
+        &quot;fleet-comparisons.json&quot;
+      ],
+      &quot;screenshots&quot;: [
+        {
+          &quot;path&quot;: &quot;cycle-accounting-390.png&quot;,
+          &quot;inspection&quot;: &quot;Dark narrow ledger has readable wrapping. Observed 295 CR and estimated 270 CR are distinct; realized net is Unknown and the allowance caveat is visible.&quot;
+        },
+        {
+          &quot;path&quot;: &quot;fleet-comparison-desktop.png&quot;,
+          &quot;inspection&quot;: &quot;Desktop result clearly shows separate capital, current-assets rate, incremental rate, payback, ship-hours and throughput. Controls/text have readable contrast.&quot;
+        },
+        {
+          &quot;path&quot;: &quot;fleet-comparison-390.png&quot;,
+          &quot;inspection&quot;: &quot;Narrow single-column result wraps all labels and values. Insufficient buyer capacity shows Unresolved with both payback values Unknown. No horizontal clipping in this result.&quot;
+        }
+      ],
+      &quot;status&quot;: &quot;pass&quot;,
+      &quot;revision&quot;: &quot;a91d749c4166db0bb86f9e6894815355ba58c066&quot;
+    },
+    {
+      &quot;id&quot;: &quot;staged-engine-browser&quot;,
+      &quot;layer&quot;: &quot;browser&quot;,
+      &quot;scenario&quot;: &quot;Investigate, stage chosen wear, preview, stale-price rejection, real engine mining/contract, validation, Stop and session recovery&quot;,
+      &quot;expected&quot;: &quot;Versioned draft retains the allowance; open contracts do not claim comparable profit&quot;,
+      &quot;observed&quot;: &quot;Passed all seven journeys. Mining allowance 25 CR persisted and produced 215 CR estimated net from 240 CR cash. Contract cash 1300 CR remains unresolved for position/fuel. Screens checked at 1440/390/320; serviceRemoved=true, confirmed independently with launchctl print.&quot;,
+      &quot;command&quot;: &quot;PHP_BIN=\&quot;$PWD/scripts/herd-php\&quot; PLAYWRIGHT_BROWSERS_PATH=\&quot;$PWD/storage/app/mvp-evidence/browsers\&quot; QA_ARTIFACT_DIR=\&quot;$PWD/storage/app/exp09-evidence/automation-browser\&quot; node scripts/verify-automation-browser.mjs&quot;,
+      &quot;evidence&quot;: [
+        &quot;automation-browser.json&quot;
+      ],
+      &quot;screenshots&quot;: [
+        {
+          &quot;path&quot;: &quot;mining-preview-panel-390.png&quot;,
+          &quot;inspection&quot;: &quot;Dark scrollable preview shows the entered 25 CR allowance, limits, trial warning and ordered actions. Labels wrap within the narrow panel; sticky dialog chrome remains visible.&quot;
+        },
+        {
+          &quot;path&quot;: &quot;contract-outcome-panel-390.png&quot;,
+          &quot;inspection&quot;: &quot;Dark scrollable outcome shows 1300 CR cash, 25 CR allowance and 1275 CR after wear, while both comparable/realized rates remain Unknown. Open position and 100/95 fuel mismatch are visible.&quot;
+        }
+      ],
+      &quot;status&quot;: &quot;pass&quot;,
+      &quot;revision&quot;: &quot;a91d749c4166db0bb86f9e6894815355ba58c066&quot;
+    },
+    {
+      &quot;id&quot;: &quot;dependency-checks&quot;,
+      &quot;layer&quot;: &quot;review&quot;,
+      &quot;scenario&quot;: &quot;Locked dependencies and platform compatibility&quot;,
+      &quot;expected&quot;: &quot;No lock changes, platform mismatch or reported known vulnerabilities&quot;,
+      &quot;observed&quot;: &quot;Composer strict validation and platform checks pass. Composer audit and pnpm audit report no known vulnerabilities.&quot;,
+      &quot;command&quot;: &quot;PHP_BIN=\&quot;$PWD/scripts/herd-php\&quot; ./scripts/composer validate --strict; ./scripts/composer check-platform-reqs; ./scripts/composer audit; npm exec --yes --package=pnpm@12.16.1 -- pnpm audit&quot;,
+      &quot;evidence&quot;: [
+        &quot;composer-validate.txt&quot;,
+        &quot;platform.txt&quot;,
+        &quot;composer-audit.txt&quot;,
+        &quot;pnpm-audit.txt&quot;
+      ],
+      &quot;screenshots&quot;: [],
+      &quot;status&quot;: &quot;pass&quot;,
+      &quot;revision&quot;: &quot;a91d749c4166db0bb86f9e6894815355ba58c066&quot;
+    },
+    {
+      &quot;id&quot;: &quot;build-browser-sequencing&quot;,
+      &quot;layer&quot;: &quot;review&quot;,
+      &quot;scenario&quot;: &quot;Explain initial login HTTP 500 during concurrent asset builds&quot;,
+      &quot;expected&quot;: &quot;A reproducible verification-harness cause; stable assets produce successful login&quot;,
+      &quot;observed&quot;: &quot;Owned probe reproduced HTTP 500 with Vite manifest not found while rebuilding. Login was 200 before/after; final browser suites ran with stable assets and passed. Build output remained byte-identical to the implementation commit.&quot;,
+      &quot;command&quot;: &quot;PHP_BIN=\&quot;$PWD/scripts/herd-php\&quot; PNPM_BIN=\&quot;$PWD/storage/app/exp09-pnpm\&quot; node storage/app/exp09-build-login-probe.mjs&quot;,
+      &quot;evidence&quot;: [
+        &quot;build-login-probe.txt&quot;
+      ],
+      &quot;screenshots&quot;: [],
+      &quot;status&quot;: &quot;pass&quot;,
+      &quot;revision&quot;: &quot;a91d749c4166db0bb86f9e6894815355ba58c066&quot;
+    }
+  ],
+  &quot;findings&quot;: [
+    {
+      &quot;id&quot;: &quot;missing-integration&quot;,
+      &quot;summary&quot;: &quot;Cash-only runner totals and mining history ranking omitted a monetary wear basis&quot;,
+      &quot;in_scope&quot;: true,
+      &quot;status&quot;: &quot;fixed&quot;,
+      &quot;evidence&quot;: &quot;Red regressions reproduced the missing allowance. Final backend, worker and browser checks prove the ledger reaches the actual callers.&quot;
+    },
+    {
+      &quot;id&quot;: &quot;opt01-reuse&quot;,
+      &quot;summary&quot;: &quot;New evidence reporting initially fetched reset-scoped fuel listings again&quot;,
+      &quot;in_scope&quot;: true,
+      &quot;status&quot;: &quot;fixed&quot;,
+      &quot;evidence&quot;: &quot;OPT01 query-count tests failed. Report now reuses the supplied collection, including empty scopes; focused and full suites pass.&quot;
+    },
+    {
+      &quot;id&quot;: &quot;browser-controls&quot;,
+      &quot;summary&quot;: &quot;New reference selector and nested summaries required specific accessible targets&quot;,
+      &quot;in_scope&quot;: true,
+      &quot;status&quot;: &quot;fixed&quot;,
+      &quot;evidence&quot;: &quot;Initial selector failures were reproduced and corrected with an explicit reference-control accessible name and scoped summary/staging locators. Both complete browser reruns pass.&quot;
+    },
+    {
+      &quot;id&quot;: &quot;build-browser-race&quot;,
+      &quot;summary&quot;: &quot;Browser login overlapped temporary Vite manifest removal&quot;,
+      &quot;in_scope&quot;: true,
+      &quot;status&quot;: &quot;fixed&quot;,
+      &quot;evidence&quot;: &quot;Controlled owned probe recorded ViteManifestNotFoundException and temporary 500 responses during build. Final validation serialized builds before browser work; stable login and full journeys pass.&quot;
+    }
+  ],
+  &quot;limitations&quot;: [
+    &quot;No live SpaceTraders gameplay, paid APIs, spending, external notifications, deployment, push, remote merge, issue closure or PR metadata change.&quot;,
+    &quot;External API responses, prices and yields are synthetic. Local HTTP handlers, SQLite persistence, queues, launchd engine and browsers were real; this does not prove live economic performance.&quot;,
+    &quot;No independent review or security audit was requested/performed. No subagents were spawned. Remote CI remains unrun.&quot;,
+    &quot;Inventory value after known fuel is a partial quote estimate; full remaining wear/selling costs, unpriced/excess cargo and imported or later unobserved equipment capital remain unknown.&quot;,
+    &quot;Forecasts are disclosed observed sample envelopes, with no calibrated confidence or invented minimum-return policy. Fleet cases use entered assumptions and a bounded measured baseline; coordinated multi-ship gameplay remains separate.&quot;,
+    &quot;Native hardware restore, long-run live operation, cross-device behavior and full screen-reader accessibility were not tested. Scrolling panel screenshots show the inspected scroll position.&quot;,
+    &quot;Evidence is pinned to the implementation commit. The following evidence/documentation commit does not change runtime source or build assets.&quot;,
+    &quot;Shared origin/main advanced eight documentation-only commits during the task, to 930e5bbc5aa83aa2c87c313ee6168206f08c4cb4. Runtime source equivalence was checked; this branch retains the requested 5c199069 base.&quot;
+  ]
+}</pre></main></html>

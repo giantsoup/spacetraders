@@ -1,0 +1,102 @@
+[
+  {
+    "pid": 48920,
+    "exited": true
+  },
+  {
+    "pid": 48935,
+    "exited": true
+  },
+  {
+    "pid": 49224,
+    "exited": true
+  },
+  {
+    "pid": 49274,
+    "exited": true
+  },
+  {
+    "pid": 49275,
+    "exited": true
+  },
+  {
+    "service": "gui/503/io.spacetraders.engine.dad04030d795513208ccf153",
+    "absent": true
+  },
+  {
+    "pid": 47581,
+    "exited": true
+  },
+  {
+    "pid": 47601,
+    "exited": true
+  },
+  {
+    "pid": 47931,
+    "exited": true
+  },
+  {
+    "pid": 47988,
+    "exited": true
+  },
+  {
+    "pid": 47989,
+    "exited": true
+  },
+  {
+    "service": "gui/503/io.spacetraders.engine.5c855693e83668e6a3258b1d",
+    "absent": true
+  },
+  {
+    "pid": 50177,
+    "exited": true
+  },
+  {
+    "pid": 50194,
+    "exited": true
+  },
+  {
+    "service": "gui/503/io.spacetraders.engine.21783e7d3a3af107025db54c",
+    "absent": true
+  },
+  {
+    "pid": 46921,
+    "exited": true
+  },
+  {
+    "pid": 46999,
+    "exited": true
+  },
+  {
+    "pid": 40582,
+    "exited": true
+  },
+  {
+    "pid": 40631,
+    "exited": true
+  },
+  {
+    "pid": 66982,
+    "exited": true
+  },
+  {
+    "pid": 67278,
+    "exited": true
+  },
+  {
+    "pid": 67279,
+    "exited": true
+  },
+  {
+    "service": "gui/503/io.spacetraders.engine.a9b4c5fd92e68510313cdba0",
+    "absent": true
+  },
+  {
+    "pid": 40656,
+    "exited": true
+  },
+  {
+    "pid": 40737,
+    "exited": true
+  }
+]

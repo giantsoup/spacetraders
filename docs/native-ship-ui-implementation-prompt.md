@@ -1,5 +1,7 @@
 # Native ship UI implementation prompt
 
+Status on November 1, 2026: implementation exists on unpublished `feature/native-single-ship-ui` at `da1da847e6c2234331317b98ced76afe0bc2b745`. It is not on audited remote main or this documentation branch. UI01 [issue #5](https://github.com/giantsoup/spacetraders/issues/5) / [PR #6](https://github.com/giantsoup/spacetraders/pull/6) retains integration and acceptance ownership. See the [current status index](plan-implementation-audit.md#current-status-index). The implementation instructions below remain the acceptance contract.
+
 Give the following task to an implementation agent working in this repository. This prompt authorizes the UI implementation when invoked; it does not authorize live gameplay or deployment.
 
 ---

@@ -12,6 +12,8 @@ use Illuminate\Validation\ValidationException;
 
 class SpaceTradersClient
 {
+    public const REGISTRATION_UNKNOWN = 'Registration outcome is unknown. Check your official account dashboard and import the agent token if created. Do not repeat registration until its outcome is resolved.';
+
     public const BASE_URL = 'https://api.spacetraders.io/v2';
 
     private int $scopeDepth = 0;
@@ -61,9 +63,18 @@ class SpaceTradersClient
             $request = $request->withToken($token);
         }
 
-        $response = $request->send(strtoupper($method), $path, $data === [] ? [] : [
-            strtolower($method) === 'get' ? 'query' : 'json' => $data,
-        ]);
+        $options = $data === [] ? [] : [$read ? 'query' : 'json' => $data];
+        if ($read && isset($data['traits']) && is_array($data['traits'])) {
+            // OpenAPI form/explode query arrays repeat the name; PHP bracket encoding is a different contract.
+            $pairs = [];
+            foreach ($data as $name => $value) {
+                foreach (is_array($value) ? $value : [$value] as $item) {
+                    $pairs[] = rawurlencode($name).'='.rawurlencode((string) $item);
+                }
+            }
+            $options['query'] = implode('&', $pairs);
+        }
+        $response = $request->send(strtoupper($method), $path, $options);
         $budget = app(RequestBudget::class);
         try {
             $budget->observe($response, $token, $account);
@@ -107,11 +118,14 @@ class SpaceTradersClient
             $response = $this->request($method, $path, $data, $token);
         } catch (ConnectionException|GameException $exception) {
             throw ValidationException::withMessages([
-                'api' => 'Could not connect to SpaceTraders. Please try again later.',
+                'api' => $method === 'post' ? self::REGISTRATION_UNKNOWN : 'Could not connect to SpaceTraders. Please try again later.',
             ]);
         }
 
         if (! $response->successful()) {
+            if ($method === 'post' && ($response->serverError() || $response->status() === 429)) {
+                throw ValidationException::withMessages(['api' => self::REGISTRATION_UNKNOWN]);
+            }
             throw ValidationException::withMessages([
                 'api' => match ($response->status()) {
                     401 => 'Token is invalid.',
@@ -126,7 +140,7 @@ class SpaceTradersClient
 
         if (! is_array($payload) || Validator::make($payload, $rules)->fails()) {
             throw ValidationException::withMessages([
-                'api' => 'SpaceTraders returned incomplete agent details. No agent was saved.',
+                'api' => $method === 'post' ? self::REGISTRATION_UNKNOWN : 'SpaceTraders returned incomplete agent details. No agent was saved.',
             ]);
         }
 

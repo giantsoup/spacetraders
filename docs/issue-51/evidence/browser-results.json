@@ -1,0 +1,16 @@
+{
+  "result": "pass",
+  "steps": [
+    "Saved preview stopped through CSRF-protected HTTP; real worker sent nothing.",
+    "Approved pending scan stopped before worker reservation; queued job sent nothing.",
+    "Question, limits and continuation approved on mobile; separate worker stored scan traits and source evidence.",
+    "Empty scan coverage leaves target unresolved and authorizes no follow-up.",
+    "Chart at current location stores separate chart evidence and the synthetic reward.",
+    "Lost chart response remains uncertain after read-only reconciliation, without replay.",
+    "World reset rejects pending chart before POST and archives the agent."
+  ],
+  "errors": [],
+  "browser": "156.0.8078.4",
+  "timezone": "America/Los_Angeles",
+  "colorScheme": "light OS preference, dark app"
+}

@@ -1,0 +1,65 @@
+{
+  "implementation_source": "659f8aa6aeeef1398ee647a4fd378acb2553fb01",
+  "scope": "Native Vue controls and real file-backed workers with owned synthetic provider only. Focus is the modal heading, not the approval panel. Browser login selector and initial missing cached Chromium setup were corrected before these journeys; neither was an application defect.",
+  "journeys": [
+    {
+      "variant": "partial_cargo_refuel",
+      "ui": {
+        "approval": "Review manual command\n\nLOCAL-1 · Refuel · Expires Nov 1, 2026, 5:27:25 PM PST\n\nFuel source\ncargo\nExpected tank change\n0 → 37 / 100\nTank units\n37 · Capped to remaining tank space\n\nPartial cargo conversion: server rounding is unknown. Maximum approved cargo exposure 1 FUEL units; this is a review threshold, not a server cap or exact consumption prediction.\n\nTank conversion and protected cargo\n\nUses owned FUEL cargo. Whole-unit and rounding evidence are shown separately. Returned cargo, fuel and credits are authoritative.\n\nQuantity\n37\nFrom cargo\nYes\nProtected fuel\n0\nMax cargo units\n1\nMaximum cost\n0 CR\nProtected credit reserve\n2,000 CR\nObserved cost\n0 CR\nObserved sale\nUnknown CR\nProtected reserve\n2,000 CR\nAvailable credits\n100,000 CR\nFree cargo\n38\n\nLocal quotes are estimates. SpaceTraders has no execution-price limit. A changed execution price pauses further work.\n\nApprove command\nStop manual command\nCancel preview",
+        "command": "refuel",
+        "destructive": "app-button app-button-primary",
+        "focused": false,
+        "previewed": true
+      },
+      "worker": "{\"command\":\"refuel\",\"state\":\"confirmed\",\"message\":\"Confirmed by SpaceTraders.\"}"
+    },
+    {
+      "variant": "omitted_market_refuel",
+      "ui": {
+        "approval": "Review manual command\n\nLOCAL-1 · Refuel · Expires Nov 1, 2026, 5:28:13 PM PST\n\nFuel source\nmarket\nExpected tank change\n0 → 100 / 100\nTank units\n100 · Fill tank; units omitted\nFrom cargo\nNo\nProtected fuel\n0\nMaximum cost\n100 CR\nProtected credit reserve\n2,000 CR\nObserved cost\n5 CR\nObserved sale\nUnknown CR\nProtected reserve\n2,000 CR\nAvailable credits\n100,000 CR\nFree cargo\n38\n\nLocal quotes are estimates. SpaceTraders has no execution-price limit. A changed execution price pauses further work.\n\nApprove command\nStop manual command\nCancel preview",
+        "command": "refuel",
+        "destructive": "app-button app-button-primary",
+        "focused": false,
+        "previewed": true
+      },
+      "worker": "{\"id\":2,\"command\":\"refuel\",\"state\":\"confirmed\",\"review_required\":false,\"message\":\"Confirmed by SpaceTraders.\"}"
+    },
+    {
+      "variant": "atomic_manual_stop",
+      "ui": {
+        "approved": false,
+        "command": "jettison",
+        "focused": false,
+        "previewed": true,
+        "stopped": true
+      },
+      "worker": {
+        "id": 3,
+        "command": "jettison",
+        "state": "rejected",
+        "review_required": false,
+        "message": "Stopped before reservation. No manual request was sent."
+      },
+      "writes": 0
+    },
+    {
+      "variant": "partial_cargo_unknown_projection",
+      "ui": {
+        "approval": "Review manual command\n\nLOCAL-1 · Refuel · Expires Nov 1, 2026, 5:30:27 PM PST\n\nFuel source\ncargo\nExpected tank change\n0 → 37 / 100\nTank units\n37 · Capped to remaining tank space\n\nPartial cargo conversion: server rounding is unknown. Maximum approved cargo exposure 1 FUEL units; this is a review threshold, not a server cap or exact consumption prediction.\n\nTank conversion and protected cargo\n\nUses owned FUEL cargo. Whole-unit and rounding evidence are shown separately. Returned cargo, fuel and credits are authoritative.\n\nQuantity\n37\nFrom cargo\nYes\nProtected fuel\n0\nMax cargo units\n1\nMaximum cost\n0 CR\nProtected credit reserve\n2,000 CR\nObserved cost\n0 CR\nObserved sale\nUnknown CR\nProtected reserve\n2,000 CR\nAvailable credits\n100,000 CR\nFree cargo\n38\n\nLocal quotes are estimates. SpaceTraders has no execution-price limit. A changed execution price pauses further work.\n\nApprove command\nStop manual command\nCancel preview",
+        "command": "refuel",
+        "destructive": "app-button app-button-primary",
+        "focused": false,
+        "previewed": true
+      },
+      "worker": "{\"id\":1,\"command\":\"refuel\",\"state\":\"confirmed\",\"review_required\":false,\"message\":\"Confirmed by SpaceTraders.\"}",
+      "details": "Cargo units, fuel cargo after, cargo after and cargo free after displayed Unknown; max cargo exposure 1 and minimum fuel cargo after 1 remained explicit."
+    }
+  ],
+  "narrow_check": {
+    "width": 390,
+    "document_width": 390,
+    "os_preference": "light",
+    "background": "rgb(7, 13, 23)",
+    "modal_heading_focus": true
+  }
+}

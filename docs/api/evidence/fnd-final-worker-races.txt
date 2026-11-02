@@ -1,0 +1,24 @@
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS separate worker reached world.json.before
+PASS worker exits after Stop wins reservation race
+PASS manual Stop wins before reservation
+PASS Stop/preflight race sends no write
+PASS separate worker reached world.json.after
+PASS Stop after reservation leaves sending visible
+PASS reserved PATCH worker settles after Stop
+PASS confirmed PATCH retains post-reservation Stop evidence
+PASS post-reservation Stop causes one write and no follow-up
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS PATCH survives separate workers and duplicate delivery
+PASS duplicate PATCH is sent only once
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS lost repair response remains durable uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS repair reconciliation records evidence without inventing confirmation
+PASS worker restart and duplicate delivery never replay uncertain repair
+PASS owned worker queue has no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-worker-2400188c1d00

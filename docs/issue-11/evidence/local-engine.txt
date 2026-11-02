@@ -1,0 +1,20 @@
+PASS No login LaunchAgent installed
+PASS Actual owned worker and scheduler are alive
+PASS Repeated Start preserves exactly one supervisor and child pair
+PASS Owned worker executes one explicitly approved fake command
+PASS Deployment drain preserves previews and the local engine session
+PASS Shared persistent pause resumes the same owned engine without extra gameplay
+PASS End session waits for actual child exit
+PASS End session leaves an unrelated PHP process alive
+PASS End session invalidates unsent previews
+PASS Restart creates a fresh session
+PASS Legacy execution cannot bypass the restarted session gate
+PASS Restart and Start alone authorize zero additional gameplay
+PASS Child crash closes the gate and stops the remaining owned process
+PASS Abrupt supervisor death is detected and closes approval
+PASS launchd removes only the crashed supervisor’s child process group
+PASS A sleep-length heartbeat gap closes permission instead of catching up
+PASS Crash and wake recovery never replay prior approvals
+PASS Acknowledged force stop kills only the fixed owned service after its modeled grace period
+PASS Supervisor crash recovery leaves unrelated PHP processes alive
+Owned offline lifecycle evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-fixture-c906579d080a

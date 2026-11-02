@@ -1,0 +1,18 @@
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.5.12
+Configuration: /Users/Taylor/.t3/worktrees/spacetraders/integrate-completed-batch2-20261101/phpunit.xml
+
+F                                                                   1 / 1 (100%)
+
+Time: 00:00.401, Memory: 65.00 MB
+
+There was 1 failure:
+
+1) Tests\Feature\AdviserTest::test_historical_income_uses_matching_worst_trip_inputs_and_rejects_nonpositive_history
+Failed asserting that an array is empty.
+
+/Users/Taylor/.t3/worktrees/spacetraders/integrate-completed-batch2-20261101/tests/Feature/AdviserTest.php:306
+
+FAILURES!
+Tests: 1, Assertions: 10, Failures: 1.

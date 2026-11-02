@@ -1,0 +1,29 @@
+{
+    "mode": "verify",
+    "checks": [
+        "close waits for an actually reserved gameplay job",
+        "close includes the real HTTP-kernel writer",
+        "closed dispatch preserves delayed queue bytes and attempts",
+        "active writer remains alive during drain",
+        "active web writer acknowledges after finishing its database write",
+        "pre-close schedule:run descendant exits before drain succeeds",
+        "reserved work finishes exactly one fake upstream mutation",
+        "both real workers leave pending delayed intent untouched while closed",
+        "resumed duplicate delivery does not replay confirmed work",
+        "old controller cannot reopen the next release",
+        "frozen rollback release reads the shared version 1 contract and existing SQLite schema",
+        "rollback artifact worker observes persistent pause without reserving",
+        "abrupt process exit leaves the scheduler cache lock behind",
+        "stale scheduler overlap lock suppresses a second pass before expiry",
+        "live OS dispatcher ownership prevents overlap even if cache lock is cleared",
+        "owned lock holder exits normally",
+        "real stale-lock expiry recovers dispatch after 120 seconds with measured bounded pass",
+        "close waits outside the actual SQLite reservation critical section",
+        "pre-close reservation finishes; missing continuous readiness is reported honestly",
+        "reservation after close cannot change SQL attempts, even without Laravel pause polling",
+        "50-intent dispatcher pass survives real SQLite writer contention within its budget",
+        "races and dispatcher stress never replay the confirmed fake mutation",
+        "owned SQLite run has no failed jobs"
+    ],
+    "owned_directory": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-deployment-20b3f2e44b3b"
+}

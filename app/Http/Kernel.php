@@ -2,7 +2,9 @@
 
 namespace App\Http;
 
+use App\Gameplay\DeploymentGate;
 use App\Http\Middleware\Authenticate;
+use App\Http\Middleware\DeploymentAdmission;
 use App\Http\Middleware\EncryptCookies;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\PreventRequestForgery;
@@ -30,6 +32,18 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 class Kernel extends HttpKernel
 {
+    public function terminate($request, $response)
+    {
+        try {
+            parent::terminate($request, $response);
+        } finally {
+            if ($id = $request->attributes->get('_deployment_admission')) {
+                app(DeploymentGate::class)->finish($id);
+                $request->attributes->remove('_deployment_admission');
+            }
+        }
+    }
+
     /**
      * The application's global HTTP middleware stack.
      *
@@ -40,6 +54,7 @@ class Kernel extends HttpKernel
     protected $middleware = [
         // \App\Http\Middleware\TrustHosts::class,
         TrustProxies::class,
+        DeploymentAdmission::class,
         HandleCors::class,
         PreventRequestsDuringMaintenance::class,
         ValidatePostSize::class,

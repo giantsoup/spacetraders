@@ -1,0 +1,8 @@
+$ PHP_BIN=Herd/php85 bash -x scripts/verify.sh
++ set -euo pipefail
+++ dirname scripts/verify.sh
++ cd scripts/..
++ php_bin='Herd/bin/php85'
++ pnpm_bin=pnpm
++ 'Herd/bin/php85' -r 'exit(PHP_VERSION_ID >= 80401 && PHP_VERSION_ID < 80500 ? 0 : 1);'
+exit: 1

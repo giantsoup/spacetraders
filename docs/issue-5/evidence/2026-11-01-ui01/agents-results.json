@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "steps": [
+    "Owned login, automatic archival, separate current/archived same-name agents, invalid credentials remain current, unknown balance, UTC/local time, dark mode and keyboard skip link",
+    "Desktop, tablet, 390px and 320px layouts without clipping",
+    "Archived same-name record is clearly labelled, preserves fleet snapshots, disables gameplay, survives reload, and is excluded from guide choices",
+    "Flight deck navigation, direct recovery/import link, form switching, successful offline import",
+    "Registration, player guide and profile navigation",
+    "An invalid upstream status keeps both saved sections available and shows a readable retry message",
+    "A changed upstream world automatically archives every known old-world agent on list load; archive-only state persists after reload",
+    "Empty state, guided setup and POST logout with authentication required afterward"
+  ],
+  "errors": []
+}

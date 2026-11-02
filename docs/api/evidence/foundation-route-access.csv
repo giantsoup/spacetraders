@@ -1,0 +1,53 @@
+method,uri,name,middleware,audience,assessment
+GET|HEAD,/,,web,public by existing policy,unchanged route; source inventory and existing regression suite
+POST,_ignition/execute-solution,ignition.executeSolution,Spatie\LaravelIgnition\Http\Middleware\RunnableSolutionsEnabled,public by existing policy,unchanged route; source inventory and existing regression suite
+GET|HEAD,_ignition/health-check,ignition.healthCheck,Spatie\LaravelIgnition\Http\Middleware\RunnableSolutionsEnabled,public by existing policy,unchanged route; source inventory and existing regression suite
+POST,_ignition/update-config,ignition.updateConfig,Spatie\LaravelIgnition\Http\Middleware\RunnableSolutionsEnabled,public by existing policy,unchanged route; source inventory and existing regression suite
+GET|HEAD,agents,agents.index,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents,agents.store,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+GET|HEAD,agents/create,agents.create,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/storeExisting,agents.storeExisting,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+GET|HEAD,agents/{agent},agents.show,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/accounting/review,game.accounting.review,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/adviser/assess,game.adviser.assess,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/adviser/collect,game.adviser.collect,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+GET|HEAD,agents/{agent}/adviser/history,game.adviser.history,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/adviser/investigations/{investigation}/advance,game.adviser.advance,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/adviser/investigations/{investigation}/cancel,game.adviser.cancel,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/adviser/policies,game.adviser.policies,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/adviser/policies/{policy}/pause,game.adviser.pause,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/commands/preview,game.commands.preview,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,changed HTTP ownership/CSRF tests plus source review
+POST,agents/{agent}/commands/{action}/acknowledge,game.commands.acknowledge,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,changed HTTP ownership/CSRF tests plus source review
+POST,agents/{agent}/commands/{action}/approve,game.commands.approve,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,changed HTTP ownership/CSRF tests plus source review
+POST,agents/{agent}/commands/{action}/reconcile,game.commands.reconcile,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,changed HTTP ownership/CSRF tests plus source review
+POST,agents/{agent}/commands/{action}/stop,game.commands.stop,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,changed HTTP ownership/CSRF tests plus source review
+POST,agents/{agent}/drafts,game.drafts.create,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/drafts/{draft}/preview,game.drafts.preview,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/drafts/{draft}/update,game.drafts.update,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/economics/investment,game.economics.investment,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/engine/end,game.engine.end,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/engine/force-stop,game.engine.force-stop,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/engine/start,game.engine.start,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+GET|HEAD,agents/{agent}/guide,agents.guide,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+GET|HEAD,agents/{agent}/history,game.history,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/investigations,game.investigations.create,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/investigations/{investigation}/advance,game.investigations.advance,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/investigations/{investigation}/cancel,game.investigations.cancel,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/reads,game.reads,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,changed HTTP ownership/CSRF tests plus source review
+POST,agents/{agent}/runs/preview,game.runs.preview,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/runs/{run}/start,game.runs.start,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/runs/{run}/stop,game.runs.stop,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+POST,agents/{agent}/sync,game.sync,"web;App\Http\Middleware\Authenticate;Illuminate\Routing\Middleware\ThrottleRequests:60,1",authenticated owner,unchanged route; source inventory and existing regression suite
+GET|HEAD,api/user,,api;App\Http\Middleware\Authenticate:sanctum,authenticated owner,unchanged route; source inventory and existing regression suite
+GET|HEAD,confirm-password,password.confirm,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+POST,confirm-password,,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+GET|POST|HEAD,forward,forward,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+GET|HEAD,guide,guide,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+GET|HEAD,login,login,web;App\Http\Middleware\RedirectIfAuthenticated,authenticated owner,unchanged route; source inventory and existing regression suite
+POST,login,,web;App\Http\Middleware\RedirectIfAuthenticated,authenticated owner,unchanged route; source inventory and existing regression suite
+POST,logout,logout,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+PUT,password,password.update,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+GET|HEAD,profile,profile.edit,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+PATCH,profile,profile.update,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+DELETE,profile,profile.destroy,web;App\Http\Middleware\Authenticate,authenticated owner,unchanged route; source inventory and existing regression suite
+GET|HEAD,sanctum/csrf-cookie,sanctum.csrf-cookie,web,public by existing policy,unchanged route; source inventory and existing regression suite

@@ -79,6 +79,7 @@ class CreditAccounting
         if ($outcome['price_discrepancy'] || ($outcome['fuel_discrepancy'] ?? false) || (isset($run->plan['max_fuel']) && ($totals['travel_fuel'] ?? 0) > $run->plan['max_fuel']) || $totals['spending'] > $run->plan['max_spend'] || ($totals['no_progress'] ?? 0) >= 1 || $totals['credit_delta'] < -$run->plan['max_loss']) {
             $run->update(['state' => 'blocked', 'blocked_reason' => 'Execution price, spending, loss or no-progress limit reached.']);
         }
+        app(CycleAccounting::class)->record($run, $ship);
     }
 
     public function summary(Agent $agent): array

@@ -1,0 +1,94 @@
+Final implementation source 98d3f32877519e775b52305de12fd24ccd7a09c6
+Tutorial repro precedes the readiness fix; passing tutorial/browser/build evidence covers the matching final frontend. Backend and final worker evidence covers the final receipt guards. All gameplay used synthetic providers.
+
+npm notice run npx
+npm notice run 'pnpm' build
+$ vite build
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 726 modules transformed.
+rendering chunks...
+computing gzip size...
+public/build/manifest.json                                      8.92 kB │ gzip:  1.24 kB
+public/build/assets/Welcome-C6ZLIYTJ.css                        0.15 kB │ gzip:  0.13 kB
+public/build/assets/dateTime-05q_TOSW.css                       0.66 kB │ gzip:  0.34 kB
+public/build/assets/GuidedFlight-CPCUKnB1.css                   1.17 kB │ gzip:  0.53 kB
+public/build/assets/AppShell-CGlwTphf.css                       1.39 kB │ gzip:  0.61 kB
+public/build/assets/Show-DVouwzbK.css                           2.82 kB │ gzip:  0.91 kB
+public/build/assets/Agents-UQeWFSxe.css                         4.70 kB │ gzip:  1.27 kB
+public/build/assets/TutorialCourse-DQR4gQuP.css                 5.69 kB │ gzip:  1.58 kB
+public/build/assets/Dashboard-CAh1y6U-.css                     23.14 kB │ gzip:  4.54 kB
+public/build/assets/app-D6bvJ2S7.css                           33.25 kB │ gzip:  7.44 kB
+public/build/assets/_plugin-vue_export-helper-BDNMzG2s.js       0.08 kB │ gzip:  0.09 kB
+public/build/assets/DangerButton-DEAnZoyE.js                    0.26 kB │ gzip:  0.22 kB
+public/build/assets/PrimaryButton-Br5zNxrh.js                   0.26 kB │ gzip:  0.22 kB
+public/build/assets/SecondaryButton-4bHs4hWm.js                 0.27 kB │ gzip:  0.21 kB
+public/build/assets/AuthenticatedLayout-eK1oqNrE.js             0.43 kB │ gzip:  0.30 kB
+public/build/assets/Checkbox-Datz2B3g.js                        0.45 kB │ gzip:  0.32 kB
+public/build/assets/GuestLayout-E1C85f4k.js                     0.63 kB │ gzip:  0.43 kB
+public/build/assets/Edit-CAkKkw-b.js                            0.84 kB │ gzip:  0.48 kB
+public/build/assets/TextInput-BBFCIiA_.js                       0.93 kB │ gzip:  0.52 kB
+public/build/assets/ConfirmPassword-eDIpnPYk.js                 1.43 kB │ gzip:  0.76 kB
+public/build/assets/dateTime-BNtwrR6e.js                        1.71 kB │ gzip:  0.86 kB
+public/build/assets/Welcome-W6EIGFTM.js                         1.79 kB │ gzip:  0.95 kB
+public/build/assets/UpdateProfileInformationForm-BPbNkvaD.js    2.06 kB │ gzip:  0.91 kB
+public/build/assets/dataPresentation-DFEDIr8Z.js                2.20 kB │ gzip:  1.17 kB
+public/build/assets/Login-BmKUvM3N.js                           2.28 kB │ gzip:  1.02 kB
+public/build/assets/UpdatePasswordForm-Dp4_XhKZ.js              3.08 kB │ gzip:  1.05 kB
+public/build/assets/DeleteUserForm-DWoloSnT.js                  3.69 kB │ gzip:  1.65 kB
+public/build/assets/AppShell-4GHbrB9G.js                        3.86 kB │ gzip:  1.62 kB
+public/build/assets/Agents-BIirmdZa.js                          6.00 kB │ gzip:  2.38 kB
+public/build/assets/GuidedFlight-BbUFj9KN.js                    6.07 kB │ gzip:  2.51 kB
+public/build/assets/Show-rAjLRg1H.js                            7.81 kB │ gzip:  3.47 kB
+public/build/assets/CreateAgent-fwpS1r7J.js                     9.03 kB │ gzip:  3.11 kB
+public/build/assets/TutorialCourse-DrS30jUV.js                 23.48 kB │ gzip:  9.04 kB
+public/build/assets/Dashboard-DibHjeCK.js                     170.16 kB │ gzip: 49.87 kB
+public/build/assets/app-C6tKJcgN.js                           283.49 kB │ gzip: 97.37 kB
+
+✓ built in 304ms
+npm notice run npx
+npm notice run 'pnpm' build
+$ vite build
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 726 modules transformed.
+rendering chunks...
+computing gzip size...
+public/build/manifest.json                                      8.92 kB │ gzip:  1.24 kB
+public/build/assets/Welcome-C6ZLIYTJ.css                        0.15 kB │ gzip:  0.13 kB
+public/build/assets/dateTime-05q_TOSW.css                       0.66 kB │ gzip:  0.34 kB
+public/build/assets/GuidedFlight-CPCUKnB1.css                   1.17 kB │ gzip:  0.53 kB
+public/build/assets/AppShell-CGlwTphf.css                       1.39 kB │ gzip:  0.61 kB
+public/build/assets/Show-DVouwzbK.css                           2.82 kB │ gzip:  0.91 kB
+public/build/assets/Agents-UQeWFSxe.css                         4.70 kB │ gzip:  1.27 kB
+public/build/assets/TutorialCourse-DQR4gQuP.css                 5.69 kB │ gzip:  1.58 kB
+public/build/assets/Dashboard-CAh1y6U-.css                     23.14 kB │ gzip:  4.54 kB
+public/build/assets/app-D6bvJ2S7.css                           33.25 kB │ gzip:  7.44 kB
+public/build/assets/_plugin-vue_export-helper-BDNMzG2s.js       0.08 kB │ gzip:  0.09 kB
+public/build/assets/DangerButton-DEAnZoyE.js                    0.26 kB │ gzip:  0.22 kB
+public/build/assets/PrimaryButton-Br5zNxrh.js                   0.26 kB │ gzip:  0.22 kB
+public/build/assets/SecondaryButton-4bHs4hWm.js                 0.27 kB │ gzip:  0.21 kB
+public/build/assets/AuthenticatedLayout-eK1oqNrE.js             0.43 kB │ gzip:  0.30 kB
+public/build/assets/Checkbox-Datz2B3g.js                        0.45 kB │ gzip:  0.32 kB
+public/build/assets/GuestLayout-E1C85f4k.js                     0.63 kB │ gzip:  0.43 kB
+public/build/assets/Edit-CAkKkw-b.js                            0.84 kB │ gzip:  0.48 kB
+public/build/assets/TextInput-BBFCIiA_.js                       0.93 kB │ gzip:  0.52 kB
+public/build/assets/ConfirmPassword-eDIpnPYk.js                 1.43 kB │ gzip:  0.76 kB
+public/build/assets/dateTime-BNtwrR6e.js                        1.71 kB │ gzip:  0.86 kB
+public/build/assets/Welcome-W6EIGFTM.js                         1.79 kB │ gzip:  0.95 kB
+public/build/assets/UpdateProfileInformationForm-BPbNkvaD.js    2.06 kB │ gzip:  0.91 kB
+public/build/assets/dataPresentation-DFEDIr8Z.js                2.20 kB │ gzip:  1.17 kB
+public/build/assets/Login-BmKUvM3N.js                           2.28 kB │ gzip:  1.02 kB
+public/build/assets/UpdatePasswordForm-Dp4_XhKZ.js              3.08 kB │ gzip:  1.05 kB
+public/build/assets/DeleteUserForm-DWoloSnT.js                  3.69 kB │ gzip:  1.65 kB
+public/build/assets/AppShell-4GHbrB9G.js                        3.86 kB │ gzip:  1.62 kB
+public/build/assets/Agents-BIirmdZa.js                          6.00 kB │ gzip:  2.38 kB
+public/build/assets/GuidedFlight-BbUFj9KN.js                    6.07 kB │ gzip:  2.51 kB
+public/build/assets/Show-rAjLRg1H.js                            7.81 kB │ gzip:  3.47 kB
+public/build/assets/CreateAgent-fwpS1r7J.js                     9.03 kB │ gzip:  3.11 kB
+public/build/assets/TutorialCourse-DrS30jUV.js                 23.48 kB │ gzip:  9.04 kB
+public/build/assets/Dashboard-DibHjeCK.js                     170.16 kB │ gzip: 49.87 kB
+public/build/assets/app-C6tKJcgN.js                           283.49 kB │ gzip: 97.37 kB
+
+✓ built in 281ms
+Production assets are identical with unrelated Markdown and generated-view fixtures.

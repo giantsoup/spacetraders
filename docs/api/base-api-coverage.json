@@ -1,0 +1,2224 @@
+{
+  "schema_version": 1,
+  "scope": "All operations in the pinned official specification; strategies are deferred.",
+  "source": {
+    "url": "https://spacetraders.io/SpaceTraders.json",
+    "version": "2.3.0",
+    "sha256": "c07d04f575df43e4d05eea4ba539f2d33ef8c5d9a3c863d49520193ef5431ad8",
+    "retrieved_at_utc": "2026-11-01T23:56:00.475322+00:00",
+    "source_commit": "98d3f32877519e775b52305de12fd24ccd7a09c6",
+    "snapshot": "docs/api/spacetraders-openapi-2.3.0.json"
+  },
+  "source_files": {
+    "app/Gameplay/SpaceTradersApi.php": "95a7f3f9613cc49a73957f6973137942af3bf763ef8b9a6e59d988d7b4b09df5",
+    "app/Gameplay/CommandRules.php": "89e0cd88c16ed1064f473d9c8111fa1a0162a54fb0f3923c14364c6bee653410",
+    "app/Http/Requests/GameplayRequest.php": "a1d9512304d06aefabf5c83e3571c7784a4a22a5d2ce5ec94ea41c831d6b89e4",
+    "app/Services/SpaceTradersClient.php": "d379c65dca8a3ed534048be899a737d5f0181d61c9774b309648e8d8e474a704",
+    "app/Http/Controllers/AgentController.php": "3b29992032b3a206e64092008a5f81f446ce52f0a441eb7d383cf2fdd1301b72",
+    "app/Http/Controllers/ForwarderController.php": "dcbf9dbb894fa723d211e133302bf49e7e642ff9dc8f05189c500a08c9dcc7c4",
+    "routes/web.php": "7b91d1376ffceaf549d50a0326b3f043602bde382919ff250bdfc08dc63e81e6",
+    "resources/js/Pages/Agent/Dashboard.vue": "267a8c2107e8a6e8bd903707ad0fc70c5a58f135c233c6d06790e7bbd5092a7e",
+    "app/Gameplay/ManualReads.php": "6c52b61b8db2507e8cbbda79350ca0392ce3639c15302cf00d9cbd99ff775016",
+    "resources/js/Components/ManualReadBrowser.vue": "ecb7eac7dab53a9363609a85bb55bec04e29866ad3a0981f7a8e6d34055c1658",
+    "app/Http/Controllers/AgentReadController.php": "b4e64e1a0c3f672b2754f21cd658d9c3a3eb2808c12391cda6e1a4276e8299bc",
+    "app/Gameplay/ShipCommandExecutor.php": "8642aeb0e5539d84d7f60e17a0bc1ae6302e9372e1cda67a32f3d391935e195f",
+    "config/foundation.php": "887e07c6d73d4cbe9c14a0976527bab0bd2de6312c94da2d7b18f3ab5469bd2a",
+    "app/Gameplay/ManualCommands.php": "7f0cd3b88fc3596db2c1690dc290fa5792d48dc8eec6f1ead4ed107cad0d966c",
+    "app/Gameplay/EquipmentRules.php": "28578466e5da851dd924ee95208377e1242ff6786c4d9b9b28e45372ce237bbb",
+    "app/Gameplay/CargoAuthority.php": "ff715344bac98c9a9d6dc5c433b087b6d927a7920b56082842bae0197c162753",
+    "app/Gameplay/CargoRefuel.php": "70a051a54dc4744823fe4872915b8a477ed381a1a028dfbf4210a42ce3b46120",
+    "resources/js/Components/ManualCommandForm.vue": "605c92d0c2bacc3dbce83329c56522e2952044a871781dc4c131dc4aded73c74",
+    "resources/js/Components/ContractApproval.vue": "f87491efe2502583466b8b5033254dcd3a879c6c9888af1a93c88475ee323cdb",
+    "app/Http/Controllers/AgentCommandController.php": "c5eefed079b698e837e5566e6b83362dcc6d46510d8e5128204e4b56e305b479",
+    "app/Http/Controllers/AgentDashboardController.php": "968fa6accf4f8d07e26ded5b8a5a8841efcde9577daa3f48b8790bd2d7402cb6",
+    "resources/js/Pages/Agent/CreateAgent.vue": "3821aed242eb5aa40b544f9acf6f2730cc56a2c068bcf381e960ae3d97186c61",
+    "config/gameplay.php": "c193232f7b16ee93368f779ecaf43450923add7098123762da6a477b8e767ba2",
+    "public/build/manifest.json": "e0cdb9fc76b05b30b48f172922d56717df566c52c663836da0d5eb1a5c5c59a4"
+  },
+  "tasks": {
+    "FND-01": {
+      "title": "Command and read boundaries",
+      "depends_on": []
+    },
+    "FND-02": {
+      "title": "Complete manual read browser",
+      "depends_on": [
+        "FND-01"
+      ]
+    },
+    "FND-03": {
+      "title": "General fleet and cargo actions",
+      "depends_on": [
+        "FND-01",
+        "FND-02"
+      ]
+    },
+    "FND-04": {
+      "title": "Manual contract lifecycle",
+      "depends_on": [
+        "FND-01",
+        "FND-02"
+      ]
+    },
+    "FND-05": {
+      "title": "Repair execution and maintenance quotes",
+      "depends_on": [
+        "FND-01",
+        "FND-02",
+        "FND-03"
+      ]
+    },
+    "FND-06": {
+      "title": "Mount and module outfitting",
+      "depends_on": [
+        "FND-01",
+        "FND-02"
+      ]
+    },
+    "FND-07": {
+      "title": "Resource extraction and processing",
+      "depends_on": [
+        "FND-01",
+        "FND-02"
+      ]
+    },
+    "FND-08": {
+      "title": "Navigation modes and refueling",
+      "depends_on": [
+        "FND-01",
+        "FND-02"
+      ]
+    },
+    "FND-09": {
+      "title": "General scans and charting",
+      "depends_on": [
+        "FND-01",
+        "FND-02"
+      ]
+    },
+    "FND-10": {
+      "title": "Jump-gate and warp travel",
+      "depends_on": [
+        "FND-01",
+        "FND-02",
+        "FND-08"
+      ]
+    },
+    "FND-11": {
+      "title": "Construction participation",
+      "depends_on": [
+        "FND-01",
+        "FND-02",
+        "FND-03"
+      ]
+    },
+    "FND-12": {
+      "title": "Destructive scrap execution",
+      "depends_on": [
+        "FND-03",
+        "FND-04",
+        "FND-05",
+        "FND-06",
+        "FND-07",
+        "FND-08",
+        "FND-09",
+        "FND-10",
+        "FND-11"
+      ]
+    },
+    "FND-13": {
+      "title": "Complete foundation acceptance",
+      "depends_on": [
+        "FND-01",
+        "FND-02",
+        "FND-03",
+        "FND-04",
+        "FND-05",
+        "FND-06",
+        "FND-07",
+        "FND-08",
+        "FND-09",
+        "FND-10",
+        "FND-11",
+        "FND-12"
+      ]
+    }
+  },
+  "operations": [
+    {
+      "id": "get-status",
+      "method": "GET",
+      "path": "/",
+      "summary": "Get Status",
+      "tags": [
+        "Global"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-02",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-status' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "register",
+      "method": "POST",
+      "path": "/register",
+      "summary": "Register New Agent",
+      "tags": [
+        "Global"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-02",
+      "notes": "Existing account-token registration supports all pinned factions, optional email and symbol bounds; unknown-outcome failures never retry automatically. Registration browser journey was not repeated in this run. Official acceptance remains pending.",
+      "request_fields": [
+        "email",
+        "faction",
+        "symbol"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Services/SpaceTradersClient.php",
+          "contains": "public function register("
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-systems",
+      "method": "GET",
+      "path": "/systems",
+      "summary": "List Systems",
+      "tags": [
+        "Systems"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-02",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [
+        "limit",
+        "page"
+      ],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-systems' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-system",
+      "method": "GET",
+      "path": "/systems/{systemSymbol}",
+      "summary": "Get System",
+      "tags": [
+        "Systems"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-02",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-system' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-system-waypoints",
+      "method": "GET",
+      "path": "/systems/{systemSymbol}/waypoints",
+      "summary": "List Waypoints in System",
+      "tags": [
+        "Systems"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-02",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [
+        "limit",
+        "page",
+        "traits",
+        "type"
+      ],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-system-waypoints' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-waypoint",
+      "method": "GET",
+      "path": "/systems/{systemSymbol}/waypoints/{waypointSymbol}",
+      "summary": "Get Waypoint",
+      "tags": [
+        "Systems"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-02",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-waypoint' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-market",
+      "method": "GET",
+      "path": "/systems/{systemSymbol}/waypoints/{waypointSymbol}/market",
+      "summary": "Get Market",
+      "tags": [
+        "Systems"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-02",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-market' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-shipyard",
+      "method": "GET",
+      "path": "/systems/{systemSymbol}/waypoints/{waypointSymbol}/shipyard",
+      "summary": "Get Shipyard",
+      "tags": [
+        "Systems"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-02",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-shipyard' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-jump-gate",
+      "method": "GET",
+      "path": "/systems/{systemSymbol}/waypoints/{waypointSymbol}/jump-gate",
+      "summary": "Get Jump Gate",
+      "tags": [
+        "Systems"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-10",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-jump-gate' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-construction",
+      "method": "GET",
+      "path": "/systems/{systemSymbol}/waypoints/{waypointSymbol}/construction",
+      "summary": "Get Construction Site",
+      "tags": [
+        "Systems"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-11",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-construction' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "supply-construction",
+      "method": "POST",
+      "path": "/systems/{systemSymbol}/waypoints/{waypointSymbol}/construction/supply",
+      "summary": "Supply Construction Site",
+      "tags": [
+        "Systems"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-11",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "shipSymbol",
+        "tradeSymbol",
+        "units"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'supply' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'supply' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-factions",
+      "method": "GET",
+      "path": "/factions",
+      "summary": "List Factions",
+      "tags": [
+        "Factions"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-02",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [
+        "limit",
+        "page"
+      ],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-factions' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-faction",
+      "method": "GET",
+      "path": "/factions/{factionSymbol}",
+      "summary": "Get Faction",
+      "tags": [
+        "Factions"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-02",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-faction' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-my-agent",
+      "method": "GET",
+      "path": "/my/agent",
+      "summary": "Get Agent",
+      "tags": [
+        "Agents"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-02",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-my-agent' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-agents",
+      "method": "GET",
+      "path": "/agents",
+      "summary": "List Agents",
+      "tags": [
+        "Agents"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-02",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [
+        "limit",
+        "page"
+      ],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-agents' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-agent",
+      "method": "GET",
+      "path": "/agents/{agentSymbol}",
+      "summary": "Get Public Agent",
+      "tags": [
+        "Agents"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-02",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-agent' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-contracts",
+      "method": "GET",
+      "path": "/my/contracts",
+      "summary": "List Contracts",
+      "tags": [
+        "Contracts"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-04",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [
+        "limit",
+        "page"
+      ],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-contracts' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-contract",
+      "method": "GET",
+      "path": "/my/contracts/{contractId}",
+      "summary": "Get Contract",
+      "tags": [
+        "Contracts"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-04",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-contract' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "accept-contract",
+      "method": "POST",
+      "path": "/my/contracts/{contractId}/accept",
+      "summary": "Accept Contract",
+      "tags": [
+        "Contracts"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-04",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'contract_accept' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'contract_accept' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "deliver-contract",
+      "method": "POST",
+      "path": "/my/contracts/{contractId}/deliver",
+      "summary": "Deliver Cargo to Contract",
+      "tags": [
+        "Contracts"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-04",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "shipSymbol",
+        "tradeSymbol",
+        "units"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'contract_deliver' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'contract_deliver' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "fulfill-contract",
+      "method": "POST",
+      "path": "/my/contracts/{contractId}/fulfill",
+      "summary": "Fulfill Contract",
+      "tags": [
+        "Contracts"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-04",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'contract_fulfill' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'contract_fulfill' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-my-ships",
+      "method": "GET",
+      "path": "/my/ships",
+      "summary": "List Ships",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-03",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [
+        "limit",
+        "page"
+      ],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-my-ships' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "purchase-ship",
+      "method": "POST",
+      "path": "/my/ships",
+      "summary": "Purchase Ship",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-03",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "shipType",
+        "waypointSymbol"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'buy_ship' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'buy_ship' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-my-ship",
+      "method": "GET",
+      "path": "/my/ships/{shipSymbol}",
+      "summary": "Get Ship",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-03",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-my-ship' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-my-ship-cargo",
+      "method": "GET",
+      "path": "/my/ships/{shipSymbol}/cargo",
+      "summary": "Get Ship Cargo",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-03",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-my-ship-cargo' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "orbit-ship",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/orbit",
+      "summary": "Orbit Ship",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-03",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'orbit' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'orbit' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "ship-refine",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/refine",
+      "summary": "Ship Refine",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-07",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "produce"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'refine' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'refine' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "create-chart",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/chart",
+      "summary": "Create Chart",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-09",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'chart' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'chart' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-ship-cooldown",
+      "method": "GET",
+      "path": "/my/ships/{shipSymbol}/cooldown",
+      "summary": "Get Ship Cooldown",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-03",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-ship-cooldown' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "dock-ship",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/dock",
+      "summary": "Dock Ship",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-03",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'dock' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'dock' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "create-survey",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/survey",
+      "summary": "Create Survey",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-07",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'survey' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'survey' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "extract-resources",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/extract",
+      "summary": "Extract Resources",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-07",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "survey"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'mine' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'mine' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "siphon-resources",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/siphon",
+      "summary": "Siphon Resources",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-07",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'siphon' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'siphon' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "extract-resources-with-survey",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/extract/survey",
+      "summary": "Extract Resources with Survey",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-07",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "deposits",
+        "expiration",
+        "signature",
+        "size",
+        "symbol"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'mine_survey' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'mine_survey' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "jettison",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/jettison",
+      "summary": "Jettison Cargo",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-03",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "symbol",
+        "units"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'jettison' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'jettison' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "jump-ship",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/jump",
+      "summary": "Jump Ship",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-10",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "waypointSymbol"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'jump' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'jump' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "navigate-ship",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/navigate",
+      "summary": "Navigate Ship",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-08",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "waypointSymbol"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'navigate' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'navigate' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "patch-ship-nav",
+      "method": "PATCH",
+      "path": "/my/ships/{shipSymbol}/nav",
+      "summary": "Patch Ship Nav",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-08",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "flightMode"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'flight_mode' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'flight_mode' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-ship-nav",
+      "method": "GET",
+      "path": "/my/ships/{shipSymbol}/nav",
+      "summary": "Get Ship Nav",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-08",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-ship-nav' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "warp-ship",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/warp",
+      "summary": "Warp Ship",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-10",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "waypointSymbol"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'warp' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'warp' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "sell-cargo",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/sell",
+      "summary": "Sell Cargo",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-03",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "symbol",
+        "units"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'sell' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'sell' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "create-ship-system-scan",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/scan/systems",
+      "summary": "Scan Systems",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-09",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'scan_systems' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'scan_systems' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "create-ship-waypoint-scan",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/scan/waypoints",
+      "summary": "Scan Waypoints",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-09",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'scan_waypoints' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'scan_waypoints' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "create-ship-ship-scan",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/scan/ships",
+      "summary": "Scan Ships",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-09",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'scan_ships' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'scan_ships' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "refuel-ship",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/refuel",
+      "summary": "Refuel Ship",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-08",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "fromCargo",
+        "units"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'refuel' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'refuel' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "purchase-cargo",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/purchase",
+      "summary": "Purchase Cargo",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-03",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "symbol",
+        "units"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'buy' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'buy' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "transfer-cargo",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/transfer",
+      "summary": "Transfer Cargo",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-03",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "shipSymbol",
+        "tradeSymbol",
+        "units"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'transfer' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'transfer' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "negotiateContract",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/negotiate/contract",
+      "summary": "Negotiate Contract",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-04",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'negotiate' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'negotiate' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-mounts",
+      "method": "GET",
+      "path": "/my/ships/{shipSymbol}/mounts",
+      "summary": "Get Mounts",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-06",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-mounts' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "install-mount",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/mounts/install",
+      "summary": "Install Mount",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-06",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "symbol"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'install_mount' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'install_mount' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "remove-mount",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/mounts/remove",
+      "summary": "Remove Mount",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-06",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "symbol"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'remove_mount' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'remove_mount' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-scrap-ship",
+      "method": "GET",
+      "path": "/my/ships/{shipSymbol}/scrap",
+      "summary": "Get Scrap Ship",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-05",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-scrap-ship' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "scrap-ship",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/scrap",
+      "summary": "Scrap Ship",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-12",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'scrap' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'scrap' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-repair-ship",
+      "method": "GET",
+      "path": "/my/ships/{shipSymbol}/repair",
+      "summary": "Get Repair Ship",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-05",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-repair-ship' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "repair-ship",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/repair",
+      "summary": "Repair Ship",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-05",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'repair' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'repair' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-supply-chain",
+      "method": "GET",
+      "path": "/market/supply-chain",
+      "summary": "Get Supply Chain",
+      "tags": [
+        "Data"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-02",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-supply-chain' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "get-ship-modules",
+      "method": "GET",
+      "path": "/my/ships/{shipSymbol}/modules",
+      "summary": "Get Ship Modules",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-06",
+      "notes": "Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.",
+      "request_fields": [],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualReads.php",
+          "contains": "'get-ship-modules' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "public function manualRead("
+        },
+        {
+          "path": "resources/js/Components/ManualReadBrowser.vue",
+          "contains": "Refresh selected read"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "install-ship-module",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/modules/install",
+      "summary": "Install Ship Module",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-06",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "symbol"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'install_module' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'install_module' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    },
+    {
+      "id": "remove-ship-module",
+      "method": "POST",
+      "path": "/my/ships/{shipSymbol}/modules/remove",
+      "summary": "Remove Ship Module",
+      "tags": [
+        "Fleet"
+      ],
+      "implementation": "source_mapped",
+      "task": "FND-06",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
+      "request_fields": [
+        "symbol"
+      ],
+      "query_fields": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'remove_module' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'remove_module' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
+      "acceptance": {
+        "state": "not_accepted",
+        "contract": null,
+        "browser": null,
+        "live": null
+      }
+    }
+  ]
+}

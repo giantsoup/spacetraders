@@ -1,0 +1,22 @@
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.5.12
+Configuration: $WORKTREE/phpunit.xml
+
+F                                                                   1 / 1 (100%)
+
+Time: 00:00.757, Memory: 63.50 MB
+
+There was 1 failure:
+
+1) Tests\Feature\Auth\PrivateAccountTest::test_closed_account_routes_are_absent_for_guests_and_existing_users
+Expected response status code [404] but received 200.
+Failed asserting that 200 is identical to 404.
+
+$WORKTREE/vendor/laravel/framework/src/Illuminate/Testing/TestResponseAssert.php:46
+$WORKTREE/vendor/laravel/framework/src/Illuminate/Testing/TestResponse.php:183
+$WORKTREE/vendor/laravel/framework/src/Illuminate/Testing/Concerns/AssertsStatusCodes.php:151
+$WORKTREE/tests/Feature/Auth/PrivateAccountTest.php:27
+
+FAILURES!
+Tests: 1, Assertions: 1, Failures: 1.

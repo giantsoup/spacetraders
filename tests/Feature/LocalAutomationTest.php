@@ -10,6 +10,7 @@ use App\Gameplay\ContractPlanner;
 use App\Gameplay\CreditAccounting;
 use App\Gameplay\EngineGate;
 use App\Gameplay\GameException;
+use App\Gameplay\MiningPlanner;
 use App\Gameplay\OpportunityEvaluator;
 use App\Gameplay\OpportunityInvestigator;
 use App\Gameplay\ShipCommandExecutor;
@@ -19,6 +20,7 @@ use App\Models\AutomationDraft;
 use App\Models\AutomationRun;
 use App\Models\LocalEngine;
 use App\Models\OpportunityInvestigation;
+use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -111,6 +113,35 @@ class LocalAutomationTest extends TestCase
                 app(ShipCommandExecutor::class)->execute($action->id);
             }
         }
+    }
+
+    public function test_preview_explains_departure_before_cooldown_at_each_approved_limit(): void
+    {
+        foreach ([
+            ['max_extractions' => 1, 'extraction_headroom' => 1, 'site_seconds' => 300],
+            ['max_extractions' => 5, 'extraction_headroom' => 40, 'site_seconds' => 300],
+            ['max_extractions' => 5, 'extraction_headroom' => 1, 'site_seconds' => 10],
+        ] as $limits) {
+            $run = $this->preview('mining', $limits);
+            $this->assertStringContainsString('travel can overlap the remaining extraction cooldown', $run->plan['ordered_actions'][2]);
+            $ship = Ship::where('agent_id', $this->agent->id)->where('symbol', 'LOCAL-1')->firstOrFail()->snapshot;
+            $ship['nav']['status'] = 'IN_ORBIT';
+            $ship['cooldown']['expiration'] = now()->addSeconds(80)->toIso8601String();
+            $ship['cargo']['units'] = 4;
+            $ship['cargo']['inventory'] = [['symbol' => 'IRON_ORE', 'units' => 4]];
+            $totals = ['phase' => 'mine', 'no_progress' => 0, 'load_attempts' => 1,
+                'load_started_at' => now()->subSeconds(10)->toIso8601String(), 'extracted' => ['IRON_ORE' => 4], 'sold' => []];
+            $planner = app(MiningPlanner::class);
+            $this->assertSame('depart', $planner->next($ship, $run->plan, $totals, [], now()->toImmutable())->kind);
+            $totals['phase'] = 'sell';
+            $plan = $run->plan;
+            $plan['route']['market'] = 'X1-TEST-PORT';
+            $step = $planner->next($ship, $plan, $totals, [], now()->toImmutable());
+            $this->assertSame('navigate', $step->command);
+            $this->assertSame('X1-TEST-PORT', $step->arguments['waypointSymbol']);
+        }
+        $this->assertSame([], $this->world()['writes']);
+        $this->assertSame(0, ShipAction::count());
     }
 
     public function test_investigation_and_staging_are_read_only_and_work_with_engine_off(): void
@@ -559,10 +590,13 @@ class LocalAutomationTest extends TestCase
         $this->postJson('/agents/'.$this->agent->id.'/investigations/'.$draft->investigation_id.'/advance')->assertNotFound();
     }
 
-    public function test_contract_writes_cannot_be_requested_as_arbitrary_manual_commands(): void
+    public function test_manual_contract_preview_needs_approval_and_rejects_arbitrary_payloads(): void
     {
+        $input = ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'contract_accept', 'arguments' => ['contractId' => 'contract-1']];
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', $input)->assertAccepted()->assertJsonPath('state', 'preview');
         $before = count($this->world()['calls']);
-        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'contract_accept', 'arguments' => ['contractId' => 'contract-1']])->assertUnprocessable();
+        $input['arguments']['url'] = 'https://example.test/unapproved';
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', $input)->assertUnprocessable();
         $this->assertSame($before, count($this->world()['calls']));
         $this->assertSame([], $this->world()['writes']);
     }

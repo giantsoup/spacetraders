@@ -1,0 +1,14 @@
+{
+  "result": "pass",
+  "steps": [
+    "Reviewed one-ship grant persisted with explicit bounds; cross-site request without CSRF rejected with 419.",
+    "Real bounded observation handlers and immutable assessment show unknown mining returns and named blocked exploration; no jobs, writes or commands.",
+    "Explicit replacement revoked the old grant and selected a named, funded, bounded exploration question.",
+    "Pause left the existing approved run running; Stop persisted separately and a real finite database worker released it without gameplay writes.",
+    "The shared executor still confirmed one separately approved synthetic manual orbit through a real worker after policy Pause."
+  ],
+  "errors": [],
+  "fixture": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-syn3zacl/spacetraders-fixture-a1979d10f530",
+  "evidence": "/Users/Taylor/.t3/worktrees/spacetraders/integrate-completed-batch2-20261101/storage/app/integration-evidence/adviser-browser",
+  "php": "8.5.12"
+}

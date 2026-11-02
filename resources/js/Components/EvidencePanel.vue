@@ -2,8 +2,11 @@
 import { computed } from 'vue';
 import DataDetails from '@/Components/DataDetails.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
+import CycleResults from '@/Components/CycleResults.vue';
+import FleetComparison from '@/Components/FleetComparison.vue';
+import { formatLocalTime } from '@/dateTime.js';
 
-const props = defineProps({ evidence: Object });
+const props = defineProps({ evidence: Object, agentId: Number });
 const number = value => value === null || value === undefined ? 'Unknown' : Number(value).toLocaleString(undefined, { maximumFractionDigits: 3 });
 const requestUsage = computed(() => Object.fromEntries(Object.entries(props.evidence?.request_usage || {}).map(([scope, value]) => {
     if (!value || typeof value !== 'object') return [scope, value];
@@ -37,6 +40,16 @@ function download() {
         <p>{{ evidence.policy }}</p>
         <p>{{ evidence.travel_samples_in_window }} of {{ evidence.total_travel_samples }} travel samples and {{ evidence.mining_runs_in_window }} of {{ evidence.total_mining_runs }} mining runs are in this analysis window. Older raw evidence remains saved.</p>
         <SecondaryButton @click="download">Download evidence summary</SecondaryButton>
+        <details><summary>Complete-cycle outcomes · {{ evidence.cycles?.length || 0 }} runs</summary>
+            <p>Observed cash, wear-adjusted estimates and realized net are separate. Open or unsettled cycles cannot rank comparable income. Elapsed time includes actual overlapping waits once.</p>
+            <details v-for="cycle in evidence.cycles || []" :key="cycle.run_id"><summary>Run {{ cycle.run_id }} · {{ cycle.ship }} · {{ cycle.strategy }} · {{ cycle.state }}</summary>
+                <p>Started {{ formatLocalTime(cycle.started_at) }} · accounted {{ formatLocalTime(cycle.accounted_at, 'Unknown') }}</p>
+                <CycleResults :accounting="cycle.accounting" /><DataDetails :value="cycle.capital" />
+            </details>
+            <h4>Current inventory estimates</h4><DataDetails :value="evidence.current_inventory_estimates" />
+            <h4>Fleet capital</h4><DataDetails :value="evidence.fleet_capital" />
+        </details>
+        <FleetComparison v-if="agentId" :agent-id="agentId" :cycles="evidence.cycles || []" />
         <details v-if="evidence.request_usage"><summary>API request usage</summary>
             <p>Host and account budgets share a conservative 1.9 requests per second with a 10-request burst. Server headers can lower these limits. Writes and their preflight reads have reserved capacity ahead of discovery. Counts include manual and automated requests from cooperating local checkouts; other devices remain outside this budget.</p>
             <DataDetails :value="requestUsage" />

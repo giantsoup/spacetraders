@@ -1,0 +1,138 @@
+Owned browser lifecycle evidence: /Users/Taylor/.t3/worktrees/spacetraders/integrate-completed-batch2-20261101/storage/app/integration-evidence/browser-lifecycle/run-kXN10y
+{
+  "processes": {
+    "browser": 25956,
+    "server": 25999
+  },
+  "browser": "156.0.8078.4",
+  "evidence": "/Users/Taylor/.t3/worktrees/spacetraders/integrate-completed-batch2-20261101/storage/app/integration-evidence/browser-lifecycle/run-kXN10y/success",
+  "passed": true,
+  "shutdown": {
+    "server": "verified",
+    "browserConnection": "verified",
+    "browser": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-r08aKc",
+  "fixtureRemoved": true,
+  "diagnostics": null,
+  "failures": []
+}
+✔ real browser/server success removes its owned fixture and preserves a dark screenshot (2626.168625ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-LVOcxP
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-LVOcxP",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-LVOcxP",
+  "failures": [
+    "Failed to launch chromium because executable doesn't exist at /Users/Taylor/.t3/worktrees/spacetraders/integrate-completed-batch2-20261101/storage/app/integration-evidence/browser-lifecycle/run-kXN10y/missing-browser Failed to launch browser."
+  ]
+}
+✔ failed browser launch retains partial setup privately before any server or service starts (867.742166ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-nR9shs
+{
+  "processes": {
+    "browser": 26318,
+    "server": 26323
+  },
+  "engineShutdown": {
+    "processesExited": [
+      26364,
+      26378,
+      26379
+    ],
+    "serviceRemoved": true,
+    "serviceLabel": "io.spacetraders.engine.118dbe082e9ae915376f8072"
+  },
+  "passed": false,
+  "shutdown": {
+    "service": "verified",
+    "server": "verified",
+    "browserConnection": "verified",
+    "browser": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-nR9shs",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-nR9shs",
+  "failures": [
+    "Intentional failure after real engine startup"
+  ]
+}
+✔ real native engine assertion failure stops every owned process and removes only its service (4039.544375ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-Hpe4WG
+{
+  "processes": {
+    "browser": 26493,
+    "server": 26496
+  },
+  "engineShutdown": {
+    "processesExited": [
+      26547,
+      26559,
+      26560
+    ],
+    "serviceRemoved": true,
+    "serviceLabel": "io.spacetraders.engine.01633a05828ef1f7c3ec8499"
+  },
+  "passed": false,
+  "shutdown": {
+    "service": "verified",
+    "server": "verified",
+    "browserConnection": "verified",
+    "browser": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-Hpe4WG",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-Hpe4WG",
+  "failures": [
+    "Verification interrupted by SIGTERM"
+  ]
+}
+✔ real native engine SIGTERM failure stops every owned process and removes only its service (3195.760417ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-XR7FOl
+{
+  "passed": false,
+  "shutdown": {},
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-XR7FOl",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-XR7FOl",
+  "failures": [
+    "Owned PHP command failed, exit 17"
+  ]
+}
+✔ failed fixture process retains its private allocation and cannot claim a pass (237.306041ms)
+Private failed-run diagnostics retained at: /private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-IO23bi
+{
+  "processes": {
+    "browser": 27096,
+    "server": 27099
+  },
+  "engineShutdown": {
+    "processesExited": [],
+    "serviceRemoved": true,
+    "serviceLabel": "io.spacetraders.engine.dd10e690278cb1ea61285382"
+  },
+  "passed": false,
+  "shutdown": {
+    "service": "verified",
+    "server": "verified",
+    "browserConnection": "verified",
+    "browser": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-IO23bi",
+  "fixtureRemoved": false,
+  "diagnostics": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-IO23bi",
+  "failures": [
+    "Owned PHP command failed, exit 17"
+  ]
+}
+✔ partial installation failure still removes the actual bootstrapped service (1811.451667ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 13078.6025

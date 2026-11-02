@@ -1,0 +1,13 @@
+$ php vendor/bin/phpunit --colors=never --filter test_local_mutation_invalidates_a_quote_without_renewing_its_age --repeat 25 tests/Feature/OpportunityTest.php
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.4.27
+Configuration: <worktree>/phpunit.xml
+
+.........................                                         25 / 25 (100%)
+
+Time: 00:05.924, Memory: 73.00 MB
+
+OK (25 tests, 325 assertions)
+
+Exit status: 0

@@ -1,0 +1,186 @@
+{
+  "recorded_at_utc": "2026-11-01T23:34:12.465692+00:00",
+  "implementation_head": "a903845aaf9a2b40c87f02e8abd683a24d75ba02",
+  "backend": {
+    "tests": 391,
+    "assertions": 2244
+  },
+  "browser_lifecycle": {
+    "tests": 6,
+    "skips": 0
+  },
+  "focused_lifecycle": {
+    "tests": 18
+  },
+  "dependency_audits": {
+    "composer": "passed; no advisories",
+    "pnpm": "passed; zero vulnerabilities"
+  },
+  "checks": [
+    {
+      "name": "verify",
+      "exit": 0,
+      "seconds": 38.68,
+      "log": "verify.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-0e5hy0sx",
+      "runtime_removed": false,
+      "retained_diagnostics": [
+        "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-0e5hy0sx/spacetraders-verification-7tmov9/failure.log",
+        "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-0e5hy0sx/spacetraders-verification-dfuzjc/failure.log",
+        "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-0e5hy0sx/spacetraders-verification-cI3gG8/failure.log",
+        "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-0e5hy0sx/spacetraders-verification-O2FDco/failure.log",
+        "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-0e5hy0sx/spacetraders-verification-LNbCgt/failure.log",
+        "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-0e5hy0sx/spacetraders-verification-Jy2bhc/failure.log",
+        "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-0e5hy0sx/spacetraders-verification-TBbToV/failure.log",
+        "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-0e5hy0sx/spacetraders-verification-PrTWh5/failure.log"
+      ]
+    },
+    {
+      "name": "mvp-worker",
+      "exit": 0,
+      "seconds": 4.23,
+      "log": "mvp-worker.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-tu0uj1dd",
+      "runtime_removed": true,
+      "retained_diagnostics": []
+    },
+    {
+      "name": "automation-worker",
+      "exit": 0,
+      "seconds": 19.79,
+      "log": "automation-worker.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-unh9ekus",
+      "runtime_removed": true,
+      "retained_diagnostics": []
+    },
+    {
+      "name": "deployment-processes",
+      "exit": 0,
+      "seconds": 175.06,
+      "log": "deployment-processes.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-ddp3doei",
+      "runtime_removed": true,
+      "retained_diagnostics": []
+    },
+    {
+      "name": "deployment-wall-timeout",
+      "exit": 0,
+      "seconds": 600.83,
+      "log": "deployment-wall-timeout.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-gykk8rhs",
+      "runtime_removed": true,
+      "retained_diagnostics": []
+    },
+    {
+      "name": "local-engine",
+      "exit": 0,
+      "seconds": 15.12,
+      "log": "local-engine.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-e06pv_4k",
+      "runtime_removed": true,
+      "retained_diagnostics": []
+    },
+    {
+      "name": "private-account-browser",
+      "exit": 0,
+      "seconds": 6.61,
+      "log": "private-account-browser.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-8i7efkxt",
+      "runtime_removed": true,
+      "retained_diagnostics": []
+    },
+    {
+      "name": "pages-browser",
+      "exit": 0,
+      "seconds": 5.91,
+      "log": "pages-browser.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-spwhr7_k",
+      "runtime_removed": true,
+      "retained_diagnostics": []
+    },
+    {
+      "name": "native-ship-browser",
+      "exit": 0,
+      "seconds": 20.7,
+      "log": "native-ship-browser.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-x35dh6jv",
+      "runtime_removed": true,
+      "retained_diagnostics": []
+    },
+    {
+      "name": "deployment-browser",
+      "exit": 0,
+      "seconds": 4.91,
+      "log": "deployment-browser.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-ouauclmw",
+      "runtime_removed": true,
+      "retained_diagnostics": []
+    },
+    {
+      "name": "adviser-browser",
+      "exit": 0,
+      "seconds": 7.12,
+      "log": "adviser-browser.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-syn3zacl",
+      "runtime_removed": true,
+      "retained_diagnostics": []
+    },
+    {
+      "name": "exploration-browser",
+      "exit": 0,
+      "seconds": 11.95,
+      "log": "exploration-browser.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-j5erfp5v",
+      "runtime_removed": true,
+      "retained_diagnostics": []
+    },
+    {
+      "name": "automation-browser",
+      "exit": 0,
+      "seconds": 125.88,
+      "log": "automation-browser.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-lchxi8mt",
+      "runtime_removed": true,
+      "retained_diagnostics": []
+    },
+    {
+      "name": "opportunities-browser",
+      "exit": 0,
+      "seconds": 24.6,
+      "log": "opportunities-browser.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-maktl7hw",
+      "runtime_removed": true,
+      "retained_diagnostics": []
+    },
+    {
+      "name": "browser-lifecycle",
+      "exit": 0,
+      "seconds": 13.39,
+      "log": "browser-lifecycle.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj",
+      "runtime_removed": false,
+      "retained_diagnostics": [
+        "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-Hpe4WG/failure.log",
+        "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-nR9shs/failure.log",
+        "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-XR7FOl/failure.log",
+        "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-LVOcxP/failure.log",
+        "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-vd2h88tj/spacetraders-verification-IO23bi/failure.log"
+      ]
+    },
+    {
+      "name": "combined-browser",
+      "exit": 0,
+      "seconds": 4.97,
+      "log": "combined-browser.log",
+      "runtime": "/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/st-batch2-run-pbq3by3w",
+      "runtime_removed": true,
+      "retained_diagnostics": []
+    }
+  ],
+  "limits": [
+    "Owned synthetic fixtures only",
+    "No independent review",
+    "No live API mechanics or authenticated upstream acceptance",
+    "No remote publication, CI, deployment or issue mutation"
+  ]
+}

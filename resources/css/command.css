@@ -1,14 +1,16 @@
 @theme {
-    --color-space: #0a111c;
-    --color-panel: #101b2b;
-    --color-field: #0b1523;
+    --color-space: #070d17;
+    --color-panel: #0d1524;
+    --color-field: #111b2c;
     --color-line: #34455d;
-    --color-ink: #e4edf7;
-    --color-muted: #aebed2;
+    --color-ink: #e8eef6;
+    --color-muted: #97a8bc;
     --color-accent: #a6f3d0;
     --color-focus: #f7dc91;
     --color-fault: #ffb4bf;
     --font-terminal: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --font-interface: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --color-cargo: #b8b1ff;
 }
 
 @layer base {
@@ -20,8 +22,8 @@
 }
 
 @layer components {
-    .app-shell { min-height: 100vh; background: var(--color-space); color: var(--color-ink); font: 15px/1.6 var(--font-terminal); overflow-wrap: anywhere; }
-    .app-topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 20px 28px; border-bottom: 2px solid var(--color-line); background: var(--color-panel); font: 15px/1.6 var(--font-terminal); }
+    .app-shell { min-height: 100vh; background: var(--color-space); color: var(--color-ink); font: 16px/1.5 var(--font-interface); overflow-wrap: anywhere; }
+    .app-topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 20px 28px; border-bottom: 2px solid var(--color-line); background: var(--color-panel); font: 16px/1.5 var(--font-interface); }
     .app-brand { display: inline-flex; align-items: center; min-height: 44px; color: var(--color-accent); font-weight: 800; letter-spacing: .08em; }
     .app-topbar nav { display: flex; flex-wrap: wrap; gap: 8px 24px; }
     .app-topbar nav :is(a, button) { display: inline-flex; align-items: center; min-height: 44px; font: inherit; color: var(--color-ink); }
@@ -33,33 +35,33 @@
     .app-eyebrow { color: var(--color-accent); font-size: 12px; letter-spacing: .12em; }
     .app-muted { color: var(--color-muted); }
     .app-auth { max-width: 600px; padding-top: 64px; }
-    .app-panel { min-width: 0; padding: 24px; border: 2px solid var(--color-line); background: var(--color-panel); box-shadow: 5px 5px 0 #05090f; }
+    .app-panel { min-width: 0; padding: 24px; border: 2px solid var(--color-line); background: var(--color-panel); box-shadow: none; }
     .app-panel h2 { font-size: 18px; font-weight: 750; }
     .app-stack { display: grid; gap: 24px; }
     .app-form-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 16px; margin-top: 24px; }
     .app-link { color: var(--color-accent); text-decoration: underline; text-underline-offset: 4px; }
     .app-link:hover { color: #c4ffe4; }
     .app-link:is(a, button) { display: inline-flex; align-items: center; min-height: 44px; }
-    .app-button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; max-width: 100%; padding: 10px 16px; border: 2px solid transparent; border-radius: 0; font: 700 13px/1.6 var(--font-terminal); text-align: center; white-space: normal; box-shadow: 2px 2px 0 #05090f; cursor: pointer; }
+    .app-button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; max-width: 100%; padding: 10px 16px; border: 2px solid transparent; border-radius: 12px; font: 650 16px/1.4 var(--font-interface); text-align: center; white-space: normal; box-shadow: none; cursor: pointer; }
     .app-button:focus-visible { outline: 3px solid var(--color-focus); outline-offset: 4px; }
     .app-button:active:not(:disabled) { box-shadow: none; }
     .app-button-primary { background: var(--color-accent); border-color: var(--color-accent); color: #0a241d; }
     .app-button-primary:hover:not(:disabled) { background: #c4ffe4; }
-    .app-button-secondary { background: #243c54; border-color: #7593ac; color: #f0f5ff; }
+    .app-button-secondary { background: #162337; border-color: #526881; color: #f0f5ff; }
     .app-button-secondary:hover:not(:disabled) { background: #365574; }
     .app-button-danger { background: #8e263b; border-color: var(--color-fault); color: #fff; }
     .app-button-danger:hover:not(:disabled) { background: #aa3049; }
     .app-button:disabled, .app-link:disabled { opacity: .5; cursor: not-allowed; }
     .app-label { display: block; color: var(--color-ink); font-size: 13px; font-weight: 600; }
-    .app-input { min-height: 44px; max-width: 100%; padding: 10px 12px; border: 1px solid #67829f; border-radius: 0; background: var(--color-field); color: #f0f5ff; font: inherit; box-shadow: none; }
+    .app-input { min-height: 44px; max-width: 100%; padding: 10px 12px; border: 1px solid #67829f; border-radius: 12px; background: var(--color-field); color: #f0f5ff; font: inherit; box-shadow: none; }
     .app-input:focus { border-color: var(--color-accent); box-shadow: none; outline: 3px solid var(--color-focus); outline-offset: 3px; }
     .app-input::placeholder { color: var(--color-muted); opacity: 1; }
     .app-input[aria-invalid="true"] { border-color: var(--color-fault); }
-    .app-checkbox { border: 1px solid #67829f; border-radius: 0; background: var(--color-field); color: var(--color-accent); }
+    .app-checkbox { border: 1px solid #67829f; border-radius: 12px; background: var(--color-field); color: var(--color-accent); }
     .app-checkbox:focus { --tw-ring-color: var(--color-focus); --tw-ring-offset-color: var(--color-panel); }
     .app-error { color: var(--color-fault); font-size: 13px; }
     .app-success { color: var(--color-accent); font-size: 13px; }
-    .app-dialog { width: calc(100% - 32px); max-height: calc(100% - 48px); margin: auto; padding: 0; overflow-y: auto; border: 2px solid var(--color-line); background: var(--color-panel); color: var(--color-ink); font: 15px/1.6 var(--font-terminal); overflow-wrap: anywhere; }
+    .app-dialog { width: calc(100% - 32px); max-height: calc(100% - 48px); margin: auto; padding: 0; overflow-y: auto; border: 2px solid var(--color-line); background: var(--color-panel); color: var(--color-ink); font: 16px/1.5 var(--font-interface); overflow-wrap: anywhere; }
     .app-dialog::backdrop { background: #05090fcc; }
     .skip { position: fixed; top: -200px; left: 16px; z-index: 99; padding: 12px; background: var(--color-ink); color: var(--color-space); font: 14px/1.6 var(--font-terminal); }
     .skip:focus { top: 12px; }
@@ -71,3 +73,8 @@
         .app-form-actions { justify-content: flex-start; }
     }
 }
+
+.sheet-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.sheet-tabs button { min-height: 44px; padding: 10px 14px; border-radius: 12px; background: #162337; color: var(--color-ink); border: 1px solid #526881; }
+.sheet-tabs button[aria-pressed="true"] { background: var(--color-accent); color: #0c271d; }
+summary { min-height: 44px; cursor: pointer; }

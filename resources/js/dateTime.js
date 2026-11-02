@@ -18,3 +18,10 @@ export function formatLocalJson(value) {
         ? formatLocalTime(entry)
         : entry, 2);
 }
+
+export function formatLocalClock(value, fallback = 'Unknown') {
+    if (typeof value !== 'string' || !timestampPattern.test(value)) return fallback;
+    const normalized = value.replace(' ', 'T');
+    const timestamp = Date.parse(/Z$|[+-]\d{2}:?\d{2}$/.test(normalized) ? normalized : `${normalized}Z`);
+    return Number.isFinite(timestamp) ? new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit', timeZoneName: 'short' }).format(timestamp) : fallback;
+}

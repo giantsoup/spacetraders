@@ -1,3 +1,4 @@
+import { shipView } from './ship-browser-navigation.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -55,16 +56,18 @@ async function clickResponse(label, suffix) {
 }
 async function refresh() {
     await page.reload();
-    await page.getByRole('heading', { level: 1, name: 'LOCAL', exact: true }).waitFor();
+    await page.getByRole('heading', { level: 1, name: 'LOCAL-1', exact: true }).waitFor();
+    await shipView(page, 'commands');
 }
 async function drain() {
     execFileSync(php, ['artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, stdio: 'pipe' });
     await refresh();
 }
-async function sync() { await clickResponse('Synchronize', '/sync'); await refresh(); }
+async function sync() { await shipView(page, 'guide'); await clickResponse('Synchronize', '/sync'); await refresh(); }
 async function command(label) {
+    await shipView(page, 'commands');
     const action = await clickResponse(label, '/commands/preview');
-    assert.equal(await page.locator('.approval').evaluate(panel => panel === document.activeElement), true);
+    assert.equal(await page.getByRole('dialog', {name:'Review approval',exact:true}).evaluate(panel => panel.contains(document.activeElement)), true);
     await clickResponse('Approve command', `/commands/${action.id}/approve`);
     await drain();
     const saved = state().actions.find(a => a.id === action.id);
@@ -72,8 +75,10 @@ async function command(label) {
     return saved;
 }
 async function limits(reserve = '2000') {
+    await shipView(page, 'commands');
     await page.getByLabel('Mining site', { exact: true }).selectOption('X1-TEST-ROCK');
     await page.getByLabel('Sale and refueling market', { exact: true }).selectOption('X1-TEST-ROCK');
+    await shipView(page, 'automation');
     await page.getByLabel('Protected credit reserve', { exact: true }).fill(reserve);
     await page.getByLabel('Maximum fuel spending', { exact: true }).fill('100');
     await page.getByLabel('Maximum credit loss', { exact: true }).fill('100');
@@ -81,26 +86,30 @@ async function limits(reserve = '2000') {
 async function shot(name, fullPage = false) { await page.screenshot({ path: path.join(output, name), fullPage, animations: 'disabled' }); }
 try {
     await record('login and explicit synchronization', async () => {
-        await page.goto(origin + '/login');
+        const login = await page.goto(origin + '/login');
+        const data = (await login.text()).match(/<script data-page="app" type="application\/json">([\s\S]*?)<\/script>/);
+        assert.equal(data && JSON.parse(data[1]).props.gameConnection?.mode, 'offline', 'The served site must identify itself as offline practice before login or fixture commands.');
         await page.getByLabel('Email', { exact: true }).fill(auth.email);
         await page.getByLabel('Password', { exact: true }).fill(auth.password);
         await button('Log in').click();
         await page.waitForURL('**/agents');
         await page.goto(`${origin}/agents/${auth.agent_id}`);
         await sync();
+        await button('Done').click();
         const hide = button('Hide badge for this session');
         if (await hide.count()) await hide.click();
     });
     await record('keyboard skip link and visible focus', async () => {
         await page.goto(`${origin}/agents/${auth.agent_id}`);
         await page.keyboard.press('Tab');
-        assert.equal(await page.evaluate(() => document.activeElement.textContent.trim()), 'Skip to command controls');
+        assert.equal(await page.evaluate(() => document.activeElement.textContent.trim()), 'Skip to selected ship');
         assert.equal(await page.evaluate(() => getComputedStyle(document.activeElement).outlineWidth), '3px');
         await shot('01-skip-focus.png');
         await page.keyboard.press('Enter');
-        assert.equal(new URL(page.url()).hash, '#manual');
+        assert.equal(new URL(page.url()).hash, '#ship-home');
     });
     await record('navigation requires a destination and orbit before preview', async () => {
+        await shipView(page, 'commands');
         const navigate = button('Preview navigation');
         const destination = page.getByLabel('Destination', { exact: true });
         const before = state().actions.length;
@@ -153,6 +162,8 @@ try {
         await clickResponse('Start approved mining run', `/runs/${preview.id}/start`);
         await refresh();
         assert.equal(await page.locator('#manual fieldset').evaluate(element => element.disabled), true);
+        await button('Done').click();
+        await button('View active run').click();
         await button('Stop automation').scrollIntoViewIfNeeded();
         await shot('04-active-stop.png');
         const writes = (await world()).writes.length;
@@ -174,15 +185,18 @@ try {
         assert.equal(run.state, 'completed', run.blocked_reason);
         assert.deepEqual(run.totals.extracted, run.totals.sold);
         assert.equal(run.totals.cycles, 1);
+        await shipView(page, 'automation');
         await page.getByRole('heading', { name: 'Recorded outcomes', exact: true }).scrollIntoViewIfNeeded();
         await shot('05-trip-outcomes.png', true);
     });
     await record('lost response, uncertainty and idempotent reconciliation', async () => {
         await world(w => { w.failure = 'timeout_after'; });
+        await shipView(page, 'commands');
         const action = await clickResponse('Preview orbit', '/commands/preview');
         await clickResponse('Approve command', `/commands/${action.id}/approve`);
         await drain();
         assert.equal(state().actions.find(a => a.id === action.id).state, 'uncertain');
+        await shipView(page, 'activity');
         await page.locator('.activity').scrollIntoViewIfNeeded();
         await shot('06-uncertain.png', true);
         const writes = (await world()).writes.length;
@@ -195,6 +209,7 @@ try {
         await world(w => { w.ships[0].mounts = []; });
         await sync();
         await limits();
+        await shipView(page, 'commands');
         await page.getByLabel('Observed shipyard offer', { exact: true }).selectOption('0');
         await page.getByLabel('Maximum cost / minimum sale total', { exact: true }).fill('20000');
         await page.getByLabel('Protected credits', { exact: true }).fill('2000');
