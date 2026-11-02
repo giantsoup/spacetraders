@@ -11,6 +11,7 @@ use App\Gameplay\HostLock;
 use App\Gameplay\MiningPlanner;
 use App\Gameplay\RequestBudget;
 use App\Gameplay\ShipCommandExecutor;
+use App\Gameplay\SpaceTradersApi;
 use App\Jobs\AdvanceAutomationRun;
 use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
@@ -19,6 +20,7 @@ use App\Models\GameObservation;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
+use App\Services\SpaceTradersClient;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -59,6 +61,74 @@ class GameplayTest extends TestCase
     {
         unlink($this->worldFile);
         parent::tearDown();
+    }
+
+    public function test_browser_sync_allows_rate_limited_discovery_and_restores_the_web_time_limit(): void
+    {
+        $previous = (int) ini_get('max_execution_time');
+        $limits = [];
+        Http::globalOptions(function () use (&$limits) {
+            $limits[] = (int) ini_get('max_execution_time');
+
+            return [];
+        });
+        set_time_limit(30);
+        try {
+            $this->postJson('/agents/'.$this->agent->id.'/sync')->assertAccepted();
+            $this->assertNotEmpty($limits);
+            $this->assertGreaterThanOrEqual(60, min($limits));
+            $this->assertSame(30, (int) ini_get('max_execution_time'));
+            $this->assertSame([], json_decode(file_get_contents($this->worldFile), true)['writes']);
+        } finally {
+            set_time_limit($previous);
+        }
+    }
+
+    public function test_failed_browser_sync_restores_the_web_time_limit(): void
+    {
+        $previous = (int) ini_get('max_execution_time');
+        Http::globalOptions(fn () => throw new GameException('Synthetic sync interruption.'));
+        set_time_limit(30);
+        try {
+            $this->postJson('/agents/'.$this->agent->id.'/sync')->assertUnprocessable()
+                ->assertJsonPath('message', 'Synthetic sync interruption.');
+            $this->assertSame(30, (int) ini_get('max_execution_time'));
+        } finally {
+            set_time_limit($previous);
+        }
+    }
+
+    public function test_browser_sync_passes_one_bounded_deadline_without_lowering_read_priority(): void
+    {
+        $deadlines = [];
+        $client = \Mockery::mock(SpaceTradersClient::class)->makePartial();
+        $client->shouldReceive('request')->withArgs(function ($method, $path, $data, $token, $deadline) use (&$deadlines) {
+            $this->assertSame('get', $method);
+            $deadlines[] = $deadline;
+
+            return true;
+        })->passthru();
+        app()->instance(SpaceTradersClient::class, $client);
+        app()->instance(SpaceTradersApi::class, new SpaceTradersApi($client));
+        $budget = new class extends RequestBudget
+        {
+            public array $priorities = [];
+
+            public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75): void
+            {
+                $this->priorities[] = $priority;
+                parent::reserve($token, $account, $priority, $maxWait);
+            }
+        };
+        app()->instance(RequestBudget::class, $budget);
+        $started = microtime(true);
+        $this->postJson('/agents/'.$this->agent->id.'/sync')->assertAccepted();
+
+        $this->assertNotEmpty($deadlines);
+        $this->assertCount(1, array_unique($deadlines));
+        $this->assertGreaterThanOrEqual($started + 49, $deadlines[0]);
+        $this->assertLessThanOrEqual($started + 51, $deadlines[0]);
+        $this->assertSame(['critical'], array_unique($budget->priorities));
     }
 
     public function test_incomplete_observations_remain_available_without_inventing_planning_values(): void

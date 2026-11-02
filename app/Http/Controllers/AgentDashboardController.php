@@ -13,6 +13,7 @@ use App\Gameplay\MiningPlanner;
 use App\Gameplay\OpportunityAssessor;
 use App\Gameplay\OpportunityEvaluator;
 use App\Gameplay\ShipCommandExecutor;
+use App\Gameplay\SpaceTradersApi;
 use App\Http\Requests\GameplayRequest;
 use App\Models\Agent;
 use App\Models\AutomationDraft;
@@ -82,13 +83,26 @@ class AgentDashboardController extends Controller
         return response()->json($evaluator->investment($agent, $case))->header('Cache-Control', 'no-store');
     }
 
-    public function sync(GameplayRequest $request, Agent $agent, ShipCommandExecutor $executor, AgentSynchronizer $sync)
+    public function sync(GameplayRequest $request, Agent $agent, ShipCommandExecutor $executor, AgentSynchronizer $sync, SpaceTradersApi $api)
     {
-        return $this->result(fn () => $executor->locked($agent, function () use ($agent, $sync) {
-            $sync->sync($agent);
+        $previousLimit = (int) ini_get('max_execution_time');
+        set_time_limit(60);
+        $deadline = microtime(true) + 50;
+        try {
+            return $this->result(fn () => $executor->locked($agent, fn () => $api->readOnly(function () use ($deadline) {
+                if (microtime(true) >= $deadline) {
+                    throw new GameException('Synchronization time limit reached. Saved observations remain available; refresh to continue.');
+                }
 
-            return ['message' => 'Fleet and bounded local observations synchronized.'];
-        }));
+                return $deadline;
+            }, function () use ($agent, $sync) {
+                $sync->sync($agent);
+
+                return ['message' => 'Fleet and bounded local observations synchronized.'];
+            }, 'critical')));
+        } finally {
+            set_time_limit($previousLimit);
+        }
     }
 
     public function result(callable $work)

@@ -16,11 +16,11 @@ class SpaceTradersApi
 
     private ?\Closure $readGuard = null;
 
-    public function readOnly(\Closure $guard, callable $work): mixed
+    public function readOnly(\Closure $guard, callable $work, string $priority = 'discovery'): mixed
     {
         $this->readGuard = $guard;
         try {
-            return $this->client->scope($work, 'discovery');
+            return $this->client->scope($work, $priority);
         } finally {
             $this->readGuard = null;
         }
