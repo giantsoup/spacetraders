@@ -51,6 +51,12 @@ The map keeps unknown, observed empty, old, and invalidated information distinct
 
 ## Verification and limits
 
-The full repository verification script passes, including 513 PHP tests with 2,994 assertions and 5 map JavaScript tests. T3 preview verified desktop and phone layouts, real drag/click/keyboard workflows, overlap selection, empty/unknown/stale states, and ship-selection round trips. Browser event probes exercised wheel and two-pointer touch handlers. Gameplay table and fake transport hashes stayed unchanged across browser verification.
+The full repository verification script passes, including 518 PHP tests with 3,041 assertions and 6 map JavaScript tests. T3 preview verified desktop and phone layouts, real drag/click/keyboard workflows, overlap selection, empty/unknown/stale states, and ship-selection round trips. Browser event probes exercised wheel and two-pointer touch handlers. Gameplay table and fake transport hashes stayed unchanged across browser verification.
 
-Phone coverage used a browser viewport and synthetic touch events. Physical device gestures, Safari, screen readers, deployment, and live gameplay remain unverified. Catalogue completeness is historical, and map browsing never requests missing data. See the [verification report](interactive-system-map-verification.md) for exact checks and screenshots.
+Follow-up phone coverage used native Chromium input in an emulated viewport. Physical device gestures, Safari, Firefox, screen readers, deployment, and live gameplay remain unverified. Catalogue completeness is historical, and map browsing never requests missing data. See the [verification report](interactive-system-map-verification.md) for exact checks and screenshots.
+
+## Follow-up integration and QA
+
+Merged latest main `f84bd824fe5bc117339d5ece249205ab6c7d54ba`, including the API rate tracker. The follow-up native Chromium suite covers 24 scenarios across desktop, phone, small phone, landscape and reduced viewport layouts. It exercises all stored fixture locations, every marker, native wheel and touch, card/camera combinations, keyboard shortcuts, focus and Escape priority, navigation/history/authentication, tracker interactions and recovery, and the no-gameplay boundary.
+
+Claude Sonnet 5.5 independently reviewed the integration source. Confirmed issues were reproduced, fixed, and covered by the native browser regressions. The [latest QA report](interactive-system-map/qa/qa.html) records exact revision, source-review limits and physical-device/browser coverage gaps.

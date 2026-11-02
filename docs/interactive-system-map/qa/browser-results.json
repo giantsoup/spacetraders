@@ -1,0 +1,3366 @@
+{
+  "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+  "origin": "http://spacetraders-map-90.test",
+  "browser": "156.0.8078.4",
+  "checks": [
+    {
+      "id": "desktop-entry",
+      "status": "pass",
+      "observed": "Agents → flight deck → map; stored selected ship and current built assets verified",
+      "screenshot": "desktop-entry.png"
+    },
+    {
+      "id": "desktop-camera",
+      "status": "pass",
+      "observed": "Native wheel, drag, both zoom buttons, fit and center all changed the expected camera values",
+      "screenshot": "desktop-camera.png"
+    },
+    {
+      "id": "desktop-marker-drag",
+      "status": "pass",
+      "observed": "Dragging from artwork pans; a subsequent click still opens the location",
+      "screenshot": "desktop-marker-drag.png"
+    },
+    {
+      "id": "desktop-all-locations",
+      "status": "pass",
+      "observed": "Every one of 21 stored locations opens and closes, including the unplotted entry",
+      "screenshot": "desktop-all-locations.png"
+    },
+    {
+      "id": "desktop-all-markers-overlaps",
+      "status": "pass",
+      "observed": "19 map markers and both co-located locations individually selectable; Escape restores marker focus",
+      "screenshot": "desktop-all-markers-overlaps.png"
+    },
+    {
+      "id": "desktop-card-states-scroll",
+      "status": "pass",
+      "observed": "Stored text, empty and unknown states, stale/invalidated zero-valued prices, and native card scrolling verified",
+      "screenshot": "desktop-card-states-scroll.png"
+    },
+    {
+      "id": "desktop-keyboard-dismissal",
+      "status": "pass",
+      "observed": "Keyboard pan/zoom/fit/center, Tab+Enter, Escape focus restore and outside click verified",
+      "screenshot": "desktop-keyboard-dismissal.png"
+    },
+    {
+      "id": "open-card-camera-controls",
+      "status": "pass",
+      "observed": "Zoom, pan, Fit and Center retain the location card and control focus; ship picker works while a card was open",
+      "screenshot": "open-card-camera-controls.png"
+    },
+    {
+      "id": "nearby-keyboard-and-scroll-reset",
+      "status": "pass",
+      "observed": "Nearby keyboard selection retains button focus and replacing a scrolled card resets details to the top",
+      "screenshot": "nearby-keyboard-and-scroll-reset.png"
+    },
+    {
+      "id": "browser-shortcuts-and-global-escape",
+      "status": "pass",
+      "observed": "Browser modifier shortcuts remain available, Escape works from controls, and marker focus has an inset visible ring",
+      "screenshot": "browser-shortcuts-and-global-escape.png"
+    },
+    {
+      "id": "wheel-line-units",
+      "status": "pass",
+      "observed": "Line-mode wheel events normalize consistently with pixel-mode wheel input",
+      "screenshot": "wheel-line-units.png"
+    },
+    {
+      "id": "unplotted-controls-access",
+      "status": "pass",
+      "observed": "Unplotted information opens away from the desktop camera controls",
+      "screenshot": "unplotted-controls-access.png"
+    },
+    {
+      "id": "ship-selection-history",
+      "status": "pass",
+      "observed": "All ships, empty observations/fleet, transit departure, reload, generic link, back/forward and deck round trip verified",
+      "screenshot": "ship-selection-history.png"
+    },
+    {
+      "id": "rate-tracker-navigation",
+      "status": "pass",
+      "observed": "API tracker refresh/Done/Escape and focus containment, Menu Done/Escape and affected navigation verified",
+      "screenshot": "rate-tracker-navigation.png"
+    },
+    {
+      "id": "rate-tracker-states",
+      "status": "pass",
+      "observed": "Browser-mocked tracker snapshots show ready, low capacity, cooldown, unavailable and recovery; two budgets and dark details render without upstream calls",
+      "screenshot": "rate-tracker-states.png"
+    },
+    {
+      "id": "navigation-and-signout",
+      "status": "pass",
+      "observed": "Skip link, same-page System map, Agents link, brand, sign out, authentication redirect and fresh login verified",
+      "screenshot": "navigation-and-signout.png"
+    },
+    {
+      "id": "zoom-limits-directory-toggle",
+      "status": "pass",
+      "observed": "Zoom bounds remain finite, Fit recovers, and directory toggles both ways",
+      "screenshot": "zoom-limits-directory-toggle.png"
+    },
+    {
+      "id": "map-read-only-boundary",
+      "status": "pass",
+      "observed": "Gameplay table hashes and fake transport calls/writes unchanged, including API tracker refresh",
+      "screenshot": "map-read-only-boundary.png"
+    },
+    {
+      "id": "phone-layout",
+      "status": "pass",
+      "observed": "Map, tracker, controls and open location card fit 390x844; 260px detail area remains keyboard-scrollable",
+      "screenshot": "phone-layout.png"
+    },
+    {
+      "id": "small-phone-layout",
+      "status": "pass",
+      "observed": "Map, tracker, controls and open location card fit 320x568; 104px detail area remains keyboard-scrollable",
+      "screenshot": "small-phone-layout.png"
+    },
+    {
+      "id": "phone-landscape-layout",
+      "status": "pass",
+      "observed": "Map, tracker, controls and open location card fit 844x390; 95px detail area remains keyboard-scrollable",
+      "screenshot": "phone-landscape-layout.png"
+    },
+    {
+      "id": "reflow-layout",
+      "status": "pass",
+      "observed": "Map, tracker, controls and open location card fit 720x450; 140px detail area remains keyboard-scrollable",
+      "screenshot": "reflow-layout.png"
+    },
+    {
+      "id": "two-finger-tap-card",
+      "status": "pass",
+      "observed": "Two-finger gesture without motion retains the selected card",
+      "screenshot": "two-finger-tap-card.png"
+    },
+    {
+      "id": "native-touch",
+      "status": "pass",
+      "observed": "Trusted Chromium touch input pinches, pans, taps markers, selects overlap members and closes the card",
+      "screenshot": "native-touch.png"
+    }
+  ],
+  "errors": [
+    {
+      "check": "rate-tracker-states",
+      "kind": "response",
+      "url": "/rate-limit",
+      "status": 503,
+      "expected": true
+    },
+    {
+      "check": "rate-tracker-states",
+      "kind": "console",
+      "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+      "expected": true
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/login"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/Login-D3heYP5q.js"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/Checkbox-DMMwbvRW.js"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/GuestLayout-BGsjt-Gi.js"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/TextInput-DSv2E1Nz.js"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BCBGjbB0.js"
+    },
+    {
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "method": "POST",
+      "path": "/login"
+    },
+    {
+      "method": "GET",
+      "path": "/agents"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/Agents-EABhi3lL.js"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/GameConnection-Bpaw0hRd.js"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/Agents-UQeWFSxe.css"
+    },
+    {
+      "check": "desktop-entry",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "desktop-entry",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "desktop-entry",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-BH1HoGGh.js"
+    },
+    {
+      "check": "desktop-entry",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-Dccay97P.js"
+    },
+    {
+      "check": "desktop-entry",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "desktop-entry",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-b8io0S3p.js"
+    },
+    {
+      "check": "desktop-entry",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "desktop-entry",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CVVppjEh.js"
+    },
+    {
+      "check": "desktop-entry",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "desktop-entry",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CI7m37d-.css"
+    },
+    {
+      "check": "desktop-entry",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "desktop-entry",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "desktop-entry",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "desktop-entry",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "desktop-entry",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "desktop-camera",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "desktop-camera",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "desktop-camera",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "desktop-camera",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "desktop-camera",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "desktop-camera",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "desktop-camera",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "desktop-camera",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "desktop-camera",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "desktop-camera",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "desktop-camera",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "desktop-camera",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "desktop-camera",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "desktop-camera",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "desktop-camera",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "desktop-marker-drag",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "desktop-marker-drag",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "desktop-marker-drag",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "desktop-marker-drag",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "desktop-marker-drag",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "desktop-marker-drag",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "desktop-marker-drag",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "desktop-marker-drag",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "desktop-marker-drag",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "desktop-marker-drag",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "desktop-marker-drag",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "desktop-marker-drag",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "desktop-marker-drag",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "desktop-marker-drag",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "desktop-marker-drag",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "desktop-all-locations",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "desktop-all-locations",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "desktop-all-locations",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "desktop-all-locations",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "desktop-all-locations",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "desktop-all-locations",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "desktop-all-locations",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "desktop-all-locations",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "desktop-all-locations",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "desktop-all-locations",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "desktop-all-locations",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "desktop-all-locations",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "desktop-all-locations",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "desktop-all-locations",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "desktop-all-locations",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "desktop-all-markers-overlaps",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "desktop-all-markers-overlaps",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "desktop-all-markers-overlaps",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "desktop-all-markers-overlaps",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "desktop-all-markers-overlaps",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "desktop-all-markers-overlaps",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "desktop-all-markers-overlaps",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "desktop-all-markers-overlaps",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "desktop-all-markers-overlaps",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "desktop-all-markers-overlaps",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "desktop-all-markers-overlaps",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "desktop-all-markers-overlaps",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "desktop-all-markers-overlaps",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "desktop-all-markers-overlaps",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "desktop-all-markers-overlaps",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "desktop-card-states-scroll",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "desktop-card-states-scroll",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "desktop-card-states-scroll",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "desktop-card-states-scroll",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "desktop-card-states-scroll",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "desktop-card-states-scroll",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "desktop-card-states-scroll",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "desktop-card-states-scroll",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "desktop-card-states-scroll",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "desktop-card-states-scroll",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "desktop-card-states-scroll",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "desktop-card-states-scroll",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "desktop-card-states-scroll",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "desktop-card-states-scroll",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "desktop-card-states-scroll",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "desktop-keyboard-dismissal",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "desktop-keyboard-dismissal",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "desktop-keyboard-dismissal",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "desktop-keyboard-dismissal",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "desktop-keyboard-dismissal",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "desktop-keyboard-dismissal",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "desktop-keyboard-dismissal",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "desktop-keyboard-dismissal",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "desktop-keyboard-dismissal",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "desktop-keyboard-dismissal",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "desktop-keyboard-dismissal",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "desktop-keyboard-dismissal",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "desktop-keyboard-dismissal",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "desktop-keyboard-dismissal",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "desktop-keyboard-dismissal",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "open-card-camera-controls",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "nearby-keyboard-and-scroll-reset",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "nearby-keyboard-and-scroll-reset",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "nearby-keyboard-and-scroll-reset",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "nearby-keyboard-and-scroll-reset",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "nearby-keyboard-and-scroll-reset",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "nearby-keyboard-and-scroll-reset",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "nearby-keyboard-and-scroll-reset",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "nearby-keyboard-and-scroll-reset",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "nearby-keyboard-and-scroll-reset",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "nearby-keyboard-and-scroll-reset",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "nearby-keyboard-and-scroll-reset",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "nearby-keyboard-and-scroll-reset",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "nearby-keyboard-and-scroll-reset",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "nearby-keyboard-and-scroll-reset",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "nearby-keyboard-and-scroll-reset",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "browser-shortcuts-and-global-escape",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "browser-shortcuts-and-global-escape",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "browser-shortcuts-and-global-escape",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "browser-shortcuts-and-global-escape",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "browser-shortcuts-and-global-escape",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "browser-shortcuts-and-global-escape",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "browser-shortcuts-and-global-escape",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "browser-shortcuts-and-global-escape",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "browser-shortcuts-and-global-escape",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "browser-shortcuts-and-global-escape",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "browser-shortcuts-and-global-escape",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "browser-shortcuts-and-global-escape",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "browser-shortcuts-and-global-escape",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "browser-shortcuts-and-global-escape",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "browser-shortcuts-and-global-escape",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "wheel-line-units",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "wheel-line-units",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "wheel-line-units",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "wheel-line-units",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "wheel-line-units",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "wheel-line-units",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "wheel-line-units",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "wheel-line-units",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "wheel-line-units",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "wheel-line-units",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "wheel-line-units",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "wheel-line-units",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "wheel-line-units",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "wheel-line-units",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "wheel-line-units",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "unplotted-controls-access",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "unplotted-controls-access",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "unplotted-controls-access",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "unplotted-controls-access",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "unplotted-controls-access",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "unplotted-controls-access",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "unplotted-controls-access",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "unplotted-controls-access",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "unplotted-controls-access",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "unplotted-controls-access",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "unplotted-controls-access",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "unplotted-controls-access",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "unplotted-controls-access",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "unplotted-controls-access",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "unplotted-controls-access",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-BH1HoGGh.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BCBGjbB0.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-Dccay97P.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-DMMwbvRW.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-b8io0S3p.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CVVppjEh.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-Bpaw0hRd.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CI7m37d-.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/agents/2/map"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "ship-selection-history",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/profile"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/Edit-C0SzDGZV.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/AuthenticatedLayout-BTQcJJDC.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/DeleteUserForm-jdqG6-Di.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-Dccay97P.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/TextInput-DSv2E1Nz.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/UpdatePasswordForm-CDh5sfrW.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BCBGjbB0.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/UpdateProfileInformationForm-BTuGZ9IN.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/guide"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/Show-DP13hPr0.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-b8io0S3p.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-Bpaw0hRd.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/Show-DVouwzbK.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-BH1HoGGh.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BCBGjbB0.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-Dccay97P.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-DMMwbvRW.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-b8io0S3p.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CVVppjEh.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-Bpaw0hRd.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CI7m37d-.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "rate-tracker-navigation",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "rate-tracker-states",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/agents"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/Agents-EABhi3lL.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-Bpaw0hRd.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/Agents-UQeWFSxe.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/agents"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/Agents-EABhi3lL.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-Bpaw0hRd.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/Agents-UQeWFSxe.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "POST",
+      "path": "/logout"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/Welcome-DEFEQOa4.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/Welcome-C6ZLIYTJ.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/login"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/Login-D3heYP5q.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-DMMwbvRW.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/GuestLayout-BGsjt-Gi.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/TextInput-DSv2E1Nz.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BCBGjbB0.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "POST",
+      "path": "/login"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "navigation-and-signout",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "zoom-limits-directory-toggle",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "zoom-limits-directory-toggle",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "zoom-limits-directory-toggle",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "zoom-limits-directory-toggle",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "zoom-limits-directory-toggle",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "zoom-limits-directory-toggle",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "zoom-limits-directory-toggle",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "zoom-limits-directory-toggle",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "zoom-limits-directory-toggle",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "zoom-limits-directory-toggle",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "zoom-limits-directory-toggle",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "zoom-limits-directory-toggle",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "zoom-limits-directory-toggle",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "zoom-limits-directory-toggle",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "zoom-limits-directory-toggle",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "map-read-only-boundary",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "phone-layout",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "phone-layout",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "phone-layout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "phone-layout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "phone-layout",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "phone-layout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "phone-layout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "phone-layout",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "phone-layout",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "phone-layout",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "phone-layout",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "phone-layout",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "phone-layout",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "phone-layout",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "phone-layout",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "small-phone-layout",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "small-phone-layout",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "small-phone-layout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "small-phone-layout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "small-phone-layout",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "small-phone-layout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "small-phone-layout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "small-phone-layout",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "small-phone-layout",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "small-phone-layout",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "small-phone-layout",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "small-phone-layout",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "small-phone-layout",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "small-phone-layout",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "small-phone-layout",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "phone-landscape-layout",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "phone-landscape-layout",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "phone-landscape-layout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "phone-landscape-layout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "phone-landscape-layout",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "phone-landscape-layout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "phone-landscape-layout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "phone-landscape-layout",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "phone-landscape-layout",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "phone-landscape-layout",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "phone-landscape-layout",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "phone-landscape-layout",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "phone-landscape-layout",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "phone-landscape-layout",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "phone-landscape-layout",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/login"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/Login-D3heYP5q.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-DMMwbvRW.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/GuestLayout-BGsjt-Gi.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/TextInput-DSv2E1Nz.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BCBGjbB0.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "POST",
+      "path": "/login"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/agents"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/Agents-EABhi3lL.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-Bpaw0hRd.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "reflow-layout",
+      "method": "GET",
+      "path": "/build/assets/Agents-UQeWFSxe.css"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "two-finger-tap-card",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "native-touch",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "native-touch",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "native-touch",
+      "method": "GET",
+      "path": "/build/assets/AppShell-B0H5RQlY.css"
+    },
+    {
+      "check": "native-touch",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-CCn7uh2d.css"
+    },
+    {
+      "check": "native-touch",
+      "method": "GET",
+      "path": "/build/assets/app-BvFFmSZM.js"
+    },
+    {
+      "check": "native-touch",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BcgVJmMO.js"
+    },
+    {
+      "check": "native-touch",
+      "method": "GET",
+      "path": "/build/assets/AppShell-DAfI42NT.js"
+    },
+    {
+      "check": "native-touch",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-D0yC2aPx.js"
+    },
+    {
+      "check": "native-touch",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "native-touch",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-BuCnSmna.js"
+    },
+    {
+      "check": "native-touch",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "native-touch",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "native-touch",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "native-touch",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "native-touch",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    }
+  ]
+}

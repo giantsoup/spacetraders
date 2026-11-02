@@ -1,0 +1,25 @@
+PASS desktop-entry
+PASS desktop-camera
+PASS desktop-marker-drag
+PASS desktop-all-locations
+PASS desktop-all-markers-overlaps
+PASS desktop-card-states-scroll
+PASS desktop-keyboard-dismissal
+PASS open-card-camera-controls
+PASS nearby-keyboard-and-scroll-reset
+PASS browser-shortcuts-and-global-escape
+PASS wheel-line-units
+PASS unplotted-controls-access
+PASS ship-selection-history
+PASS rate-tracker-navigation
+PASS rate-tracker-states
+PASS navigation-and-signout
+PASS zoom-limits-directory-toggle
+PASS map-read-only-boundary
+PASS phone-layout
+PASS small-phone-layout
+PASS phone-landscape-layout
+PASS reflow-layout
+PASS two-finger-tap-card
+PASS native-touch
+All 24 browser scenarios passed with no unexpected browser errors

@@ -1,0 +1,15 @@
+PASS desktop-entry: Agents → flight deck → map; stored selected ship and current built assets verified
+PASS desktop-camera: Native wheel, drag, both zoom buttons, fit and center all changed the expected camera values
+PASS desktop-marker-drag: Dragging from artwork pans; a subsequent click still opens the location
+FAILED desktop-all-locations: Directory selection close should restore focus to its visible opener
+PASS desktop-all-markers-overlaps: 19 map markers and both co-located locations individually selectable; Escape restores marker focus
+FAILED desktop-card-states-scroll: page.waitForFunction: Timeout 7000ms exceeded.
+FAILED desktop-keyboard-dismissal: Expected values to be strictly equal:
+PASS ship-selection-history: All ships, empty observations/fleet, transit departure, reload, generic link, back/forward and deck round trip verified
+PASS rate-tracker-navigation: API tracker refresh/Done/Escape, Menu Done/Escape and affected navigation verified
+PASS map-read-only-boundary: Gameplay table hashes and fake transport calls/writes unchanged, including API tracker refresh
+PASS phone-layout: Map, tracker, controls and open location card fit 390x844; 178px detail area remains keyboard-scrollable
+FAILED small-phone-layout: Location detail scroll region has only 22px of height
+FAILED phone-landscape-layout: Location detail scroll region has only 51px of height
+FAILED reflow-layout: Location detail scroll region has only 36px of height
+PASS native-touch: Trusted Chromium touch input pinches, pans, taps markers, selects overlap members and closes the card
