@@ -43,6 +43,6 @@
     const buttons = [...document.querySelectorAll('.map-controls button, .map-marker, .map-directory summary')];
     assert(buttons.every(b => b.getBoundingClientRect().height >= 44), 'Map controls and markers have 44px touch targets');
     const controls = document.querySelector('.map-controls').getBoundingClientRect(), directory = document.querySelector('.map-directory').getBoundingClientRect();
-    assert(controls.right <= directory.left || controls.bottom <= directory.top, 'Map controls do not overlap location directory');
+    assert(controls.right <= directory.left || controls.bottom <= directory.top || controls.top >= directory.bottom, 'Map controls do not overlap location directory');
     return { checks, viewport: {width:innerWidth,height:innerHeight}, pointerChecks:'Synthetic two-pointer events; native capture tested with real T3 drag separately', camera:camera() };
 })()

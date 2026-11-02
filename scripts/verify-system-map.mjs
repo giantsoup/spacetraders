@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import fs from 'node:fs';
-import { fitCamera, zoomCamera, panCamera, project, wheelZoomFactor, markerGroups, mapLabels } from '../resources/js/systemMap.js';
+import { fitCamera, closeUpZoom, markerSize, zoomCamera, panCamera, project, wheelZoomFactor, markerGroups, mapLabels } from '../resources/js/systemMap.js';
 import { waypointSprite, waypointFamilies } from '../resources/js/waypointSprites.js';
 const size = { width: 1000, height: 600 };
 test('fit keeps negative, positive, identical, and zero coordinates visible', () => {
@@ -61,4 +61,24 @@ test('wheel units normalize pixels, lines and pages without changing zoom bounds
     assert.equal(wheelZoomFactor(3, 1, 600), wheelZoomFactor(48, 0, 600));
     assert.equal(wheelZoomFactor(.1, 2, 600), wheelZoomFactor(60, 0, 600));
     assert.equal(wheelZoomFactor(-10000, 0, 600), wheelZoomFactor(-200, 0, 600));
+});
+
+test('close-up artwork grows with zoom and all camera zooms stop at the useful limit', () => {
+    for (const fit of [.05, .3, 2, 10]) {
+        const maximum = closeUpZoom(fit);
+        assert.equal(markerSize(fit, fit), 48);
+        assert.ok(markerSize(maximum, fit) > 48);
+        assert.ok(markerSize(maximum, fit) <= 168);
+        const camera = {x:0, y:0, scale:fit}, anchor = {x:250, y:180};
+        const capped = zoomCamera(camera, 1e9, anchor, size, maximum);
+        assert.equal(capped.scale, maximum);
+        assert.deepEqual(zoomCamera(capped, 2, anchor, size, maximum), capped);
+    }
+    assert.equal(markerSize(4, 1), 88);
+    assert.equal(markerSize(16, 1), 168);
+    const groups = markerGroups([{symbol:'A',x:0,y:0}, {symbol:'B',x:200,y:0}], {x:0,y:0,scale:1}, size, 168);
+    assert.equal(groups.length, 2);
+    const labels = mapLabels(groups, size, 168);
+    assert.equal(labels[0].labelY, groups[0].y + 102);
+    assert.equal(markerGroups([{symbol:'A',x:0,y:0}, {symbol:'B',x:100,y:0}], {x:0,y:0,scale:1}, size, 168).length, 1);
 });

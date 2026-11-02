@@ -77,7 +77,7 @@ function assertBounds(b) {
     assert.ok(b.scrollWidth<=b.width,`Page overflows horizontally: ${b.scrollWidth} > ${b.width}`);
     assert.ok(b.map.height>=100,`Map has only ${b.map.height}px of height`);
     assert.ok(b.header.top>=0 && b.map.bottom<=b.height+1,'Header or map extends outside viewport height');
-    assert.ok(b.controls.right<=b.directory.left || b.controls.bottom<=b.directory.top,'Map controls overlap location directory');
+    assert.ok(b.controls.right<=b.directory.left || b.controls.bottom<=b.directory.top || b.controls.top>=b.directory.bottom,'Map controls overlap location directory');
     if(b.card){assert.ok(b.card.left>=0 && b.card.right<=b.width,'Card is outside viewport width');assert.ok(b.card.top>=b.map.top && b.card.bottom<=b.map.bottom+1,'Card is outside map height');}
     assert.ok(b.rate.right<=b.menu.left,'Rate tracker overlaps Menu');
 }
@@ -217,12 +217,19 @@ try {
         return 'Skip link, same-page System map, Agents link, brand, sign out, authentication redirect and fresh login verified';
     });
     await check('zoom-limits-directory-toggle',async()=>{
-        await map();for(let i=0;i<18;i++)await button('Zoom in').click();assert.equal((await camera()).scale,128);
+        await map();const baseSize=Number(await page.locator('.system-canvas').getAttribute('data-marker-size'));
+        for(let i=0;i<18 && await button('Zoom in').isEnabled();i++)await button('Zoom in').click();
+        const maximum=Number(await page.locator('.system-canvas').getAttribute('data-max-zoom'));assert.equal((await camera()).scale,maximum);assert.ok(await button('Zoom in').isDisabled());
+        const closeSize=Number(await page.locator('.system-canvas').getAttribute('data-marker-size'));assert.ok(closeSize>baseSize*3);assert.ok(closeSize<=168);
+        await button('Center on ship').click();const sprite=page.locator('.map-marker').filter({has:page.locator('svg')});assert.ok(await sprite.count()>0);
+        await page.locator('.system-canvas').focus();await page.keyboard.press('+');assert.equal((await camera()).scale,maximum);
+        const box=await page.locator('.system-canvas').boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.wheel(0,-10000);await page.waitForTimeout(80);assert.equal((await camera()).scale,maximum);
+        await page.screenshot({path:path.join(output,'desktop-close-up.png')});
         for(let i=0;i<24;i++)await button('Zoom out').click();assert.equal((await camera()).scale,.05);
         assert.ok(Object.values(await camera()).every(Number.isFinite));await button('Fit system').click();
         await page.locator('.map-directory summary').click();assert.ok(await page.locator('.map-directory').evaluate(el=>el.open));await page.locator('.map-directory summary').click();assert.ok(!await page.locator('.map-directory').evaluate(el=>el.open));
         await openLocation('X1-TEST-PORT');await button('Close location information').click();
-        return 'Zoom bounds remain finite, Fit recovers, and directory toggles both ways';
+        return 'Artwork grows from 40px to 160px; button, keyboard and wheel stop at close-up limit; Fit and directory recover';
     });
     await check('map-read-only-boundary',async()=>{
         await map();const before=audit();await button('Zoom in').click();await button('Zoom out').click();await button('Fit system').click();await button('Center on ship').click();await openLocation('X1-TEST-PORT');await page.keyboard.press('Escape');await page.locator('.rate-trigger').click();await page.getByRole('dialog',{name:'API rate limit',exact:true}).getByRole('button',{name:'Refresh status',exact:true}).click();await page.keyboard.press('Escape');
@@ -238,6 +245,18 @@ try {
         return `Map, tracker, controls and open location card fit ${width}x${height}; ${clientHeight}px detail area remains keyboard-scrollable`;
     });
     page=await newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+    await check('mobile-knowledge-and-map-space',async()=>{
+        await map();const b=await bounds();assert.ok(b.map.height>=740,`Expected at least 740px map height, got ${b.map.height}`);
+        const toggle=page.locator('.map-knowledge-toggle');await toggle.tap();assert.equal(await toggle.getAttribute('aria-expanded'),'true');assert.ok(await page.locator('#map-knowledge-detail').isVisible());
+        await page.keyboard.press('Escape');assert.equal(await toggle.getAttribute('aria-expanded'),'false');assert.ok(await toggle.evaluate(el=>el===document.activeElement));
+        await openLocation('X1-TEST-PORT');await toggle.tap();await page.keyboard.press('Tab');assert.ok(await page.locator('.system-canvas').evaluate(el=>el===document.activeElement));await page.keyboard.press('Escape');
+        assert.equal(await toggle.getAttribute('aria-expanded'),'false');assert.equal(await page.locator('.location-card').count(),1,'Escape from the canvas closes knowledge before the underlying card');
+        await toggle.tap();await page.locator('.map-directory summary').tap();assert.equal(await toggle.getAttribute('aria-expanded'),'false');await toggle.tap();assert.ok(!await page.locator('.map-directory').evaluate(el=>el.open));
+        await page.locator('.system-canvas').focus();await page.keyboard.press('Escape');await page.keyboard.press('Escape');
+        for(const selector of ['.map-controls button','.map-directory summary','.map-knowledge-toggle','.map-header select','.map-deck-link'])for(const rect of await page.locator(selector).evaluateAll(nodes=>nodes.map(n=>({w:n.getBoundingClientRect().width,h:n.getBoundingClientRect().height}))))assert.ok(rect.w>=44 && rect.h>=44,`${selector} touch target is ${rect.w}x${rect.h}`);
+        await page.screenshot({path:path.join(output,'phone-map-space.png')});
+        return '390x844 map uses at least 740px height, touch targets are 44px, knowledge opens/closes and Escape respects overlay priority';
+    });
     await check('two-finger-tap-card',async()=>{
         await map();await openLocation('X1-TEST-PORT');const client=await page.context().newCDPSession(page),b=await bounds();const y=b.map.top+160;
         await client.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:100,y,id:11},{x:170,y,id:12}]});await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});assert.equal(await page.locator('.location-card').count(),1,'Two-finger gesture must not count as an outside tap');
@@ -252,7 +271,15 @@ try {
         await button('Fit system').tap();const initial=await camera();
         await client.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:195,y:b.map.top+150,id:3}]});await client.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:245,y:b.map.top+180,id:3}]});await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});assert.notEqual((await camera()).x,initial.x);
         await button('Fit system').tap();await page.locator('.map-marker[aria-label="2 locations near X1-TEST-PORT"]').tap();await page.locator('#location-title').waitFor();await page.locator('.nearby-locations').getByRole('button',{name:'X1-TEST-TWIN',exact:true}).tap();assert.equal(await page.locator('#location-title').innerText(),'X1-TEST-TWIN');await button('Close location information').tap();assert.equal(await page.locator('.location-card').count(),0);
-        return 'Trusted Chromium touch input pinches, pans, taps markers, selects overlap members and closes the card';
+        for(let i=0;i<18 && await button('Zoom in').isEnabled();i++)await button('Zoom in').tap();
+        const maximum=Number(await page.locator('.system-canvas').getAttribute('data-max-zoom'));assert.equal((await camera()).scale,maximum);
+        await button('Center on ship').tap();await page.screenshot({path:path.join(output,'phone-close-up.png')});
+        await client.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:cx-30,y,id:21},{x:cx+30,y,id:22}]});
+        await client.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:cx-75,y,id:21},{x:cx+75,y,id:22}]});
+        await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});assert.equal((await camera()).scale,maximum);
+        assert.ok(await button('Zoom in').isDisabled());assert.equal(Number(await page.locator('.system-canvas').getAttribute('data-marker-size')),168);
+        await button('Fit system').tap();assert.equal(Number(await page.locator('.system-canvas').getAttribute('data-marker-size')),48);
+        return 'Trusted Chromium touch pinches and pans, selects overlap members, closes cards, stops pinch zoom at close-up limit and recovers with Fit';
     });
     await flush();
 } finally { for(const context of contexts)await context.close().catch(()=>{});await browser.close();await flush(); }

@@ -2,7 +2,7 @@
 
 Issue: https://github.com/giantsoup/spacetraders/issues/90
 
-Status: Delivered and locally verified. See [verification evidence and limitations](interactive-system-map-verification.md). Deployment and live gameplay were not performed.
+Status: Delivered and locally verified. See [verification evidence and limitations](interactive-system-map-verification.md). Real API reads and two reversible manual commands were verified with later user authorization. No deployment or merge was performed.
 
 ## Requested feature
 
@@ -39,7 +39,7 @@ Location art is seeded by reset and waypoint identity. Known traits may refine a
 
 ## PR request and authorization
 
-Create a feature branch and one PR for this issue, initially containing this plan, then complete implementation in a separate worktree thread. Taylor explicitly authorized autonomous implementation, browser verification, local commits, pushing this feature branch and opening/updating its PR while unavailable. Make routine reversible decisions without waiting for Taylor. Do not merge, deploy, or mutate live gameplay. Preserve unrelated work and use owned isolated fixtures for verification. Keep reports and review artifacts in dark mode.
+Create a feature branch and one PR for this issue, initially containing this plan, then complete implementation in a separate worktree thread. Taylor explicitly authorized autonomous implementation, browser verification, local commits, pushing this feature branch and opening/updating its PR while unavailable. Make routine reversible decisions without waiting for Taylor. The original scope excluded live gameplay. Taylor later explicitly authorized small real API tests and spending. Do not merge or deploy. Preserve unrelated work and use owned isolated fixtures for verification. Keep reports and review artifacts in dark mode.
 
 Final PR description must describe actual delivered behavior, browser and automated evidence, remaining limitations, and link this issue.
 
@@ -51,12 +51,20 @@ The map keeps unknown, observed empty, old, and invalidated information distinct
 
 ## Verification and limits
 
-The full repository verification script passes, including 518 PHP tests with 3,041 assertions and 6 map JavaScript tests. T3 preview verified desktop and phone layouts, real drag/click/keyboard workflows, overlap selection, empty/unknown/stale states, and ship-selection round trips. Browser event probes exercised wheel and two-pointer touch handlers. Gameplay table and fake transport hashes stayed unchanged across browser verification.
+The full repository verification script passes, including 518 PHP tests with 3,041 assertions and 7 map JavaScript tests. T3 preview verified desktop and phone layouts, real drag/click/keyboard workflows, overlap selection, empty/unknown/stale states, and ship-selection round trips. Browser event probes exercised wheel and two-pointer touch handlers. Gameplay table and fake transport hashes stayed unchanged across browser verification.
 
-Follow-up phone coverage used native Chromium input in an emulated viewport. Physical device gestures, Safari, Firefox, screen readers, deployment, and live gameplay remain unverified. Catalogue completeness is historical, and map browsing never requests missing data. See the [verification report](interactive-system-map-verification.md) for exact checks and screenshots.
+Follow-up phone coverage used native Chromium input in an emulated viewport. Physical device gestures, Safari, Firefox, screen readers and deployment remain unverified. The real API follow-up verified a catalogue refresh and orbit/dock through normal preview, approval and queue execution. Catalogue completeness is historical, and map browsing never requests missing data. See the [verification report](interactive-system-map-verification.md) for exact checks and screenshots.
 
 ## Follow-up integration and QA
 
 Merged latest main `f84bd824fe5bc117339d5ece249205ab6c7d54ba`, including the API rate tracker. The follow-up native Chromium suite covers 24 scenarios across desktop, phone, small phone, landscape and reduced viewport layouts. It exercises all stored fixture locations, every marker, native wheel and touch, card/camera combinations, keyboard shortcuts, focus and Escape priority, navigation/history/authentication, tracker interactions and recovery, and the no-gameplay boundary.
 
 Claude Sonnet 5.5 independently reviewed the integration source. Confirmed issues were reproduced, fixed, and covered by the native browser regressions. The [latest QA report](interactive-system-map/qa/qa.html) records exact revision, source-review limits and physical-device/browser coverage gaps.
+
+## Mobile design and close-up follow-up
+
+Claude Sonnet 5.5 implemented the requested map UI design pass. The phone header uses a single compact row, coverage and observation age move into a floating disclosure, and 44px controls sit along the right edge. On the tested 390×844 viewport, the map is 743px tall. The coverage disclosure retains full detail and exact timestamps, and respects Escape and directory selection.
+
+Waypoint artwork grows with zoom from 40px to a 160px close-up. All zoom inputs stop at a limit derived from the fitted system view. Marker grouping, labels, ship indicators and card anchors account for the larger artwork. Deterministic vector pixel art scales without replacement assets.
+
+The later user-authorized live check used 14 successful real API reads to store 94 known locations. Orbit and dock both confirmed through the normal command preview/approval/worker path, restoring the original dock, fuel and cargo with zero credit change. Map browsing and tracker refresh did not change gameplay hashes or upstream request counters. The local live preview shares the original database, locks, engine and budget; it does not create a second execution authority. See the [mobile and zoom report](interactive-system-map/mobile/qa.html) for final source hashes and checks.
