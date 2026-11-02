@@ -26,3 +26,17 @@ export function shipPresentation(ship, observedAt, connection, now) {
         age: Number.isFinite(stamp) ? `${Math.max(0, Math.floor((now - stamp) / 1000))}s ago` : 'Unknown',
     };
 }
+
+// Use the observed route, independent of countdown progress or an unapproved form destination.
+export function flightDeckLocation(ship, locations = []) {
+    const nav = ship?.nav;
+    const destination = nav?.route?.destination;
+    const symbol = (nav?.status === 'IN_TRANSIT' ? destination?.symbol : null) || nav?.waypointSymbol || null;
+    const saved = locations.find(point => point.symbol === symbol);
+    return {
+        symbol,
+        type: saved?.type || (destination?.symbol === symbol ? destination.type : null),
+        traits: saved?.traits ?? null,
+        description: saved?.description ?? null,
+    };
+}

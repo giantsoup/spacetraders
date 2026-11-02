@@ -1,0 +1,62 @@
+PHP 8.5.12; Node 26.13.0; pnpm 12.16.1
+Command: PHP_BIN=scripts/herd-php PNPM_BIN=<pnpm-12.16.1> bash scripts/verify.sh
+Exit: 0
+
+PASS PHP 8.5.12 matches Composer, lockfile and CI pin; worker/SQLite extensions loaded.
+PASS real selected PHP and matching runtime pins
+PASS stale Composer lock pin rejected
+PASS untested PHP patch rejected even when manifest pins agree
+PASS executable PHP_BIN wrapper preserves paths and literal arguments with spaces
+PASS missing Herd executable fails without falling back to global PHP
+Production assets are identical with unrelated Markdown and generated-view fixtures.
+PASS partial ready selection, blocked price selection, deduplicated scouting controls, local refresh and fulfilled-contract guidance.
+PASS absolute deadlines, observation-confirmed readiness, unknowns, zero-capacity meters and freshness
+✔ fit keeps negative, positive, identical, and zero coordinates visible (0.630542ms)
+✔ zoom retains the anchored world position and clamps repeated wheel extremes (0.272167ms)
+✔ overlapping and touching markers stay individually represented and split on zoom (4.634709ms)
+✔ all published waypoint types have pixel families (4.112708ms)
+✔ sprites are deterministic, distinct, neutral when unknown, and keep identity as knowledge grows (1.599375ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 45.048042
+✔ success waits for actual child exit, removes only its allocation and preserves durable output and an unrelated process (208.570041ms)
+✔ failure retains private diagnostics, redacts durable errors and still shuts down all acquired resources (105.446125ms)
+✔ partial setup failure before acquisition retains its allocation (3.098167ms)
+✔ one shutdown failure never skips the other cleanups or removes diagnostics (3.431458ms)
+✔ descendant symlinks are unlinked without traversing an external target (2.041834ms)
+✔ refuses cleanup when the owned symlink changes (1.764916ms)
+✔ refuses cleanup when the owned directory changes (1.856584ms)
+✔ refuses cleanup when the owned marker changes (1.53875ms)
+✔ refuses cleanup when the owned marker-symlink changes (1.279167ms)
+✔ refuses cleanup when the owned permissions changes (1.168459ms)
+✔ a child that already exited or failed to spawn cannot hang shutdown (22.152084ms)
+✔ an unresponsive owned child is reaped, and escalation fails the run (442.682792ms)
+✔ SIGTERM enters shutdown, retains diagnostics and does not skip subsequent cleanups (2.699834ms)
+✔ a user-supplied output directory is never a deletion target (2.708792ms)
+✔ a reporting failure retains the owned fixture and still verifies resource shutdown (2.02825ms)
+✔ replaced durable output cannot redirect reporting into the private fixture (1.431875ms)
+✔ result filenames cannot escape the durable output directory (0.250375ms)
+✔ failed-run diagnostics never follow an injected file symlink (1.25025ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 842.750917
+PASS template defaults: HTTP 404, key changed no
+PASS local debug with solutions disabled: HTTP 404, key changed no
+PASS production control: HTTP 404, key changed no
+PASS isolated vulnerable positive control: HTTP 204, key changed only in disposable positive control
+OK (513 tests, 2994 assertions)
+{"tool":"pint","result":"passed"}
+
+Targeted SystemMapTest: 6 tests, 74 assertions passed.
+Browser gameplay audit: before and after identical.
+git diff --check: passed.

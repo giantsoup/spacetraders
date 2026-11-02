@@ -63,6 +63,44 @@ class GameplayTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_map_command_handoff_keeps_owned_ship_and_reset_scoped_target_without_upstream_calls(): void
+    {
+        $before = json_decode(file_get_contents($this->worldFile), true)['calls'];
+        $this->get('/agents/'.$this->agent->id.'?ship=LOCAL-1&map_action=travel&map_waypoint=X1-TEST-PORT')
+            ->assertOk()->assertInertia(fn (Assert $page) => $page->where('mapTask.ship_symbol', 'LOCAL-1')
+            ->where('mapTask.action', 'travel')->where('mapTask.point.symbol', 'X1-TEST-PORT'));
+        $this->get('/agents/'.$this->agent->id.'/map?ship=LOCAL-1&location=X1-TEST-PORT')
+            ->assertOk()->assertInertia(fn (Assert $page) => $page->where('selectedLocation', 'X1-TEST-PORT'));
+        $this->get('/agents/'.$this->agent->id.'?ship=')->assertOk();
+        $this->getJson('/agents/'.$this->agent->id.'?ship=LOCAL-1&map_action=invalid&map_waypoint=X1-TEST-PORT')->assertUnprocessable();
+        $this->getJson('/agents/'.$this->agent->id.'?ship=LOCAL-1&map_action=travel')->assertUnprocessable();
+        $this->assertSame($before, json_decode(file_get_contents($this->worldFile), true)['calls']);
+        $this->get('/agents/'.$this->agent->id.'?ship=FOREIGN-1&map_action=travel&map_waypoint=X1-TEST-PORT')->assertNotFound();
+        $this->get('/agents/'.$this->agent->id.'?ship=LOCAL-1&map_action=discover&map_waypoint=X2-OTHER-A')->assertNotFound();
+        GameObservation::create(['agent_id' => $this->agent->id, 'reset_id' => 'old-reset', 'kind' => 'waypoint', 'symbol' => 'X1-TEST-OLD', 'data' => ['systemSymbol' => 'X1-TEST'], 'observed_at' => now(), 'source' => 'fixture']);
+        $this->get('/agents/'.$this->agent->id.'?ship=LOCAL-1&map_action=travel&map_waypoint=X1-TEST-OLD')->assertNotFound();
+        $this->actingAs(User::factory()->create())->get('/agents/'.$this->agent->id.'?ship=LOCAL-1&map_action=travel&map_waypoint=X1-TEST-PORT')->assertNotFound();
+    }
+
+    public function test_flight_deck_art_reuses_reset_scoped_map_knowledge_without_refreshing(): void
+    {
+        $point = GameObservation::where('agent_id', $this->agent->id)->where('kind', 'waypoint')->where('symbol', 'X1-TEST-PORT')->firstOrFail();
+        $point->update(['data' => array_replace($point->data, ['traits' => [['symbol' => 'OCEAN']], 'description' => 'Stored ocean world.'])]);
+        GameObservation::create(['agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id, 'kind' => 'manual_read', 'symbol' => 'get-system-art', 'data' => ['operation' => 'get-system', 'data' => ['symbol' => 'X1-TEST', 'waypoints' => [['symbol' => 'X1-TEST-MANUAL', 'type' => 'MOON']]]], 'observed_at' => now(), 'source' => 'fixture']);
+        GameObservation::create(['agent_id' => $this->agent->id, 'reset_id' => 'previous-reset', 'kind' => 'waypoint', 'symbol' => 'X1-TEST-OLD', 'data' => ['systemSymbol' => 'X1-TEST', 'type' => 'PLANET'], 'observed_at' => now(), 'source' => 'fixture']);
+        $before = json_decode(file_get_contents($this->worldFile), true)['calls'];
+        $this->get('/agents/'.$this->agent->id)->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('sceneLocations', function ($rows) {
+                $points = collect($rows)->keyBy('symbol');
+
+                return $points->get('X1-TEST-PORT') == ['symbol' => 'X1-TEST-PORT', 'type' => 'PLANET', 'traits' => [['symbol' => 'OCEAN']], 'description' => 'Stored ocean world.']
+                    && $points->get('X1-TEST-MANUAL')['type'] === 'MOON'
+                    && $points->get('X1-TEST-MANUAL')['traits'] === null
+                    && ! $points->has('X1-TEST-OLD');
+            }));
+        $this->assertSame($before, json_decode(file_get_contents($this->worldFile), true)['calls']);
+    }
+
     public function test_browser_sync_allows_rate_limited_discovery_and_restores_the_web_time_limit(): void
     {
         $previous = (int) ini_get('max_execution_time');

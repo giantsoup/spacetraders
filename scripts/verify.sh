@@ -16,6 +16,11 @@ node scripts/verify-rate-limit.mjs
 node --check scripts/verify-rate-limit-browser.mjs
 node scripts/verify-automation-selection.mjs
 node scripts/verify-ship-presentation.mjs
+node --test scripts/verify-system-map.mjs
+node --check scripts/system-map-browser-probes.js
+node --check scripts/verify-system-map-browser.mjs
+node --check scripts/verify-system-map-actions-browser.mjs
+node --check scripts/verify-flight-deck-art-browser.mjs
 node --check scripts/verify-native-ship-browser.mjs
 node --check scripts/verify-ship-https-browser.mjs
 node --check scripts/ship-browser-navigation.mjs
@@ -51,6 +56,7 @@ node --check scripts/verify-batch2-browser.mjs
     config/cache.php config/inertia.php config/sanctum.php config/session.php \
     tests/Feature/AgentTest.php tests/Feature/ForwarderTest.php \
     tests/Feature/UpgradeCompatibilityTest.php \
+    app/Maps app/Http/Controllers/SystemMapController.php tests/Feature/SystemMapTest.php scripts/system-map-fixture.php scripts/system-map-action-fixture.php \
     app/Gameplay app/Enums app/Jobs app/Queue app/Console app/Http/Middleware/DeploymentAdmission.php app/Http/Requests/GameplayRequest.php app/Http/Requests/LocalAutomationRequest.php \
     app/Http/Controllers/AdviserController.php app/Http/Requests/AdviserRequest.php tests/Feature/AdviserTest.php \
     app/Http/Controllers/AgentDashboardController.php app/Http/Controllers/AgentCommandController.php \

@@ -1,14 +1,17 @@
 <script setup>
+import MapFlightTask from '@/Components/SystemMap/MapFlightTask.vue';
 import ContractApproval from '@/Components/ContractApproval.vue';
 import ManualCommandForm from '@/Components/ManualCommandForm.vue';
 import ManualReadBrowser from '@/Components/ManualReadBrowser.vue';
 import AdviserPanel from '@/Components/AdviserPanel.vue';
 import FocusSheet from '@/Components/FocusSheet.vue';
 import ShipScene from '@/Components/ShipScene.vue';
+import WaypointSprite from '@/Components/SystemMap/WaypointSprite.vue';
 import ShipReport from '@/Components/ShipReport.vue';
-import { shipPresentation, observedNumber, meterPercent } from '@/shipPresentation.js';
+import { shipPresentation, flightDeckLocation, observedNumber, meterPercent } from '@/shipPresentation.js';
 import AutomationConsole from '@/Components/AutomationConsole.vue';
 import AppShell from '@/Layouts/AppShell.vue';
+import { shipSelectionKey } from '@/shipSelection.js';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Head, Link, router, usePage, usePoll } from '@inertiajs/vue3';
 import { submissionKey } from '@/gameplay.js';
@@ -27,16 +30,17 @@ import OpportunityPanel from '@/Components/OpportunityPanel.vue';
 import OperationControls from '@/Components/OperationControls.vue';
 import { useGuidedFlight } from '@/Composables/useGuidedFlight.js';
 
-const props = defineProps({ manualReserveFloor: Number, manualCommands: Object, manualReads: Object, foundationEnums: Object, adviser: Object, agent: Object, ships: Array, capabilities: Object, observations: Array, actions: Array, runs: Array, health: Object, intelligence: Object, automationEnabled: Boolean, synthetic: Boolean, localAutomation: Boolean, engine: Object, engineOperator: Boolean, investigations: { type: Array, default: () => [] }, drafts: { type: Array, default: () => [] }, accounting: Object, guidedOffers: { type: Array, default: () => [] } });
+const props = defineProps({ sceneLocations: { type: Array, default: () => [] }, mapTask: Object, manualReserveFloor: Number, manualCommands: Object, manualReads: Object, foundationEnums: Object, adviser: Object, agent: Object, ships: Array, capabilities: Object, observations: Array, actions: Array, runs: Array, health: Object, intelligence: Object, automationEnabled: Boolean, synthetic: Boolean, localAutomation: Boolean, engine: Object, engineOperator: Boolean, investigations: { type: Array, default: () => [] }, drafts: { type: Array, default: () => [] }, accounting: Object, guidedOffers: { type: Array, default: () => [] } });
 const archived = computed(() => props.agent.connection_state === 'reset');
 const manualFlightMode = ref('CRUISE');
 const selected = ref(props.ships[0]?.symbol || '');
 const page = usePage();
-const selectionKey = computed(() => `spacetraders:ship:${page.props.auth.user.id}:${props.agent.id}:${props.agent.reset_id || 'unknown'}`);
+const selectionKey = computed(() => shipSelectionKey(page.props.auth.user.id, props.agent));
 function restoreSelection() {
     let saved;
     try { saved = window.sessionStorage.getItem(selectionKey.value); } catch { /* Selection remains usable without browser storage. */ }
-    selected.value = props.ships.find(entry => entry.symbol === saved)?.symbol || props.ships.find(entry => entry.symbol === selected.value)?.symbol || props.ships[0]?.symbol || '';
+    const requested = new URLSearchParams(window.location.search).get('ship');
+    selected.value = props.ships.find(entry => entry.symbol === requested)?.symbol || props.ships.find(entry => entry.symbol === saved)?.symbol || props.ships.find(entry => entry.symbol === selected.value)?.symbol || props.ships[0]?.symbol || '';
 }
 onMounted(restoreSelection);
 watch([selectionKey, () => props.ships.map(entry => entry.symbol).join(',')], restoreSelection);
@@ -50,11 +54,11 @@ const paused = ref(false);
 const hidden = ref(false);
 const view = ref('');
 const reportSection = ref('systems');
-const views = { manualApi: 'Manual API', library: 'API library', adviser: 'Adviser policy', report: 'Ship report', fleet: 'Your fleet', commands: 'Commands', review: 'Review approval', automation: 'Automation', intelligence: 'Intelligence', activity: 'Activity history', run: 'Active run', guide: 'Guided flight' };
+const views = { mapTask: 'Map action', manualApi: 'Manual API', library: 'API library', adviser: 'Adviser policy', report: 'Ship report', fleet: 'Your fleet', commands: 'Commands', review: 'Review approval', automation: 'Automation', intelligence: 'Intelligence', activity: 'Activity history', run: 'Active run', guide: 'Guided flight' };
 const aliases = { manual: 'commands', setup: 'commands', market: 'intelligence', waypoints: 'intelligence', fleet: 'fleet', activity: 'activity', automation: 'automation' };
 function readView() {
     const key = window.location.hash.slice(1);
-    view.value = views[key] ? key : aliases[key] || '';
+    view.value = key === 'mapTask' && !props.mapTask ? '' : views[key] ? key : aliases[key] || '';
 }
 function openView(key, section) {
     if (key === 'guide' && guiding.value) key = guidedDestination();
@@ -66,7 +70,9 @@ function openView(key, section) {
 function resumeClock() { now.value = Date.now(); hidden.value = document.hidden; }
 let clock;
 onMounted(() => {
-    readView(); resumeClock();
+    readView();
+    if (props.mapTask && !window.location.hash) view.value = 'mapTask';
+    resumeClock();
     clock = window.setInterval(() => { now.value = Date.now(); }, 1000);
     window.addEventListener('popstate', readView);
     window.addEventListener('hashchange', readView);
@@ -81,6 +87,7 @@ onUnmounted(() => {
     document.removeEventListener('visibilitychange', resumeClock);
 });
 const presentation = computed(() => shipPresentation(ship.value, shipRecord.value?.observed_at, props.agent.connection_state, now.value));
+const sceneLocation = computed(() => flightDeckLocation(ship.value, props.sceneLocations));
 const primary = computed(() => archived.value ? { label: 'Review archived activity', view: 'activity' }
     : pending.value ? { label: pending.value.state === 'uncertain' || pending.value.review_required ? 'Review unresolved action' : 'View pending command', view: 'activity' }
     : activeRun.value ? { label: 'View active run', view: 'run' }
@@ -148,6 +155,7 @@ const busy = ref(false);
 const notice = ref('');
 const error = ref(false);
 const commandPreview = ref(null);
+const commandReturnView = ref('commands');
 const runPreview = ref(null);
 watch(() => props.actions, actions => {
     const observed = actions.find(a => a.id === commandPreview.value?.id);
@@ -170,7 +178,7 @@ const cash = value => value === null || value === undefined ? 'Unknown' : Number
 const age = value => value && Number.isFinite(Date.parse(value)) ? `${Math.max(0, Math.floor((now.value - Date.parse(value)) / 1000))}s ago` : 'Never observed';
 const healthy = value => value && now.value - Date.parse(value) < 90000;
 const url = suffix => `/agents/${props.agent.id}/${suffix}`;
-const reload = () => new Promise(resolve => router.reload({ only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'engine', 'investigations', 'drafts', 'accounting', 'intelligence', 'adviser'], onFinish: resolve }));
+const reload = () => new Promise(resolve => router.reload({ only: ['sceneLocations', 'mapTask', 'agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'engine', 'investigations', 'drafts', 'accounting', 'intelligence', 'adviser'], onFinish: resolve }));
 async function prepareMarket(task) {
     if (archived.value || busy.value || pending.value || activeRun.value || guiding.value) return;
     selected.value = task.ship_symbol;
@@ -184,7 +192,7 @@ async function prepareMarket(task) {
         notice.value = `Destination set to ${task.market} for ${task.ship_symbol}. Enter orbit if docked, then Preview navigation and review fuel before approving. Synchronize after arrival, then investigate mining again.`;
     }
 }
-usePoll(5000, { only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'engine', 'investigations', 'drafts', 'accounting', 'intelligence'] });
+usePoll(5000, { only: ['sceneLocations', 'mapTask', 'agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'engine', 'investigations', 'drafts', 'accounting', 'intelligence'] });
 const guided = useGuidedFlight(() => page.props.auth.user.id, () => ({
     ...props, selected: selected.value, offers: offers.value, commandPreview: commandPreview.value,
     form: { destination: destination.value, good: good.value, quantity: quantity.value, priceBound: priceBound.value, reserve: reserve.value, site: site.value, buyer: buyer.value, offerIndex: offerIndex.value },
@@ -239,6 +247,7 @@ async function post(path, payload = {}, allowBusy = false) {
     }
 }
 async function preview(command) {
+    commandReturnView.value = 'commands';
     if (command === 'navigate' && navigationHelp.value) {
         error.value = true;
         notice.value = navigationHelp.value;
@@ -259,22 +268,28 @@ async function preview(command) {
         Object.assign(args, { shipType: offer.type, waypointSymbol: offer.yard, site: site.value, market: buyer.value });
     }
     commandPreview.value = await post('commands/preview', { key: submissionKey(), ship_symbol: selected.value, command, arguments: args });
-    if (commandPreview.value) { await nextTick(); previewPanel.value?.focus(); }
+    if (commandPreview.value) { notice.value = 'Preview ready. No command has been approved or queued.'; await nextTick(); previewPanel.value?.focus(); }
 }
 async function previewManual(intent) {
+    commandReturnView.value = 'commands';
     commandPreview.value = await post('commands/preview', { key: submissionKey(), ...intent });
-    if (commandPreview.value) { await nextTick(); previewPanel.value?.focus(); }
+    if (commandPreview.value) { notice.value = 'Preview ready. No command has been approved or queued.'; await nextTick(); previewPanel.value?.focus(); }
 }
-async function previewExploration(intent) {
-    commandPreview.value = await post('commands/preview', { key: submissionKey(), ship_symbol: selected.value, command: intent.command, arguments: { ...intent.arguments, reserve: Number(reserve.value) } });
-    if (commandPreview.value) { await nextTick(); previewPanel.value?.focus(); }
+function previewMapTask(intent) {
+    selected.value = props.mapTask.ship_symbol;
+    return previewExploration(intent, true);
+}
+async function previewExploration(intent, fromMap = false) {
+    commandReturnView.value = fromMap ? 'mapTask' : 'commands';
+    commandPreview.value = await post('commands/preview', { key: submissionKey(), ship_symbol: selected.value, command: intent.command, arguments: { reserve: Number(reserve.value), ...intent.arguments } });
+    if (commandPreview.value) { notice.value = 'Preview ready. No command has been approved or queued.'; await nextTick(); previewPanel.value?.focus(); }
 }
 async function approveCommand() {
     if (!commandPreview.value) return;
     const intent = guiding.value && guidedStep.value?.kind === 'approve' ? guidedStep.value.intent : null;
     guided.trackApproval(commandPreview.value, intent);
     const action = await post(`commands/${commandPreview.value.id}/approve`);
-    if (action) { commandPreview.value = null; openView('activity'); }
+    if (action) { commandPreview.value = null; openView(commandReturnView.value === 'mapTask' ? 'mapTask' : 'activity'); }
 }
 async function previewRun() {
     runPreview.value = await post('runs/preview', { ...(wearAllowance.value === '' ? {} : { wear_allowance: Number(wearAllowance.value) }), ship_symbol: selected.value, site: site.value, market: buyer.value, reserve: Number(reserve.value), max_spend: Number(spend.value), max_loss: Number(loss.value), cycles: Number(cycles.value), minutes: Number(minutes.value), max_extractions: Number(extractionCount.value), ...(Number(extractionCount.value) > 1 ? { extraction_headroom: Number(extractionHeadroom.value), site_seconds: Number(siteSeconds.value) } : {}), ...(runSurveySignature.value ? { survey_signature: runSurveySignature.value } : {}) });
@@ -298,14 +313,15 @@ function distance(point) {
 
 <template>
     <Head :title="`${agent.name} · Ship`" />
-    <AppShell compact brand="SPACETRADERS" :agent-id="agent.id" skip-to="ship-home" skip-label="Skip to selected ship" :guide-href="archived ? route('guide') : route('agents.guide', agent.id)" class="bridge" :class="{ guiding }">
+    <AppShell compact brand="SPACETRADERS" :agent-id="agent.id" :ship-symbol="selected" skip-to="ship-home" skip-label="Skip to selected ship" :guide-href="archived ? route('guide') : route('agents.guide', agent.id)" class="bridge" :class="{ guiding }">
+
         <main :aria-busy="busy">
             <section id="ship-home" class="ship-home" tabindex="-1" aria-labelledby="ship-title">
                 <header class="ship-identity">
                     <button type="button" class="identity-button" @click="openView('fleet')"><h1 id="ship-title">{{ selected || agent.name }}</h1><span aria-hidden="true">⌄</span><span class="sr-only">Switch owned ship</span></button>
                     <button type="button" class="home-link" @click="openView('report', 'systems')">Report</button>
                 </header>
-                <ShipScene v-if="ship" :ship-name="selected" :transit="presentation.transit" :progress="presentation.progress" :paused="paused || hidden || !!view" @report="openView('report', 'systems')" />
+                <ShipScene :location="sceneLocation" :reset="agent.reset_id" v-if="ship" :ship-name="selected" :transit="presentation.transit" :progress="presentation.progress" :paused="paused || hidden || !!view" @report="openView('report', 'systems')" />
                 <div class="ship-status">
                     <p class="status-location">{{ presentation.status }}</p>
                     <p class="ship-eta" :class="{ 'stationary-label': !presentation.transit }">{{ presentation.transit ? presentation.arrival : ship ? assetName(ship.nav?.status) : 'Synchronize fleet' }}</p>
@@ -326,10 +342,12 @@ function distance(point) {
                 <div class="home-action"><PrimaryButton :disabled="busy" @click="primary.sync ? synchronize() : openView(primary.view)">{{ primary.label }}</PrimaryButton><DangerButton v-if="activeRun && !archived && !view" :disabled="!!activeRun.stop_requested_at" @click="post(`runs/${activeRun.id}/stop`, {}, true)">{{ activeRun.stop_requested_at ? 'Stop requested' : 'Stop automation' }}</DangerButton></div>
             </section>
             <p v-if="notice" :role="error ? 'alert' : 'status'" class="notice" :class="{ fault: error }">{{ readableText(notice) }}</p>
-            <nav class="home-destinations" aria-label="Ship destinations"><button v-for="key in ['commands', 'manualApi', 'library', 'automation', 'adviser', 'intelligence', 'activity', 'guide']" :key="key" type="button" @click="openView(key)">{{ key === 'activity' && actions[0] ? `Activity · ${readableLabel(actions[0].state)}` : views[key] }}</button></nav>
-            <FocusSheet :open="!!view" :title="views[view] || 'Ship'" @ready="sheetReady" @close="openView('')">
+            <nav class="home-destinations" aria-label="Ship destinations"><button v-if="mapTask" type="button" @click="openView('mapTask')">Continue map {{ mapTask.action === 'travel' ? 'travel' : 'discovery' }}</button><Link :href="route('agents.map', { agent: agent.id, ship: selected || undefined })">System map</Link><button v-for="key in ['commands', 'manualApi', 'library', 'automation', 'adviser', 'intelligence', 'activity', 'guide']" :key="key" type="button" @click="openView(key)">{{ key === 'activity' && actions[0] ? `Activity · ${readableLabel(actions[0].state)}` : views[key] }}</button></nav>
+            <FocusSheet :open="!!view" :title="view === 'mapTask' ? (mapTask?.action === 'travel' ? 'Plan travel' : 'Discover location') : views[view] || 'Ship'" @ready="sheetReady" @close="openView('')">
                 <nav class="sheet-tabs" aria-label="Flight deck destinations"><button type="button" @click="openView('')">Back to ship</button><SecondaryButton v-if="['commands', 'intelligence', 'guide'].includes(view)" data-guide="sync" :disabled="archived || busy || (guiding && guidedStep?.kind !== 'sync' && !guidedStep?.canSync && !(guidedStep?.kind === 'blocked' && guidedStep?.target === 'sync'))" @click="synchronize">Synchronize</SecondaryButton></nav>
                 <p v-if="notice" :role="error ? 'alert' : 'status'" class="notice" :class="{ fault: error }">{{ readableText(notice) }}</p>
+                <div v-if="mapTask && view !== 'mapTask'" class="sheet-tabs"><SecondaryButton @click="openView('mapTask')">Continue map {{ mapTask.action === 'travel' ? 'travel' : 'discovery' }}</SecondaryButton></div>
+                <MapFlightTask v-if="mapTask" v-show="view === 'mapTask'" :task="mapTask" :agent-id="agent.id" :ship="ships.find(entry => entry.symbol === mapTask.ship_symbol)?.snapshot" :actions="actions" :now="now" :reserve-floor="manualReserveFloor" :disabled="archived || busy || guiding" :blocked-reason="archived ? 'Archived agent. Commands unavailable.' : guiding ? 'Finish or pause guided flight before using map commands.' : pending ? 'An action is pending or needs review. Settle it before another command.' : activeRun?.ship_symbol === mapTask.ship_symbol ? 'Stop automation and settle its action before manual takeover.' : ''" @preview="previewMapTask" @sync="synchronize" @stop="post(`commands/${$event.id}/stop`)" @reconcile="reconcile" @activity="openView('activity')" />
                 <section v-show="view === 'guide'" class="agent-heading"><h2>{{ agent.name }}</h2><GameConnection /><p>Credits {{ cash(agent.credits) }} CR · {{ readableLabel(agent.connection_state) }}</p><SecondaryButton v-if="!archived && guidedFinished" @click="guided.start">Restart tutorial</SecondaryButton><p v-if="!localAutomation">Worker: {{ healthy(health.worker) ? 'recent step' : 'idle or offline' }} · {{ age(health.worker) }}. Scheduler: {{ healthy(health.scheduler) ? 'recent pass' : 'stale or offline' }}. Closing this page does not stop gameplay.</p></section>
                 <div v-show="view === 'guide' || guiding" class="guidance-slot">
             <GuidedFlight v-if="!archived && !guidedFinished" :session="guidedSession" :step="guidedStep" :storage-available="guidedStorage" :busy="busy" @reveal="openView(guidedDestination())" @start="guided.start" @pause="guided.pause" @resume="guided.resume" @finish="finishTutorial" @advance="guided.advance" @sync="synchronize" @recover="commandPreview = actions.find(action => action.id === guidedSession.pending.id && action.state === 'preview')" @clear-expired="guided.clearExpired(); commandPreview = null" />
@@ -351,7 +369,7 @@ function distance(point) {
                 </aside>
 
                     <fieldset v-show="view === 'automation'" :disabled="guiding"><legend v-if="guiding">Pause guidance before using automation.</legend><AutomationConsole v-if="localAutomation && !archived" :agent="agent" :ships="ships" :engine="engine" :operator="engineOperator" :investigations="investigations" :drafts="drafts" :runs="runs" :accounting="accounting" :observations="observations" :enabled="automationEnabled" @inspect-run="openView('run')" @prepare-market="prepareMarket" @refresh="async done => { await reload(); done(); }" /></fieldset>
-                    <section v-if="view === 'intelligence' && presentation.transit" class="panel" aria-labelledby="destination-brief-heading"><h2 id="destination-brief-heading">Destination brief</h2><p>{{ ship.nav.waypointSymbol }} · {{ assetName(arrivalPoint?.data?.type) }}</p><p>Arrival <time :datetime="ship.nav.route?.arrival">{{ formatLocalTime(ship.nav.route?.arrival) }}</time> · {{ presentation.arrival }}</p><p>{{ arrivalPoint?.data?.traits ? arrivalPoint.data.traits.map(assetName).join(', ') || 'No traits observed' : 'Traits Unknown' }} · Observed {{ age(arrivalPoint?.observed_at) }}</p><p class="muted">Destination facts are saved observations. Arrival and command eligibility require a fresh server check.</p></section>
+                    <section v-if="view === 'intelligence' && presentation.transit" class="panel" aria-labelledby="destination-brief-heading"><div class="destination-art" aria-hidden="true"><WaypointSprite :point="sceneLocation" :reset="agent.reset_id" /></div><h2 id="destination-brief-heading">Destination brief</h2><p>{{ sceneLocation.symbol }} · {{ assetName(sceneLocation.type) }}</p><p>Arrival <time :datetime="ship.nav.route?.arrival">{{ formatLocalTime(ship.nav.route?.arrival) }}</time> · {{ presentation.arrival }}</p><p>{{ sceneLocation.traits ? sceneLocation.traits.map(assetName).join(', ') || 'Confirmed empty trait list' : 'Traits Unknown' }} · {{ arrivalPoint ? `Observed ${age(arrivalPoint.observed_at)}` : 'From saved navigation or system information' }}</p><p class="muted">Destination facts are saved observations. Arrival and command eligibility require a fresh server check.</p></section>
                     <OpportunityPanel v-show="view === 'intelligence'" :report="intelligence" :selected="selected" />
                     <section v-show="view === 'review'" v-if="!archived && (commandPreview || runPreview)" ref="previewPanel" tabindex="-1" class="panel approval" aria-labelledby="approval-heading">
                         <h2 id="approval-heading">Review {{ commandPreview?.command === 'buy_ship' ? 'ship purchase' : commandPreview ? 'manual command' : `${runPreview.plan.strategy || 'mining'} operation` }}</h2>
@@ -383,8 +401,8 @@ function distance(point) {
                             <div class="button-row approval-actions">
                                 <DangerButton v-if="['scrap', 'jettison', 'supply'].includes(commandPreview.command)" data-guide="approve" :disabled="archived || busy" @click="approveCommand">Approve {{ commandPreview.command === 'scrap' ? 'irreversible scrap' : 'permanent cargo loss' }}</DangerButton>
                                 <PrimaryButton v-else data-guide="approve" :disabled="archived || busy || (guiding && guidedStep?.kind !== 'approve')" @click="approveCommand">Approve {{ commandPreview.command === 'buy_ship' ? 'purchase' : 'command' }}</PrimaryButton>
-                                <DangerButton  :disabled="busy" @click="post(`commands/${commandPreview.id}/stop`); commandPreview = null; openView('commands')">Stop manual command</DangerButton>
-                                <SecondaryButton data-guide="cancel-preview" @click="commandPreview = null; openView('commands')">Cancel preview</SecondaryButton>
+                                <DangerButton  :disabled="busy" @click="post(`commands/${commandPreview.id}/stop`); commandPreview = null; openView(commandReturnView)">Stop manual command</DangerButton>
+                                <SecondaryButton data-guide="cancel-preview" @click="notice = ''; commandPreview = null; openView(commandReturnView)">Cancel preview</SecondaryButton>
                             </div>
                         </template>
                         <template v-else>
@@ -478,8 +496,10 @@ h1 { min-width: 0; font-size: 20px; font-weight: 650; line-height: 1.25; overflo
 .motion-control { white-space: nowrap; flex-shrink: 0; min-height: 44px; min-width: 44px; background: none; color: var(--color-muted); text-decoration: underline; }
 .home-action { display: grid; gap: 12px; margin-top: auto; padding-top: 12px; }
 .home-action .app-button { width: 100%; min-height: 52px; border-radius: 16px; }
+.destination-art { float: right; width: 88px; height: 88px; margin: 0 0 12px 16px; pointer-events: none; }
+.destination-art svg { width: 100%; height: 100%; }
 .home-destinations { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 16px; padding: 20px 0 4px; border-top: 1px solid var(--color-line); margin-top: 16px; }
-.home-destinations button { background: none; border: 0; color: var(--color-muted); min-height: 44px; padding: 8px 0; }
+.home-destinations button, .home-destinations > a { background: none; border: 0; color: var(--color-muted); min-height: 44px; padding: 8px 0; }
 .panel { padding: 16px 0; min-width: 0; border-bottom: 1px solid var(--color-line); }
 .bridge h2 { font-size: 20px; font-weight: 650; margin: 0 0 16px; }
 .bridge h3 { font-size: 18px; font-weight: 650; margin: 20px 0 12px; }

@@ -1,0 +1,84 @@
+# Interactive system map
+
+Issue: https://github.com/giantsoup/spacetraders/issues/90
+
+Status: Map browsing delivered and locally verified. Travel and explicit information actions added in the PR follow-up. See [verification evidence and limitations](interactive-system-map-verification.md). Real API reads and two reversible manual commands were verified with later user authorization. No deployment or merge was performed.
+
+## Requested feature
+
+Add a dedicated, dark, full-page map of the selected ship's current star system. Taylor wants to pan and zoom, click planets and other locations, and inspect a small information card. Browse stored observations without background API calls. Missing information remains Unknown. Explicit actions now open guarded travel/discovery or fetch a named read.
+
+## Approved choices
+
+- Current system first; no galaxy view in this version.
+- Stored knowledge only; opening, panning, zooming and selecting must not fetch upstream details or trigger gameplay.
+- Generated 8-bit artwork with unique, reproducible designs based on each location's known type, traits and descriptions.
+
+## Acceptance criteria
+
+- [x] Add an authenticated per-agent map route and links from the flight deck and navigation.
+- [x] Open the selected ship's current system; preserve ship selection when returning.
+- [x] Provide drag pan, wheel and pinch zoom, zoom buttons, Fit system and Center on ship.
+- [x] Plot actual coordinates. Manage labels by zoom and make overlapping locations individually selectable.
+- [x] Show a compact location card containing identifier, known type, coordinates, traits and descriptions, with market, shipyard and faction information when stored.
+- [x] Show observation times and distinguish Unknown from confirmed empty results. Mark partial catalogue coverage.
+- [x] List known locations that lack coordinates separately rather than inventing positions.
+- [x] Use a small anchored desktop card and compact phone bottom card; support outside click, Escape, keyboard access and touch.
+- [x] Generate stable pixel-art families for all published waypoint types, with trait-based visual differences and neutral fallbacks when information is unknown.
+- [x] Keep cosmetic variation separate from factual signals. Never invent terrain, services, prices or discoveries.
+- [x] Scope observations to the authenticated owner, selected agent and current game reset.
+- [x] Keep the page usable with an empty fleet, no observations, stale data, incomplete observations and co-located locations.
+- [x] Verify desktop and phone behavior in a real browser, inspect screenshots, exercise keyboard and touch interactions, and verify no upstream reads or gameplay writes while browsing.
+- [x] Run relevant automated checks, build frontend assets, and inspect the final diff.
+
+## Implementation direction
+
+Use the existing Vue/Inertia application with an SVG map, reusable deterministic pixel-art generator and location card. Reuse GameObservation, Ship, readable-label helpers and local-time presentation. Keep map projection and knowledge assembly behind a small server-side interface rather than duplicating observation rules in UI components.
+
+Location art is seeded by reset and waypoint identity. Known traits may refine appearance without changing the location's basic visual identity. Render crisp pixel art with readable text and large interaction targets. The selected ship's location is last observed, and in-transit ships must not be presented as confirmed arrivals.
+
+## PR request and authorization
+
+Create a feature branch and one PR for this issue, initially containing this plan, then complete implementation in a separate worktree thread. Taylor explicitly authorized autonomous implementation, browser verification, local commits, pushing this feature branch and opening/updating its PR while unavailable. Make routine reversible decisions without waiting for Taylor. The original scope excluded live gameplay. Taylor later explicitly authorized small real API tests and spending. Do not merge or deploy. Preserve unrelated work and use owned isolated fixtures for verification. Keep reports and review artifacts in dark mode.
+
+Final PR description must describe actual delivered behavior, browser and automated evidence, remaining limitations, and link this issue.
+
+## Delivered implementation
+
+`SystemMapKnowledge` assembles owner- and reset-scoped waypoint, service, catalogue, and saved manual system observations without changing storage. The SVG page shares ship selection with the flight deck. It includes deterministic code-generated pixel sprites, bounded marker groups, exact coordinate dots, keyboard controls, a desktop information card, and a phone bottom card.
+
+The map keeps unknown, observed empty, old, and invalidated information distinct. Directory and quote ages are independent. Unplotted locations remain selectable from the location directory. In-transit ships show their observed departure with arrival unconfirmed.
+
+## Verification and limits
+
+The full repository verification script passes, including 518 PHP tests with 3,041 assertions and 7 map JavaScript tests. T3 preview verified desktop and phone layouts, real drag/click/keyboard workflows, overlap selection, empty/unknown/stale states, and ship-selection round trips. Browser event probes exercised wheel and two-pointer touch handlers. Gameplay table and fake transport hashes stayed unchanged across browser verification.
+
+Follow-up phone coverage used native Chromium input in an emulated viewport. Physical device gestures, Safari, Firefox, screen readers and deployment remain unverified. The real API follow-up verified a catalogue refresh and orbit/dock through normal preview, approval and queue execution. Catalogue completeness is historical, and map browsing never requests missing data. See the [verification report](interactive-system-map-verification.md) for exact checks and screenshots.
+
+## Follow-up integration and QA
+
+Merged latest main `f84bd824fe5bc117339d5ece249205ab6c7d54ba`, including the API rate tracker. The follow-up native Chromium suite covers 24 scenarios across desktop, phone, small phone, landscape and reduced viewport layouts. It exercises all stored fixture locations, every marker, native wheel and touch, card/camera combinations, keyboard shortcuts, focus and Escape priority, navigation/history/authentication, tracker interactions and recovery, and the no-gameplay boundary.
+
+Claude Sonnet 5.5 independently reviewed the integration source. Confirmed issues were reproduced, fixed, and covered by the native browser regressions. The [latest QA report](interactive-system-map/qa/qa.html) records exact revision, source-review limits and physical-device/browser coverage gaps.
+
+## Mobile design and close-up follow-up
+
+Claude Sonnet 5.5 implemented the requested map UI design pass. The phone header uses a single compact row, coverage and observation age move into a floating disclosure, and 44px controls sit along the right edge. On the tested 390×844 viewport, the map is 743px tall. The coverage disclosure retains full detail and exact timestamps, and respects Escape and directory selection.
+
+Waypoint artwork grows with zoom from 40px to a 160px close-up. All zoom inputs stop at a limit derived from the fitted system view. Marker grouping, labels, ship indicators and card anchors account for the larger artwork. Deterministic vector pixel art scales without replacement assets.
+
+The later user-authorized live check used 14 successful real API reads to store 94 known locations. Orbit and dock both confirmed through the normal command preview/approval/worker path, restoring the original dock, fuel and cargo with zero credit change. Map browsing and tracker refresh did not change gameplay hashes or upstream request counters. The local live preview shares the original database, locks, engine and budget; it does not create a second execution authority. See the [mobile and zoom report](interactive-system-map/mobile/qa.html) for final source hashes and checks.
+
+Cards now put prices, shipyard offers and market goods first. Nearby locations expand from a compact selector; full terrain descriptions and lore appear below gameplay information. The final native browser suite covers 26 scenarios, including card order and overlap selection.
+
+## Travel and information follow-up
+
+A location card now has a fixed action footer. Travel here opens Plan travel on the existing flight deck, with the owned ship and location already selected. It creates no upstream requests until the user chooses a named action. Docked ships require a separate orbit preview and approval before travel. The standard travel preview checks fuel-safe continuation and protected credits. Explicit manual fuel/time review limits retain the existing acknowledgement and uncertainty warnings. These thresholds cannot cap server consumption.
+
+Get information opens a read sheet. Fetch waypoint details saves only the returned fields. Fetch market information and Fetch shipyard information appear for observed services. Prices and detailed offers still require a ship at the location; a remote read may provide only a directory. A GET cannot reveal uncharted traits.
+
+For unknown traits, Review discovery options opens Discover location with the same ship and target. One marketplace or shipyard question uses the existing ExplorationPolicy. Charting requires the current uncharted location. Nearby scanning requires a Sensor Array and can miss the target. Both use the existing orbit, cooldown, crew/power, fuel-continuation and reserve checks. Returned scan/chart data goes through AgentSynchronizer; a missed target stays unknown.
+
+Every gameplay command uses the existing preview, approval, durable ShipAction, queue execution, locks, Stop and reconciliation path. Nothing chains orbit into travel, repeats a scan, refuels automatically, or infers arrival from elapsed browser time. Back to selected map location preserves the ship and card selection. The map itself never polls gameplay or fetches while browsing.
+
+The follow-up adds no galaxy view, new command executor, engine service or automation. Existing canonical engine ownership is unchanged. Fixture browser execution uses bounded drains of the owned synthetic queue only.

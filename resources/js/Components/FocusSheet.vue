@@ -46,6 +46,7 @@ onBeforeUnmount(() => { if (dialog.value?.open) dialog.value.close(); });
 .focus-sheet { color-scheme: dark; width: min(100% - 16px, 760px); max-height: calc(100dvh - 16px - env(safe-area-inset-top)); margin: auto auto 0; padding: 0 0 env(safe-area-inset-bottom); border: 1px solid var(--color-line); border-radius: 26px 26px 0 0; background: var(--color-panel); color: var(--color-ink); overflow: auto; overscroll-behavior: contain; scroll-padding-top: 100px; font: 16px/1.5 var(--font-interface); overflow-wrap: anywhere; }
 .focus-sheet::backdrop { background: #020710cc; }
 .sheet-header { position: sticky; top: 0; z-index: 45; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 20px; background: var(--color-panel); border-bottom: 1px solid var(--color-line); }
+.sheet-header > button { flex-shrink: 0; white-space: nowrap; }
 .sheet-header h2 { margin: 0 !important; border: 0 !important; padding: 0 !important; color: var(--color-ink) !important; font-size: 22px !important; letter-spacing: 0 !important; }
 .sheet-content { padding: 16px 20px 28px; }
 @media(min-width:800px) { .focus-sheet { margin: auto; border-radius: 26px; max-height: calc(100dvh - 48px); } }

@@ -1,0 +1,31 @@
+{
+  "before": {
+    "game_table_hashes": {
+      "agents": "893896d9f2b9859baf94286036a2e56e317aca7b13e52f1dfe82c26b44d0057f",
+      "ships": "535865e27f1dc35337f2dc71166652e7c3e723c8ac48ada15b18538d647515e8",
+      "game_observations": "0a0094a743c21c491bfbdfc54ef0f2099887606c99bf214d940286fa648b61ef",
+      "observation_history": "86569d58deaa2e83adb8d4e603050c082538cbec230abfb96e9736ff52d7f0fb",
+      "ship_actions": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "automation_runs": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "jobs": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "fake_transport_calls": 42,
+    "fake_gameplay_writes": 0,
+    "world_hash": "b22bc6b45f30fd90bb3e0399ff11b69fabfa17f23044d65a801dfc9a5aaf5493"
+  },
+  "after": {
+    "game_table_hashes": {
+      "agents": "893896d9f2b9859baf94286036a2e56e317aca7b13e52f1dfe82c26b44d0057f",
+      "ships": "535865e27f1dc35337f2dc71166652e7c3e723c8ac48ada15b18538d647515e8",
+      "game_observations": "0a0094a743c21c491bfbdfc54ef0f2099887606c99bf214d940286fa648b61ef",
+      "observation_history": "86569d58deaa2e83adb8d4e603050c082538cbec230abfb96e9736ff52d7f0fb",
+      "ship_actions": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "automation_runs": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "jobs": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "fake_transport_calls": 42,
+    "fake_gameplay_writes": 0,
+    "world_hash": "b22bc6b45f30fd90bb3e0399ff11b69fabfa17f23044d65a801dfc9a5aaf5493"
+  },
+  "equal": true
+}

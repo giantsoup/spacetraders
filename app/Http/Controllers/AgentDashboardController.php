@@ -15,6 +15,7 @@ use App\Gameplay\OpportunityEvaluator;
 use App\Gameplay\ShipCommandExecutor;
 use App\Gameplay\SpaceTradersApi;
 use App\Http\Requests\GameplayRequest;
+use App\Maps\SystemMapKnowledge;
 use App\Models\Agent;
 use App\Models\AutomationDraft;
 use App\Models\AutomationRun;
@@ -23,19 +24,37 @@ use App\Models\OpportunityInvestigation;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class AgentDashboardController extends Controller
 {
-    public function show(Request $request, Agent $agent, MiningPlanner $planner, OpportunityAssessor $assessor): Response
+    public function show(Request $request, Agent $agent, MiningPlanner $planner, OpportunityAssessor $assessor, SystemMapKnowledge $knowledge): Response
     {
         abort_unless($agent->user_id === $request->user()->id, 404);
         $ships = Ship::where('agent_id', $agent->id)->get();
         $observations = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->get();
 
+        $input = $request->validate([
+            'map_action' => ['sometimes', 'string', Rule::in(['travel', 'discover'])],
+            'map_waypoint' => ['required_with:map_action', 'string', 'max:80'],
+            'ship' => ['required_with:map_action', 'nullable', 'string', 'max:80'],
+        ]);
+        $mapTask = null;
+        if (isset($input['map_action'])) {
+            $selectedShip = $ships->firstWhere('symbol', $input['ship']);
+            abort_unless($selectedShip, 404);
+            $map = app(SystemMapKnowledge::class)->forShip($agent, $selectedShip);
+            $point = collect($map['locations'])->firstWhere('symbol', $input['map_waypoint']);
+            abort_unless($point, 404);
+            $mapTask = ['action' => $input['map_action'], 'point' => $point, 'ship_symbol' => $selectedShip->symbol];
+        }
+
         return Inertia::render('Agent/Dashboard', [
+            'mapTask' => $mapTask,
             'agent' => $agent, 'ships' => $ships,
             'manualReserveFloor' => max(1, (int) config('gameplay.manual_reserve_floor')),
             'manualCommands' => ManualCommands::OPERATIONS,
@@ -43,6 +62,9 @@ class AgentDashboardController extends Controller
             'foundationEnums' => config('foundation.enums'),
             'capabilities' => $ships->mapWithKeys(fn ($s) => [$s->symbol => $planner->capability($s->snapshot)]),
             'observations' => $observations,
+            'sceneLocations' => $ships->unique(fn ($ship) => $ship->snapshot['nav']['systemSymbol'] ?? null)
+                ->flatMap(fn ($ship) => collect($knowledge->forShip($agent, $ship)['locations'])
+                    ->map(fn ($point) => Arr::only($point, ['symbol', 'type', 'traits', 'description'])))->values(),
             'intelligence' => $assessor->report($agent),
             'guidedOffers' => $observations->where('kind', 'shipyard')->flatMap(fn ($yard) => collect($yard->data['ships'] ?? [])
                 ->filter(fn ($offer) => $planner->capability($offer, true) === null)
