@@ -41,6 +41,8 @@ Owned executable `./scripts/herd-php` selected Herd PHP 8.5.12; Node 26.13.0 and
 | Follow-up browser | At final source: selected in-transit ship + agent contract, plain extract, omitted market refuel, standard CRUISE, omitted PATCH, jettison Stop with zero writes, cargo/equipment/scrap approval Stop, frozen pagination, rendered faction enum, long refuel form and destructive scrap panel. [Records](evidence/fnd-qa-followup-browser.json). |
 | Empty fleet | Final ship removal preserves history; ship actions disable while agent contract controls still work. [Record](evidence/fnd-final-empty-fleet-browser.json). |
 
+The supplemental platform invocation initially split a Composer path containing spaces and did not execute. Its published log was corrected with a successful quoted run; the earlier platform check had passed. Locked Composer and production pnpm advisory checks also found no known advisories ([logs](evidence/fnd-dependency-audits.txt)); this is not application security sign-off.
+
 The first broad verification at `b1b0b89` exposed a Pint import-order failure in routes; it was fixed. The final full check above passes. Earlier remote CI exposed the obsolete contract-write rejection test; the test now verifies manual preview plus arbitrary-field denial. New QA regressions first reproduced seven real failures, then passed after fixes. A new uncertainty harness initially looked for the wrong evidence key; its assertions were corrected to the actual durable fields and rerun. No production acceptance checker was weakened.
 
 All browser/worker mutations above used synthetic providers. No real-game mutation, purchase, jettison, construction, scrap, registration or spending occurred. No live acceptance is claimed.

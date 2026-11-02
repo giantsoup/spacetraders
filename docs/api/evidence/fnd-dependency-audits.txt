@@ -1,0 +1,10 @@
+Implementation source 308ccb9c86d9180b05fd5d05934d0bc5c069131c; locked dependency audit only, no dependency changes.
+Composer audit --locked --no-interaction (correctly quoted executable, exit0):
+No security vulnerability advisories found.
+
+pnpm12.16.1 audit --prod (exit0):
+npm notice run npx
+npm notice run 'pnpm' audit --prod
+No known vulnerabilities found
+
+These database checks cover known advisories at execution time; they are not an application security sign-off.
