@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Enums\ActionState;
+use App\Gameplay\AgentSynchronizer;
+use App\Gameplay\GameException;
 use App\Gameplay\ShipCommandExecutor;
 use App\Gameplay\SpaceTradersApi;
 use App\Models\ShipAction;
@@ -56,5 +58,15 @@ class FoundationBoundaryTest extends TestCase
         $this->assertArrayNotHasKey('expiration', $ship['cooldown']);
         $this->assertSame('derived_from_remaining_seconds', $ship['cooldown']['deadlineSource']);
         $this->assertNotEmpty($ship['cooldown']['readyAt']);
+    }
+
+    public function test_http_200_empty_cooldown_is_rejected_instead_of_masquerading_as_204(): void
+    {
+        $agent = User::factory()->create()->agents()->create(['name' => 'LOCAL', 'token' => 'synthetic', 'account_id' => 'synthetic-account', 'faction' => 'COSMIC']);
+        app(AgentSynchronizer::class)->saveShip($agent, FakeSpaceTraders::ship());
+        Http::fake(['*' => Http::response(['data' => []], 200)]);
+        $this->expectException(GameException::class);
+        $this->expectExceptionMessage('Cooldown HTTP 200 requires a cooldown object.');
+        app(SpaceTradersApi::class)->manualRead($agent, 'get-ship-cooldown', ['shipSymbol' => 'LOCAL-1']);
     }
 }

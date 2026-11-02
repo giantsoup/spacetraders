@@ -19,7 +19,7 @@ for row in manifest['operations']:
         row['notes'] = 'Named API library read, complete response presentation and bounded manual queries implemented. Synthetic request/browser checks exist; official-API and final acceptance pending.'
         row['source_evidence'] = [{'path': 'app/Gameplay/ManualReads.php', 'contains': "'" + row['id'] + "' =>"}, {'path': 'app/Gameplay/SpaceTradersApi.php', 'contains': 'public function manualRead('}, {'path': 'resources/js/Components/ManualReadBrowser.vue', 'contains': 'Refresh selected read'}]
     commands = {
-        'purchase-ship': 'buy_ship', 'orbit-ship': 'orbit', 'dock-ship': 'dock',
+        'scrap-ship': 'scrap', 'purchase-ship': 'buy_ship', 'orbit-ship': 'orbit', 'dock-ship': 'dock',
         'purchase-cargo': 'buy', 'sell-cargo': 'sell', 'transfer-cargo': 'transfer', 'jettison': 'jettison',
         'accept-contract': 'contract_accept', 'deliver-contract': 'contract_deliver', 'fulfill-contract': 'contract_fulfill', 'negotiateContract': 'negotiate',
         'repair-ship': 'repair', 'install-mount': 'install_mount', 'remove-mount': 'remove_mount', 'install-ship-module': 'install_module', 'remove-ship-module': 'remove_module',

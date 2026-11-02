@@ -10,24 +10,24 @@
     "snapshot": "docs/api/spacetraders-openapi-2.3.0.json"
   },
   "source_files": {
-    "app/Gameplay/SpaceTradersApi.php": "05a290508e27001982283b1a802eb0cbed5f20cca4d759cea49b30005e3d3e3c",
-    "app/Gameplay/CommandRules.php": "b8c5635d5328259c301dda38a0a45bd108f90243a9685b90636f60b7ffe17c8a",
+    "app/Gameplay/SpaceTradersApi.php": "72145c9788bba95af9ba237a50b3dc8b35ed862788bbac657f99bf7c41bfbe27",
+    "app/Gameplay/CommandRules.php": "e79196de2b4b5069adf2b76a9bcd5302102cddd38a0834b3c51e6a1ff1a5e6b2",
     "app/Http/Requests/GameplayRequest.php": "a9e551019d5614bfbbf1b84d063f7f7d1740f0bb929fe55c89606a594804ad25",
-    "app/Services/SpaceTradersClient.php": "44dd201ba406c69ec7d6ad793f8b4ceef013ddefe60dd201d2af69475484eb6d",
+    "app/Services/SpaceTradersClient.php": "d379c65dca8a3ed534048be899a737d5f0181d61c9774b309648e8d8e474a704",
     "app/Http/Controllers/AgentController.php": "68e29abd6a3909f17659c0122c31e763f4c08f75bcceab74df97424a35c62d97",
     "app/Http/Controllers/ForwarderController.php": "dcbf9dbb894fa723d211e133302bf49e7e642ff9dc8f05189c500a08c9dcc7c4",
-    "routes/web.php": "77c517d190b050291bff48279dd03b1ee24d99407952c81b96ac480a3335b1b7",
-    "resources/js/Pages/Agent/Dashboard.vue": "8f5cc9ba15e983b23a42ec5dde00e4fe052f95962073338982f41742bffd4fd6",
+    "routes/web.php": "7b91d1376ffceaf549d50a0326b3f043602bde382919ff250bdfc08dc63e81e6",
+    "resources/js/Pages/Agent/Dashboard.vue": "05715a23b3e3a4b2ae62f97019c742d856db202c73714aa0eee677dbccc81ddb",
     "app/Gameplay/ManualReads.php": "6c52b61b8db2507e8cbbda79350ca0392ce3639c15302cf00d9cbd99ff775016",
     "resources/js/Components/ManualReadBrowser.vue": "8135041b5049f651fc00c474cf011779f565c31be7ebed3bc4d41a609d04c865",
     "app/Http/Controllers/AgentReadController.php": "f7cb77c4ba4f1e08dd49fa5508bbc7e457a7dbdca2a58e44117112e6f43603d6",
-    "app/Gameplay/ShipCommandExecutor.php": "e6762299f1cc76f710d2347351c673ff537f28f5f59cc613ffdc7dc8a73002f9",
+    "app/Gameplay/ShipCommandExecutor.php": "16f9e0be1de468e230784e3f2e816853e2f3339690170f46141a10bd669fbe80",
     "config/foundation.php": "887e07c6d73d4cbe9c14a0976527bab0bd2de6312c94da2d7b18f3ab5469bd2a",
-    "app/Gameplay/ManualCommands.php": "94b252ac8af3a58876af9f35e7be89f266c54402f62cea5211f0add190fc803b",
+    "app/Gameplay/ManualCommands.php": "7f0cd3b88fc3596db2c1690dc290fa5792d48dc8eec6f1ead4ed107cad0d966c",
     "app/Gameplay/EquipmentRules.php": "28578466e5da851dd924ee95208377e1242ff6786c4d9b9b28e45372ce237bbb",
     "app/Gameplay/CargoAuthority.php": "ff715344bac98c9a9d6dc5c433b087b6d927a7920b56082842bae0197c162753",
     "app/Gameplay/CargoRefuel.php": "70dd0caffa942190bbac4ab5acaae055b1e8d3d140f0cb005f4646a95bd8458e",
-    "resources/js/Components/ManualCommandForm.vue": "6af6f7ddc99d478d059fe816b5030625caa26da4a068d3c9ad6292f32a0e4ab2"
+    "resources/js/Components/ManualCommandForm.vue": "e47f8feaf98428e49bba086e61ff99f472a1e2eba5b2569986a7fdef949968d5"
   },
   "tasks": {
     "FND-01": {
@@ -1980,12 +1980,25 @@
       "tags": [
         "Fleet"
       ],
-      "implementation": "missing",
+      "implementation": "source_mapped",
       "task": "FND-12",
-      "notes": "No owned first-class operation or manual UI was identified in the audited baseline.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
       "request_fields": [],
       "query_fields": [],
-      "source_evidence": [],
+      "source_evidence": [
+        {
+          "path": "app/Gameplay/ManualCommands.php",
+          "contains": "'scrap' =>"
+        },
+        {
+          "path": "app/Gameplay/SpaceTradersApi.php",
+          "contains": "'scrap' =>"
+        },
+        {
+          "path": "resources/js/Components/ManualCommandForm.vue",
+          "contains": "Preview selected action"
+        }
+      ],
       "acceptance": {
         "state": "not_accepted",
         "contract": null,

@@ -90,6 +90,9 @@ class SpaceTradersApi
         $result = ['operation' => $operation, 'parameters' => $parameters, 'data' => $data, 'meta' => $body['meta'] ?? null,
             'observed_at' => now()->utc()->toIso8601String(), 'source' => 'official_api', 'no_content' => ($body['_http_status'] ?? null) === 204];
         if ($operation === 'get-ship-cooldown') {
+            if ($data === [] && ! $result['no_content']) {
+                throw new GameException('Cooldown HTTP 200 requires a cooldown object.');
+            }
             $result['deadline'] = $data === [] ? null : Arr::only($this->cooldownData($data), ['readyAt', 'deadlineSource']);
         }
         app(AgentSynchronizer::class)->observe($agent, 'manual_read', $operation.'-'.substr(hash('sha256', json_encode($parameters)), 0, 16), $result);
@@ -260,6 +263,25 @@ class SpaceTradersApi
         return Arr::only($data, ['symbol', 'shipTypes', 'ships', 'transactions']);
     }
 
+    public function commandMetadata(string $command, string $ship, array $arguments): array
+    {
+        if (! isset(ManualCommands::OPERATIONS[$command])) {
+            throw new GameException('Unsupported command.');
+        }
+
+        return ['method' => $command === 'flight_mode' ? 'PATCH' : 'POST',
+            'actor' => in_array($command, ['contract_accept', 'contract_fulfill', 'buy_ship'], true) ? 'agent' : 'ship',
+            'ship' => $ship !== '' ? $ship : null,
+            'target_type' => str_starts_with($command, 'contract_') ? 'contract' : ($command === 'supply' ? 'construction' : ($command === 'buy_ship' ? 'fleet' : 'ship')),
+            'target' => $arguments['contractId'] ?? $arguments['waypointSymbol'] ?? $arguments['targetShip'] ?? $ship,
+            'variant' => match ($command) {
+                'refuel' => (($arguments['fromCargo'] ?? false) ? 'cargo' : 'market').(isset($arguments['units']) ? '_explicit_units' : '_fill_tank'),
+                'mine' => isset($arguments['surveySignature']) ? 'nested_signed_survey' : 'plain',
+                'mine_survey' => 'signed_survey_body', 'flight_mode' => isset($arguments['flightMode']) ? 'set_mode' : 'unchanged_mode', default => 'standard',
+            },
+            'response_effects' => $this->responseFields($command, $arguments)];
+    }
+
     public function mutate(Agent $agent, string $ship, string $command, array $arguments, ?callable $receipt = null): array
     {
         $path = str_starts_with($command, 'contract_')
@@ -267,7 +289,7 @@ class SpaceTradersApi
                 'contract_accept' => 'accept', 'contract_deliver' => 'deliver', 'contract_fulfill' => 'fulfill', default => throw new GameException('Unsupported contract command.')
             }
         : ($command === 'supply' ? $this->waypointPath($arguments['waypointSymbol']).'/construction/supply' : ($command === 'buy_ship' ? '/my/ships' : '/my/ships/'.$ship.'/'.match ($command) {
-            'jump' => 'jump', 'warp' => 'warp', 'scan_systems' => 'scan/systems', 'scan_ships' => 'scan/ships', 'siphon' => 'siphon', 'refine' => 'refine', 'repair' => 'repair', 'install_mount' => 'mounts/install', 'remove_mount' => 'mounts/remove', 'install_module' => 'modules/install', 'remove_module' => 'modules/remove', 'jettison' => 'jettison', 'negotiate' => 'negotiate/contract', 'flight_mode' => 'nav', 'scan_waypoints' => 'scan/waypoints', 'chart' => 'chart', 'mine' => 'extract', 'mine_survey' => 'extract/survey', 'survey' => 'survey', 'transfer' => 'transfer', 'buy' => 'purchase', 'sell' => 'sell', 'navigate' => 'navigate', 'dock' => 'dock', 'orbit' => 'orbit', 'refuel' => 'refuel',
+            'scrap' => 'scrap', 'jump' => 'jump', 'warp' => 'warp', 'scan_systems' => 'scan/systems', 'scan_ships' => 'scan/ships', 'siphon' => 'siphon', 'refine' => 'refine', 'repair' => 'repair', 'install_mount' => 'mounts/install', 'remove_mount' => 'mounts/remove', 'install_module' => 'modules/install', 'remove_module' => 'modules/remove', 'jettison' => 'jettison', 'negotiate' => 'negotiate/contract', 'flight_mode' => 'nav', 'scan_waypoints' => 'scan/waypoints', 'chart' => 'chart', 'mine' => 'extract', 'mine_survey' => 'extract/survey', 'survey' => 'survey', 'transfer' => 'transfer', 'buy' => 'purchase', 'sell' => 'sell', 'navigate' => 'navigate', 'dock' => 'dock', 'orbit' => 'orbit', 'refuel' => 'refuel',
             default => throw new GameException('Unsupported command.'),
         }));
         $body = match ($command) {
@@ -285,8 +307,9 @@ class SpaceTradersApi
             'transfer' => ['tradeSymbol' => $arguments['symbol'], 'units' => $arguments['units'], 'shipSymbol' => $arguments['targetShip']],
             default => [],
         };
-        $data = $this->payload($this->call($command === 'flight_mode' ? 'patch' : 'post', $path, $body, $agent, receipt: $receipt), true);
+        $data = $this->payload($this->call(strtolower($this->commandMetadata($command, $ship, $arguments)['method']), $path, $body, $agent, receipt: $receipt), true);
         $rules = match ($command) {
+            'scrap' => ['agent.credits' => 'required|integer|min:0', 'transaction.shipSymbol' => 'required|in:'.$ship, 'transaction.waypointSymbol' => 'required|string', 'transaction.timestamp' => 'required|date', 'transaction.totalPrice' => 'required|integer|min:0'],
             'jump' => ['nav' => 'required|array', 'nav.waypointSymbol' => 'required|in:'.$arguments['waypointSymbol'], 'cooldown.remainingSeconds' => 'required|integer|min:0', 'transaction.totalPrice' => 'required|integer|min:0', 'agent.credits' => 'required|integer|min:0'],
             'warp' => ['nav' => 'required|array', 'nav.status' => 'required|in:IN_TRANSIT', 'nav.route.arrival' => 'required|date', 'fuel.current' => 'required|integer|min:0'],
             'scan_systems' => ['cooldown.remainingSeconds' => 'required|integer|min:0', 'systems' => 'present|array', 'systems.*.symbol' => 'required|string|distinct', 'systems.*.sectorSymbol' => 'required|string', 'systems.*.type' => 'required|string', 'systems.*.x' => 'required|integer', 'systems.*.y' => 'required|integer', 'systems.*.distance' => 'required|integer|min:0'],
@@ -317,6 +340,13 @@ class SpaceTradersApi
             $rules['cargo'] = 'required|array';
         }
         $this->validate($data, $rules, true);
+        if (isset($data['agent']['symbol']) && $data['agent']['symbol'] !== $agent->name) {
+            throw new GameException('Returned agent differs from the credential owner.', uncertain: true);
+        }
+        $expectedShip = $command === 'buy_ship' ? $data['ship']['symbol'] : $ship;
+        if (isset($data['transaction']['shipSymbol']) && $data['transaction']['shipSymbol'] !== $expectedShip) {
+            throw new GameException('Transaction ship differs from the approved actor.', uncertain: true);
+        }
 
         if (ExplorationPolicy::command($command)) {
             try {
@@ -357,7 +387,13 @@ class SpaceTradersApi
             }
         }
 
-        return Arr::only($data, match ($command) {
+        return Arr::only($data, $this->responseFields($command, $arguments));
+    }
+
+    private function responseFields(string $command, array $arguments): array
+    {
+        return match ($command) {
+            'scrap' => ['agent', 'transaction'],
             'jump' => ['nav', 'cooldown', 'transaction', 'agent'],
             'warp' => ['nav', 'fuel'],
             'scan_systems' => ['cooldown', 'systems'], 'scan_ships' => ['cooldown', 'ships'],
@@ -380,7 +416,7 @@ class SpaceTradersApi
             'buy_ship' => ['ship', 'agent', 'transaction'],
             'refuel' => ($arguments['fromCargo'] ?? false) ? ['fuel', 'cargo', 'agent', 'transaction'] : ['fuel', 'agent', 'transaction'],
             'buy', 'sell' => ['cargo', 'agent', 'transaction'],
-        });
+        };
     }
 
     public function shipData(array $data): array
@@ -396,7 +432,7 @@ class SpaceTradersApi
             'mounts' => 'present|array|max:100', 'modules' => 'present|array|max:100',
             'mounts.*.symbol' => 'required|string|max:80', 'mounts.*.requirements' => 'present|array', 'mounts.*.requirements.*' => 'integer|min:0',
             'mounts.*.deposits' => 'sometimes|array|max:100', 'mounts.*.deposits.*' => 'string|max:80',
-            'modules.*.symbol' => 'required|string|max:80', 'modules.*.capacity' => 'sometimes|integer|min:0', 'modules.*.requirements' => 'present|array', 'modules.*.requirements.*' => 'integer|min:0', 'crew.current' => 'required|integer|min:0', 'crew.required' => 'required|integer|min:0',
+            'modules.*.symbol' => 'required|string|max:80', 'modules.*.capacity' => 'sometimes|integer|min:0', 'modules.*.requirements' => 'present|array', 'modules.*.requirements.*' => 'integer|min:0', 'crew.current' => 'required|integer|min:0', 'crew.required' => 'required|integer|min:0', 'crew.capacity' => 'required|integer|min:0',
             'frame.moduleSlots' => 'required|integer|min:0', 'frame.mountingPoints' => 'required|integer|min:0',
             'frame.integrity' => 'required|numeric|between:0,1', 'engine.integrity' => 'required|numeric|between:0,1', 'reactor.integrity' => 'required|numeric|between:0,1',
             'frame.condition' => 'required|numeric|between:0,1', 'engine.condition' => 'required|numeric|between:0,1', 'reactor.condition' => 'required|numeric|between:0,1',
@@ -414,7 +450,10 @@ class SpaceTradersApi
 
     public function cooldownData(array $data): array
     {
-        $this->validate($data, ['remainingSeconds' => 'required|integer|min:0', 'expiration' => 'sometimes|nullable|date']);
+        $this->validate($data, ['remainingSeconds' => 'required|integer|min:0', 'totalSeconds' => 'sometimes|integer|min:0', 'expiration' => 'sometimes|nullable|date']);
+        if (isset($data['totalSeconds']) && $data['remainingSeconds'] > $data['totalSeconds']) {
+            throw new GameException('Inconsistent cooldown duration.');
+        }
         $data['readyAt'] = isset($data['expiration']) ? CarbonImmutable::parse($data['expiration'])->utc()->toIso8601String() : now()->addSeconds($data['remainingSeconds'])->utc()->toIso8601String();
         $data['deadlineSource'] = isset($data['expiration']) ? 'api_expiration' : 'derived_from_remaining_seconds';
 
@@ -485,6 +524,9 @@ class SpaceTradersApi
         $data = $response->json();
         if ($receipt) {
             $safe = is_array($data) && is_array($data['data'] ?? null) ? Arr::only($data['data'], ['agent', 'ship', 'transaction', 'nav', 'fuel', 'cargo', 'targetCargo', 'cooldown', 'contract', 'mounts', 'modules', 'extraction', 'siphon', 'produced', 'consumed', 'surveys', 'systems', 'waypoints', 'ships', 'chart', 'waypoint', 'construction', 'events', 'modifiers']) : [];
+            if (isset($safe['agent']) && ! is_array($safe['agent'])) {
+                unset($safe['agent']);
+            }
             if (isset($safe['agent'])) {
                 $safe['agent'] = Arr::only($safe['agent'], ['symbol', 'credits', 'shipCount', 'headquarters', 'startingFaction', 'accountId']);
             }

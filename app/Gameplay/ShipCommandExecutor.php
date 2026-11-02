@@ -37,6 +37,7 @@ class ShipCommandExecutor
             }
             $this->clear($agent);
             $before = $this->rules->inspect($agent, $ship, $command, $arguments);
+            $before['operation'] = $this->api->commandMetadata($command, $ship, $arguments);
 
             return ShipAction::create([
                 'agent_id' => $agent->id, 'key' => $key, 'reset_id' => $agent->reset_id, 'ship_symbol' => $ship,
@@ -230,6 +231,11 @@ class ShipCommandExecutor
 
     private function confirm(Agent $agent, ShipAction $action, array $data, array $before, ?AutomationRun $run): void
     {
+        if ($action->command === 'scrap') {
+            $this->confirmScrap($agent, $action, $data, $before);
+
+            return;
+        }
         $ship = $action->command === 'repair' ? $data['ship'] : $before['ship'];
         foreach (['nav', 'fuel', 'cargo', 'cooldown', 'mounts', 'modules'] as $field) {
             if (isset($data[$field])) {
@@ -237,6 +243,17 @@ class ShipCommandExecutor
             }
         }
         $actualShip = $action->command === 'buy_ship' ? $this->api->shipData($data['ship']) : ($ship ? $this->api->shipData($ship) : null);
+        if ($action->command === 'buy_ship' && in_array($actualShip['symbol'], $before['estimate']['fleet_symbols'] ?? [], true)) {
+            throw new GameException('Purchase returned an existing ship identity. Reconcile without buying again.', uncertain: true);
+        }
+        if (in_array($action->command, ['flight_mode', 'dock', 'orbit'], true)) {
+            if ($actualShip['nav']['systemSymbol'] !== $before['ship']['nav']['systemSymbol'] || $actualShip['nav']['waypointSymbol'] !== $before['ship']['nav']['waypointSymbol'] || ($action->command === 'flight_mode' && $actualShip['nav']['status'] !== $before['ship']['nav']['status'])) {
+                throw new GameException('Stationary command unexpectedly changed location or navigation state.', uncertain: true);
+            }
+        }
+        if ($action->command === 'survey' && collect($data['surveys'])->contains(fn ($survey) => $survey['symbol'] !== $before['ship']['nav']['waypointSymbol'])) {
+            throw new GameException('Survey response names a different waypoint.', uncertain: true);
+        }
         if (in_array($action->command, ['install_mount', 'remove_mount', 'install_module', 'remove_module'], true)) {
             $field = str_ends_with($action->command, 'mount') ? 'mounts' : 'modules';
             $expected = array_count_values(array_column($before['ship'][$field], 'symbol'));
@@ -442,6 +459,24 @@ class ShipCommandExecutor
         if ($action->command === 'buy_ship' && ($configurationMismatch || (isset($action->arguments['site']) && app(MiningPlanner::class)->capability($actualShip) !== null))) {
             $action->update(['message' => 'Delivered configuration differs from the approved offer or is not operational for the selected setup. Inspect the delivered ship.']);
         }
+    }
+
+    private function confirmScrap(Agent $agent, ShipAction $action, array $data, array $before): void
+    {
+        $credits = $data['agent']['credits'];
+        $price = $data['transaction']['totalPrice'];
+        $delta = $credits - $before['credits'];
+        $review = $delta !== $price || $price < ($action->arguments['minTotal'] ?? 0) || $credits < $before['estimate']['reserve'];
+        DB::transaction(function () use ($agent, $action, $data, $credits, $price, $delta, $review, $before) {
+            Ship::where('agent_id', $agent->id)->where('symbol', $action->ship_symbol)->delete();
+            ShipAction::where('agent_id', $agent->id)->where('ship_symbol', $action->ship_symbol)->where('state', 'preview')->update(['state' => 'rejected', 'settled_at' => now(), 'message' => 'Ship was scrapped. This preview cannot be approved.']);
+            $agent->update(['credits' => $credits, 'synced_at' => now()]);
+            $this->sync->observe($agent, 'scrap', $action->ship_symbol, ['transaction' => $data['transaction'], 'removed_ship' => $action->ship_symbol, 'cargo_before' => $before['ship']['cargo'], 'equipment_before' => ['mounts' => $before['ship']['mounts'], 'modules' => $before['ship']['modules']]], 'scrap', $action->ship_symbol);
+            $action->update(['state' => ActionState::Confirmed, 'review_required' => $review, 'settled_at' => now(),
+                'outcome' => array_merge($action->fresh()->outcome ?? [], ['credit_delta' => $delta, 'transaction_total' => $price, 'removed_ship' => $action->ship_symbol, 'price_discrepancy' => $review]),
+                'message' => $review ? 'Scrap confirmed. Returned credits differ from the approved quote or reserve; review before further work.' : 'Scrap confirmed by the authoritative transaction. Ship history is retained.']);
+            app(CreditAccounting::class)->record($agent, $action, $delta);
+        });
     }
 
     private function configuration(array $ship): array

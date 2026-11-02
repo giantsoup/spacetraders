@@ -75,21 +75,29 @@ final class FakeSpaceTraders
             try {
                 $world = json_decode(stream_get_contents($handle), true, flags: JSON_THROW_ON_ERROR);
                 [$body, $status] = self::respond($world, $request);
-                if ($request->method() === 'POST' && str_ends_with($request->url(), '/deliver') && ($world['extra_delivery_payment'] ?? false)) {
+                if ($request->method() !== 'GET' && str_ends_with($request->url(), '/deliver') && ($world['extra_delivery_payment'] ?? false)) {
                     $body['data']['agent'] = ['credits' => 999999999];
                     $body['data']['transaction'] = ['totalPrice' => 123456];
                 }
-                if ($request->method() === 'POST' && ($world['verify_worker_storage'] ?? false)) {
+                if ($request->method() !== 'GET' && ($world['verify_worker_storage'] ?? false)) {
                     $world['worker_storage'] = ['pid' => getmypid(), 'synchronous' => (int) DB::selectOne('PRAGMA synchronous')->synchronous, 'fullfsync' => (int) DB::selectOne('PRAGMA fullfsync')->fullfsync];
                 }
-                if ($request->method() === 'POST' && isset($world['write_stop_action_id'])) {
+                if ($request->method() !== 'GET' && isset($world['write_stop_action_id'])) {
                     app(ShipCommandExecutor::class)->stopManual(ShipAction::findOrFail($world['write_stop_action_id']));
                 }
-                if ($request->method() === 'POST' && isset($world['write_stop_run_id'])) {
+                if ($request->method() !== 'GET' && isset($world['write_stop_run_id'])) {
                     app(AutomationRunner::class)->stop(AutomationRun::findOrFail($world['write_stop_run_id']));
                 }
-                $pause = $request->method() === 'POST' && $world['failure'] === 'pause_after';
-                $timeout = $request->method() === 'POST' && $world['failure'] === 'timeout_after';
+                $pauseBefore = ($world['pause_before_reservation'] ?? false) && $request->method() === 'GET' && str_ends_with($request->url(), '/my/ships/LOCAL-1');
+                $pauseAfter = ($world['pause_after_reservation'] ?? false) && $request->method() !== 'GET';
+                if ($pauseBefore) {
+                    $world['pause_before_reservation'] = false;
+                }
+                if ($pauseAfter) {
+                    $world['pause_after_reservation'] = false;
+                }
+                $pause = $request->method() !== 'GET' && $world['failure'] === 'pause_after';
+                $timeout = $request->method() !== 'GET' && $world['failure'] === 'timeout_after';
                 if ($timeout) {
                     $world['failure'] = null;
                 }
@@ -99,6 +107,17 @@ final class FakeSpaceTraders
             } finally {
                 flock($handle, LOCK_UN);
                 fclose($handle);
+            }
+            if ($pauseBefore || $pauseAfter) {
+                $stage = $pauseBefore ? 'before' : 'after';
+                file_put_contents($file.'.'.$stage, 'owned worker boundary reached');
+                $deadline = microtime(true) + 8;
+                while (! is_file($file.'.resume-'.$stage) && microtime(true) < $deadline) {
+                    usleep(20000);
+                }
+                if (! is_file($file.'.resume-'.$stage)) {
+                    throw new ConnectionException('Owned race fixture resume timed out.');
+                }
             }
             if ($pause) {
                 file_put_contents($file.'.sent', 'synthetic upstream committed');
@@ -116,6 +135,16 @@ final class FakeSpaceTraders
     {
         $path = substr(parse_url($request->url(), PHP_URL_PATH), strlen('/v2')) ?: '/';
         $args = $request->data();
+        $traits = [];
+        foreach (explode('&', parse_url($request->url(), PHP_URL_QUERY) ?? '') as $pair) {
+            $parts = explode('=', $pair, 2);
+            if (rawurldecode($parts[0]) === 'traits') {
+                $traits[] = rawurldecode($parts[1] ?? '');
+            }
+        }
+        if ($traits) {
+            $args['traits'] = count($traits) === 1 ? $traits[0] : $traits;
+        }
         if (($world['foundation'] ?? false) && $request->method() === 'GET') {
             $response = self::foundationRead($world, $path, $args);
             if ($response !== null) {
@@ -361,6 +390,17 @@ final class FakeSpaceTraders
 
     private static function foundationWrite(array &$world, string $path, array $args, string $method): ?array
     {
+        if (preg_match('~^/my/ships/([^/]+)/scrap$~', $path, $scrap)) {
+            $removed = collect($world['ships'])->firstWhere('symbol', $scrap[1]);
+            if (! $removed) {
+                return [['error' => ['code' => 404]], 404];
+            }
+            $world['ships'] = array_values(array_filter($world['ships'], fn ($ship) => $ship['symbol'] !== $scrap[1]));
+            $price = $world['scrap_price'] ?? 100;
+            $world['credits'] += $price;
+
+            return [['data' => ['agent' => ['credits' => $world['credits']], 'transaction' => ['shipSymbol' => $scrap[1], 'waypointSymbol' => $removed['nav']['waypointSymbol'], 'totalPrice' => $price, 'timestamp' => now()->toIso8601String()]]], 200];
+        }
         if (str_ends_with($path, '/construction/supply')) {
             foreach ($world['ships'] as &$supplying) {
                 if ($supplying['symbol'] !== $args['shipSymbol']) {

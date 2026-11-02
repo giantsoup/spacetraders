@@ -25,6 +25,8 @@ const action = process.argv[2];
 if (action === 'worker') {
     execFileSync(php, ['artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe', timeout: 20000 });
     console.log(cli(`echo json_encode(App\\Models\\ShipAction::latest('id')->first()->only(['id','command','state','review_required','message']));`));
+} else if (action === 'routes') {
+    console.log(execFileSync(php, ['artisan', 'route:list', '--json', '-v'], { cwd: root, env, encoding: 'utf8' }));
 } else if (action === 'finish') {
     await fs.writeFile(`${directory}/done`, 'shared preview finished');
 } else {
@@ -50,6 +52,7 @@ if (action === 'worker') {
         if($command==='contract_deliver') { $w['ships'][0]['nav']['waypointSymbol']='X1-TEST-PORT'; $w['ships'][0]['cargo']=['capacity'=>40,'units'=>10,'inventory'=>[['symbol'=>'IRON_ORE','units'=>10]]]; }
         if($command==='contract_fulfill') $w['contracts'][0]['terms']['deliver'][0]['unitsFulfilled']=10; break;
       case 'negotiate': $w['contracts']=[]; break;
+      case 'scrap': $a+=['confirmShip'=>'LOCAL-1','acknowledgeLoss'=>true,'minTotal'=>0]; break;
       case 'repair': $w['ships'][0]['frame']['condition']=0.5; $a+=['maxTotal'=>100]; break;
       case 'install_mount': case 'remove_mount': case 'install_module': case 'remove_module':
         $symbol=str_ends_with($command,'mount')?'MOUNT_MINING_LASER_I':($command==='remove_module'?'MODULE_MINERAL_PROCESSOR_I':'MODULE_GAS_PROCESSOR_I');

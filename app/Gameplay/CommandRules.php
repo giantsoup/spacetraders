@@ -24,6 +24,12 @@ class CommandRules
         if ($ship && $ship['nav']['status'] === 'IN_TRANSIT' && $command !== 'flight_mode') {
             throw new GameException('Ship is in transit. Reconcile after the reported arrival.');
         }
+        if ($ship && in_array($command, ['survey', 'mine', 'mine_survey', 'siphon', 'refine', 'scan_systems', 'scan_waypoints', 'scan_ships', 'jump', 'warp'], true)) {
+            $components = array_merge($ship['mounts'], $ship['modules'], [$ship['frame'], $ship['engine'], $ship['reactor']]);
+            if ($ship['crew']['current'] < $ship['crew']['required'] || array_sum(array_map(fn ($item) => $item['requirements']['power'] ?? 0, $components)) > $ship['reactor']['powerOutput']) {
+                throw new GameException('Crew or known equipment power requirements exceed available capacity.');
+            }
+        }
         $active = AutomationRun::where('agent_id', $agent->id)->whereNotNull('active_agent_id')->first();
         if ($active && ($agentCommand || $active->ship_symbol === $symbol) && $active->id !== $run?->id) {
             throw new GameException('Stop automation and settle its action before manual takeover.');
@@ -174,6 +180,23 @@ class CommandRules
                     }
                 }
                 $estimate['effects'] = 'Requests the selected product. The API chooses inputs and batch size. Exact recipe and yield remain uncalibrated; consumed and produced cargo are recorded from the response.';
+                break;
+            case 'scrap':
+                if (($arguments['confirmShip'] ?? null) !== $symbol || empty($arguments['acknowledgeLoss']) || $active) {
+                    throw new GameException('Type the exact ship symbol, acknowledge permanent ship/cargo/equipment loss, and stop active automation before scrapping.');
+                }
+                app(EquipmentRules::class)->shipyard($agent, $ship);
+                foreach (MiningPlanner::inventory($ship) as $good => $owned) {
+                    if (app(CargoAuthority::class)->available($agent, $ship, $good) !== $owned) {
+                        throw new GameException('Resolve protected contract cargo before scrapping this ship.');
+                    }
+                }
+                $estimate['scrap_quote'] = $this->api->manualRead($agent, 'get-scrap-ship', ['shipSymbol' => $symbol]);
+                $estimate['sale_estimate'] = $estimate['scrap_quote']['data']['transaction']['totalPrice'];
+                if ($estimate['sale_estimate'] < ($arguments['minTotal'] ?? 0)) {
+                    throw new GameException('Scrap quote is below the approved minimum.');
+                }
+                $estimate['effects'] = 'Permanently removes this exact ship. Cargo and equipment disposition is not promised by the API. Assume all aboard is lost. The quote reserves no price; Stop cannot reverse a sent request.';
                 break;
             case 'repair':
                 app(EquipmentRules::class)->shipyard($agent, $ship);
@@ -344,6 +367,7 @@ class CommandRules
                         throw new GameException('An operational miner already exists. Setup purchase is unnecessary.');
                     }
                 }
+                $estimate['fleet_symbols'] = array_column($this->api->ships($agent), 'symbol');
                 $yard = $this->api->shipyard($agent, $arguments['waypointSymbol']);
                 $this->sync->observe($agent, 'shipyard', $arguments['waypointSymbol'], $yard);
                 $offer = collect($yard['ships'] ?? [])->firstWhere('type', $arguments['shipType']);

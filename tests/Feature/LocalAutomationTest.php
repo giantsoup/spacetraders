@@ -590,10 +590,13 @@ class LocalAutomationTest extends TestCase
         $this->postJson('/agents/'.$this->agent->id.'/investigations/'.$draft->investigation_id.'/advance')->assertNotFound();
     }
 
-    public function test_contract_writes_cannot_be_requested_as_arbitrary_manual_commands(): void
+    public function test_manual_contract_preview_needs_approval_and_rejects_arbitrary_payloads(): void
     {
+        $input = ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'contract_accept', 'arguments' => ['contractId' => 'contract-1']];
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', $input)->assertAccepted()->assertJsonPath('state', 'preview');
         $before = count($this->world()['calls']);
-        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'contract_accept', 'arguments' => ['contractId' => 'contract-1']])->assertUnprocessable();
+        $input['arguments']['url'] = 'https://example.test/unapproved';
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', $input)->assertUnprocessable();
         $this->assertSame($before, count($this->world()['calls']));
         $this->assertSame([], $this->world()['writes']);
     }

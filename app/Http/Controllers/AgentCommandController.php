@@ -21,6 +21,12 @@ class AgentCommandController extends Controller
             }
         }
 
+        foreach (['fromCargo', 'require_guaranteed_price', 'acknowledgeLoss', 'acknowledgeUnknown'] as $field) {
+            if (isset($data['arguments'][$field])) {
+                $data['arguments'][$field] = (bool) $data['arguments'][$field];
+            }
+        }
+
         return $responses->result(fn () => $executor->preview($agent, $data['ship_symbol'] ?? '', $data['command'], $data['arguments'], $data['key']));
     }
 

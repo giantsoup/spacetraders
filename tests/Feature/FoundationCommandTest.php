@@ -243,6 +243,7 @@ class FoundationCommandTest extends TestCase
     {
         return [
             'market omitted' => [[], false], 'market explicit' => [['units' => 100], false], 'market capped' => [['units' => 1000], false],
+            'cargo boolean input' => [['units' => 100, 'fromCargo' => 1], true],
             'cargo whole' => [['units' => 100, 'fromCargo' => true], true], 'cargo omitted' => [['fromCargo' => true], true], 'cargo partial' => [['units' => 37, 'fromCargo' => true, 'maxCargoUnits' => 1], true],
         ];
     }
@@ -257,7 +258,11 @@ class FoundationCommandTest extends TestCase
         $action = $this->execute($this->preview('refuel', $arguments + ['maxTotal' => $cargo ? 0 : 5, 'reserve' => 1000]));
         $this->assertSame(ActionState::Confirmed, $action->state);
         $payload = $this->world()['writes'][0]['arguments'];
-        $this->assertSame(array_intersect_key($arguments, array_flip(['units', 'fromCargo'])), $payload);
+        $expectedPayload = array_intersect_key($arguments, array_flip(['units', 'fromCargo']));
+        if (isset($expectedPayload['fromCargo'])) {
+            $expectedPayload['fromCargo'] = (bool) $expectedPayload['fromCargo'];
+        }
+        $this->assertSame($expectedPayload, $payload);
         $this->assertSame(min($arguments['units'] ?? 100, 100), Ship::firstOrFail()->snapshot['fuel']['current']);
         $this->assertSame($cargo ? 1 : 2, Ship::firstOrFail()->snapshot['cargo']['units']);
     }
@@ -360,6 +365,83 @@ class FoundationCommandTest extends TestCase
         $action = $this->preview('supply', ['waypointSymbol' => 'X1-TEST-ROCK', 'symbol' => 'IRON_ORE', 'units' => 3, 'acknowledgeLoss' => true]);
         $this->world(fn (&$w) => $w['construction'] = ['symbol' => 'X1-TEST-ROCK', 'isComplete' => true, 'materials' => [['tradeSymbol' => 'IRON_ORE', 'required' => 100, 'fulfilled' => 100]]]);
         $this->postJson('/agents/'.$this->agent->id.'/commands/'.$action->id.'/approve')->assertUnprocessable();
+        $this->assertEmpty($this->world()['writes']);
+    }
+
+    public function test_confirmed_scrap_removes_only_the_exact_ship_and_preserves_history_and_credit_entry(): void
+    {
+        $older = $this->preview('orbit');
+        $action = $this->execute($this->preview('scrap', ['confirmShip' => 'LOCAL-1', 'acknowledgeLoss' => true, 'minTotal' => 100]));
+        $this->assertSame(ActionState::Confirmed, $action->state);
+        $this->assertDatabaseCount('ships', 0);
+        $this->assertDatabaseHas('ship_actions', ['id' => $action->id, 'ship_symbol' => 'LOCAL-1', 'state' => 'confirmed']);
+        $this->assertDatabaseHas('confirmed_credit_entries', ['ship_action_id' => $action->id, 'credits' => 100]);
+        $this->assertSame(ActionState::Rejected, $older->fresh()->state);
+        $this->assertSame('LOCAL-1', $action->outcome['removed_ship']);
+        $this->get('/agents/'.$this->agent->id)->assertOk();
+        app(AgentSynchronizer::class)->sync($this->agent, false);
+        $this->assertDatabaseCount('ships', 0);
+    }
+
+    public function test_lost_scrap_response_records_complete_fleet_disappearance_without_claiming_confirmation_or_replaying(): void
+    {
+        $action = $this->preview('scrap', ['confirmShip' => 'LOCAL-1', 'acknowledgeLoss' => true, 'minTotal' => 0]);
+        $this->postJson('/agents/'.$this->agent->id.'/commands/'.$action->id.'/approve')->assertAccepted();
+        $this->world(fn (&$w) => $w['failure'] = 'timeout_after');
+        $executor = app(ShipCommandExecutor::class);
+        $executor->execute($action->id);
+        $this->assertSame(ActionState::Uncertain, $action->fresh()->state);
+        $executor->reconcile($this->agent, $action);
+        $this->assertSame(ActionState::Uncertain, $action->fresh()->state);
+        $this->assertFalse($action->fresh()->outcome['actor_present']);
+        $this->assertSame([], $action->fresh()->outcome['fleet']);
+        $this->assertNull($action->fresh()->outcome['ship']);
+        $executor->execute($action->id);
+        $this->assertCount(1, $this->world()['writes']);
+        $this->assertDatabaseHas('ship_actions', ['id' => $action->id]);
+    }
+
+    public function test_scrap_requires_exact_identity_and_rejects_changed_or_committed_cargo(): void
+    {
+        $input = ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'scrap', 'arguments' => ['confirmShip' => 'LOCAL-2', 'acknowledgeLoss' => true, 'minTotal' => 0]];
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', $input)->assertUnprocessable();
+        $action = $this->preview('scrap', ['confirmShip' => 'LOCAL-1', 'acknowledgeLoss' => true, 'minTotal' => 0]);
+        $this->world(function (&$w) {
+            $w['ships'][0]['cargo'] = ['capacity' => 40, 'units' => 1, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 1]]];
+        });
+        $this->postJson('/agents/'.$this->agent->id.'/commands/'.$action->id.'/approve')->assertUnprocessable();
+        $this->world(fn (&$w) => $w['contracts'][0]['accepted'] = true);
+        $input['arguments']['confirmShip'] = 'LOCAL-1';
+        $input['key'] = (string) Str::uuid();
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', $input)->assertUnprocessable();
+        $this->assertEmpty($this->world()['writes']);
+    }
+
+    public function test_malformed_success_retains_status_and_body_hash_without_replaying_extraction(): void
+    {
+        $this->world(fn (&$w) => $w['ships'][0]['nav']['status'] = 'IN_ORBIT');
+        $action = $this->preview('mine');
+        $this->postJson('/agents/'.$this->agent->id.'/commands/'.$action->id.'/approve')->assertAccepted();
+        $this->world(fn (&$w) => $w['failure'] = 'malformed');
+        $executor = app(ShipCommandExecutor::class);
+        $executor->execute($action->id);
+        $outcome = $action->fresh()->outcome;
+        $this->assertSame(ActionState::Uncertain, $action->fresh()->state);
+        $this->assertSame(200, $outcome['http_status']);
+        $this->assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $outcome['body_sha256']);
+        $this->assertArrayNotHasKey('response_validated', $outcome);
+        $executor->execute($action->id);
+        $this->assertCount(1, $this->world()['writes']);
+    }
+
+    public function test_new_read_and_preview_routes_enforce_real_csrf_with_valid_owner_controls(): void
+    {
+        $this->app['env'] = 'local'; // Exercise middleware instead of Laravel's unit-test exemption.
+        $this->postJson('/agents/'.$this->agent->id.'/reads', ['operation' => 'get-status', 'parameters' => []])->assertStatus(419);
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'orbit', 'arguments' => []])->assertStatus(419);
+        $csrf = bin2hex(random_bytes(20));
+        $this->withSession(['_token' => $csrf])->withHeader('X-CSRF-TOKEN', $csrf)->postJson('/agents/'.$this->agent->id.'/reads', ['operation' => 'get-status', 'parameters' => []])->assertAccepted();
+        $this->withSession(['_token' => $csrf])->withHeader('X-CSRF-TOKEN', $csrf)->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'orbit', 'arguments' => []])->assertAccepted();
         $this->assertEmpty($this->world()['writes']);
     }
 }

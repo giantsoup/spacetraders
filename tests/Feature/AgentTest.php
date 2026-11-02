@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Services\SpaceTradersClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
@@ -194,10 +195,10 @@ class AgentTest extends TestCase
         foreach (['agents.store', 'agents.storeExisting'] as $route) {
             $cases[$route.' unauthorized'] = [$route, ['error' => ['code' => 401, 'message' => 'Token is invalid.']], 401, 'Token is invalid.'];
             $cases[$route.' validation'] = [$route, ['error' => ['code' => 422, 'message' => 'Invalid symbol.', 'data' => ['symbol' => ['Already taken.']]]], 422, 'Invalid symbol.'];
-            $cases[$route.' rate limited'] = [$route, ['error' => ['code' => 429, 'message' => 'Rate limit reached.']], 429, 'Rate limit reached.'];
-            $cases[$route.' non-json'] = [$route, '<html>Unavailable</html>', 503, 'SpaceTraders could not complete the request. Please try again later.'];
+            $cases[$route.' rate limited'] = [$route, ['error' => ['code' => 429, 'message' => 'Rate limit reached.']], 429, $route === 'agents.store' ? SpaceTradersClient::REGISTRATION_UNKNOWN : 'Rate limit reached.'];
+            $cases[$route.' non-json'] = [$route, '<html>Unavailable</html>', 503, $route === 'agents.store' ? SpaceTradersClient::REGISTRATION_UNKNOWN : 'SpaceTraders could not complete the request. Please try again later.'];
             $cases[$route.' malformed error'] = [$route, ['error' => ['message' => ['invalid']]], 400, 'SpaceTraders could not complete the request. Please try again later.'];
-            $cases[$route.' incomplete success'] = [$route, ['data' => ['symbol' => 'TEST_AGENT']], 200, 'SpaceTraders returned incomplete agent details. No agent was saved.'];
+            $cases[$route.' incomplete success'] = [$route, ['data' => ['symbol' => 'TEST_AGENT']], 200, $route === 'agents.store' ? SpaceTradersClient::REGISTRATION_UNKNOWN : 'SpaceTraders returned incomplete agent details. No agent was saved.'];
         }
 
         return $cases;

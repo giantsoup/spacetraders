@@ -96,4 +96,20 @@ class FoundationReadTest extends TestCase
         Http::assertNotSent(fn ($request) => str_contains($request->url(), 'OTHER-1'));
         $this->assertLessThanOrEqual($count + 1, Http::recorded()->count());
     }
+
+    public function test_inherited_auth_uses_one_agent_bearer_and_public_directories_have_no_bearer(): void
+    {
+        foreach ([['get-faction', ['factionSymbol' => 'COSMIC'], '/factions/COSMIC'], ['get-ship-modules', ['shipSymbol' => 'LOCAL-1'], '/my/ships/LOCAL-1/modules'], ['get-supply-chain', [], '/market/supply-chain']] as [$operation, $parameters, $path]) {
+            $this->postJson('/agents/'.$this->agent->id.'/reads', compact('operation', 'parameters'))->assertAccepted();
+            Http::assertSent(fn ($request) => parse_url($request->url(), PHP_URL_PATH) === '/v2'.$path && $request->header('Authorization') === ['Bearer synthetic-agent-credential']);
+        }
+        $this->postJson('/agents/'.$this->agent->id.'/reads', ['operation' => 'get-systems', 'parameters' => []])->assertAccepted();
+        Http::assertSent(fn ($request) => parse_url($request->url(), PHP_URL_PATH) === '/v2/systems' && ! $request->hasHeader('Authorization'));
+    }
+
+    public function test_multiple_traits_use_openapi_repeated_query_names_on_the_actual_wire(): void
+    {
+        $this->postJson('/agents/'.$this->agent->id.'/reads', ['operation' => 'get-system-waypoints', 'parameters' => ['systemSymbol' => 'X1-TEST', 'traits' => ['MARKETPLACE', 'SHIPYARD']]])->assertAccepted()->assertJsonPath('meta.total', 1);
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'traits=MARKETPLACE&traits=SHIPYARD') && ! str_contains($request->url(), 'traits%5B'));
+    }
 }

@@ -18,6 +18,7 @@ final class ManualCommands
         'contract_deliver' => ['Deliver contract goods', 'Contracts', ['contractId', 'symbol', 'units', 'term_index']],
         'contract_fulfill' => ['Fulfill contract', 'Contracts', ['contractId']],
         'negotiate' => ['Negotiate a contract offer', 'Contracts', []],
+        'scrap' => ['Scrap this ship permanently', 'Maintenance', ['confirmShip', 'acknowledgeLoss', 'minTotal']],
         'repair' => ['Repair condition', 'Maintenance', ['maxTotal', 'reserve']],
         'install_mount' => ['Install mount from cargo', 'Outfitting', ['symbol', 'maxTotal', 'reserve']],
         'remove_mount' => ['Remove installed mount', 'Outfitting', ['symbol', 'maxTotal', 'reserve']],
@@ -42,7 +43,7 @@ final class ManualCommands
     public static function rules(string $command): array
     {
         $required = self::OPERATIONS[$command][2] ?? [];
-        $fields = ['units', 'symbol', 'waypointSymbol', 'shipType', 'maxTotal', 'minTotal', 'reserve', 'site', 'market', 'require_guaranteed_price', 'targetShip', 'surveySignature', 'surveyWaypoint', 'question', 'maxCooldownSeconds', 'flightMode', 'contractId', 'term_index', 'acknowledgeLoss', 'produce', 'fromCargo', 'protectedFuel', 'maxCargoUnits', 'maxFuel', 'maxSeconds', 'acknowledgeUnknown'];
+        $fields = ['units', 'symbol', 'waypointSymbol', 'shipType', 'maxTotal', 'minTotal', 'reserve', 'site', 'market', 'require_guaranteed_price', 'targetShip', 'surveySignature', 'surveyWaypoint', 'question', 'maxCooldownSeconds', 'flightMode', 'contractId', 'term_index', 'acknowledgeLoss', 'confirmShip', 'produce', 'fromCargo', 'protectedFuel', 'maxCargoUnits', 'maxFuel', 'maxSeconds', 'acknowledgeUnknown'];
         $rules = [
             'key' => ['required', 'uuid'], 'ship_symbol' => [Rule::requiredIf(! in_array($command, ['contract_accept', 'contract_fulfill'], true)), 'nullable', 'string', 'max:80', 'regex:/^[A-Z0-9_-]+$/'],
             'command' => ['required', Rule::in(array_keys(self::OPERATIONS))], 'arguments' => ['present', 'array:'.implode(',', $fields)],
