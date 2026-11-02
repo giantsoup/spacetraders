@@ -1,6 +1,6 @@
 # Foundation variant and live gates
 
-Implementation source: `308ccb9c86d9180b05fd5d05934d0bc5c069131c`. This is an informational evidence index, not an acceptance-stage record. All official-API cases below remain pending. A synthetic success does not establish game mechanics. The unchanged completion verifier correctly rejects 0/59 accepted operations.
+Implementation source: `659f8aa6aeeef1398ee647a4fd378acb2553fb01`. This is an informational evidence index, not an acceptance-stage record. All official-API cases below remain pending. A synthetic success does not establish game mechanics. The unchanged completion verifier correctly rejects 0/59 accepted operations.
 
 | Operation family | Supported variants and local verification | Outstanding official cases |
 | --- | --- | --- |
@@ -25,10 +25,12 @@ Implementation source: `308ccb9c86d9180b05fd5d05934d0bc5c069131c`. This is an in
 
 The pinned official [schema](https://spacetraders.io/SpaceTraders.json), `/components/securitySchemes`, assigns account tokens to creating agents and agent tokens to API use during a reset. Its root security object requires both bearer schemes, inherited by faction detail and module read/install/remove. Two different bearer credentials cannot safely satisfy that declaration in a single Authorization header.
 
-Implementation resolution: these four gameplay reads/writes use exactly the saved owning agent bearer. There is no anonymous retry, concatenation, second bearer or account-token fallback. Tests inspect the actual transport headers. The inherited declaration remains an upstream contract defect, and official acceptance for each of the four paths is pending; fixture success does not resolve that server question. This separates the implemented credential policy from an unproven claim about server authorization.
+Implementation resolution: these four gameplay reads/writes use exactly the saved owning agent bearer. There is no anonymous retry, concatenation, second bearer or account-token fallback. A 401 on these four operations reports unresolved operation authorization and preserves credential state; an authoritative agent-profile 401 still marks the credential invalid. Tests inspect the actual transport headers. The inherited declaration remains an upstream contract defect, and official acceptance for each of the four paths is pending; fixture success does not resolve that server question. This separates the implemented credential policy from an unproven claim about server authorization.
 
 ## Shared safety gates
 
 Manual spending preserves at least2,000 CR through server-side configuration, even if reserve is omitted or 0; the approval shows the effective floor. Higher explicit or active-run reservations still win. This is a client policy, not a live spending authorization or server price guarantee. Fresh immutable expiring approvals, reset/engine admission, request budgets and agent-wide cargo/spending authority remain in the shared command path.
 
 Browser Stop covered jettison and approval cancellation for cargo refuel, equipment and scrap. File-backed races cover Stop before reservation, after PATCH reservation, duplicate delivery and repair uncertainty. Fifteen additional operation scenarios use fresh worker processes, duplicate delivery, restart and reconciliation: navigate, jump, warp, supply, siphon, refine, all four equipment writes, accept/deliver/fulfill, negotiate and scrap. Original MVP worker tests still cover killed purchase/mining senders and offline Stop. These are synthetic provider checks, not official acceptance.
+
+Post-review hardening: post-receipt request-budget deferral stays uncertain with its validated receipt; scheduler and duplicate workers never return it to pending or resend. Stop atomically updates only its JSON field and conditional state. Non-string selectors return 422. Refuel previews display source, expected tank change and cargo exposure; uncalibrated partial cargo projections remain Unknown rather than exact invented quantities. See [security resolution](foundation-security-resolution.md).

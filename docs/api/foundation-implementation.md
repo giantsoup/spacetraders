@@ -1,6 +1,6 @@
 # Base API foundation implementation
 
-Issue [86](https://github.com/giantsoup/spacetraders/issues/86), draft PR [87](https://github.com/giantsoup/spacetraders/pull/87). Implementation source: `308ccb9c86d9180b05fd5d05934d0bc5c069131c`, based on planning `98ff5d7f38f3064f7bab40d629ca3e6359892efc` and integrated baseline `99be3c474dddd7bf9fd1c1aec5bf2147cf9b5868`. Later evidence-only commits identify this source separately from the PR head.
+Issue [86](https://github.com/giantsoup/spacetraders/issues/86), draft PR [87](https://github.com/giantsoup/spacetraders/pull/87). Final implementation source: `659f8aa6aeeef1398ee647a4fd378acb2553fb01`, based on planning `98ff5d7f38f3064f7bab40d629ca3e6359892efc` and integrated baseline `99be3c474dddd7bf9fd1c1aec5bf2147cf9b5868`. Later evidence-only commits identify this source separately from the PR head.
 
 All 59 pinned operations have source implementations: 26 named dedicated reads, 32 manual gameplay actions including explicit PATCH, and the existing account-token registration flow. There is no missing source operation. **Full foundation acceptance remains 0/59**. Official behavior and per-variant calibration remain pending; the unchanged `--require-complete` verifier correctly fails. This PR remains draft and the issue remains open.
 
@@ -51,7 +51,7 @@ All browser/worker mutations above used synthetic providers. No real-game mutati
 
 Claude Sonnet 5.5 reviewed `b1b0b89` independently and inspected the committed screenshots and coverage gate. It did not rerun backend/frontend/workers/browser. Its [full findings](evidence/sonnet-qa-review-b1b0b89.md) remain preserved.
 
-The final source fixes the review's contract actor coupling, missing contract terms, optional reserve, Stop read/write interleaving, canonical read-normalization bypass, unlabeled conservative policies, four numeric casts and form/pagination/destructive-style issues. Tests reproduced the actor/reserve/Stop/malformed-read defects. Additional regressions cover signed plain-extraction rejection, bounded cargo loss versus expected conversion, and non-renewal of unchanged derived cooldowns. The separate Sonnet 5.5 security review is recorded in the final review artifact when returned; a source-only review does not certify live mechanics.
+The final source fixes the review's contract actor coupling, missing contract terms, optional reserve, Stop read/write interleaving, canonical read-normalization bypass, unlabeled conservative policies, four numeric casts and form/pagination/destructive-style issues. Tests reproduced the actor/reserve/Stop/malformed-read defects. Additional regressions cover signed plain-extraction rejection, bounded cargo loss versus expected conversion, and non-renewal of unchanged derived cooldowns. The separate Sonnet 5.5 security review completed on 308ccb9, ran 103 targeted tests and confirmed a post-receipt budget defect. Findings 1–4 were fixed and verified at 659f8aa. See the [security review resolution](foundation-security-resolution.md); the fixes were not independently re-reviewed, and no live certification is claimed.
 
 ## Visual and cleanup evidence
 
@@ -64,3 +64,10 @@ The last owned tab was closed. The final fixture harness verified server and bro
 PR87 stays draft and issue86 stays open. Official read/auth acceptance, per-variant mechanics, equipment/world availability, refinery/rounding behavior, warp/non-CRUISE formulas and actual construction/scrap effects remain pending as listed in the variant matrix. Real mutation acceptance requires separately approved agent/resources and numerical limits after read-only preflight; no budget was inferred here. New strategies, adviser execution/AI calls, investments, notifications, mobile/hosting and deployment remain deferred.
 
 No database migration was required. Source rollback can revert the implementation units and restore their matching committed assets; retain durable intents/history and settle pending or uncertain actions before changing a running installation. No installation or live cutover was performed by this task. Do not use rollback as authority to replay an uncertain write or delete gameplay records.
+
+
+## Final security follow-up at 659f8aa
+
+The original 469-test verification above remains historical at 308ccb9. After independent security review, the full verification script passes 475 tests/2791 assertions with new assets, and the last PHP-only projection/policy corrections pass the full backend 475 tests/2794 assertions. Final format, coverage and whitespace checks pass; all 34 committed manifest files exist. Source hashes now identify 659f8aa.
+
+Post-receipt request-budget deferral can no longer return a paid write to pending or false rejection. It retains its validated response as uncertain and cannot be scheduled/replayed. The four inherited-auth operations no longer poison saved credential state on 401; malformed selectors return 422. Stop updates its JSON field atomically without replacing receipts. Real worker restart/duplicate/Stop regressions passed. Refuel approvals now show source/tank change and protected cargo; uncalibrated partial cargo projections display Unknown. Browser journeys, inspected screenshots, lifecycle cleanup and all review dispositions are linked in the security resolution.
