@@ -2,6 +2,22 @@
 
 Delivered for [issue #90](https://github.com/giantsoup/spacetraders/issues/90) in [PR #91](https://github.com/giantsoup/spacetraders/pull/91).
 
+## Travel and discovery follow-up
+
+The new flows use the real local Vue/Inertia UI, Laravel handlers, durable actions and database queue with the owned FakeSpaceTraders fixture. No real SpaceTraders API calls or live gameplay tests were added in this follow-up. The earlier live observations and orbit/dock tests below are historical evidence only.
+
+The fixture browser suite verifies explicit waypoint, market and shipyard reads; uncharted details remaining unknown; failed reads and explicit retry after budget cooldown; selected ship and destination through orbit, preview, cancel, Stop, approval, queue execution, transit and refreshed arrival; protected-credit input; unsafe-fuel rejection; expiry; explicit manual fuel/time limits; Stop before send; lost-response uncertainty and read-only reconciliation; missing sensors; wrong-location charting; active cooldown; one scan with a returned target; a scan that misses the target; and charting the current uncharted location. Phone screenshots include 390px and 360px widths. Browser regressions also prove that unrelated commands keep their own return flow, Back restores the selected map card, blank reserves retain the default, and safety inputs survive orbit approval.
+
+A fresh full map browsing run also verifies all 26 existing scenarios with no unexpected browser errors. It retains the map's stored-only audit, all 21 locations, sprite interactions, mobile disclosure, card hierarchy, native wheel/touch, keyboard focus, ship selection, tracker, sign-out and authentication return.
+
+The final action suite has 16 scenarios and passed in a complete fresh run, with no unexpected browser errors. The final browsing suite also passed all 26 scenarios, including short cards with at least 130px of scrollable detail space. Earlier diagnostic runs hit a transient Herd empty GET response and local throttling. The paced final run passed without changing the application throttle.
+
+Run `node scripts/verify-system-map-actions-browser.mjs` on the owned Herd fixture host. The script refuses other checkouts and fixture paths, restricts browser traffic to that origin, and prepares only synthetic scenarios through `scripts/system-map-action-fixture.php`. That helper refuses live databases and enabled engines. `--drain` processes only the owned fixture queue to completion; it installs no service. Use `MAP_QA_ONLY` for a named journey and `MAP_QA_OUTPUT` for private evidence. Do not run two fixture-mutating suites together. Run `scripts/herd-php scripts/system-map-fixture.php` afterward to restore the broad map scenarios.
+
+Opening Get information or following Travel here makes no upstream request. Named fetches use the normal manual-read route and reset guard. Discovery adds the existing question, reserve and cooldown limits, so it uses ExplorationPolicy and the existing approval evidence. No new command implementation or engine authority was introduced.
+
+The new [dark travel/discovery report](interactive-system-map/travel/qa.html) records source hashes, screenshots, browser results, review findings and verification limits. Safari, Firefox, physical devices, screen readers, deployment and new live API travel/discovery remain unverified.
+
 ## Latest mobile, zoom and real API checks
 
 The [mobile and zoom report](interactive-system-map/mobile/qa.html) records the final UI source hashes, screenshots and browser checks after Claude Sonnet 5.5’s requested design pass. The phone map fills 743px of a 390×844 viewport, with compact controls and an expandable coverage chip. Artwork grows from 40px to 160px; wheel, keyboard, buttons and emulated touch stop at the close-up limit. Parent QA reproduced and fixed Escape closing the card beneath the coverage panel. The final card pass leads with stored prices, shipyard offers and market goods. Overlap choices expand on demand, and terrain descriptions and lore sit below gameplay information. All 26 native browser scenarios pass.
@@ -64,6 +80,6 @@ Run `scripts/herd-php scripts/system-map-fixture.php` to seed synthetic map obse
 
 ## Limitations
 
-This is a current-system view of stored knowledge. Catalogue coverage can be partial, observations can be old, and a complete catalogue describes the time it was observed. The page deliberately has no discovery, refresh, route execution, or galaxy controls.
+This is a current-system view of stored knowledge. Catalogue coverage can be partial, observations can be old, and a complete catalogue describes the time it was observed. The initial delivery had no discovery or travel actions. The follow-up above adds explicit information fetches and guarded command handoffs; browsing remains stored-only, and there is no galaxy view.
 
 The follow-up used fresh Playwright Chromium processes and contexts against the owned Herd host after T3 preview twice failed to emit a working wheel action. Wheel, mouse and CDP touch input were native browser input. Line-mode wheel normalization and API tracker status variants were simulated browser data/events. Physical hardware, Safari, Firefox, and screen-reader behavior remain untested. No deployment was tested. The later bounded live gameplay check is described above.

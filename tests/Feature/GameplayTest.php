@@ -63,6 +63,25 @@ class GameplayTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_map_command_handoff_keeps_owned_ship_and_reset_scoped_target_without_upstream_calls(): void
+    {
+        $before = json_decode(file_get_contents($this->worldFile), true)['calls'];
+        $this->get('/agents/'.$this->agent->id.'?ship=LOCAL-1&map_action=travel&map_waypoint=X1-TEST-PORT')
+            ->assertOk()->assertInertia(fn (Assert $page) => $page->where('mapTask.ship_symbol', 'LOCAL-1')
+            ->where('mapTask.action', 'travel')->where('mapTask.point.symbol', 'X1-TEST-PORT'));
+        $this->get('/agents/'.$this->agent->id.'/map?ship=LOCAL-1&location=X1-TEST-PORT')
+            ->assertOk()->assertInertia(fn (Assert $page) => $page->where('selectedLocation', 'X1-TEST-PORT'));
+        $this->get('/agents/'.$this->agent->id.'?ship=')->assertOk();
+        $this->getJson('/agents/'.$this->agent->id.'?ship=LOCAL-1&map_action=invalid&map_waypoint=X1-TEST-PORT')->assertUnprocessable();
+        $this->getJson('/agents/'.$this->agent->id.'?ship=LOCAL-1&map_action=travel')->assertUnprocessable();
+        $this->assertSame($before, json_decode(file_get_contents($this->worldFile), true)['calls']);
+        $this->get('/agents/'.$this->agent->id.'?ship=FOREIGN-1&map_action=travel&map_waypoint=X1-TEST-PORT')->assertNotFound();
+        $this->get('/agents/'.$this->agent->id.'?ship=LOCAL-1&map_action=discover&map_waypoint=X2-OTHER-A')->assertNotFound();
+        GameObservation::create(['agent_id' => $this->agent->id, 'reset_id' => 'old-reset', 'kind' => 'waypoint', 'symbol' => 'X1-TEST-OLD', 'data' => ['systemSymbol' => 'X1-TEST'], 'observed_at' => now(), 'source' => 'fixture']);
+        $this->get('/agents/'.$this->agent->id.'?ship=LOCAL-1&map_action=travel&map_waypoint=X1-TEST-OLD')->assertNotFound();
+        $this->actingAs(User::factory()->create())->get('/agents/'.$this->agent->id.'?ship=LOCAL-1&map_action=travel&map_waypoint=X1-TEST-PORT')->assertNotFound();
+    }
+
     public function test_browser_sync_allows_rate_limited_discovery_and_restores_the_web_time_limit(): void
     {
         $previous = (int) ini_get('max_execution_time');

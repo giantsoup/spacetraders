@@ -15,6 +15,7 @@ use App\Gameplay\OpportunityEvaluator;
 use App\Gameplay\ShipCommandExecutor;
 use App\Gameplay\SpaceTradersApi;
 use App\Http\Requests\GameplayRequest;
+use App\Maps\SystemMapKnowledge;
 use App\Models\Agent;
 use App\Models\AutomationDraft;
 use App\Models\AutomationRun;
@@ -24,6 +25,7 @@ use App\Models\Ship;
 use App\Models\ShipAction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -35,7 +37,23 @@ class AgentDashboardController extends Controller
         $ships = Ship::where('agent_id', $agent->id)->get();
         $observations = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->get();
 
+        $input = $request->validate([
+            'map_action' => ['sometimes', 'string', Rule::in(['travel', 'discover'])],
+            'map_waypoint' => ['required_with:map_action', 'string', 'max:80'],
+            'ship' => ['required_with:map_action', 'nullable', 'string', 'max:80'],
+        ]);
+        $mapTask = null;
+        if (isset($input['map_action'])) {
+            $selectedShip = $ships->firstWhere('symbol', $input['ship']);
+            abort_unless($selectedShip, 404);
+            $map = app(SystemMapKnowledge::class)->forShip($agent, $selectedShip);
+            $point = collect($map['locations'])->firstWhere('symbol', $input['map_waypoint']);
+            abort_unless($point, 404);
+            $mapTask = ['action' => $input['map_action'], 'point' => $point, 'ship_symbol' => $selectedShip->symbol];
+        }
+
         return Inertia::render('Agent/Dashboard', [
+            'mapTask' => $mapTask,
             'agent' => $agent, 'ships' => $ships,
             'manualReserveFloor' => max(1, (int) config('gameplay.manual_reserve_floor')),
             'manualCommands' => ManualCommands::OPERATIONS,

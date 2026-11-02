@@ -1,12 +1,14 @@
 <script setup>
+import { Link } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 import { assetName, readableLabel, readableText, readableValue } from '@/dataPresentation.js';
 import WaypointSprite from './WaypointSprite.vue';
 import ObservationStamp from './ObservationStamp.vue';
-const props = defineProps({ point: Object, nearby: Array, reset: String, now: Number, seconds: Number });
-defineEmits(['close', 'select']);
+const props = defineProps({ point: Object, nearby: Array, reset: String, now: Number, seconds: Number, ship: Object, archived: Boolean, agentId: Number });
+defineEmits(['close', 'select', 'information']);
 const details = ref(null);
 watch(() => props.point.symbol, () => { if (details.value) details.value.scrollTop = 0; }, { flush: 'post' });
+const travelReason = computed(() => props.archived ? 'Archived agent. Commands are unavailable.' : !props.ship ? 'Select an owned ship first.' : props.ship.in_transit ? 'In transit. Refresh status on the flight deck after arrival.' : props.ship.waypoint === props.point.symbol ? 'This is your last observed location.' : '');
 const directory = computed(() => props.point.market.directory?.data);
 const prices = computed(() => props.point.market.prices?.data);
 const offers = computed(() => props.point.shipyard.offers?.data);
@@ -35,7 +37,13 @@ const shipDescriptions = computed(() => offers.value?.ships?.filter(offer => off
             <section><h3>Traits & terrain</h3><p v-if="point.traits === null">Unknown</p><p v-else-if="!point.traits.length">Confirmed empty trait list</p><ul v-else class="map-traits"><li v-for="trait in point.traits" :key="trait.symbol"><strong>{{ trait.name || assetName(trait.symbol) }}</strong><p v-if="trait.description">{{ readableText(trait.description) }}</p></li></ul><ObservationStamp v-if="point.traits !== null" :at="point.traits_observed_at" :now="now" :seconds="seconds" /></section>
             <section v-if="point.description || point.faction?.description || shipDescriptions.length"><h3>Descriptions & lore</h3><p v-if="point.description">{{ readableText(point.description) }}</p><p v-if="point.faction?.description">{{ readableText(point.faction.description) }}</p><ul v-if="shipDescriptions.length" class="map-traits"><li v-for="(offer, index) in shipDescriptions" :key="index"><strong>{{ offer.name || assetName(offer.type) }}</strong><p>{{ readableText(offer.description) }}</p></li></ul></section>
             <section><h3>Observation details</h3><ObservationStamp :at="point.observed_at" :now="now" :seconds="seconds" /><p class="map-provenance">Source: {{ readableLabel(point.source) }} · Stored observation</p></section>
-            <p class="map-footnote">Artwork uses known type and terrain. Pixel patterns are cosmetic. This card never refreshes or executes gameplay.</p>
+            <p v-if="travelReason" id="travel-reason">{{ travelReason }}</p>
+            <p class="map-footnote">Artwork uses known type and terrain. Pixel patterns are cosmetic. Browsing never refreshes information. Use an explicit action above to request new information or review a command.</p>
+        </div>
+        <div class="location-actions">
+            <Link v-if="!travelReason" class="map-button map-primary" :href="route('agents.show', { agent: agentId, ship: ship.symbol, map_action: 'travel', map_waypoint: point.symbol }) + '#mapTask'">Travel here</Link>
+            <button v-else type="button" class="map-button" :aria-label="`Travel here unavailable. ${travelReason}`" :title="travelReason" disabled aria-describedby="travel-reason">{{ archived ? 'Archived agent' : !ship ? 'Select a ship' : ship.in_transit ? 'In transit' : 'At this location' }}</button>
+            <button type="button" class="map-button" @click="$emit('information')">Get information</button>
         </div>
     </section>
 </template>

@@ -1,0 +1,116 @@
+{
+  "base_revision": "8c24fed5e88d99b21512efd0a043d2757eeeed80",
+  "browser": "156.0.8078.4",
+  "actions": [
+    {
+      "id": "read-intent-and-unknown-traits",
+      "status": "pass",
+      "observed": "Options are stored-only; explicit detail GET preserves hidden traits, saves observation and restores focus on Escape.",
+      "screenshot": "read-intent-and-unknown-traits.png"
+    },
+    {
+      "id": "read-error-recovery",
+      "status": "pass",
+      "observed": "Real local read handler reports fake upstream failure, retains the map and succeeds on explicit retry.",
+      "screenshot": "read-error-recovery.png"
+    },
+    {
+      "id": "market-and-shipyard-reads",
+      "status": "pass",
+      "observed": "Separate explicit market and shipyard reads update rendered stored data without gameplay writes.",
+      "screenshot": "market-and-shipyard-reads.png"
+    },
+    {
+      "id": "travel-orbit-preview-cancel-stop",
+      "status": "pass",
+      "observed": "Map handoff preselects ship and target; docked travel explains orbit. Preview, cancel and Stop perform no gameplay writes.",
+      "screenshot": "travel-orbit-preview-cancel-stop.png"
+    },
+    {
+      "id": "travel-approval-queue-transit-arrival",
+      "status": "pass",
+      "observed": "Separate orbit and travel approvals execute through the real fixture queue. Destination/reserve survive; returned transit stays unconfirmed until explicit upstream refresh.",
+      "screenshot": "travel-approval-queue-transit-arrival.png"
+    },
+    {
+      "id": "travel-fuel-rejection",
+      "status": "pass",
+      "observed": "Server rejects unsafe fuel continuation before approval with a visible error and zero gameplay writes.",
+      "screenshot": "travel-fuel-rejection.png"
+    },
+    {
+      "id": "expired-preview",
+      "status": "pass",
+      "observed": "Expired approval reports server rejection without a write.",
+      "screenshot": "expired-preview.png"
+    },
+    {
+      "id": "pending-stop-and-uncertain-reconciliation",
+      "status": "pass",
+      "observed": "Stop prevents queued transport; a lost write response shows uncertainty and blocks new commands. Explicit reconciliation performs reads without replay.",
+      "screenshot": "pending-stop-and-uncertain-reconciliation.png"
+    },
+    {
+      "id": "explicit-travel-limits",
+      "status": "pass",
+      "observed": "Explicit fuel/time thresholds require acknowledgement, appear in existing server preview and remain separate from approval.",
+      "screenshot": "explicit-travel-limits.png"
+    },
+    {
+      "id": "discovery-capabilities-and-cooldown",
+      "status": "pass",
+      "observed": "No-sensor, wrong-location charting and cooldown states explain unavailable actions.",
+      "screenshot": "discovery-capabilities-and-cooldown.png"
+    },
+    {
+      "id": "discovery-scan-and-map-observations",
+      "status": "pass",
+      "observed": "Guarded exploration preview/approval/queue performs one scan, applies cooldown and displays normalized revealed traits on the original map location.",
+      "screenshot": "discovery-scan-and-map-observations.png"
+    },
+    {
+      "id": "discovery-missing-target",
+      "status": "pass",
+      "observed": "A scan that returns no target leaves traits unknown and stops after one write.",
+      "screenshot": "discovery-missing-target.png"
+    },
+    {
+      "id": "discovery-chart-current-location",
+      "status": "pass",
+      "observed": "Current uncharted location is charted through separate approval and queue execution; the map displays the returned traits.",
+      "screenshot": "discovery-chart-current-location.png"
+    },
+    {
+      "id": "map-task-normal-command-return-and-history",
+      "status": "pass",
+      "observed": "Map context does not take over unrelated command cancellation or reopen on browser Back to ship.",
+      "screenshot": "map-task-normal-command-return-and-history.png"
+    },
+    {
+      "id": "blank-reserve-and-phone-back-selection",
+      "status": "pass",
+      "observed": "Browser Back restores the selected map card, and blank reserve retains the configured floor rather than silently becoming zero.",
+      "screenshot": "blank-reserve-and-phone-back-selection.png"
+    },
+    {
+      "id": "short-phone-action-layout",
+      "status": "pass",
+      "observed": "360px phone uses scrollable modal, readable controls and no horizontal page overflow.",
+      "screenshot": "short-phone-action-layout.png"
+    }
+  ],
+  "browsing_scenarios": 26,
+  "unexpected_browser_errors": [],
+  "scope": "Real local UI and Laravel handlers with owned FakeSpaceTraders transport and bounded database queue. No new live API tests.",
+  "local_checks": {
+    "php_tests": 519,
+    "php_assertions": 3071,
+    "map_js_tests": 7,
+    "verify_sh": "passed"
+  },
+  "reviews": {
+    "sonnet_design": "Claude Sonnet 5.5 completed early mobile design. Accepted reserve, guarded discovery, footer, read status and Done sizing recommendations.",
+    "sonnet_general_qa": "Claude Sonnet 5.5 completed independent source/screenshot QA. Accepted origin tracking, history, short cards, blank reserve, recovery link and preview-copy findings fixed with browser regressions.",
+    "sol_loop": "Approved, one round with GPT-6.1 Sol on high. No blocker or should-fix findings. No usage figures returned."
+  }
+}

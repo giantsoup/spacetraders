@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import AppShell from '@/Layouts/AppShell.vue';
+import LocationInformation from '@/Components/SystemMap/LocationInformation.vue';
 import LocationCard from '@/Components/SystemMap/LocationCard.vue';
 import WaypointSprite from '@/Components/SystemMap/WaypointSprite.vue';
 import ObservationStamp from '@/Components/SystemMap/ObservationStamp.vue';
@@ -9,11 +10,12 @@ import MapIcon from '@/Components/SystemMap/MapIcon.vue';
 import { assetName } from '@/dataPresentation.js';
 import { clamp, closeUpZoom, fitCamera, isPlotted, mapLabels, markerGroups, markerSize, panCamera, project, wheelZoomFactor, zoomCamera } from '@/systemMap.js';
 import { shipSelectionKey } from '@/shipSelection.js';
-const props = defineProps({ agent: Object, ships: Array, map: Object, freshnessSeconds: Number });
-const viewport = ref(null), canvas = ref(null), selected = ref(null), directory = ref(null), knowledge = ref(null), knowledgeOpen = ref(false);
+const props = defineProps({ agent: Object, ships: Array, map: Object, freshnessSeconds: Number, selectedLocation: String });
+const viewport = ref(null), canvas = ref(null), selected = ref(props.selectedLocation || null), directory = ref(null), knowledge = ref(null), knowledgeOpen = ref(false);
 const size = reactive({ width: 1000, height: 600 });
 const camera = ref({ x: 0, y: 0, scale: 1 });
 const now = ref(Date.now());
+const informationOpen = ref(false);
 const page = usePage();
 const shipSymbol = computed(() => props.map.ship?.symbol || '');
 const plotted = computed(() => props.map.locations.filter(isPlotted));
@@ -44,11 +46,19 @@ async function select(symbol, event) {
     const withinCard = Boolean(opener?.closest('.location-card'));
     if (!withinCard) returnFocus = opener?.closest('.map-directory')?.querySelector('summary') || opener || returnFocus;
     selected.value = symbol;
+    rememberLocation(symbol);
+
     knowledgeOpen.value = false;
     if (directory.value) directory.value.open = false;
     await nextTick();
     if (withinCard) opener.scrollIntoView({ block: 'nearest' });
     else viewport.value?.querySelector('.map-close')?.focus({ preventScroll: true });
+}
+function rememberLocation(symbol) {
+    const address = new URL(window.location.href);
+    if (symbol) address.searchParams.set('location', symbol);
+    else address.searchParams.delete('location');
+    router.replace({ url: address.pathname + address.search + address.hash, props: current => ({ ...current, selectedLocation: symbol }), preserveState: true, preserveScroll: true });
 }
 function toggleKnowledge() {
     knowledgeOpen.value = !knowledgeOpen.value;
@@ -63,6 +73,7 @@ function outside(event) {
 function close(restore = true) {
     if (!selected.value) return;
     selected.value = null;
+    rememberLocation(null);
     if (!restore) return;
     if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
     else canvas.value?.focus({ preventScroll: true });
@@ -153,7 +164,7 @@ onBeforeUnmount(() => { observer?.disconnect(); clearInterval(timer); });
             <div class="map-stage">
                 <div ref="knowledge" class="map-knowledge" :class="{ open: knowledgeOpen }">
                     <button type="button" class="map-knowledge-toggle" :aria-expanded="knowledgeOpen" aria-controls="map-knowledge-detail" @click="toggleKnowledge"><span class="map-status-dot" /><span class="map-knowledge-summary"><span class="map-sr">Stored knowledge only · </span>{{ map.catalogue?.complete ? 'Complete' : 'Partial' }}<span class="map-sr"> catalogue</span> · {{ plotted.length }}<template v-if="unplotted.length"> of {{ map.locations.length }}</template> plotted</span><ObservationStamp v-if="map.catalogue" :at="map.catalogue.observed_at" :now="now" :seconds="freshnessSeconds" /><MapIcon name="info" /></button>
-                    <div id="map-knowledge-detail" class="map-knowledge-detail"><span class="map-status-dot" /><span>Stored knowledge only</span><span>· {{ map.catalogue?.complete ? 'Complete catalogue when observed' : 'Partial catalogue · coverage unconfirmed' }}</span><span>· {{ plotted.length }} plotted<span v-if="unplotted.length"> / {{ unplotted.length }} unplotted</span></span><ObservationStamp v-if="map.catalogue" :at="map.catalogue.observed_at" :now="now" :seconds="freshnessSeconds" /><p class="map-knowledge-help">Drag to pan · Pinch to zoom · Dots mark exact coordinates · Art patterns are cosmetic</p></div>
+                    <div id="map-knowledge-detail" class="map-knowledge-detail"><span class="map-status-dot" /><span>Stored knowledge while browsing</span><span>· {{ map.catalogue?.complete ? 'Complete catalogue when observed' : 'Partial catalogue · coverage unconfirmed' }}</span><span>· {{ plotted.length }} plotted<span v-if="unplotted.length"> / {{ unplotted.length }} unplotted</span></span><ObservationStamp v-if="map.catalogue" :at="map.catalogue.observed_at" :now="now" :seconds="freshnessSeconds" /><p class="map-knowledge-help">Drag to pan · Pinch to zoom · Dots mark exact coordinates · Art patterns are cosmetic. New information and commands require an explicit action.</p></div>
                 </div>
             <div ref="viewport" class="map-viewport">
                 <svg ref="canvas" class="system-canvas" :viewBox="`0 0 ${size.width} ${size.height}`" tabindex="0" role="group" aria-label="Interactive system map" aria-describedby="map-help" :data-camera="JSON.stringify(camera)" :data-max-zoom="maxZoom" :data-marker-size="diameter" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="pointerUp" @lostpointercapture="pointerLost" @wheel.prevent="wheel" @keydown="keydown">
@@ -171,12 +182,13 @@ onBeforeUnmount(() => { observer?.disconnect(); clearInterval(timer); });
                 <div class="map-controls" role="group" aria-label="Map controls"><button type="button" class="map-tool map-tool-square" aria-label="Zoom in" :disabled="atCloseUp" :title="atCloseUp ? 'Close-up limit reached' : 'Zoom in'" @click="zoom(1.5)"><MapIcon name="plus" /></button><button type="button" class="map-tool map-tool-square" aria-label="Zoom out" title="Zoom out" @click="zoom(1 / 1.5)"><MapIcon name="minus" /></button><button type="button" class="map-tool" title="Fit system" @click="fit"><MapIcon name="fit" /><span class="map-label">Fit system</span></button><button type="button" class="map-tool" :title="map.ship?.in_transit ? 'Center departure' : 'Center on ship'" :disabled="!position" @click="centerShip"><MapIcon name="ship" /><span class="map-label">{{ map.ship?.in_transit ? 'Center departure' : 'Center on ship' }}</span></button></div>
                 <details ref="directory" class="map-directory" @toggle="directoryToggled"><summary><MapIcon name="list" /><span class="map-label">Locations</span><span class="map-count">{{ map.locations.length }}</span></summary><div class="map-directory-list"><p v-if="!map.locations.length">No stored locations</p><h3>Plotted locations</h3><button v-for="location in plotted" :key="location.symbol" type="button" @click="select(location.symbol, $event)"><span>{{ location.symbol }}</span><small>{{ assetName(location.type) }} · {{ location.x }}, {{ location.y }}</small></button><h3 v-if="unplotted.length">Unplotted · coordinates Unknown</h3><button v-for="location in unplotted" :key="location.symbol" type="button" @click="select(location.symbol, $event)"><span>{{ location.symbol }}</span><small>{{ assetName(location.type) }} · Unknown coordinates</small></button></div></details>
                 <div v-if="map.ship" class="map-ship-note"><span class="map-status-dot" />{{ shipSymbol }} · {{ map.ship.in_transit ? 'In transit · departure shown, arrival unconfirmed' : `Last observed at ${map.ship.waypoint || 'Unknown'}` }}<span v-if="!position"> · Position Unknown</span><ObservationStamp :at="map.ship.observed_at" :now="now" :seconds="freshnessSeconds" /><span v-if="agent.connection_state === 'reset'">Archived world</span></div>
-                <LocationCard v-if="point" :point="point" :nearby="nearby" :reset="agent.reset_id" :now="now" :seconds="freshnessSeconds" :style="cardStyle" @select="select" @close="close" />
+                <LocationCard :ship="map.ship" :archived="agent.connection_state === 'reset'" :agent-id="agent.id" @information="informationOpen = true" v-if="point" :point="point" :nearby="nearby" :reset="agent.reset_id" :now="now" :seconds="freshnessSeconds" :style="cardStyle" @select="select" @close="close" />
                 <div class="map-scale" aria-hidden="true"><span :style="{ width: `${grid.pixels}px` }" />{{ grid.step }} coordinate units · +y ↑</div>
             </div>
             </div>
             <footer id="map-help" class="map-help"><span>Drag to pan · Scroll / pinch to zoom</span><span>Keyboard: arrows pan · + / − zoom · F fit · C ship · Esc close</span><span>Dots mark exact coordinates · Art patterns are cosmetic</span></footer>
         </main>
+        <LocationInformation v-if="point" :open="informationOpen" :agent="agent" :ship="map.ship" :point="point" :system="map.system" @close="informationOpen = false" />
     </AppShell>
 </template>
 

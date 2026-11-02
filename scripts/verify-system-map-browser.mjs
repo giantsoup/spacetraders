@@ -248,7 +248,7 @@ try {
     for(const [name,width,height] of [['phone',390,844],['small-phone',320,568],['phone-landscape',844,390],['reflow',720,450]])await check(`${name}-layout`,async()=>{
         await page.setViewportSize({width,height});await map();await button('Fit system').click();assertBounds(await bounds());
         await openLocation('X1-TEST-PORT');assertBounds(await bounds());
-        const clientHeight=await page.locator('.location-scroll').evaluate(el=>el.clientHeight);assert.ok(clientHeight>=80,`Location detail scroll region has only ${clientHeight}px of height`);
+        const clientHeight=await page.locator('.location-scroll').evaluate(el=>el.clientHeight);assert.ok(clientHeight>=130,`Location detail scroll region has only ${clientHeight}px of height`);
         await page.locator('.location-scroll').focus();await page.keyboard.press('PageDown');await page.waitForFunction(()=>document.querySelector('.location-scroll').scrollTop>0);
         assertBounds(await bounds());assert.equal(await page.evaluate(()=>scrollY),0,'Scrolling card must not scroll the page header away');
         return `Map, tracker, controls and open location card fit ${width}x${height}; ${clientHeight}px detail area remains keyboard-scrollable`;

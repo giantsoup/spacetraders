@@ -2,11 +2,11 @@
 
 Issue: https://github.com/giantsoup/spacetraders/issues/90
 
-Status: Delivered and locally verified. See [verification evidence and limitations](interactive-system-map-verification.md). Real API reads and two reversible manual commands were verified with later user authorization. No deployment or merge was performed.
+Status: Map browsing delivered and locally verified. Travel and explicit information actions added in the PR follow-up. See [verification evidence and limitations](interactive-system-map-verification.md). Real API reads and two reversible manual commands were verified with later user authorization. No deployment or merge was performed.
 
 ## Requested feature
 
-Add a dedicated, dark, full-page map of the selected ship's current star system. Taylor wants to pan and zoom, click planets and other locations, and inspect a small information card. Use stored observations only. Missing information remains Unknown.
+Add a dedicated, dark, full-page map of the selected ship's current star system. Taylor wants to pan and zoom, click planets and other locations, and inspect a small information card. Browse stored observations without background API calls. Missing information remains Unknown. Explicit actions now open guarded travel/discovery or fetch a named read.
 
 ## Approved choices
 
@@ -70,3 +70,15 @@ Waypoint artwork grows with zoom from 40px to a 160px close-up. All zoom inputs 
 The later user-authorized live check used 14 successful real API reads to store 94 known locations. Orbit and dock both confirmed through the normal command preview/approval/worker path, restoring the original dock, fuel and cargo with zero credit change. Map browsing and tracker refresh did not change gameplay hashes or upstream request counters. The local live preview shares the original database, locks, engine and budget; it does not create a second execution authority. See the [mobile and zoom report](interactive-system-map/mobile/qa.html) for final source hashes and checks.
 
 Cards now put prices, shipyard offers and market goods first. Nearby locations expand from a compact selector; full terrain descriptions and lore appear below gameplay information. The final native browser suite covers 26 scenarios, including card order and overlap selection.
+
+## Travel and information follow-up
+
+A location card now has a fixed action footer. Travel here opens Plan travel on the existing flight deck, with the owned ship and location already selected. It creates no upstream requests until the user chooses a named action. Docked ships require a separate orbit preview and approval before travel. The standard travel preview checks fuel-safe continuation and protected credits. Explicit manual fuel/time review limits retain the existing acknowledgement and uncertainty warnings. These thresholds cannot cap server consumption.
+
+Get information opens a read sheet. Fetch waypoint details saves only the returned fields. Fetch market information and Fetch shipyard information appear for observed services. Prices and detailed offers still require a ship at the location; a remote read may provide only a directory. A GET cannot reveal uncharted traits.
+
+For unknown traits, Review discovery options opens Discover location with the same ship and target. One marketplace or shipyard question uses the existing ExplorationPolicy. Charting requires the current uncharted location. Nearby scanning requires a Sensor Array and can miss the target. Both use the existing orbit, cooldown, crew/power, fuel-continuation and reserve checks. Returned scan/chart data goes through AgentSynchronizer; a missed target stays unknown.
+
+Every gameplay command uses the existing preview, approval, durable ShipAction, queue execution, locks, Stop and reconciliation path. Nothing chains orbit into travel, repeats a scan, refuels automatically, or infers arrival from elapsed browser time. Back to selected map location preserves the ship and card selection. The map itself never polls gameplay or fetches while browsing.
+
+The follow-up adds no galaxy view, new command executor, engine service or automation. Existing canonical engine ownership is unchanged. Fixture browser execution uses bounded drains of the owned synthetic queue only.
