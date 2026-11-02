@@ -48,7 +48,9 @@ class SpaceTradersClient
             // Even rejected or ambiguous writes invalidate every read in this preflight scope.
             $this->reads = [];
         }
-        $maxWait = $read ? 2.0 : 0.75;
+        // A successful preflight can exhaust a one-second window plus our safety margin.
+        // Short waits apply to writes too; actual error backoffs still defer before transport.
+        $maxWait = 2.0;
         if ($deadline !== null) {
             $maxWait = min($maxWait, max(0, $deadline - microtime(true) - 0.1));
         }

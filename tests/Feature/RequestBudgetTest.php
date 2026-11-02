@@ -157,16 +157,31 @@ class RequestBudgetTest extends TestCase
         }
     }
 
-    public function test_write_does_not_inherit_the_longer_read_wait(): void
+    public function test_write_waits_through_short_successful_preflight_exhaustion(): void
     {
         $budget = $this->budget();
         app()->instance(RequestBudget::class, $budget);
         $budget->observe($this->response(200, ['X-RateLimit-Remaining' => '0', 'Retry-After' => '1']), 'a');
         Http::preventStrayRequests();
         Http::fake();
+        $started = $budget->time;
+        app(SpaceTradersClient::class)->request('post', '/my/ships/A/orbit', token: 'a');
+        $this->assertGreaterThanOrEqual(1.25, $budget->time - $started);
+        $this->assertLessThanOrEqual(2, $budget->time - $started);
+        Http::assertSentCount(1);
+    }
+
+    #[DataProvider('upstreamBackoffs')]
+    public function test_writes_still_defer_actual_upstream_error_backoffs(int $status): void
+    {
+        $budget = $this->budget();
+        app()->instance(RequestBudget::class, $budget);
+        $budget->observe($this->response($status, ['Retry-After' => '1']), 'a');
+        Http::preventStrayRequests();
+        Http::fake();
         try {
             app(SpaceTradersClient::class)->request('post', '/my/ships/A/orbit', token: 'a');
-            $this->fail('Write inherited the longer read wait.');
+            $this->fail('Write bypassed upstream error backoff.');
         } catch (RequestDeferred) {
             Http::assertNothingSent();
         }
