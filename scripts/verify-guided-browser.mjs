@@ -83,6 +83,7 @@ page.on('console', message => { if (message.type() === 'error') errors.push(mess
 page.on('response', response => { if (response.status() >= 400) responses.push(`${response.status()} ${new URL(response.url()).pathname}`); });
 const coach = page.getByRole('complementary', { name: 'Guided first flight' });
 const button = name => page.getByRole('button', { name, exact: true });
+const approvalRequest = request => /\/commands\/\d+\/approve$/.test(new URL(request.url()).pathname) && request.method() === 'POST';
 const key = guidedKey(identities.user, identities.agent);
 const session = () => page.evaluate(key => JSON.parse(localStorage.getItem(key)), key);
 const state = () => cli("echo json_encode(['actions'=>App\\Models\\ShipAction::orderBy('id')->get(),'ships'=>App\\Models\\Ship::all(),'agent'=>App\\Models\\Agent::first()]);");
@@ -223,7 +224,9 @@ try {
         } else if (kind === 'approve') {
             if (scenario === 'recovery' && !previewRecovered && phase === 'outbound') {
                 await page.route('**/commands/*/approve', route => route.abort('failed'), { times: 1 });
-                await page.locator('.guided-target').click();
+                // Tracking is saved before dispatch. Wait for the injected failure before navigating.
+                await Promise.all([page.waitForEvent('requestfailed', approvalRequest), page.locator('[data-guide="approve"].guided-target').click()]);
+                await page.waitForFunction(() => document.querySelector('main')?.getAttribute('aria-busy') === 'false');
                 await page.waitForFunction(key => !!JSON.parse(localStorage.getItem(key))?.pending, key);
                 await reload();
                 await button('Restore saved preview').click();
@@ -246,8 +249,9 @@ try {
                     committed();
                     await route.abort('failed');
                 }, { times: 1 });
-                await page.locator('.guided-target').click();
+                await Promise.all([page.waitForEvent('requestfailed', approvalRequest), page.locator('[data-guide="approve"].guided-target').click()]);
                 await persisted;
+                await page.waitForFunction(() => document.querySelector('main')?.getAttribute('aria-busy') === 'false');
                 assert.ok((await session()).pending, 'Known action ID must be saved before the approval response');
                 await button('Pause guidance').click();
                 await reload();
@@ -257,7 +261,7 @@ try {
                 recovered = true;
                 continue;
             }
-            const [response] = await Promise.all([page.waitForResponse(response => /\/commands\/\d+\/approve$/.test(new URL(response.url()).pathname) && response.request().method() === 'POST'), page.locator('.guided-target').click()]);
+            const [response] = await Promise.all([page.waitForResponse(response => approvalRequest(response.request())), page.locator('[data-guide="approve"].guided-target').click()]);
             const action = await response.json();
             assert.equal(response.status(), 202, action.message);
             await page.waitForFunction(key => !!JSON.parse(localStorage.getItem(key))?.pending, key);
