@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import fs from 'node:fs';
-import { fitCamera, zoomCamera, panCamera, project, markerGroups, mapLabels } from '../resources/js/systemMap.js';
+import { fitCamera, zoomCamera, panCamera, project, wheelZoomFactor, markerGroups, mapLabels } from '../resources/js/systemMap.js';
 import { waypointSprite, waypointFamilies } from '../resources/js/waypointSprites.js';
 const size = { width: 1000, height: 600 };
 test('fit keeps negative, positive, identical, and zero coordinates visible', () => {
@@ -55,4 +55,10 @@ test('sprites are deterministic, distinct, neutral when unknown, and keep identi
     assert.equal(waypointSprite({symbol:'X1-MAP-NEW', type:'NEW_TYPE', traits:null}).family, 'unknown');
     assert.deepEqual(neutral, waypointSprite({...point, traits:[]} ,'reset'));
     assert.deepEqual(neutral.pixels, waypointSprite({...point, traits:[{symbol:'MARKETPLACE', description:'Services and spices available.'}]} ,'reset').pixels);
+});
+
+test('wheel units normalize pixels, lines and pages without changing zoom bounds', () => {
+    assert.equal(wheelZoomFactor(3, 1, 600), wheelZoomFactor(48, 0, 600));
+    assert.equal(wheelZoomFactor(.1, 2, 600), wheelZoomFactor(60, 0, 600));
+    assert.equal(wheelZoomFactor(-10000, 0, 600), wheelZoomFactor(-200, 0, 600));
 });

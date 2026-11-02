@@ -18,6 +18,10 @@ export function zoomCamera(camera, factor, anchor, size) {
     return { x: camera.x + (anchor.x - size.width / 2) * (1 / camera.scale - 1 / scale),
         y: camera.y - (anchor.y - size.height / 2) * (1 / camera.scale - 1 / scale), scale };
 }
+export function wheelZoomFactor(deltaY, deltaMode, height) {
+    const pixels = deltaY * (deltaMode === 1 ? 16 : deltaMode === 2 ? height : 1);
+    return Math.exp(-clamp(pixels, -200, 200) * .005);
+}
 export function panCamera(camera, dx, dy) {
     return { ...camera, x: camera.x - dx / camera.scale, y: camera.y + dy / camera.scale };
 }

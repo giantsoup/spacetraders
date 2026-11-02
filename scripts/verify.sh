@@ -18,6 +18,7 @@ node scripts/verify-automation-selection.mjs
 node scripts/verify-ship-presentation.mjs
 node --test scripts/verify-system-map.mjs
 node --check scripts/system-map-browser-probes.js
+node --check scripts/verify-system-map-browser.mjs
 node --check scripts/verify-native-ship-browser.mjs
 node --check scripts/verify-ship-https-browser.mjs
 node --check scripts/ship-browser-navigation.mjs

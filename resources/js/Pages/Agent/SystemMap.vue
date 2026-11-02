@@ -6,7 +6,7 @@ import LocationCard from '@/Components/SystemMap/LocationCard.vue';
 import WaypointSprite from '@/Components/SystemMap/WaypointSprite.vue';
 import ObservationStamp from '@/Components/SystemMap/ObservationStamp.vue';
 import { assetName } from '@/dataPresentation.js';
-import { clamp, fitCamera, isPlotted, mapLabels, markerGroups, panCamera, project, zoomCamera } from '@/systemMap.js';
+import { clamp, fitCamera, isPlotted, mapLabels, markerGroups, panCamera, project, wheelZoomFactor, zoomCamera } from '@/systemMap.js';
 import { shipSelectionKey } from '@/shipSelection.js';
 const props = defineProps({ agent: Object, ships: Array, map: Object, freshnessSeconds: Number });
 const viewport = ref(null), canvas = ref(null), selected = ref(null), directory = ref(null);
@@ -23,7 +23,10 @@ const nearby = computed(() => groups.value.find(g => g.members.some(m => m.point
 const position = computed(() => plotted.value.find(p => p.symbol === props.map.ship?.position));
 const shipScreen = computed(() => position.value ? project(position.value, camera.value, size) : null);
 const selectedScreen = computed(() => point.value && isPlotted(point.value) ? project(point.value, camera.value, size) : null);
-const cardStyle = computed(() => ({ left: `${clamp((selectedScreen.value?.x ?? 12) + 38, 12, size.width - 392)}px`, top: `${clamp((selectedScreen.value?.y ?? 24) - 60, 12, Math.max(12, size.height - Math.min(560, size.height - 24) - 12))}px` }));
+const cardStyle = computed(() => {
+    const anchor = selectedScreen.value || { x: size.width - 430, y: 150 };
+    return { left: `${clamp(anchor.x + 38, 12, size.width - 392)}px`, top: `${clamp(anchor.y - 60, 12, Math.max(12, size.height - Math.min(560, size.height - 24) - 12))}px` };
+});
 const grid = computed(() => { const desired = 80 / camera.value.scale, base = 10 ** Math.floor(Math.log10(desired)); const step = [1, 2, 5, 10].find(n => n * base >= desired) * base; return { step, pixels: step * camera.value.scale, origin: project({ x: 0, y: 0 }, camera.value, size) }; });
 function fit() { camera.value = fitCamera(plotted.value, size); }
 function zoom(factor, anchor = { x: size.width / 2, y: size.height / 2 }) { camera.value = zoomCamera(camera.value, factor, anchor, size); }
@@ -31,23 +34,36 @@ function centerShip() { if (position.value) camera.value = { ...camera.value, x:
 function chooseShip(event) { router.get(route('agents.map', props.agent.id), { ship: event.target.value }); }
 let returnFocus, observer, timer;
 async function select(symbol, event) {
-    returnFocus = event?.currentTarget || returnFocus;
+    const opener = event?.currentTarget;
+    const withinCard = Boolean(opener?.closest('.location-card'));
+    if (!withinCard) returnFocus = opener?.closest('.map-directory')?.querySelector('summary') || opener || returnFocus;
     selected.value = symbol;
     if (directory.value) directory.value.open = false;
     await nextTick();
-    viewport.value?.querySelector('.map-close')?.focus({ preventScroll: true });
+    if (withinCard) opener.scrollIntoView({ block: 'nearest' });
+    else viewport.value?.querySelector('.map-close')?.focus({ preventScroll: true });
 }
-function outside(event) { if (point.value && !event.target.closest('.location-card, .map-marker, .map-directory')) close(); }
-function close() { selected.value = null; if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); else canvas.value?.focus({ preventScroll: true }); }
+function outside(event) {
+    const mapGesture = event.target.closest('.system-canvas') && (dragged || multiTouch);
+    if (point.value && !mapGesture && !event.target.closest('.location-card, .map-marker, .map-directory, .map-controls, .map-header')) close(false);
+}
+function close(restore = true) {
+    if (!selected.value) return;
+    selected.value = null;
+    if (!restore) return;
+    if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+    else canvas.value?.focus({ preventScroll: true });
+}
+function escape(event) { if (point.value) { event.preventDefault(); close(); } }
 const pointers = new Map();
-let gesture = null, start = null, dragged = false;
+let gesture = null, start = null, dragged = false, multiTouch = false;
 function local(event) { const bounds = canvas.value.getBoundingClientRect(); return { x: event.clientX - bounds.left, y: event.clientY - bounds.top }; }
 function pointerDown(event) {
     if (event.button && event.pointerType !== 'touch') return;
     event.preventDefault();
+    if (!pointers.size) { dragged = false; multiTouch = false; } else multiTouch = true;
     pointers.set(event.pointerId, local(event));
-    if (!event.target.closest('.map-marker')) canvas.value.setPointerCapture(event.pointerId);
-    dragged = false;
+    if (!event.target.closest('.map-marker')) { canvas.value.focus({ preventScroll: true }); canvas.value.setPointerCapture(event.pointerId); }
     gesture = [...pointers.values()];
     start = gesture[0];
 }
@@ -74,12 +90,12 @@ function pointerUp(event) {
     if (!pointers.has(event.pointerId)) return;
     pointers.delete(event.pointerId);
     gesture = [...pointers.values()];
-    if (!dragged && event.type === 'pointerup' && !event.target.closest('.map-marker')) close();
+    if (!pointers.size && !dragged && !multiTouch && event.type === 'pointerup' && !event.target.closest('.map-marker')) close(false);
 }
 function pointerLost(event) { if (event.target === canvas.value) pointerUp(event); }
-function wheel(event) { zoom(Math.exp(-clamp(event.deltaY, -200, 200) * .005), local(event)); }
+function wheel(event) { zoom(wheelZoomFactor(event.deltaY, event.deltaMode, size.height), local(event)); }
 function keydown(event) {
-    if (event.target !== canvas.value) return;
+    if (event.target !== canvas.value || event.ctrlKey || event.metaKey || event.altKey) return;
     const moves = { ArrowLeft: [70, 0], ArrowRight: [-70, 0], ArrowUp: [0, 70], ArrowDown: [0, -70] };
     if (moves[event.key]) camera.value = panCamera(camera.value, ...moves[event.key]);
     else if (['+', '='].includes(event.key)) zoom(1.4);
@@ -113,7 +129,7 @@ onBeforeUnmount(() => { observer?.disconnect(); clearInterval(timer); });
 <template>
     <Head :title="`System map · ${map.system || agent.name}`" />
     <AppShell compact brand="SPACETRADERS" :agent-id="agent.id" :ship-symbol="shipSymbol" class="system-map-shell">
-        <main id="main-content" class="system-map-page" @click="outside">
+        <main id="main-content" class="system-map-page" @click="outside" @keydown.esc="escape">
             <header class="map-header"><div><p class="map-eyebrow">{{ agent.name }} / STORED EXPLORATION</p><h1>{{ map.system || 'System Unknown' }} <span>System map<span v-if="map.system_info?.type"> · {{ assetName(map.system_info.type) }}</span></span></h1></div><div class="map-header-actions"><label v-if="ships.length" class="map-ship-picker"><span class="sr-only">Selected ship</span><select aria-label="Selected ship" :value="shipSymbol" @change="chooseShip"><option v-for="ship in ships" :key="ship.symbol" :value="ship.symbol">{{ ship.symbol }}</option></select></label><Link class="map-button" :href="route('agents.show', { agent: agent.id, ship: shipSymbol })">Flight deck <span aria-hidden="true">↗</span></Link></div></header>
             <div class="map-knowledge"><span class="map-status-dot" /><span>Stored knowledge only</span><span>· {{ map.catalogue?.complete ? 'Complete catalogue when observed' : 'Partial catalogue · coverage unconfirmed' }}</span><span>· {{ plotted.length }} plotted<span v-if="unplotted.length"> / {{ unplotted.length }} unplotted</span></span><ObservationStamp v-if="map.catalogue" :at="map.catalogue.observed_at" :now="now" :seconds="freshnessSeconds" /></div>
             <div ref="viewport" class="map-viewport">
@@ -123,7 +139,7 @@ onBeforeUnmount(() => { observer?.disconnect(); clearInterval(timer); });
                     <path :d="`M ${grid.origin.x - 8} ${grid.origin.y} h 16 M ${grid.origin.x} ${grid.origin.y - 8} v 16`" stroke="#596983" fill="none" />
                     <g v-for="group in groups" :key="group.key" class="map-group">
                         <g v-for="member in group.members" :key="member.point.symbol"><line :x1="member.x" :y1="member.y" :x2="group.x" :y2="group.y" stroke="#6b7c95" stroke-dasharray="2 3" /><circle :cx="member.x" :cy="member.y" r="2.5" fill="#c5d7e9"><title>{{ member.point.symbol }} · x {{ member.point.x }} · y {{ member.point.y }}</title></circle></g>
-                        <foreignObject :x="group.x - 24" :y="group.y - 24" width="48" height="48"><button xmlns="http://www.w3.org/1999/xhtml" type="button" class="map-marker" :class="{ selected: group.members.some(m => m.point.symbol === selected) }" :aria-label="group.members.length > 1 ? `${group.members.length} locations near ${group.members[0].point.symbol}` : `Inspect ${group.members[0].point.symbol}`" @click.stop="(!$event.detail || !dragged) && select(group.members[0].point.symbol, $event)"><WaypointSprite :point="group.members[0].point" :reset="agent.reset_id" /><span v-if="group.members.length > 1" class="marker-count">{{ group.members.length }}</span></button></foreignObject>
+                        <foreignObject :x="group.x - 24" :y="group.y - 24" width="48" height="48"><button xmlns="http://www.w3.org/1999/xhtml" type="button" class="map-marker" :class="{ selected: group.members.some(m => m.point.symbol === selected) }" :aria-label="group.members.length > 1 ? `${group.members.length} locations near ${group.members[0].point.symbol}` : `Inspect ${group.members[0].point.symbol}`" @click.stop="(!$event.detail || (!dragged && !multiTouch)) && select(group.members[0].point.symbol, $event)"><WaypointSprite :point="group.members[0].point" :reset="agent.reset_id" /><span v-if="group.members.length > 1" class="marker-count">{{ group.members.length }}</span></button></foreignObject>
                         <text v-if="group.label" :x="group.x" :y="group.y + 42" text-anchor="middle" class="marker-label">{{ group.label }}</text>
                     </g>
                     <g v-if="shipScreen" :transform="`translate(${shipScreen.x},${shipScreen.y})`" class="map-ship-indicator" aria-hidden="true"><circle r="29" fill="none" stroke="#7dd3cb" :stroke-dasharray="map.ship.in_transit ? '4 5' : undefined" /><path d="M -6 -35 L 0 -44 L 6 -35 Z" fill="#a3f0e4" /></g>

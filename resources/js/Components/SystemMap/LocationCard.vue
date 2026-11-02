@@ -1,10 +1,12 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { assetName, readableLabel, readableText, readableValue } from '@/dataPresentation.js';
 import WaypointSprite from './WaypointSprite.vue';
 import ObservationStamp from './ObservationStamp.vue';
 const props = defineProps({ point: Object, nearby: Array, reset: String, now: Number, seconds: Number });
 defineEmits(['close', 'select']);
+const details = ref(null);
+watch(() => props.point.symbol, () => { if (details.value) details.value.scrollTop = 0; }, { flush: 'post' });
 const directory = computed(() => props.point.market.directory?.data);
 const prices = computed(() => props.point.market.prices?.data);
 const offers = computed(() => props.point.shipyard.offers?.data);
@@ -13,8 +15,8 @@ const presence = value => ({ observed: 'Observed', absent: 'Not present in obser
 <template>
     <section class="location-card" role="dialog" aria-modal="false" aria-labelledby="location-title" @keydown.esc.stop="$emit('close')">
         <header class="location-heading"><WaypointSprite :point="point" :reset="reset" /><div><p>{{ assetName(point.type) }}</p><h2 id="location-title">{{ point.symbol }}</h2></div><button type="button" class="map-close" aria-label="Close location information" @click="$emit('close')">×</button></header>
-        <div v-if="nearby.length > 1" class="nearby-locations"><p>{{ nearby.length }} nearby locations · choose each to inspect</p><button v-for="other in nearby" :key="other.symbol" type="button" :aria-pressed="point.symbol === other.symbol" @click="$emit('select', other.symbol)">{{ other.symbol }}</button></div>
-        <div class="location-scroll" tabindex="0" aria-label="Stored location details">
+        <div ref="details" class="location-scroll" tabindex="0" aria-label="Stored location details">
+            <div v-if="nearby.length > 1" class="nearby-locations"><p>{{ nearby.length }} nearby locations · choose each to inspect</p><button v-for="other in nearby" :key="other.symbol" type="button" :aria-pressed="point.symbol === other.symbol" @click="$emit('select', other.symbol, $event)">{{ other.symbol }}</button></div>
             <p class="location-coordinates">{{ point.x === null || point.y === null ? 'Coordinates Unknown · Unplotted' : `x ${point.x} · y ${point.y}` }}<span v-if="point.orbits"> · Orbits {{ point.orbits }}</span></p>
             <ObservationStamp :at="point.observed_at" :now="now" :seconds="seconds" /><p class="map-provenance">Source: {{ readableLabel(point.source) }} · Stored observation</p>
             <p v-if="point.description">{{ readableText(point.description) }}</p>
