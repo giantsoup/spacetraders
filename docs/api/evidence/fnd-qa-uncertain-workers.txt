@@ -1,0 +1,212 @@
+Implementation source 308ccb9c86d9180b05fd5d05934d0bc5c069131c; synthetic fixtures only.
+
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS navigate lost response persists as uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS navigate reconciliation keeps missing write evidence unresolved
+PASS navigate reconciliation retains fresh observations
+PASS navigate records waypoint evidence
+PASS navigate actual worker used durable SQLite synchronization
+PASS navigate restart/duplicate/reconciliation never replays write
+PASS navigate workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-8955effa2db1
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS jump lost response persists as uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS jump reconciliation keeps missing write evidence unresolved
+PASS jump reconciliation retains fresh observations
+PASS jump records waypoint evidence
+PASS jump actual worker used durable SQLite synchronization
+PASS jump restart/duplicate/reconciliation never replays write
+PASS jump workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-f317c3f4521e
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS warp lost response persists as uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS warp reconciliation keeps missing write evidence unresolved
+PASS warp reconciliation retains fresh observations
+PASS warp records waypoint evidence
+PASS warp actual worker used durable SQLite synchronization
+PASS warp restart/duplicate/reconciliation never replays write
+PASS warp workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-07cdbd49a834
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS supply lost response persists as uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS supply reconciliation keeps missing write evidence unresolved
+PASS supply reconciliation retains fresh observations
+PASS supply records construction evidence
+PASS supply actual worker used durable SQLite synchronization
+PASS supply restart/duplicate/reconciliation never replays write
+PASS supply workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-3c45f3e14c87
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS siphon lost response persists as uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS siphon reconciliation keeps missing write evidence unresolved
+PASS siphon reconciliation retains fresh observations
+PASS siphon records fleet evidence
+PASS siphon actual worker used durable SQLite synchronization
+PASS siphon restart/duplicate/reconciliation never replays write
+PASS siphon workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-8d19ccaf6043
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS refine lost response persists as uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS refine reconciliation keeps missing write evidence unresolved
+PASS refine reconciliation retains fresh observations
+PASS refine records fleet evidence
+PASS refine actual worker used durable SQLite synchronization
+PASS refine restart/duplicate/reconciliation never replays write
+PASS refine workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-b7eaa014386e
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS install_mount lost response persists as uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS install_mount reconciliation keeps missing write evidence unresolved
+PASS install_mount reconciliation retains fresh observations
+PASS install_mount records installed evidence
+PASS install_mount actual worker used durable SQLite synchronization
+PASS install_mount restart/duplicate/reconciliation never replays write
+PASS install_mount workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-8fbcb4c0ffc4
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS remove_mount lost response persists as uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS remove_mount reconciliation keeps missing write evidence unresolved
+PASS remove_mount reconciliation retains fresh observations
+PASS remove_mount records installed evidence
+PASS remove_mount actual worker used durable SQLite synchronization
+PASS remove_mount restart/duplicate/reconciliation never replays write
+PASS remove_mount workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-3efdd7b077fc
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS install_module lost response persists as uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS install_module reconciliation keeps missing write evidence unresolved
+PASS install_module reconciliation retains fresh observations
+PASS install_module records installed evidence
+PASS install_module actual worker used durable SQLite synchronization
+PASS install_module restart/duplicate/reconciliation never replays write
+PASS install_module workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-502acea34de5
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS remove_module lost response persists as uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS remove_module reconciliation keeps missing write evidence unresolved
+PASS remove_module reconciliation retains fresh observations
+PASS remove_module records installed evidence
+PASS remove_module actual worker used durable SQLite synchronization
+PASS remove_module restart/duplicate/reconciliation never replays write
+PASS remove_module workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-6a6b60f82ed2
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS contract_accept lost response persists as uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS contract_accept reconciliation keeps missing write evidence unresolved
+PASS contract_accept reconciliation retains fresh observations
+PASS contract_accept records contract evidence
+PASS contract_accept actual worker used durable SQLite synchronization
+PASS contract_accept restart/duplicate/reconciliation never replays write
+PASS contract_accept workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-8a5e54806017
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS contract_deliver lost response persists as uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS contract_deliver reconciliation keeps missing write evidence unresolved
+PASS contract_deliver reconciliation retains fresh observations
+PASS contract_deliver records contract evidence
+PASS contract_deliver actual worker used durable SQLite synchronization
+PASS contract_deliver restart/duplicate/reconciliation never replays write
+PASS contract_deliver workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-8f7e5d9550ee
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS contract_fulfill lost response persists as uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS contract_fulfill reconciliation keeps missing write evidence unresolved
+PASS contract_fulfill reconciliation retains fresh observations
+PASS contract_fulfill records contract evidence
+PASS contract_fulfill actual worker used durable SQLite synchronization
+PASS contract_fulfill restart/duplicate/reconciliation never replays write
+PASS contract_fulfill workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-cef763176910
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS negotiate lost response persists as uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS negotiate reconciliation keeps missing write evidence unresolved
+PASS negotiate reconciliation retains fresh observations
+PASS negotiate records contracts evidence
+PASS negotiate actual worker used durable SQLite synchronization
+PASS negotiate restart/duplicate/reconciliation never replays write
+PASS negotiate workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-84fa36bff9c5
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS scrap lost response persists as uncertain
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS scrap reconciliation keeps missing write evidence unresolved
+PASS scrap reconciliation retains fresh observations
+PASS scrap records fleet evidence
+PASS scrap actual worker used durable SQLite synchronization
+PASS scrap restart/duplicate/reconciliation never replays write
+PASS scrap workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-4f989ba57c04

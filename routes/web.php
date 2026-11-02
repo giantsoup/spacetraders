@@ -4,6 +4,7 @@ use App\Http\Controllers\AdviserController;
 use App\Http\Controllers\AgentCommandController;
 use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AgentDashboardController;
+use App\Http\Controllers\AgentReadController;
 use App\Http\Controllers\AutomationRunController;
 use App\Http\Controllers\ForwarderController;
 use App\Http\Controllers\LocalAutomationController;
@@ -68,6 +69,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/agents/{agent}/engine/start', [LocalAutomationController::class, 'engineStart'])->name('game.engine.start');
         Route::post('/agents/{agent}/engine/end', [LocalAutomationController::class, 'engineEnd'])->name('game.engine.end');
         Route::post('/agents/{agent}/engine/force-stop', [LocalAutomationController::class, 'engineForceStop'])->name('game.engine.force-stop');
+        Route::post('/agents/{agent}/reads', [AgentReadController::class, 'read'])->name('game.reads');
         Route::post('/agents/{agent}/sync', [AgentDashboardController::class, 'sync'])->name('game.sync');
         Route::post('/agents/{agent}/commands/preview', [AgentCommandController::class, 'preview'])->name('game.commands.preview');
         Route::post('/agents/{agent}/commands/{action}/approve', [AgentCommandController::class, 'approve'])->name('game.commands.approve');

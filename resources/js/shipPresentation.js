@@ -14,9 +14,10 @@ export function shipPresentation(ship, observedAt, connection, now) {
     const transit = ship?.nav?.status === 'IN_TRANSIT';
     const arrival = remaining(ship?.nav?.route?.arrival, now);
     const cooldown = ship?.cooldown;
-    const expiry = Date.parse(cooldown?.expiration);
+    const deadline = cooldown?.readyAt || cooldown?.expiration;
+    const expiry = Date.parse(deadline);
     const readiness = cooldown?.remainingSeconds === 0 && (!Number.isFinite(expiry) || stamp >= expiry) ? 'Ready'
-        : cooldown?.expiration ? remaining(cooldown.expiration, now) : 'Unknown';
+        : deadline ? remaining(deadline, now) : 'Unknown';
     const departure = Date.parse(ship?.nav?.route?.departureTime);
     const end = Date.parse(ship?.nav?.route?.arrival);
     const progress = transit && Number.isFinite(departure) && end > departure ? Math.max(0, Math.min(1, (now - departure) / (end - departure))) : null;

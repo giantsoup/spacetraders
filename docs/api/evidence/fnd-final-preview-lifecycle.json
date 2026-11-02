@@ -1,0 +1,19 @@
+{
+  "processes": {
+    "browser": 13824,
+    "server": 13886
+  },
+  "sharedPreview": true,
+  "browser": "156.0.8078.76",
+  "evidence": "/Users/Taylor/.t3/worktrees/spacetraders/implement-base-api-foundation-20261101/storage/app/foundation-preview",
+  "passed": true,
+  "shutdown": {
+    "server": "verified",
+    "browserConnection": "verified",
+    "browser": "verified"
+  },
+  "fixture": "/private/var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-verification-swUuDR",
+  "fixtureRemoved": true,
+  "diagnostics": null,
+  "failures": []
+}

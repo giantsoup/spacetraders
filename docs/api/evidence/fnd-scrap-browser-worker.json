@@ -1,0 +1,16 @@
+{
+  "stage": "synthetic_browser_and_file_backed_worker",
+  "command": "scrap",
+  "previewed": true,
+  "approved": true,
+  "action_id": 33,
+  "settlement": "confirmed",
+  "deleted_last_fixture_ship": true,
+  "history_retained_after_reload": true,
+  "console_errors": [],
+  "viewport_css": [
+    390,
+    844
+  ],
+  "screenshot": "screenshots/scrap-history-390.png"
+}

@@ -1,0 +1,18 @@
+Implementation source 659f8aa6aeeef1398ee647a4fd378acb2553fb01
+Full verification preceded the last cargo-null projection/policy-label corrections; final-backend, format, coverage and browser checks cover those corrections. Frontend source and built assets are unchanged by those final PHP-only corrections. All writes used synthetic fixtures.
+
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS install_mount lost response persists as uncertain
+PASS post-receipt budget deferral preserves the validated response and sending evidence
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS install_mount reconciliation keeps missing write evidence unresolved
+PASS install_mount reconciliation retains fresh observations
+PASS install_mount records installed evidence
+PASS install_mount actual worker used durable SQLite synchronization
+PASS install_mount restart/duplicate/reconciliation never replays write
+PASS install_mount workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-fcf3c2541e4d

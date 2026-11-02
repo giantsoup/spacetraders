@@ -15,6 +15,7 @@ return [
     'request_budget_path' => (env('SPACETRADERS_REQUEST_BUDGET_PATH') ?: (env('SPACETRADERS_FIXTURE_PATH') ? dirname(env('SPACETRADERS_FIXTURE_PATH')).'/request-budget' : (getenv('HOME') ?: sys_get_temp_dir()).'/Library/Application Support/SpaceTraders/request-budget')),
     'max_pages' => 10,
     'max_observations' => 24,
+    'manual_reserve_floor' => 2000,
     'preview_seconds' => 120,
     'snapshot_seconds' => 180,
     'route_evidence' => env('SPACETRADERS_ROUTE_EVIDENCE', 'conservative'),

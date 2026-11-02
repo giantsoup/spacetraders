@@ -10,12 +10,7 @@ import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import { assetName } from '@/dataPresentation.js';
 
-// https://github.com/SpaceTradersAPI/api-docs/blob/main/models/FactionSymbol.json
-const factions = [
-    'COSMIC', 'VOID', 'GALACTIC', 'QUANTUM', 'DOMINION', 'ASTRO', 'CORSAIRS',
-    'OBSIDIAN', 'AEGIS', 'UNITED', 'SOLITARY', 'COBALT', 'OMEGA', 'ECHO',
-    'LORDS', 'CULT', 'ANCIENTS', 'SHADOW', 'ETHEREAL',
-];
+defineProps({ factions: Array });
 
 const form = useForm({
     account_token: '',

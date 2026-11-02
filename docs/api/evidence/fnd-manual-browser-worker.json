@@ -1,0 +1,440 @@
+{
+  "stage": "synthetic_browser_and_file_backed_worker",
+  "fixture_correction": "Cross-system fixture setup initially returned mixed-system waypoint lists. Corrected its system filter; repeated jump, warp and supply only.",
+  "operations": [
+    {
+      "approved": true,
+      "command": "orbit",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 2,
+        "command": "orbit",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "dock",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 3,
+        "command": "dock",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "buy_ship",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 4,
+        "command": "buy_ship",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "buy",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 5,
+        "command": "buy",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "sell",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 6,
+        "command": "sell",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "transfer",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 7,
+        "command": "transfer",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "jettison",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 8,
+        "command": "jettison",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "contract_accept",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 9,
+        "command": "contract_accept",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "contract_deliver",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 10,
+        "command": "contract_deliver",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "contract_fulfill",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 11,
+        "command": "contract_fulfill",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "negotiate",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 12,
+        "command": "negotiate",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "repair",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 13,
+        "command": "repair",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "install_mount",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 14,
+        "command": "install_mount",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "remove_mount",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 15,
+        "command": "remove_mount",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "install_module",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 16,
+        "command": "install_module",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "remove_module",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 17,
+        "command": "remove_module",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "flight_mode",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 18,
+        "command": "flight_mode",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "navigate",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 19,
+        "command": "navigate",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "refuel",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 20,
+        "command": "refuel",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "siphon",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 21,
+        "command": "siphon",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "refine",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 22,
+        "command": "refine",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "survey",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 23,
+        "command": "survey",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "mine",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 24,
+        "command": "mine",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "mine_survey",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 25,
+        "command": "mine_survey",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "scan_systems",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 26,
+        "command": "scan_systems",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "scan_waypoints",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 27,
+        "command": "scan_waypoints",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "scan_ships",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 28,
+        "command": "scan_ships",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "chart",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 29,
+        "command": "chart",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "jump",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 30,
+        "command": "jump",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "warp",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 31,
+        "command": "warp",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    },
+    {
+      "approved": true,
+      "command": "supply",
+      "focused": false,
+      "previewed": true,
+      "stopped": false,
+      "settlement": {
+        "id": 32,
+        "command": "supply",
+        "state": "confirmed",
+        "review_required": false,
+        "message": "Confirmed by SpaceTraders."
+      }
+    }
+  ]
+}

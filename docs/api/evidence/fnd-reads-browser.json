@@ -1,0 +1,135 @@
+{
+  "stage": "synthetic_browser",
+  "operations": [
+    {
+      "focused": true,
+      "operation": "get-status",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-systems",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-system",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-system-waypoints",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-waypoint",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-market",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-shipyard",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-jump-gate",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-construction",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-factions",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-faction",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-my-agent",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-agents",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-agent",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-contracts",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-contract",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-my-ships",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-my-ship",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-my-ship-cargo",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-ship-cooldown",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-ship-nav",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-mounts",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-ship-modules",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-repair-ship",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-scrap-ship",
+      "passed": true
+    },
+    {
+      "focused": true,
+      "operation": "get-supply-chain",
+      "passed": true
+    }
+  ]
+}

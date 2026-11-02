@@ -1,0 +1,5 @@
+Final implementation source 98d3f32877519e775b52305de12fd24ccd7a09c6
+Tutorial repro precedes the readiness fix; passing tutorial/browser/build evidence covers the matching final frontend. Backend and final worker evidence covers the final receipt guards. All gameplay used synthetic providers.
+
+PASS: HTTP-origin submission keys are valid independent UUIDs without randomUUID.
+PASS: deterministic planning, exact fields, approval matching, confirmed receipts, batching, refuel units, setup/scouting, blockers and progress isolation.

@@ -1,0 +1,11 @@
+Implementation source 659f8aa6aeeef1398ee647a4fd378acb2553fb01
+Full verification preceded the last cargo-null projection/policy-label corrections; final-backend, format, coverage and browser checks cover those corrections. Frontend source and built assets are unchanged by those final PHP-only corrections. All writes used synthetic fixtures.
+
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.5.12
+Configuration: /Users/Taylor/.t3/worktrees/spacetraders/implement-base-api-foundation-20261101/phpunit.xml
+
+Time: 00:36.768, Memory: 89.00 MB
+
+[30;42mOK (475 tests, 2794 assertions)[0m

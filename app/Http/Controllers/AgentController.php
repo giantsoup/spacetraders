@@ -13,6 +13,7 @@ use App\Models\ShipAction;
 use App\Services\SpaceTradersClient;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -41,15 +42,18 @@ class AgentController extends Controller
 
     public function create(): Response
     {
-        return Inertia::render('Agent/CreateAgent');
+        return Inertia::render('Agent/CreateAgent', ['factions' => config('foundation.enums.FactionSymbol')]);
     }
 
     public function store(Request $request, SpaceTradersClient $client): RedirectResponse
     {
+        if (is_string($request->input('faction'))) {
+            $request->merge(['faction' => strtoupper($request->input('faction'))]);
+        }
         $data = $request->validate([
             'account_token' => ['required', 'string', 'regex:/\A[A-Za-z0-9\-._~+\/]+=*\z/'],
             'symbol' => ['required', 'string', 'min:3', 'max:14'],
-            'faction' => ['required', 'string', 'max:255'],
+            'faction' => ['required', 'string', Rule::in(config('foundation.enums.FactionSymbol'))],
             'email' => ['nullable', 'email', 'max:255'],
         ]);
 

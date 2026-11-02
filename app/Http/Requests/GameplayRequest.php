@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Gameplay\ManualCommands;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -44,26 +45,7 @@ class GameplayRequest extends FormRequest
         if ($name === 'game.commands.preview') {
             $command = $this->input('command');
 
-            return [
-                'key' => ['required', 'uuid'], 'ship_symbol' => ['required', 'string', 'max:80', 'regex:/^[A-Z0-9_-]+$/'],
-                'command' => ['required', Rule::in(['navigate', 'orbit', 'dock', 'refuel', 'mine', 'mine_survey', 'survey', 'scan_waypoints', 'chart', 'transfer', 'buy', 'sell', 'buy_ship'])],
-                'arguments' => ['present', 'array:units,symbol,waypointSymbol,shipType,maxTotal,minTotal,reserve,site,market,require_guaranteed_price,targetShip,surveySignature,surveyWaypoint,question,maxCooldownSeconds'],
-                'arguments.units' => [Rule::requiredIf(in_array($command, ['buy', 'sell', 'refuel', 'transfer'], true)), 'integer', 'between:1,100000'],
-                'arguments.symbol' => [Rule::requiredIf(in_array($command, ['buy', 'sell', 'transfer'], true)), 'string', 'regex:/^[A-Z0-9_]+$/', 'max:80'],
-                'arguments.targetShip' => [Rule::requiredIf($command === 'transfer'), 'string', 'regex:/^[A-Z0-9_-]+$/', 'max:80'],
-                'arguments.surveySignature' => [Rule::requiredIf($command === 'mine_survey'), 'string', 'max:255'],
-                'arguments.surveyWaypoint' => [Rule::requiredIf($command === 'mine_survey'), 'string', 'regex:/^[A-Z0-9-]+$/', 'max:80'],
-                'arguments.waypointSymbol' => [Rule::requiredIf(in_array($command, ['navigate', 'buy_ship', 'scan_waypoints', 'chart'], true)), 'string', 'regex:/^[A-Z0-9-]+$/', 'max:80'],
-                'arguments.question' => [Rule::requiredIf(in_array($command, ['scan_waypoints', 'chart'], true)), Rule::in(['MARKETPLACE', 'SHIPYARD'])],
-                'arguments.maxCooldownSeconds' => [Rule::requiredIf(in_array($command, ['scan_waypoints', 'chart'], true)), 'integer', 'between:0,900'],
-                'arguments.shipType' => [Rule::requiredIf($command === 'buy_ship'), 'string', 'regex:/^SHIP_[A-Z0-9_]+$/', 'max:80'],
-                'arguments.maxTotal' => [Rule::requiredIf(in_array($command, ['buy', 'buy_ship', 'refuel'], true)), 'integer', 'between:0,1000000000'],
-                'arguments.minTotal' => [Rule::requiredIf($command === 'sell'), 'integer', 'between:0,1000000000'],
-                'arguments.reserve' => ['sometimes', 'integer', 'between:0,1000000000'],
-                'arguments.site' => [Rule::requiredIf($command === 'buy_ship'), 'string', 'max:80', 'regex:/^[A-Z0-9-]+$/'],
-                'arguments.market' => [Rule::requiredIf($command === 'buy_ship'), 'string', 'max:80', 'regex:/^[A-Z0-9-]+$/'],
-                'arguments.require_guaranteed_price' => ['sometimes', 'boolean'],
-            ];
+            return ManualCommands::rules(is_string($command) ? $command : '');
         }
         if ($name === 'game.runs.preview') {
             $strategy = $this->input('strategy', 'mining');

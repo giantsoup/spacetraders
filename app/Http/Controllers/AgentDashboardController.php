@@ -7,6 +7,8 @@ use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\CreditAccounting;
 use App\Gameplay\GameException;
 use App\Gameplay\LocalEngineManager;
+use App\Gameplay\ManualCommands;
+use App\Gameplay\ManualReads;
 use App\Gameplay\MiningPlanner;
 use App\Gameplay\OpportunityAssessor;
 use App\Gameplay\OpportunityEvaluator;
@@ -34,6 +36,10 @@ class AgentDashboardController extends Controller
 
         return Inertia::render('Agent/Dashboard', [
             'agent' => $agent, 'ships' => $ships,
+            'manualReserveFloor' => max(1, (int) config('gameplay.manual_reserve_floor')),
+            'manualCommands' => ManualCommands::OPERATIONS,
+            'manualReads' => ManualReads::OPERATIONS,
+            'foundationEnums' => config('foundation.enums'),
             'capabilities' => $ships->mapWithKeys(fn ($s) => [$s->symbol => $planner->capability($s->snapshot)]),
             'observations' => $observations,
             'intelligence' => $assessor->report($agent),

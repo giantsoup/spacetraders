@@ -1,0 +1,129 @@
+{
+  "scope": "Owned synthetic provider only. Source changes after b1b0b89. Approval focus flag compares the panel with the dialog heading, so false is not an assertion of missing keyboard focus; inspected screenshots show heading focus. Full accessibility compliance remains unverified.",
+  "journeys": [
+    {
+      "command": "contract_accept",
+      "variant": "selected_in_transit",
+      "previewed": true,
+      "confirmed": true,
+      "termsShown": true
+    },
+    {
+      "command": "mine",
+      "variant": "plain_extract",
+      "previewed": true,
+      "confirmed": true
+    },
+    {
+      "command": "refuel",
+      "variant": "market_refuel",
+      "ui": {
+        "approved": true,
+        "command": "refuel",
+        "focused": false,
+        "previewed": true,
+        "stopped": false
+      },
+      "worker": "{\"id\":5,\"command\":\"refuel\",\"state\":\"confirmed\",\"review_required\":false,\"message\":\"Confirmed by SpaceTraders.\"}"
+    },
+    {
+      "command": "navigate",
+      "variant": "cruise",
+      "ui": {
+        "approved": true,
+        "command": "navigate",
+        "focused": false,
+        "previewed": true,
+        "stopped": false
+      },
+      "worker": "{\"id\":6,\"command\":\"navigate\",\"state\":\"confirmed\",\"review_required\":false,\"message\":\"Confirmed by SpaceTraders.\"}"
+    },
+    {
+      "command": "flight_mode",
+      "variant": "unchanged_mode",
+      "ui": {
+        "approved": true,
+        "command": "flight_mode",
+        "focused": false,
+        "previewed": true,
+        "stopped": false
+      },
+      "worker": "{\"id\":7,\"command\":\"flight_mode\",\"state\":\"confirmed\",\"review_required\":false,\"message\":\"Confirmed by SpaceTraders.\"}"
+    },
+    {
+      "command": "jettison",
+      "variant": "standard",
+      "ui": {
+        "approved": false,
+        "command": "jettison",
+        "focused": false,
+        "previewed": true,
+        "stopped": true
+      },
+      "worker": "{\"id\":8,\"command\":\"jettison\",\"state\":\"rejected\",\"review_required\":false,\"message\":\"Stopped before reservation. No manual request was sent.\"}"
+    },
+    {
+      "command": "jettison",
+      "variant": "stop_zero_writes",
+      "writes": 0
+    },
+    {
+      "command": "refuel",
+      "variant": "approval_review_stop",
+      "ui": {
+        "approval": "Review manual command\n\nLOCAL-1 \u00b7 Refuel \u00b7 Expires Nov 1, 2026, 5:08:40 PM PST\n\nUses owned FUEL cargo. Whole-unit and rounding evidence are shown separately. Returned cargo, fuel and credits are authoritative.\n\nQuantity\n37\nFrom cargo\nYes\nProtected fuel\n0\nMax cargo units\n1\nMaximum cost\n0 CR\nProtected credit reserve\n2,000 CR\nObserved cost\n0 CR\nObserved sale\nUnknown CR\nProtected reserve\n2,000 CR\nAvailable credits\n100,000 CR\nFree cargo\n38\n\nLocal quotes are estimates. SpaceTraders has no execution-price limit. A changed execution price pauses further work.\n\nApprove command\nStop manual command\nCancel preview",
+        "command": "refuel",
+        "destructive": "app-button app-button-primary",
+        "focused": false,
+        "previewed": true
+      },
+      "worker": "{\"id\":9,\"command\":\"refuel\",\"state\":\"rejected\",\"review_required\":false,\"message\":\"Stopped before reservation. No manual request was sent.\"}",
+      "screenshot": "/Users/Taylor/.t3/userdata/browser-artifacts/browser-screenshot-127-0-0-1-mvyk6dc5-7cbd89a9.png"
+    },
+    {
+      "command": "install_mount",
+      "variant": "approval_review_stop",
+      "ui": {
+        "approval": "Review manual command\n\nLOCAL-1 \u00b7 Install mount \u00b7 Expires Nov 1, 2026, 5:08:46 PM PST\n\nChanges installed equipment and cargo. Fee is unknown before execution. The local spending ceiling cannot cap the server fee; a discrepancy pauses further work.\n\nItem\nMount: Mining Laser I\nMaximum cost\n100 CR\nProtected credit reserve\n2,000 CR\nObserved cost\nUnknown CR\nObserved sale\nUnknown CR\nProtected reserve\n2,000 CR\nAvailable credits\n100,000 CR\nFree cargo\n39\nEquipment, condition and quote evidence\n\nLocal quotes are estimates. SpaceTraders has no execution-price limit. A changed execution price pauses further work.\n\nApprove command\nStop manual command\nCancel preview",
+        "command": "install_mount",
+        "destructive": "app-button app-button-primary",
+        "focused": false,
+        "previewed": true
+      },
+      "worker": "{\"id\":10,\"command\":\"install_mount\",\"state\":\"rejected\",\"review_required\":false,\"message\":\"Stopped before reservation. No manual request was sent.\"}",
+      "screenshot": "/Users/Taylor/.t3/userdata/browser-artifacts/browser-screenshot-127-0-0-1-mvyk6hd7-56b5f2b2.png"
+    },
+    {
+      "command": "scrap",
+      "variant": "approval_review_stop",
+      "ui": {
+        "approval": "Review manual command\n\nLOCAL-1 \u00b7 Scrap \u00b7 Expires Nov 1, 2026, 5:08:51 PM PST\n\nPermanently removes this exact ship. Cargo and equipment disposition is not promised by the API. Assume all aboard is lost. The quote reserves no price; Stop cannot reverse a sent request.\n\nConfirm ship\nLOCAL-1\nAcknowledge loss\nYes\nMinimum sale proceeds\n0 CR\nObserved cost\n0 CR\nObserved sale\n100 CR\nProtected reserve\n0 CR\nAvailable credits\n100,000 CR\nFree cargo\n40\nEquipment, condition and quote evidence\n\nLocal quotes are estimates. SpaceTraders has no execution-price limit. A changed execution price pauses further work.\n\nApprove irreversible scrap\nStop manual command\nCancel preview",
+        "command": "scrap",
+        "destructive": "app-button app-button-danger",
+        "focused": false,
+        "previewed": true
+      },
+      "worker": "{\"id\":11,\"command\":\"scrap\",\"state\":\"rejected\",\"review_required\":false,\"message\":\"Stopped before reservation. No manual request was sent.\"}",
+      "screenshot": "/Users/Taylor/.t3/userdata/browser-artifacts/browser-screenshot-127-0-0-1-mvyk6kk6-cba8ff5c.png"
+    }
+  ],
+  "implementation_source": "308ccb9c86d9180b05fd5d05934d0bc5c069131c",
+  "additional_checks": [
+    {
+      "boundary": "pagination",
+      "result": "At limit1, page1 showed ROCK. Editing form limit to20 then Next returned PORT on page2 with the original displayed limit1."
+    },
+    {
+      "boundary": "registration form",
+      "result": "All19pinned factions rendered from shared enum. No registration was submitted."
+    },
+    {
+      "boundary": "390px long refuel form",
+      "result": "All six arguments rendered; html background rgb(7,13,23), viewport and document width390. Screenshot inspected."
+    },
+    {
+      "boundary": "desktop destructive scrap approval",
+      "result": "Warning, exact typed ship, quote and red Approve irreversible scrap button inspected. Stopped through UI; fresh worker returned rejected, no request sent."
+    }
+  ]
+}

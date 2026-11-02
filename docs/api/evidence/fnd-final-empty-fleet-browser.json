@@ -1,0 +1,28 @@
+{
+  "source_commit": "b1b0b8922c2174343c876f7a1d0f45fdeb09879e",
+  "scrap": {
+    "approved": true,
+    "command": "scrap",
+    "focused": false,
+    "previewed": true,
+    "stopped": false
+  },
+  "empty": {
+    "disabled": true,
+    "message": "Select an owned ship in Fleet, or refresh Owned fleet in the API library. Contract acceptance and fulfillment can act for the agent without a ship."
+  },
+  "contract": {
+    "approved": true,
+    "command": "contract_accept",
+    "focused": false,
+    "previewed": true,
+    "stopped": false
+  },
+  "settlement": {
+    "id": 2,
+    "command": "contract_accept",
+    "state": "confirmed",
+    "review_required": false,
+    "message": "Confirmed by SpaceTraders."
+  }
+}

@@ -121,7 +121,7 @@ class AdviserSelector
                     $mining['classification'] = 'missing_information';
                     $mining['reasons'][] = 'Every possible yield needs a buyer before policy selection; retain unmatched cargo.';
                 }
-                if (isset($ship['cooldown']['expiration']) && $now->lt($ship['cooldown']['expiration'])) {
+                if (isset($ship['cooldown']['readyAt']) && $now->lt($ship['cooldown']['readyAt'])) {
                     $mining['classification'] = 'blocked';
                     $mining['reasons'][] = 'Wait for the observed cooldown deadline and refresh readiness.';
                 }
@@ -291,7 +291,7 @@ class AdviserSelector
 
     private function deadline(?array $ship, CarbonImmutable $now): ?string
     {
-        $dates = array_filter([($ship['nav']['status'] ?? null) === 'IN_TRANSIT' ? ($ship['nav']['route']['arrival'] ?? null) : null, $ship['cooldown']['expiration'] ?? null], fn ($date) => $date && CarbonImmutable::parse($date)->gt($now));
+        $dates = array_filter([($ship['nav']['status'] ?? null) === 'IN_TRANSIT' ? ($ship['nav']['route']['arrival'] ?? null) : null, $ship['cooldown']['readyAt'] ?? null], fn ($date) => $date && CarbonImmutable::parse($date)->gt($now));
         sort($dates);
 
         return $dates[0] ?? null;
