@@ -47,14 +47,20 @@ class OpportunityEvaluator
         return hash('sha256', json_encode($quotes));
     }
 
-    public function evaluate(array $observations, string $strategy, CarbonImmutable $now, bool $complete): array
+    public function evaluate(array $observations, string $strategy, CarbonImmutable $now): array
     {
-        $complete = $complete && isset($observations['observed_at']) && CarbonImmutable::parse($observations['observed_at'])->gte($now->subSeconds(180));
+        $fresh = isset($observations['observed_at'], $observations['credits'], $observations['ships'], $observations['waypoints'])
+            && CarbonImmutable::parse($observations['observed_at'])->betweenIncluded($now->subSeconds(180), $now);
         $candidates = [];
         $points = $observations['waypoints'] ?? [];
         $markets = $observations['markets'] ?? [];
+        uksort($markets, fn ($a, $b) => [empty($markets[$a]['tradeGoods']) ? 1 : 0, $a] <=> [empty($markets[$b]['tradeGoods']) ? 1 : 0, $b]);
         $credits = $observations['credits'] ?? null;
-        foreach ($observations['ships'] ?? [] as $ship) {
+        $ships = $observations['ships'] ?? [];
+        if ($strategy === 'mining') {
+            usort($ships, fn ($a, $b) => [($this->mining->capability($a) === null ? 0 : 1), $a['symbol']] <=> [($this->mining->capability($b) === null ? 0 : 1), $b['symbol']]);
+        }
+        foreach ($ships as $ship) {
             if ($ship['nav']['systemSymbol'] !== $observations['system']) {
                 continue;
             }
@@ -85,7 +91,7 @@ class OpportunityEvaluator
                                 $candidate['classification'] = $this->classification($e->getMessage());
                                 $candidate['reasons'][] = $e->getMessage();
                             }
-                            $candidates[] = $this->finish($candidate, $complete);
+                            $candidates[] = $this->finish($candidate, $fresh);
                             if (count($candidates) >= 200) {
                                 break 3;
                             }
@@ -94,6 +100,9 @@ class OpportunityEvaluator
                 }
             } else {
                 $sites = array_filter($points, fn ($p) => in_array($p['type'], ['ASTEROID', 'ASTEROID_FIELD', 'ENGINEERED_ASTEROID'], true));
+                $start = $points[$ship['nav']['waypointSymbol']] ?? null;
+                usort($sites, fn ($a, $b) => [(MiningPlanner::hazard($a) === null ? 0 : 1), $start ? MiningPlanner::fuelEstimate($start, $a) : PHP_INT_MAX, $a['symbol']]
+                    <=> [(MiningPlanner::hazard($b) === null ? 0 : 1), $start ? MiningPlanner::fuelEstimate($start, $b) : PHP_INT_MAX, $b['symbol']]);
                 foreach ($sites as $site) {
                     foreach ($markets ?: [null => []] as $market => $quote) {
                         $candidate = $this->base('mining', $ship, $market, $observations) + ['site' => $site['symbol'], 'trial_required' => true];
@@ -122,8 +131,11 @@ class OpportunityEvaluator
                         } catch (GameException $e) {
                             $candidate['classification'] = $this->classification($e->getMessage());
                             $candidate['reasons'][] = $e->getMessage();
+                            if (str_starts_with($e->getMessage(), 'Buyer prices are unknown or stale.')) {
+                                $candidate['preparation'] = ['kind' => 'observe_market', 'ship_symbol' => $ship['symbol'], 'market' => $market, 'at_market' => $ship['nav']['waypointSymbol'] === $market];
+                            }
                         }
-                        $candidates[] = $this->finish($candidate, $complete);
+                        $candidates[] = $this->finish($candidate, $fresh);
                         if (count($candidates) >= 200) {
                             break 2;
                         }
@@ -153,11 +165,11 @@ class OpportunityEvaluator
             'estimate_kind' => 'complete_cycle_net', 'required_equipment' => $strategy === 'mining' ? ['Mining laser', 'Mineral processor', 'Cargo capacity'] : ['Operational ship', 'Cargo capacity']];
     }
 
-    private function finish(array $candidate, bool $complete): array
+    private function finish(array $candidate, bool $fresh): array
     {
-        if (! $complete) {
+        if (! $fresh && $candidate['classification'] === 'ready') {
             $candidate['classification'] = 'needs_information';
-            $candidate['reasons'][] = 'Investigation incomplete. Refresh before staging.';
+            $candidate['reasons'][] = 'Required ship, credit or route observations are missing or stale. Investigate again before staging.';
         }
         $candidate['id'] = substr(hash('sha256', json_encode([$candidate['strategy'], $candidate['ship_symbol'], $candidate['site'] ?? null, $candidate['market'], $candidate['contract_id'] ?? null, $candidate['use_existing_cargo'] ?? false])), 0, 24);
 

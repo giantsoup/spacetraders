@@ -111,7 +111,7 @@ class OpportunityInvestigator
             $complete = $done && ! $cancelled && $coverage['limits_reached'] === [];
             $observations['history'] = app(CycleAccounting::class)->history($agent);
             $record->update(['coverage' => $coverage, 'observations' => $observations, 'status' => $cancelled ? 'cancelled' : ($done ? ($complete ? 'complete' : 'partial') : 'investigating'),
-                'finished_at' => $done ? now() : null, 'candidates' => $done ? $this->evaluator->evaluate($observations, $record->strategy, CarbonImmutable::now(), $complete) : []]);
+                'finished_at' => $done ? now() : null, 'candidates' => $done ? $this->evaluator->evaluate($observations, $record->strategy, CarbonImmutable::now()) : []]);
 
             return $record;
         });

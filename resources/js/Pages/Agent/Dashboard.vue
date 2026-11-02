@@ -171,6 +171,19 @@ const age = value => value && Number.isFinite(Date.parse(value)) ? `${Math.max(0
 const healthy = value => value && now.value - Date.parse(value) < 90000;
 const url = suffix => `/agents/${props.agent.id}/${suffix}`;
 const reload = () => new Promise(resolve => router.reload({ only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'engine', 'investigations', 'drafts', 'accounting', 'intelligence', 'adviser'], onFinish: resolve }));
+async function prepareMarket(task) {
+    if (archived.value || busy.value || pending.value || activeRun.value || guiding.value) return;
+    selected.value = task.ship_symbol;
+    destination.value = task.market;
+    commandPreview.value = null;
+    openView('commands');
+    if (ship.value?.nav.waypointSymbol === task.market) {
+        await synchronize();
+    } else {
+        error.value = false;
+        notice.value = `Destination set to ${task.market} for ${task.ship_symbol}. Enter orbit if docked, then Preview navigation and review fuel before approving. Synchronize after arrival, then investigate mining again.`;
+    }
+}
 usePoll(5000, { only: ['agent', 'ships', 'capabilities', 'observations', 'actions', 'runs', 'health', 'guidedOffers', 'engine', 'investigations', 'drafts', 'accounting', 'intelligence'] });
 const guided = useGuidedFlight(() => page.props.auth.user.id, () => ({
     ...props, selected: selected.value, offers: offers.value, commandPreview: commandPreview.value,
@@ -337,7 +350,7 @@ function distance(point) {
                     </button>
                 </aside>
 
-                    <fieldset v-show="view === 'automation'" :disabled="guiding"><legend v-if="guiding">Pause guidance before using automation.</legend><AutomationConsole v-if="localAutomation && !archived" :agent="agent" :ships="ships" :engine="engine" :operator="engineOperator" :investigations="investigations" :drafts="drafts" :runs="runs" :accounting="accounting" :observations="observations" :enabled="automationEnabled" @inspect-run="openView('run')" @refresh="async done => { await reload(); done(); }" /></fieldset>
+                    <fieldset v-show="view === 'automation'" :disabled="guiding"><legend v-if="guiding">Pause guidance before using automation.</legend><AutomationConsole v-if="localAutomation && !archived" :agent="agent" :ships="ships" :engine="engine" :operator="engineOperator" :investigations="investigations" :drafts="drafts" :runs="runs" :accounting="accounting" :observations="observations" :enabled="automationEnabled" @inspect-run="openView('run')" @prepare-market="prepareMarket" @refresh="async done => { await reload(); done(); }" /></fieldset>
                     <section v-if="view === 'intelligence' && presentation.transit" class="panel" aria-labelledby="destination-brief-heading"><h2 id="destination-brief-heading">Destination brief</h2><p>{{ ship.nav.waypointSymbol }} · {{ assetName(arrivalPoint?.data?.type) }}</p><p>Arrival <time :datetime="ship.nav.route?.arrival">{{ formatLocalTime(ship.nav.route?.arrival) }}</time> · {{ presentation.arrival }}</p><p>{{ arrivalPoint?.data?.traits ? arrivalPoint.data.traits.map(assetName).join(', ') || 'No traits observed' : 'Traits Unknown' }} · Observed {{ age(arrivalPoint?.observed_at) }}</p><p class="muted">Destination facts are saved observations. Arrival and command eligibility require a fresh server check.</p></section>
                     <OpportunityPanel v-show="view === 'intelligence'" :report="intelligence" :selected="selected" />
                     <section v-show="view === 'review'" v-if="!archived && (commandPreview || runPreview)" ref="previewPanel" tabindex="-1" class="panel approval" aria-labelledby="approval-heading">

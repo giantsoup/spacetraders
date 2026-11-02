@@ -165,7 +165,17 @@ class Adviser
             }
         }
 
-        return $this->opportunities->evaluate($input, 'mining', CarbonImmutable::parse($evidence['as_of']), $complete);
+        $candidates = $this->opportunities->evaluate($input, 'mining', CarbonImmutable::parse($evidence['as_of']));
+        if (! $complete) {
+            foreach ($candidates as &$candidate) {
+                if ($candidate['classification'] === 'ready') {
+                    $candidate['classification'] = 'needs_information';
+                    $candidate['reasons'][] = 'Adviser policy requires a complete investigation matching the current ship and credit balance.';
+                }
+            }
+        }
+
+        return $candidates;
     }
 
     public function history(Agent $agent, ?int $beforeDecision = null, ?int $beforePolicy = null): array

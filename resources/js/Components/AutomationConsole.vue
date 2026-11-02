@@ -10,7 +10,7 @@ import { formatLocalTime, localTimeZone } from '@/dateTime.js';
 import { assetName, cargoSummary, readableLabel, readableText } from '@/dataPresentation.js';
 
 const props = defineProps({ agent: Object, ships: Array, engine: Object, operator: Boolean, investigations: Array, drafts: Array, runs: Array, accounting: Object, enabled: Boolean, observations: { type: Array, default: () => [] } });
-const emit = defineEmits(['refresh', 'inspect-run']);
+const emit = defineEmits(['refresh', 'inspect-run', 'prepare-market']);
 const strategy = ref(props.drafts[0]?.candidate.strategy || props.investigations[0]?.strategy || 'mining');
 const system = ref(props.ships[0]?.snapshot.nav.systemSymbol || '');
 const sort = ref('rate');
@@ -25,7 +25,16 @@ const outcome = computed(() => active.value || props.runs.find(r => r.state !== 
 const runShip = computed(() => props.ships.find(s => s.symbol === outcome.value?.ship_symbol)?.snapshot);
 const completedContractIds = computed(() => new Set((investigation.value?.observations.contracts || []).filter(contract => contract.fulfilled).map(contract => contract.id)));
 const noOpenContracts = computed(() => investigation.value?.strategy === 'contracts' && Array.isArray(investigation.value.observations.contracts) && investigation.value.observations.contracts.every(contract => contract.fulfilled));
-const candidates = computed(() => (investigation.value?.candidates || []).filter(candidate => !completedContractIds.value.has(candidate.contract_id)).sort((a, b) => sort.value === 'net' ? ((b.estimated_net ?? -Infinity) - (a.estimated_net ?? -Infinity) || (a.working_capital ?? Infinity) - (b.working_capital ?? Infinity) || (a.duration_seconds ?? Infinity) - (b.duration_seconds ?? Infinity) || a.id.localeCompare(b.id)) : 0));
+const candidates = computed(() => (investigation.value?.candidates || []).filter(candidate => !completedContractIds.value.has(candidate.contract_id)).sort((a, b) => Number(b.classification === 'ready') - Number(a.classification === 'ready') || (sort.value === 'net' ? ((b.estimated_net ?? -Infinity) - (a.estimated_net ?? -Infinity) || (a.working_capital ?? Infinity) - (b.working_capital ?? Infinity) || (a.duration_seconds ?? Infinity) - (b.duration_seconds ?? Infinity) || a.id.localeCompare(b.id)) : 0)));
+const readyCount = computed(() => candidates.value.filter(candidate => candidate.classification === 'ready').length);
+const observationTasks = computed(() => [...new Map(candidates.value.filter(candidate => candidate.preparation?.kind === 'observe_market').map(candidate => [`${candidate.ship_symbol}:${candidate.market}`, candidate.preparation])).values()]
+    .sort((a, b) => observationDistance(a) - observationDistance(b) || a.market.localeCompare(b.market)).slice(0, 3));
+function observationDistance(task) {
+    const snapshot = investigation.value?.observations;
+    const start = snapshot?.waypoints?.[snapshot.ships?.find(ship => ship.symbol === task.ship_symbol)?.nav.waypointSymbol];
+    const market = snapshot?.waypoints?.[task.market];
+    return start && market ? Math.hypot(start.x - market.x, start.y - market.y) : Infinity;
+}
 const limits = ref({ reserve: 2000, max_spend: 100, max_loss: 100, minutes: 60, cycles: 1, delivery_limit: 10, purchase_limit: 40, max_extractions: 1, extraction_headroom: 40, site_seconds: 300, survey_signature: '', wear_allowance: '' });
 const optionalNumber = value => value === '' || value === null || value === undefined ? null : Number(value);
 watch(() => draft.value?.id, () => { if (draft.value) limits.value = { max_extractions: 1, extraction_headroom: 40, site_seconds: 300, survey_signature: '', wear_allowance: '', ...draft.value.limits }; }, { immediate: true });
@@ -168,8 +177,19 @@ async function reviewBalance() {
                 <p>Investigation #{{ investigation.id }} · {{ readableLabel(investigation.status) }} · {{ investigation.system_symbol }} · {{ investigation.coverage.requests }}/{{ investigation.coverage.request_limit }} requests · {{ investigation.coverage.elapsed_seconds || 0 }}/{{ investigation.coverage.seconds_limit }}s elapsed time</p>
                 <p>Observed <time :datetime="investigation.observations.observed_at">{{ utc(investigation.observations.observed_at) }}</time>. Page limit 10; market limit 24; candidate limit 200. Search covers only this observed system.</p>
                 <p v-for="reason in investigation.coverage.limits_reached" :key="reason" class="warning">{{ readableText(reason) }}</p>
+                <p v-if="investigation.status === 'partial'">Search coverage is partial. Routes with verified prerequisites can still be selected; unexplored markets are not required for every route. A fresh preview checks your selected route again.</p>
                 <div v-if="investigation.status === 'investigating'" class="button-row"><SecondaryButton v-if="!investigating" :disabled="busy" @click="continueInvestigation()">Continue investigation</SecondaryButton><DangerButton @click="cancelInvestigation">Cancel investigation</DangerButton></div>
             </div>
+            <section v-if="investigation?.strategy === 'mining' && ['complete', 'partial'].includes(investigation.status)" aria-labelledby="mining-next-heading">
+                <h3 id="mining-next-heading">{{ readyCount ? `${readyCount} mining ${readyCount === 1 ? 'route' : 'routes'} ready to stage` : 'No mining route is ready yet' }}</h3>
+                <p>Unknown earnings are normal before a first mining trial. Buyer prices, equipment and enough fuel must be verified before selecting a route.</p>
+                <template v-if="!readyCount && observationTasks.length">
+                    <p>Observe buyer prices first. These are nearby markets from the observed candidates, with travel and fuel still subject to preview. Preparing a visit does not move your ship.</p>
+                    <div class="button-row"><SecondaryButton v-for="task in observationTasks" :key="`${task.ship_symbol}:${task.market}`" :disabled="busy || !!active" @click="emit('prepare-market', task)">{{ task.at_market ? 'Refresh prices at' : 'Prepare visit to' }} {{ task.market }} with {{ task.ship_symbol }}</SecondaryButton></div>
+                    <p>After arrival, choose Synchronize, then return here and Investigate opportunities again. Market listings alone do not reveal executable prices.</p>
+                </template>
+                <p v-else-if="!readyCount">Read the prerequisites on each route below. Refuel, empty cargo or prepare a capable ship as indicated, then investigate again.</p>
+            </section>
             <template v-if="candidates.length">
                 <label>Opportunity order<select v-model="sort"><option value="rate">Estimated credits per hour</option><option value="net">Estimated total net credits</option></select></label>
                 <div class="candidate-list">
@@ -181,7 +201,7 @@ async function reviewBalance() {
                         <dl><dt>{{ candidate.estimate_kind === 'contract_cash_contribution' ? 'Contract cash estimate / hourly' : 'Estimated net / hourly' }}</dt><dd>{{ credit(candidate.estimated_net) }} / {{ credit(candidate.estimated_per_hour) }}</dd><dt>Conservative hourly estimate</dt><dd>{{ credit(candidate.conservative_per_hour) }}</dd><dt>Estimated duration</dt><dd>{{ candidate.duration_seconds === null ? 'Unknown' : `${candidate.duration_seconds}s including allowance` }}</dd><dt>Working capital / setup</dt><dd>{{ credit(candidate.working_capital) }} / {{ credit(candidate.setup_cost) }}</dd><dt>Fuel use</dt><dd>{{ candidate.fuel_estimate ?? 'Unknown' }} tank units</dd><dt>Required equipment</dt><dd>{{ candidate.required_equipment.join(', ') }}</dd></dl>
                         <DataDetails v-if="candidate.estimates" :value="candidate.estimates" />
                         <ul class="reasons"><li v-for="reason in candidate.reasons" :key="reason">{{ readableText(reason) }}</li></ul>
-                        <p v-if="candidate.classification !== 'ready'" class="muted">Use the manual controls below for a separate scouting, setup or refueling preview. Investigate again after preparation.</p>
+                        <p v-if="candidate.classification !== 'ready'" class="muted">Use Commands for a separate scouting, setup or refueling preview. Investigate again after preparation.</p>
                         <details v-if="candidate.contract_plan"><summary>Remaining contract, payments and itinerary</summary><DataDetails :value="candidate.contract_plan" /></details>
                         <details v-if="candidate.yield_history"><summary>Yield evidence</summary><DataDetails :value="candidate.yield_history" /></details>
                         <SecondaryButton :disabled="busy || candidate.classification !== 'ready' || !!active" :aria-pressed="chosen === candidate.id" @click="selectCandidate(candidate)">Select {{ candidate.ship_symbol }} {{ candidate.contract_id || candidate.site }}{{ candidate.use_existing_cargo ? ' with existing cargo' : '' }}{{ candidate.market ? ` via ${candidate.market}` : '' }}</SecondaryButton>

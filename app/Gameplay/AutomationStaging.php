@@ -14,10 +14,10 @@ class AutomationStaging
     public function save(Agent $agent, OpportunityInvestigation $investigation, string $candidateId, array $limits, ?AutomationDraft $draft = null, ?int $revision = null): AutomationDraft
     {
         return $this->executor->locked($agent, function () use ($agent, $investigation, $candidateId, $limits, $draft, $revision) {
-            if ($agent->isArchived() || $investigation->reset_id !== $agent->reset_id || $investigation->status !== 'complete' || $investigation->finished_at->lt(now()->subSeconds(config('gameplay.snapshot_seconds')))) {
-                throw new GameException('Investigation is incomplete, stale or from another reset. Investigate again.');
+            if ($agent->isArchived() || $investigation->reset_id !== $agent->reset_id || ! in_array($investigation->status, ['complete', 'partial'], true) || ! $investigation->finished_at || $investigation->finished_at->lt(now()->subSeconds(config('gameplay.snapshot_seconds')))) {
+                throw new GameException('Investigation is unfinished, stale or from another reset. Investigate again.');
             }
-            $candidates = $this->evaluator->evaluate($investigation->observations, $investigation->strategy, CarbonImmutable::now(), true);
+            $candidates = $this->evaluator->evaluate($investigation->observations, $investigation->strategy, CarbonImmutable::now());
             $candidate = collect($candidates)->firstWhere('id', $candidateId);
             if (! $candidate || $candidate['classification'] !== 'ready') {
                 throw new GameException('This observed candidate cannot be staged. Complete its prerequisites first.');

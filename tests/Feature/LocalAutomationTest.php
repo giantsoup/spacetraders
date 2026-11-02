@@ -179,12 +179,12 @@ class LocalAutomationTest extends TestCase
         $completed['id'] = 'completed-contract';
         $observations['contracts'] = array_merge(array_fill(0, 110, $completed), $observations['contracts']);
 
-        $candidates = app(OpportunityEvaluator::class)->evaluate($observations, 'contracts', CarbonImmutable::now(), false);
+        $candidates = app(OpportunityEvaluator::class)->evaluate($observations, 'contracts', CarbonImmutable::now());
 
         $this->assertNotEmpty($candidates);
         $this->assertSame(['contract-1'], array_values(array_unique(array_column($candidates, 'contract_id'))));
         $observations['contracts'] = [$completed];
-        $this->assertSame([], app(OpportunityEvaluator::class)->evaluate($observations, 'contracts', CarbonImmutable::now(), false));
+        $this->assertSame([], app(OpportunityEvaluator::class)->evaluate($observations, 'contracts', CarbonImmutable::now()));
     }
 
     public function test_contract_search_stops_before_market_discovery_when_all_contracts_are_fulfilled(): void
@@ -215,13 +215,91 @@ class LocalAutomationTest extends TestCase
         $this->assertSame([], $this->world()['writes']);
     }
 
+    public function test_partial_market_search_can_stage_a_verified_mining_route_without_gameplay(): void
+    {
+        config(['gameplay.max_observations' => 1]);
+        $investigator = app(OpportunityInvestigator::class);
+        $record = $investigator->create($this->agent, 'mining', 'X1-TEST');
+        for ($i = 0; $i < 10 && $record->status === 'investigating'; $i++) {
+            $record = $investigator->advance($this->agent->fresh(), $record);
+        }
+        $this->assertSame('partial', $record->status);
+        $candidate = collect($record->candidates)->firstWhere('classification', 'ready');
+        $this->assertNotNull($candidate, json_encode($record->candidates));
+        $draft = app(AutomationStaging::class)->save($this->agent->fresh(), $record, $candidate['id'], ['reserve' => 2000]);
+        $this->assertSame($candidate['id'], $draft->candidate['id']);
+        $this->assertSame([], $this->world()['writes']);
+        $this->assertSame(0, ShipAction::count());
+        $this->travel(181)->seconds();
+        $this->expectException(GameException::class);
+        app(AutomationStaging::class)->save($this->agent->fresh(), $record, $candidate['id'], ['reserve' => 2000]);
+    }
+
+    public function test_unknown_mining_prices_offer_a_specific_observation_step_and_remain_unselectable(): void
+    {
+        $record = $this->investigation('mining');
+        $candidate = collect($record->candidates)->first(fn ($c) => $c['market'] === 'X1-TEST-PORT');
+        $this->assertSame('needs_information', $candidate['classification']);
+        $this->assertSame(['kind' => 'observe_market', 'ship_symbol' => 'LOCAL-1', 'market' => 'X1-TEST-PORT', 'at_market' => false], $candidate['preparation']);
+        $this->expectException(GameException::class);
+        app(AutomationStaging::class)->save($this->agent->fresh(), $record, $candidate['id'], ['reserve' => 2000]);
+    }
+
+    public function test_candidate_limit_prioritizes_capable_ships_safe_nearby_sites_and_priced_markets(): void
+    {
+        $observations = $this->investigation('mining')->observations;
+        $miner = $observations['ships'][0];
+        $probe = $miner;
+        $probe['symbol'] = 'LOCAL-0';
+        $probe['mounts'] = [];
+        $observations['ships'] = [$probe, $miner];
+        $site = $observations['waypoints']['X1-TEST-ROCK'];
+        $observations['waypoints'] = array_filter($observations['waypoints'], fn ($point) => $point['symbol'] !== $site['symbol']);
+        for ($i = 0; $i < 205; $i++) {
+            $far = $site;
+            $far['symbol'] = 'X1-TEST-FAR'.$i;
+            $far['x'] = 1000 + $i;
+            $observations['waypoints'][$far['symbol']] = $far;
+        }
+        $observations['waypoints'][$site['symbol']] = $site;
+        $observations['markets'] = array_reverse($observations['markets'], true);
+        $candidates = app(OpportunityEvaluator::class)->evaluate($observations, 'mining', CarbonImmutable::now());
+        $this->assertCount(200, $candidates);
+        $this->assertSame('ready', $candidates[0]['classification']);
+        $this->assertSame('LOCAL-1', $candidates[0]['ship_symbol']);
+        $this->assertSame('X1-TEST-ROCK', $candidates[0]['site']);
+        $this->assertSame('X1-TEST-ROCK', $candidates[0]['market']);
+    }
+
+    public function test_partial_search_keeps_real_equipment_and_fuel_blockers(): void
+    {
+        config(['gameplay.max_observations' => 1]);
+        $this->world(function (&$world) {
+            $world['ships'][0]['fuel']['current'] = 0;
+            $probe = $world['ships'][0];
+            $probe['symbol'] = 'LOCAL-2';
+            $probe['mounts'] = [];
+            $world['ships'][] = $probe;
+        });
+        $investigator = app(OpportunityInvestigator::class);
+        $record = $investigator->create($this->agent, 'mining', 'X1-TEST');
+        for ($i = 0; $i < 10 && $record->status === 'investigating'; $i++) {
+            $record = $investigator->advance($this->agent->fresh(), $record);
+        }
+        $this->assertSame('partial', $record->status);
+        $this->assertFalse(collect($record->candidates)->contains('classification', 'ready'));
+        $this->assertSame(['needs_preparation'], array_values(array_unique(array_column($record->candidates, 'classification'))));
+        $this->assertContains('Missing mining laser.', array_merge(...array_column($record->candidates, 'reasons')));
+        $this->assertSame([], $this->world()['writes']);
+    }
+
     public function test_evaluation_is_deterministic_and_unknown_yield_has_no_estimate(): void
     {
         $record = $this->investigation('mining');
         $evaluator = app(OpportunityEvaluator::class);
         $now = CarbonImmutable::now();
-        $first = $evaluator->evaluate($record->observations, 'mining', $now, true);
-        $this->assertSame($first, $evaluator->evaluate($record->observations, 'mining', $now, true));
+        $first = $evaluator->evaluate($record->observations, 'mining', $now);
+        $this->assertSame($first, $evaluator->evaluate($record->observations, 'mining', $now));
         $ready = collect($first)->firstWhere('classification', 'ready');
         $this->assertTrue($ready['trial_required']);
         $this->assertNull($ready['estimated_net']);
@@ -550,7 +628,7 @@ class LocalAutomationTest extends TestCase
         $complete = $this->investigation();
         $observations = $complete->observations;
         $observations['observed_at'] = now()->subMinutes(4)->toIso8601String();
-        $candidates = app(OpportunityEvaluator::class)->evaluate($observations, 'contracts', CarbonImmutable::now(), true);
+        $candidates = app(OpportunityEvaluator::class)->evaluate($observations, 'contracts', CarbonImmutable::now());
         $this->assertFalse(collect($candidates)->contains('classification', 'ready'));
         $this->assertFalse(collect($candidates)->contains('recommended', true));
     }

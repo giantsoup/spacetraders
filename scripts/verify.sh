@@ -12,6 +12,7 @@ PNPM_BIN="$pnpm_bin" node scripts/verify-build-sources.mjs
 node scripts/verify-store.mjs
 node scripts/verify-gameplay.mjs
 node scripts/verify-local-time.mjs
+node scripts/verify-automation-selection.mjs
 node scripts/verify-ship-presentation.mjs
 node --check scripts/verify-native-ship-browser.mjs
 node --check scripts/verify-ship-https-browser.mjs
