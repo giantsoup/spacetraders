@@ -43,7 +43,9 @@ class GameplayRequest extends FormRequest
             ];
         }
         if ($name === 'game.commands.preview') {
-            return ManualCommands::rules((string) $this->input('command'));
+            $command = $this->input('command');
+
+            return ManualCommands::rules(is_string($command) ? $command : '');
         }
         if ($name === 'game.runs.preview') {
             $strategy = $this->input('strategy', 'mining');

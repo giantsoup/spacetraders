@@ -260,6 +260,13 @@ class FoundationCommandTest extends TestCase
         });
         $action = $this->execute($this->preview('refuel', $arguments + ['maxTotal' => $cargo ? 0 : 5, 'reserve' => 1000]));
         $this->assertSame(ActionState::Confirmed, $action->state);
+        $this->assertSame(min($arguments['units'] ?? 100, 100), $action->before_state['estimate']['tank_refuel']['tank_units']);
+        $this->assertSame($cargo ? 'cargo' : 'market', $action->before_state['estimate']['tank_refuel']['source']);
+        if ($cargo && $action->before_state['estimate']['cargo_refuel']['rounding_unknown']) {
+            $this->assertNull($action->before_state['estimate']['cargo_refuel']['cargo_units']);
+            $this->assertNull($action->before_state['estimate']['cargo_refuel']['cargo_after']);
+            $this->assertSame(1, $action->before_state['estimate']['cargo_refuel']['max_cargo_units']);
+        }
         $payload = $this->world()['writes'][0]['arguments'];
         $expectedPayload = array_intersect_key($arguments, array_flip(['units', 'fromCargo']));
         if (isset($expectedPayload['fromCargo'])) {
@@ -446,6 +453,30 @@ class FoundationCommandTest extends TestCase
         $this->withSession(['_token' => $csrf])->withHeader('X-CSRF-TOKEN', $csrf)->postJson('/agents/'.$this->agent->id.'/reads', ['operation' => 'get-status', 'parameters' => []])->assertAccepted();
         $this->withSession(['_token' => $csrf])->withHeader('X-CSRF-TOKEN', $csrf)->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'orbit', 'arguments' => []])->assertAccepted();
         $this->assertEmpty($this->world()['writes']);
+    }
+
+    public function test_post_receipt_budget_deferral_stays_uncertain_without_redispatch(): void
+    {
+        $this->world(function (&$world) {
+            $world['ships'][0]['cargo'] = ['capacity' => 40, 'units' => 1, 'inventory' => [['symbol' => 'MOUNT_MINING_LASER_I', 'units' => 1]]];
+        });
+        $action = $this->preview('install_mount', ['symbol' => 'MOUNT_MINING_LASER_I', 'maxTotal' => 100]);
+        $this->postJson('/agents/'.$this->agent->id.'/commands/'.$action->id.'/approve')->assertAccepted();
+        $this->world(function (&$world) {
+            $world['defer_followup_after_write'] = true;
+        });
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $action->refresh();
+        $this->assertSame(ActionState::Uncertain, $action->state);
+        $this->assertNotNull($action->sent_at);
+        $this->assertSame(201, $action->outcome['http_status']);
+        $this->assertTrue($action->outcome['response_validated']);
+        $this->assertNotEmpty($action->outcome['body_sha256']);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->artisan('spacetraders:dispatch-due')->assertSuccessful();
+        Queue::assertPushed(ExecuteShipCommand::class, 1);
+        $this->assertSame(ActionState::Uncertain, $action->fresh()->state);
+        $this->assertCount(1, $this->world()['writes']);
     }
 
     public function test_http_numeric_strings_have_canonical_integer_approval_arguments(): void

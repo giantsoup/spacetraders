@@ -3,6 +3,7 @@
 namespace Tests\Support;
 
 use App\Gameplay\AutomationRunner;
+use App\Gameplay\RequestDeferred;
 use App\Gameplay\ShipCommandExecutor;
 use App\Models\AutomationRun;
 use App\Models\ShipAction;
@@ -138,6 +139,12 @@ final class FakeSpaceTraders
     public static function respond(array &$world, Request $request): array
     {
         $path = substr(parse_url($request->url(), PHP_URL_PATH), strlen('/v2')) ?: '/';
+        if (($world['defer_followup_after_write'] ?? false) && $request->method() === 'GET' && $path === '/my/ships/LOCAL-1' && count($world['writes']) > 0) {
+            throw new RequestDeferred('Synthetic post-receipt request-budget deferral.', 5);
+        }
+        if (($world['inherited_auth_401'] ?? false) && (preg_match('~^/factions/[^/]+$~', $path) || preg_match('~^/my/ships/[^/]+/modules(?:/(?:install|remove))?$~', $path))) {
+            return [['error' => ['code' => 4000, 'message' => 'Synthetic inherited-auth ambiguity.']], 401];
+        }
         $args = $request->data();
         $traits = [];
         foreach (explode('&', parse_url($request->url(), PHP_URL_QUERY) ?? '') as $pair) {

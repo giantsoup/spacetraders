@@ -14,7 +14,8 @@ class AgentReadController extends Controller
     public function read(Request $request, Agent $agent, ShipCommandExecutor $executor, SpaceTradersApi $api, AgentDashboardController $responses)
     {
         abort_unless($agent->user_id === $request->user()->id, 404);
-        $input = $request->validate(ManualReads::rules((string) $request->input('operation')));
+        $operation = $request->input('operation');
+        $input = $request->validate(ManualReads::rules(is_string($operation) ? $operation : ''));
 
         return $responses->result(fn () => $executor->locked($agent, function () use ($agent, $api, $input) {
             app(AgentSynchronizer::class)->guardReset($agent);

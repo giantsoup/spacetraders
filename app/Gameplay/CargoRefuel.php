@@ -42,11 +42,12 @@ class CargoRefuel
             throw new GameException('Insufficient unprotected FUEL cargo. User reserve and accepted contract fuel stay aboard.');
         }
 
-        return ['source' => 'cargo', 'rounding_unknown' => $roundingUnknown, 'omitted_units' => ! isset($arguments['units']), 'tank_units' => $units, 'cargo_units' => $cargoUnits, 'max_cargo_units' => $exposure,
+        return ['source' => 'cargo', 'rounding_unknown' => $roundingUnknown, 'omitted_units' => ! isset($arguments['units']), 'tank_units' => $units, 'cargo_units' => $roundingUnknown ? null : $cargoUnits, 'max_cargo_units' => $exposure,
             'fuel_cargo_before' => $fuel, 'user_protected_fuel' => $arguments['protectedFuel'] ?? 0, 'contract_fuel' => $committed, 'protected_fuel' => $protected,
             'tank_after' => $ship['fuel']['current'] + $units, 'tank_space_after' => $space - $units,
-            'fuel_cargo_after' => $fuel - $cargoUnits, 'cargo_after' => $ship['cargo']['units'] - $cargoUnits,
-            'cargo_free_after' => $ship['cargo']['capacity'] - $ship['cargo']['units'] + $cargoUnits];
+            'fuel_cargo_after' => $roundingUnknown ? null : $fuel - $cargoUnits, 'cargo_after' => $roundingUnknown ? null : $ship['cargo']['units'] - $cargoUnits,
+            'minimum_fuel_cargo_after' => $fuel - $exposure,
+            'cargo_free_after' => $roundingUnknown ? null : $ship['cargo']['capacity'] - $ship['cargo']['units'] + $cargoUnits];
     }
 
     public static function confirm(array $before, array $ship, int $credits, int $price): void
@@ -54,7 +55,7 @@ class CargoRefuel
         $allocation = $before['estimate']['cargo_refuel'];
         $expected = MiningPlanner::inventory($before['ship']);
         $consumed = ($expected['FUEL'] ?? 0) - (MiningPlanner::inventory($ship)['FUEL'] ?? 0);
-        if ($allocation['rounding_unknown'] && ($consumed < 0 || $consumed > $allocation['cargo_units'])) {
+        if ($allocation['rounding_unknown'] && ($consumed < 0 || $consumed > $allocation['max_cargo_units'])) {
             throw new GameException('Cargo refuel exceeded the approved cargo review threshold.', uncertain: true);
         }
         $expected['FUEL'] -= $allocation['rounding_unknown'] ? $consumed : $allocation['cargo_units'];

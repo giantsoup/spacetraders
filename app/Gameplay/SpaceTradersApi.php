@@ -62,7 +62,7 @@ class SpaceTradersApi
         }
         // Agent-only gameplay, including inherited-auth operations. Never use account-token fallback.
         $private = str_starts_with($path, '/my/') || in_array($operation, ['get-supply-chain', 'get-faction', 'get-market', 'get-shipyard'], true);
-        $body = $this->call('get', $path, $query, $private ? $agent : null, $operation === 'get-ship-cooldown');
+        $body = $this->call('get', $path, $query, $private ? $agent : null, $operation === 'get-ship-cooldown', inheritedAuth: in_array($operation, ['get-faction', 'get-ship-modules'], true));
         $data = $operation === 'get-status' ? $body : $this->payload($body);
         if ($paged) {
             $identity = $operation === 'get-contracts' ? 'id' : 'symbol';
@@ -331,7 +331,7 @@ class SpaceTradersApi
             'transfer' => ['tradeSymbol' => $arguments['symbol'], 'units' => $arguments['units'], 'shipSymbol' => $arguments['targetShip']],
             default => [],
         };
-        $data = $this->payload($this->call(strtolower($this->commandMetadata($command, $ship, $arguments)['method']), $path, $body, $agent, receipt: $receipt), true);
+        $data = $this->payload($this->call(strtolower($this->commandMetadata($command, $ship, $arguments)['method']), $path, $body, $agent, receipt: $receipt, inheritedAuth: in_array($command, ['install_module', 'remove_module'], true)), true);
         $rules = match ($command) {
             'scrap' => ['agent.credits' => 'required|integer|min:0', 'transaction.shipSymbol' => 'required|in:'.$ship, 'transaction.waypointSymbol' => 'required|string', 'transaction.timestamp' => 'required|date', 'transaction.totalPrice' => 'required|integer|min:0'],
             'jump' => ['nav' => 'required|array', 'nav.waypointSymbol' => 'required|in:'.$arguments['waypointSymbol'], 'cooldown.remainingSeconds' => 'required|integer|min:0', 'transaction.totalPrice' => 'required|integer|min:0', 'agent.credits' => 'required|integer|min:0'],
@@ -517,7 +517,7 @@ class SpaceTradersApi
         $this->validate($body, ['data' => 'present|array|max:20', 'data.*' => 'array', 'data.*.'.$identity => 'required|string|distinct|max:80', 'meta.total' => 'required|integer|min:0', 'meta.page' => 'required|integer|in:'.$page, 'meta.limit' => 'required|integer|in:20']);
     }
 
-    private function call(string $method, string $path, array $body = [], ?Agent $agent = null, bool $allowNoContent = false, ?callable $receipt = null): array
+    private function call(string $method, string $path, array $body = [], ?Agent $agent = null, bool $allowNoContent = false, ?callable $receipt = null, bool $inheritedAuth = false): array
     {
         $deadline = null;
         if ($this->readGuard) {
@@ -533,6 +533,9 @@ class SpaceTradersApi
         }
         if (! $response->successful()) {
             $code = $response->json('error.code');
+            if ($response->status() === 401 && $inheritedAuth) {
+                throw new GameException('Operation authorization is unresolved for this inherited-auth endpoint, HTTP 401. The saved agent credential was not reclassified.', is_int($code) && $code > 0 ? $code : null);
+            }
             if ($response->status() === 401 && $agent) {
                 $agent->update(['connection_state' => 'invalid_credential']);
             }

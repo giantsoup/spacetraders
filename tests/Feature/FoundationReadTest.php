@@ -3,13 +3,16 @@
 namespace Tests\Feature;
 
 use App\Gameplay\AgentSynchronizer;
+use App\Gameplay\GameException;
 use App\Gameplay\ManualReads;
+use App\Gameplay\SpaceTradersApi;
 use App\Models\Agent;
 use App\Models\GameObservation;
 use App\Models\Ship;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\FakeSpaceTraders;
 use Tests\TestCase;
@@ -38,6 +41,39 @@ class FoundationReadTest extends TestCase
     {
         unlink($this->file);
         parent::tearDown();
+    }
+
+    public function test_array_read_and_command_selectors_are_validation_errors(): void
+    {
+        $this->postJson('/agents/'.$this->agent->id.'/reads', ['operation' => ['get-status'], 'parameters' => []])->assertUnprocessable();
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['command' => ['orbit'], 'key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'arguments' => []])->assertUnprocessable();
+    }
+
+    public static function inheritedOperations(): array
+    {
+        return [['get-faction'], ['get-ship-modules'], ['install_module'], ['remove_module']];
+    }
+
+    #[DataProvider('inheritedOperations')]
+    public function test_inherited_auth_rejection_does_not_invalidate_the_saved_agent(string $operation): void
+    {
+        $world = json_decode(file_get_contents($this->file), true);
+        $world['inherited_auth_401'] = true;
+        file_put_contents($this->file, json_encode($world));
+        $state = $this->agent->fresh()->connection_state;
+        try {
+            if (str_starts_with($operation, 'get-')) {
+                app(SpaceTradersApi::class)->manualRead($this->agent, $operation, $operation === 'get-faction' ? ['factionSymbol' => 'COSMIC'] : ['shipSymbol' => 'LOCAL-1']);
+            } else {
+                app(SpaceTradersApi::class)->mutate($this->agent, 'LOCAL-1', $operation, ['symbol' => 'MODULE_GAS_PROCESSOR_I']);
+            }
+            $this->fail('Expected an unresolved operation authorization error.');
+        } catch (GameException $e) {
+            $this->assertStringContainsString('authorization is unresolved', $e->getMessage());
+        }
+        $this->assertSame($state, $this->agent->fresh()->connection_state);
+        Http::assertSent(fn ($request) => str_contains($request->url(), $operation === 'get-faction' ? '/factions/COSMIC' : '/modules') && $request->hasHeader('Authorization', 'Bearer synthetic-agent-credential'));
+        $this->assertEmpty(json_decode(file_get_contents($this->file), true)['writes']);
     }
 
     public static function reads(): array

@@ -16,6 +16,7 @@ use Tests\Support\FoundationScenario;
 
 $operations = ['navigate', 'jump', 'warp', 'supply', 'siphon', 'refine', 'install_mount', 'remove_mount', 'install_module', 'remove_module', 'contract_accept', 'contract_deliver', 'contract_fulfill', 'negotiate', 'scrap'];
 $command = $argv[1] ?? null;
+$postReceipt = ($argv[2] ?? null) === '--post-receipt';
 if ($command === null) {
     foreach ($operations as $operation) {
         $child = proc_open([PHP_BINARY, __FILE__, $operation], [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['redirect', 1]], $pipes, dirname(__DIR__));
@@ -86,12 +87,20 @@ file_put_contents($file, json_encode($scenario));
 app(AgentSynchronizer::class)->sync($agent);
 $action = $executor->preview($agent, 'LOCAL-1', $command, $arguments, (string) Str::uuid());
 $executor->approve($agent, $action);
-$scenario['failure'] = 'timeout_after';
+$scenario[$postReceipt ? 'defer_followup_after_write' : 'failure'] = $postReceipt ? true : 'timeout_after';
 file_put_contents($file, json_encode($scenario));
 workers($root, $env, $directory);
 check($action->fresh()->state === ActionState::Uncertain, $command.' lost response persists as uncertain');
+if ($postReceipt) {
+    check($action->fresh()->outcome['http_status'] === 201 && ! empty($action->fresh()->outcome['body_sha256']) && ! empty($action->fresh()->outcome['response_validated']) && $action->fresh()->sent_at !== null, 'post-receipt budget deferral preserves the validated response and sending evidence');
+}
 ExecuteShipCommand::dispatch($action->id);
 workers($root, $env, $directory);
+if ($postReceipt) {
+    $current = json_decode(file_get_contents($file), true);
+    unset($current['defer_followup_after_write']);
+    file_put_contents($file, json_encode($current));
+}
 $executor->reconcile($agent, $action);
 check($action->fresh()->state === ActionState::Uncertain, $command.' reconciliation keeps missing write evidence unresolved');
 check(! empty($action->fresh()->outcome['reconciled_at']), $command.' reconciliation retains fresh observations');

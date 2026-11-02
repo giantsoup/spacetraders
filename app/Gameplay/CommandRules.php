@@ -135,11 +135,11 @@ class CommandRules
                 }
                 $drive = $command === 'jump' ? 'MODULE_JUMP_DRIVE_' : 'MODULE_WARP_DRIVE_';
                 if (! collect($ship['modules'])->contains(fn ($item) => str_starts_with($item['symbol'], $drive))) {
-                    throw new GameException('The required drive is not installed.');
+                    throw new GameException($command === 'jump' ? 'Jump client policy requires an observed jump-drive module; drive restrictions remain a live gate.' : 'The required warp drive is not installed.');
                 }
                 if ($command === 'jump') {
                     if (now()->lt($ship['cooldown']['readyAt']) || $from['type'] !== 'JUMP_GATE' || $target['type'] !== 'JUMP_GATE' || ($from['isUnderConstruction'] ?? null) !== false || ($target['isUnderConstruction'] ?? null) !== false) {
-                        throw new GameException('Jump requires ready cooldown and two confirmed completed jump gates.');
+                        throw new GameException('Jump client policy requires ready cooldown and two confirmed completed jump gates.');
                     }
                     $gate = $this->api->manualRead($agent, 'get-jump-gate', ['systemSymbol' => $from['systemSymbol'], 'waypointSymbol' => $from['symbol']]);
                     if (! in_array($target['symbol'], $gate['data']['connections'], true)) {
@@ -149,7 +149,7 @@ class CommandRules
                     $estimate['fee_unknown'] = true;
                     $estimate['gate'] = $gate['data'];
                     $estimate['authorized_exposure'] = $cost;
-                    $estimate['effects'] = 'Instant gate travel buys antimatter at an unknown variable price and incurs a returned cooldown. The local ceiling cannot cap the server charge.';
+                    $estimate['effects'] = 'Jump client policy requires an observed drive and completed gate endpoints. Instant gate travel buys antimatter at an unknown variable price and incurs a returned cooldown. The local ceiling cannot cap the server charge.';
                 } else {
                     if (empty($arguments['acknowledgeUnknown']) || $arguments['maxFuel'] > $ship['fuel']['current']) {
                         throw new GameException('Warp requires explicit fuel/time review limits and acknowledgement of unknown mechanics.');
@@ -173,7 +173,7 @@ class CommandRules
             case 'refine':
                 $prefix = $arguments['produce'] === 'FUEL' ? 'MODULE_FUEL_REFINERY_' : 'MODULE_ORE_REFINERY_';
                 if (! collect($ship['modules'])->contains(fn ($item) => str_starts_with($item['symbol'], $prefix)) || now()->lt($ship['cooldown']['readyAt']) || $ship['cargo']['units'] < 100) {
-                    throw new GameException('Refinery client policy requires suitable equipment, ready cooldown and at least 100 input cargo units; recipe calibration is pending and no override is available.');
+                    throw new GameException('Refinery client policy requires suitable equipment, ready cooldown and at least 100 total cargo units; recipe calibration is pending and no override is available.');
                 }
                 foreach (MiningPlanner::inventory($ship) as $good => $owned) {
                     if (app(CargoAuthority::class)->available($agent, $ship, $good) !== $owned) {
@@ -365,7 +365,7 @@ class CommandRules
                     throw new GameException('Transfers require the same waypoint and matching docked or orbiting states.');
                 }
                 if (now()->lt($ship['cooldown']['readyAt']) || now()->lt($target['cooldown']['readyAt'])) {
-                    throw new GameException('Wait for both cooldowns before transferring.');
+                    throw new GameException('Transfer client policy requires both cooldowns ready; no policy override is available.');
                 }
                 if ($arguments['units'] > (MiningPlanner::inventory($ship)[$arguments['symbol']] ?? 0) || $arguments['units'] > $target['cargo']['capacity'] - $target['cargo']['units']) {
                     throw new GameException('Transfer exceeds source inventory or receiving cargo capacity.');
@@ -413,6 +413,10 @@ class CommandRules
             case 'buy':
             case 'sell':
             case 'refuel':
+                $tankUnits = min($arguments['units'] ?? ($ship['fuel']['capacity'] - $ship['fuel']['current']), $ship['fuel']['capacity'] - $ship['fuel']['current']);
+                $estimate['tank_refuel'] = ['source' => ($arguments['fromCargo'] ?? false) ? 'cargo' : 'market',
+                    'tank_before' => $ship['fuel']['current'], 'tank_after' => $ship['fuel']['current'] + $tankUnits,
+                    'tank_units' => $tankUnits, 'capacity' => $ship['fuel']['capacity'], 'omitted_units' => ! isset($arguments['units'])];
                 if ($command === 'refuel' && ($arguments['fromCargo'] ?? false)) {
                     $estimate['cargo_refuel'] = CargoRefuel::preview($ship, $arguments, $this->api->contracts($agent), $agent->credits, $floor);
                     $estimate['effects'] = 'Uses owned FUEL cargo. Whole-unit and rounding evidence are shown separately. Returned cargo, fuel and credits are authoritative.';

@@ -118,27 +118,22 @@ class ShipCommandExecutor
 
     public function stopManual(ShipAction $action): ShipAction
     {
-        return DB::transaction(function () use ($action) {
-            $action = ShipAction::whereKey($action->id)->lockForUpdate()->firstOrFail();
-            if ($action->origin !== 'manual' || $action->automation_run_id) {
-                throw new GameException('Stop the owning run for automated actions.');
-            }
-            $stopped = ShipAction::whereKey($action->id)->whereIn('state', ['preview', 'pending'])->update([
-                'state' => 'rejected',
-                'outcome' => json_encode(array_merge($action->outcome ?? [], ['stop_requested_at' => now()->utc()->toIso8601String()])),
-                'message' => 'Stopped before reservation. No manual request was sent.', 'settled_at' => now(),
+        $action->refresh();
+        if ($action->origin !== 'manual' || $action->automation_run_id) {
+            throw new GameException('Stop the owning run for automated actions.');
+        }
+        // Conditional state and JSON-path updates are atomic; never replace a concurrently saved receipt.
+        $stop = ['outcome->stop_requested_at' => now()->utc()->toIso8601String()];
+        $stopped = ShipAction::whereKey($action->id)->where('origin', 'manual')->whereNull('automation_run_id')
+            ->whereIn('state', ['preview', 'pending'])->update($stop + [
+                'state' => 'rejected', 'message' => 'Stopped before reservation. No manual request was sent.', 'settled_at' => now(),
             ]);
-            if (! $stopped) {
-                $action->refresh();
-                ShipAction::whereKey($action->id)->where('state', 'sending')->update([
-                    'outcome' => json_encode(array_merge($action->outcome ?? [], ['stop_requested_at' => now()->utc()->toIso8601String()])),
-                    'message' => 'Stop requested after reservation. This action may settle; no follow-up is authorized.',
-                ]);
-            }
-            $action->refresh();
+        if (! $stopped) {
+            ShipAction::whereKey($action->id)->where('origin', 'manual')->whereNull('automation_run_id')->where('state', 'sending')
+                ->update($stop + ['message' => 'Stop requested after reservation. This action may settle; no follow-up is authorized.']);
+        }
 
-            return $action;
-        });
+        return $action->refresh();
     }
 
     public function clear(Agent $agent, ?int $except = null): void
@@ -198,7 +193,16 @@ class ShipCommandExecutor
                 $action->update(['outcome' => array_merge($action->fresh()->outcome ?? [], ['response' => $data, 'response_validated' => true, 'response_received_at' => now()->utc()->toIso8601String()])]);
                 $this->confirm($agent, $action, $data, $before, $run);
             } catch (RequestDeferred $e) {
-                // This exception is emitted only before HTTP transport starts. Returning to pending cannot replay a write.
+                $action->refresh();
+                if ($received) {
+                    $action->update(['state' => ActionState::Uncertain, 'message' => 'Write response retained; post-write refresh was deferred by the request budget. Reconcile without replay.', 'settled_at' => now()]);
+                    if ($run) {
+                        $this->block($run, 'Post-write refresh deferred. Reconcile the retained response before further work.');
+                    }
+
+                    return;
+                }
+                // Only a budget deferral before the write starts can return to pending.
                 if ($action->expires_at->isFuture() && ! ExplorationPolicy::command($action->command) && empty($action->fresh()->outcome['stop_requested_at'])) {
                     $action->update(['state' => ActionState::Pending, 'sent_at' => null, 'message' => $e->getMessage()]);
                 } else {
