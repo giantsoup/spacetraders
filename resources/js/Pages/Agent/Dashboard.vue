@@ -301,6 +301,7 @@ function distance(point) {
 <template>
     <Head :title="`${agent.name} · Ship`" />
     <AppShell compact brand="SPACETRADERS" :agent-id="agent.id" :ship-symbol="selected" skip-to="ship-home" skip-label="Skip to selected ship" :guide-href="archived ? route('guide') : route('agents.guide', agent.id)" class="bridge" :class="{ guiding }">
+
         <main :aria-busy="busy">
             <section id="ship-home" class="ship-home" tabindex="-1" aria-labelledby="ship-title">
                 <header class="ship-identity">
