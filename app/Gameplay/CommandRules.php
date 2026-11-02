@@ -20,7 +20,7 @@ class CommandRules
         $this->sync->guardReset($agent);
         $agent->update(['credits' => $this->api->agent($agent)['credits']]);
         $ship = $this->sync->refreshShip($agent, $symbol)->snapshot;
-        if ($ship['nav']['status'] === 'IN_TRANSIT') {
+        if ($ship['nav']['status'] === 'IN_TRANSIT' && $command !== 'flight_mode') {
             throw new GameException('Ship is in transit. Reconcile after the reported arrival.');
         }
         $active = AutomationRun::where('agent_id', $agent->id)->whereNotNull('active_agent_id')->first();
@@ -96,6 +96,12 @@ class CommandRules
             throw new GameException('A guaranteed upstream execution-price ceiling is unsupported.');
         }
         switch ($command) {
+            case 'flight_mode':
+                if (isset($arguments['flightMode']) && ! in_array($arguments['flightMode'], ['DRIFT', 'STEALTH', 'CRUISE', 'BURN'], true)) {
+                    throw new GameException('Unsupported flight mode.');
+                }
+                $estimate['effects'] = 'Changes flight mode; returned fuel and condition events are authoritative. Travel needs separate approval.';
+                break;
             case 'scan_waypoints':
             case 'chart':
                 $estimate['exploration'] = app(ExplorationPolicy::class)->inspect($agent, $ship, $command, $arguments, $floor);
@@ -155,7 +161,7 @@ class CommandRules
                         throw new GameException('Approved extraction headroom is unavailable. Cargo retained.');
                     }
                 }
-                if (now()->lt($ship['cooldown']['expiration']) || $ship['cargo']['units'] >= $ship['cargo']['capacity']) {
+                if (now()->lt($ship['cooldown']['readyAt']) || $ship['cargo']['units'] >= $ship['cargo']['capacity']) {
                     throw new GameException('Extraction requires an expired cooldown and free cargo.');
                 }
                 if ($command === 'mine_survey') {
@@ -168,7 +174,7 @@ class CommandRules
                 break;
             case 'survey':
                 $this->orbit($ship);
-                if (! collect($ship['mounts'])->contains(fn ($mount) => str_starts_with($mount['symbol'], 'MOUNT_SURVEYOR_')) || now()->lt($ship['cooldown']['expiration'])) {
+                if (! collect($ship['mounts'])->contains(fn ($mount) => str_starts_with($mount['symbol'], 'MOUNT_SURVEYOR_')) || now()->lt($ship['cooldown']['readyAt'])) {
                     throw new GameException('Survey creation requires a Surveyor mount and expired cooldown.');
                 }
                 $point = $this->api->waypoint($agent, $ship['nav']['waypointSymbol']);
@@ -186,7 +192,7 @@ class CommandRules
                 if ($target['nav']['waypointSymbol'] !== $ship['nav']['waypointSymbol'] || $target['nav']['status'] !== $ship['nav']['status'] || $target['nav']['status'] === 'IN_TRANSIT') {
                     throw new GameException('Transfers require the same waypoint and matching docked or orbiting states.');
                 }
-                if (now()->lt($ship['cooldown']['expiration']) || now()->lt($target['cooldown']['expiration'])) {
+                if (now()->lt($ship['cooldown']['readyAt']) || now()->lt($target['cooldown']['readyAt'])) {
                     throw new GameException('Wait for both cooldowns before transferring.');
                 }
                 if ($arguments['units'] > (MiningPlanner::inventory($ship)[$arguments['symbol']] ?? 0) || $arguments['units'] > $target['cargo']['capacity'] - $target['cargo']['units']) {

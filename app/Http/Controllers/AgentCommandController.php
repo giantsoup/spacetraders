@@ -35,7 +35,7 @@ class AgentCommandController extends Controller
     {
         $intent = ShipAction::where('agent_id', $agent->id)->findOrFail($action);
 
-        return $responses->result(fn () => $executor->stopExploration($intent));
+        return $responses->result(fn () => $executor->stopManual($intent));
     }
 
     public function reconcile(GameplayRequest $request, Agent $agent, int $action, ShipCommandExecutor $executor, AgentDashboardController $responses)

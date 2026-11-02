@@ -83,7 +83,7 @@ final class FakeSpaceTraders
                     $world['worker_storage'] = ['pid' => getmypid(), 'synchronous' => (int) DB::selectOne('PRAGMA synchronous')->synchronous, 'fullfsync' => (int) DB::selectOne('PRAGMA fullfsync')->fullfsync];
                 }
                 if ($request->method() === 'POST' && isset($world['write_stop_action_id'])) {
-                    app(ShipCommandExecutor::class)->stopExploration(ShipAction::findOrFail($world['write_stop_action_id']));
+                    app(ShipCommandExecutor::class)->stopManual(ShipAction::findOrFail($world['write_stop_action_id']));
                 }
                 if ($request->method() === 'POST' && isset($world['write_stop_run_id'])) {
                     app(AutomationRunner::class)->stop(AutomationRun::findOrFail($world['write_stop_run_id']));
@@ -116,6 +116,14 @@ final class FakeSpaceTraders
     {
         $path = substr(parse_url($request->url(), PHP_URL_PATH), strlen('/v2')) ?: '/';
         $args = $request->data();
+        if (($world['foundation'] ?? false) && $request->method() === 'GET') {
+            $response = self::foundationRead($world, $path, $args);
+            if ($response !== null) {
+                $world['calls'][] = ['method' => 'GET', 'path' => $path];
+
+                return $response;
+            }
+        }
         $world['calls'][] = ['method' => $request->method(), 'path' => $path];
         if ($request->method() === 'GET') {
             foreach ($world['ships'] as &$arriving) {
@@ -338,6 +346,64 @@ final class FakeSpaceTraders
         }
 
         return [['error' => ['code' => 404]], 404];
+    }
+
+    private static function foundationRead(array $world, string $path, array $args): ?array
+    {
+        $system = ['symbol' => 'X1-TEST', 'sectorSymbol' => 'X1', 'type' => 'RED_STAR', 'x' => 0, 'y' => 0, 'waypoints' => $world['waypoints'], 'factions' => [['symbol' => 'COSMIC']]];
+        $faction = ['symbol' => 'COSMIC', 'name' => 'Cosmic', 'description' => 'Synthetic faction', 'headquarters' => 'X1-TEST-ROCK', 'traits' => [], 'isRecruiting' => true];
+        $profile = ['symbol' => 'LOCAL', 'credits' => $world['credits'], 'shipCount' => count($world['ships']), 'headquarters' => 'X1-TEST-ROCK', 'startingFaction' => 'COSMIC', 'accountId' => 'synthetic-account'];
+        $lists = ['/systems' => [$system], '/agents' => [$profile], '/factions' => [$faction], '/my/ships' => $world['ships'], '/my/contracts' => $world['contracts']];
+        if (preg_match('~^/systems/([^/]+)/waypoints$~', $path)) {
+            $lists[$path] = array_values(array_filter($world['waypoints'], function ($point) use ($args) {
+                return (! isset($args['type']) || $point['type'] === $args['type']) && (! isset($args['traits']) || ! array_diff((array) $args['traits'], array_column($point['traits'], 'symbol')));
+            }));
+        }
+        if (isset($lists[$path])) {
+            $limit = (int) ($args['limit'] ?? 10);
+            $page = (int) ($args['page'] ?? 1);
+
+            return [['data' => array_slice($lists[$path], ($page - 1) * $limit, $limit), 'meta' => ['total' => count($lists[$path]), 'limit' => $limit, 'page' => $page]], 200];
+        }
+        if ($path === '/systems/X1-TEST') {
+            return [['data' => $system], 200];
+        }
+        if ($path === '/factions/COSMIC') {
+            return [['data' => $faction], 200];
+        }
+        if (in_array($path, ['/agents/LOCAL', '/my/agent'], true)) {
+            return [['data' => $profile], 200];
+        }
+        if ($path === '/market/supply-chain') {
+            return [['data' => ['exportToImportMap' => ['IRON_ORE' => ['IRON']]]], 200];
+        }
+        if (str_ends_with($path, '/jump-gate')) {
+            return [['data' => ['symbol' => 'X1-TEST-ROCK', 'connections' => ['X1-NEXT-GATE']]], 200];
+        }
+        if (str_ends_with($path, '/construction')) {
+            return [['data' => $world['construction'] ?? ['symbol' => 'X1-TEST-ROCK', 'isComplete' => false, 'materials' => [['tradeSymbol' => 'IRON_ORE', 'required' => 100, 'fulfilled' => 0]]]], 200];
+        }
+        if (preg_match('~^/my/ships/([^/]+)/(cargo|nav|cooldown|mounts|modules|repair|scrap)$~', $path, $match)) {
+            $ship = collect($world['ships'])->firstWhere('symbol', $match[1]);
+            if (! $ship) {
+                return [['error' => ['code' => 404]], 404];
+            }
+            $field = $match[2];
+            if ($field === 'cooldown' && ($world['cooldown_204'] ?? false)) {
+                return ['', 204];
+            }
+            if (in_array($field, ['repair', 'scrap'], true)) {
+                return [['data' => ['transaction' => ['shipSymbol' => $ship['symbol'], 'waypointSymbol' => $ship['nav']['waypointSymbol'], 'totalPrice' => $world[$field.'_price'] ?? 100, 'timestamp' => now()->toIso8601String()]]], 200];
+            }
+            $data = $ship[$field];
+            if ($field === 'cooldown') {
+                $data += ['shipSymbol' => $ship['symbol'], 'totalSeconds' => 0];
+            }
+
+            return [['data' => $data], 200];
+        }
+
+        return null;
     }
 
     private static function cargo(array &$ship, string $symbol, int $delta): void

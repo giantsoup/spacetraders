@@ -289,7 +289,7 @@ class ExplorationTest extends TestCase
         Http::globalRequestMiddleware(function ($request) use ($action, &$stopped) {
             if (! $stopped) {
                 $stopped = true;
-                app(ShipCommandExecutor::class)->stopExploration($action->fresh());
+                app(ShipCommandExecutor::class)->stopManual($action->fresh());
             }
 
             return $request;
@@ -342,7 +342,7 @@ class ExplorationTest extends TestCase
         Http::globalRequestMiddleware(function ($request) use ($action, &$stopped) {
             if (! $stopped) {
                 $stopped = true;
-                app(ShipCommandExecutor::class)->stopExploration($action->fresh());
+                app(ShipCommandExecutor::class)->stopManual($action->fresh());
             }
 
             return $request;

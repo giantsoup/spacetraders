@@ -31,7 +31,7 @@ class ExplorationPolicy
         ])->fails()) {
             throw new GameException('Choose an unresolved trait question, target and cooldown review threshold.');
         }
-        if ($ship['nav']['status'] !== 'IN_ORBIT' || now()->lt($ship['cooldown']['expiration'])) {
+        if ($ship['nav']['status'] !== 'IN_ORBIT' || now()->lt($ship['cooldown']['readyAt'])) {
             throw new GameException('Exploration requires orbit and an expired cooldown under this client policy.');
         }
         if ($command === 'scan_waypoints' && ! collect($ship['mounts'])->contains(fn ($m) => in_array($m['symbol'], ['MOUNT_SENSOR_ARRAY_I', 'MOUNT_SENSOR_ARRAY_II', 'MOUNT_SENSOR_ARRAY_III'], true))) {

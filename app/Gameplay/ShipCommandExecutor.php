@@ -60,7 +60,7 @@ class ShipCommandExecutor
             }
             try {
                 $before = $this->rules->inspect($agent, $action->ship_symbol, $action->command, $action->arguments);
-                $this->unchangedExploration($action, $before);
+                $this->unchangedApproval($action, $before);
                 DB::transaction(function () use ($action) {
                     $this->gate->check($action->engine_session_id);
                     if (! ShipAction::whereKey($action->id)->where('state', 'preview')->update(['state' => 'pending', 'last_dispatched_at' => now()])) {
@@ -80,30 +80,40 @@ class ShipCommandExecutor
         });
     }
 
-    private function unchangedExploration(ShipAction $action, array $before): void
+    private function unchangedApproval(ShipAction $action, array $before): void
     {
-        if (! ExplorationPolicy::command($action->command)) {
+        if ($action->origin !== 'manual') {
             return;
         }
         $saved = $action->before_state['ship'];
         $current = $before['ship'];
-        if ($saved['nav']['waypointSymbol'] !== $current['nav']['waypointSymbol'] || $saved['fuel'] !== $current['fuel'] || FuelPlanner::configuration($saved) !== FuelPlanner::configuration($current)) {
-            throw new GameException('Exploration location, fuel or equipment changed. Create a fresh preview.');
+        foreach (['systemSymbol', 'waypointSymbol', 'status', 'flightMode'] as $field) {
+            if ($saved['nav'][$field] !== $current['nav'][$field]) {
+                throw new GameException('Ship location, fuel or equipment changed. Create a fresh preview.');
+            }
+        }
+        foreach (['fuel', 'cargo', 'frame', 'engine', 'reactor', 'mounts', 'modules'] as $field) {
+            if ($saved[$field] !== $current[$field]) {
+                throw new GameException('Ship fuel, cargo or equipment changed. Create a fresh preview.');
+            }
+        }
+        if (isset($action->before_state['estimate']['configuration']) && $action->before_state['estimate']['configuration'] !== ($before['estimate']['configuration'] ?? null)) {
+            throw new GameException('The observed ship offer changed. Create a fresh preview.');
         }
     }
 
-    public function stopExploration(ShipAction $action): ShipAction
+    public function stopManual(ShipAction $action): ShipAction
     {
         return DB::transaction(function () use ($action) {
             $action->refresh();
-            if (! ExplorationPolicy::command($action->command)) {
-                throw new GameException('This Stop control applies to one-shot exploration actions.');
+            if ($action->origin !== 'manual' || $action->automation_run_id) {
+                throw new GameException('Stop the owning run for automated actions.');
             }
             if (in_array($action->state, [ActionState::Preview, ActionState::Pending, ActionState::Sending], true)) {
                 $reserved = $action->state === ActionState::Sending;
                 $action->update(['state' => $reserved ? ActionState::Sending : ActionState::Rejected,
                     'outcome' => array_merge($action->outcome ?? [], ['stop_requested_at' => now()->toIso8601String()]),
-                    'message' => $reserved ? 'Stop requested after reservation. This action may settle; no follow-up is authorized.' : 'Stopped before reservation. No exploration request was sent.',
+                    'message' => $reserved ? 'Stop requested after reservation. This action may settle; no follow-up is authorized.' : 'Stopped before reservation. No manual request was sent.',
                     'settled_at' => $reserved ? null : now()]);
             }
 
@@ -145,7 +155,7 @@ class ShipCommandExecutor
                     throw new GameException('Intent expired, reset or stopped before execution.');
                 }
                 $before = $this->rules->inspect($agent, $action->ship_symbol, $action->command, $action->arguments, $run);
-                $this->unchangedExploration($action, $before);
+                $this->unchangedApproval($action, $before);
                 // Stop and reservation contend on a database transaction, independently of the host lock.
                 DB::transaction(function () use ($action, $run, $before) {
                     $this->gate->check($action->engine_session_id);
@@ -162,10 +172,11 @@ class ShipCommandExecutor
                 $action->refresh();
                 $data = $this->api->mutate($agent, $action->ship_symbol, $action->command, $action->arguments);
                 $received = true;
+                $action->update(['outcome' => array_merge($action->fresh()->outcome ?? [], ['response' => $data, 'response_received_at' => now()->utc()->toIso8601String()])]);
                 $this->confirm($agent, $action, $data, $before, $run);
             } catch (RequestDeferred $e) {
                 // This exception is emitted only before HTTP transport starts. Returning to pending cannot replay a write.
-                if ($action->expires_at->isFuture() && ! ExplorationPolicy::command($action->command)) {
+                if ($action->expires_at->isFuture() && ! ExplorationPolicy::command($action->command) && empty($action->fresh()->outcome['stop_requested_at'])) {
                     $action->update(['state' => ActionState::Pending, 'sent_at' => null, 'message' => $e->getMessage()]);
                 } else {
                     $action->update(['state' => ActionState::Rejected, 'message' => ExplorationPolicy::command($action->command) ? 'Exploration stopped at the request budget. Create a fresh preview; no automatic retry.' : 'Intent expired while waiting for the request budget.', 'settled_at' => now()]);
@@ -213,9 +224,6 @@ class ShipCommandExecutor
                 $ship[$field] = $data[$field];
             }
         }
-        if (isset($data['cooldown']) && ! isset($data['cooldown']['expiration'])) {
-            $ship['cooldown']['expiration'] = now()->addSeconds($data['cooldown']['remainingSeconds'])->toIso8601String();
-        }
         $actualShip = $action->command === 'buy_ship' ? $this->api->shipData($data['ship']) : $this->api->shipData($ship);
         if (in_array($action->command, ['mine', 'mine_survey', 'buy', 'sell', 'transfer', 'contract_deliver'], true)) {
             $expected = MiningPlanner::inventory($before['ship']);
@@ -244,6 +252,9 @@ class ShipCommandExecutor
             if ($expected !== $observed) {
                 throw new GameException('Receiving cargo does not match the reserved transfer.', uncertain: true);
             }
+        }
+        if ($action->command === 'flight_mode' && $actualShip['nav']['flightMode'] !== ($action->arguments['flightMode'] ?? $before['ship']['nav']['flightMode'])) {
+            throw new GameException('Flight mode response differs from approval.', uncertain: true);
         }
         if ($action->command === 'navigate' && ($actualShip['nav']['waypointSymbol'] !== $action->arguments['waypointSymbol'] || $actualShip['nav']['systemSymbol'] !== $before['ship']['nav']['systemSymbol'])) {
             throw new GameException('Navigation response does not match the approved destination.', uncertain: true);

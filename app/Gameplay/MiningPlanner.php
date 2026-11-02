@@ -138,7 +138,7 @@ class MiningPlanner
             if ($ship['nav']['status'] === 'DOCKED') {
                 return AutomationStep::act('orbit');
             }
-            $ready = CarbonImmutable::parse($ship['cooldown']['expiration']);
+            $ready = CarbonImmutable::parse($ship['cooldown']['readyAt']);
             if ($ready->greaterThan($now)) {
                 return AutomationStep::wait($ready);
             }

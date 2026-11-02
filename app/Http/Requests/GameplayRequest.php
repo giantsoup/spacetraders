@@ -46,8 +46,9 @@ class GameplayRequest extends FormRequest
 
             return [
                 'key' => ['required', 'uuid'], 'ship_symbol' => ['required', 'string', 'max:80', 'regex:/^[A-Z0-9_-]+$/'],
-                'command' => ['required', Rule::in(['navigate', 'orbit', 'dock', 'refuel', 'mine', 'mine_survey', 'survey', 'scan_waypoints', 'chart', 'transfer', 'buy', 'sell', 'buy_ship'])],
-                'arguments' => ['present', 'array:units,symbol,waypointSymbol,shipType,maxTotal,minTotal,reserve,site,market,require_guaranteed_price,targetShip,surveySignature,surveyWaypoint,question,maxCooldownSeconds'],
+                'command' => ['required', Rule::in(['flight_mode', 'navigate', 'orbit', 'dock', 'refuel', 'mine', 'mine_survey', 'survey', 'scan_waypoints', 'chart', 'transfer', 'buy', 'sell', 'buy_ship'])],
+                'arguments' => ['present', 'array:units,symbol,waypointSymbol,shipType,maxTotal,minTotal,reserve,site,market,require_guaranteed_price,targetShip,surveySignature,surveyWaypoint,question,maxCooldownSeconds,flightMode'],
+                'arguments.flightMode' => ['sometimes', Rule::in(['DRIFT', 'STEALTH', 'CRUISE', 'BURN'])],
                 'arguments.units' => [Rule::requiredIf(in_array($command, ['buy', 'sell', 'refuel', 'transfer'], true)), 'integer', 'between:1,100000'],
                 'arguments.symbol' => [Rule::requiredIf(in_array($command, ['buy', 'sell', 'transfer'], true)), 'string', 'regex:/^[A-Z0-9_]+$/', 'max:80'],
                 'arguments.targetShip' => [Rule::requiredIf($command === 'transfer'), 'string', 'regex:/^[A-Z0-9_-]+$/', 'max:80'],

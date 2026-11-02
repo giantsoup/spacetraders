@@ -3,6 +3,7 @@
 namespace App\Gameplay;
 
 use App\Models\Agent;
+use App\Models\Ship;
 use App\Services\SpaceTradersClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
@@ -23,6 +24,87 @@ class SpaceTradersApi
         } finally {
             $this->readGuard = null;
         }
+    }
+
+    public function manualRead(Agent $agent, string $operation, array $parameters): array
+    {
+        $parameters = Validator::make(['operation' => $operation, 'parameters' => $parameters], ManualReads::rules($operation))->validate()['parameters'];
+        $system = $parameters['systemSymbol'] ?? '';
+        $waypoint = $parameters['waypointSymbol'] ?? '';
+        if ($waypoint && ! str_starts_with($waypoint, $system.'-')) {
+            throw new GameException('Waypoint does not belong to the selected system.');
+        }
+        $ship = $parameters['shipSymbol'] ?? '';
+        if ($ship && ! Ship::where('agent_id', $agent->id)->where('symbol', $ship)->exists()) {
+            throw new GameException('Select an owned saved ship. Refresh the fleet first.');
+        }
+        $shipPath = '/my/ships/'.$ship;
+        $waypointPath = '/systems/'.$system.'/waypoints/'.$waypoint;
+        $path = match ($operation) {
+            'get-status' => '/', 'get-systems' => '/systems', 'get-system' => '/systems/'.$system,
+            'get-system-waypoints' => '/systems/'.$system.'/waypoints', 'get-waypoint' => $waypointPath,
+            'get-market' => $waypointPath.'/market', 'get-shipyard' => $waypointPath.'/shipyard',
+            'get-jump-gate' => $waypointPath.'/jump-gate', 'get-construction' => $waypointPath.'/construction',
+            'get-factions' => '/factions', 'get-faction' => '/factions/'.$parameters['factionSymbol'],
+            'get-my-agent' => '/my/agent', 'get-agents' => '/agents', 'get-agent' => '/agents/'.$parameters['agentSymbol'],
+            'get-contracts' => '/my/contracts', 'get-contract' => '/my/contracts/'.$parameters['contractId'],
+            'get-my-ships' => '/my/ships', 'get-my-ship' => $shipPath,
+            'get-my-ship-cargo' => $shipPath.'/cargo', 'get-ship-nav' => $shipPath.'/nav',
+            'get-ship-cooldown' => $shipPath.'/cooldown', 'get-mounts' => $shipPath.'/mounts',
+            'get-ship-modules' => $shipPath.'/modules', 'get-repair-ship' => $shipPath.'/repair',
+            'get-scrap-ship' => $shipPath.'/scrap', 'get-supply-chain' => '/market/supply-chain',
+            default => throw new GameException('Unsupported named read.'),
+        };
+        $paged = ManualReads::OPERATIONS[$operation][2];
+        $query = $paged ? ['page' => (int) ($parameters['page'] ?? 1), 'limit' => (int) ($parameters['limit'] ?? 10)] : [];
+        if ($operation === 'get-system-waypoints') {
+            $query += Arr::only($parameters, ['type', 'traits']);
+        }
+        // Agent-only gameplay, including inherited-auth operations. Never use account-token fallback.
+        $private = str_starts_with($path, '/my/') || in_array($operation, ['get-supply-chain', 'get-faction', 'get-market', 'get-shipyard'], true);
+        $body = $this->call('get', $path, $query, $private ? $agent : null, $operation === 'get-ship-cooldown');
+        $data = $operation === 'get-status' ? $body : $this->payload($body);
+        if ($paged) {
+            $identity = $operation === 'get-contracts' ? 'id' : 'symbol';
+            $this->validate($body, ['data' => 'present|array|max:'.$query['limit'], 'data.*.'.$identity => 'required|string|distinct', 'meta.page' => 'required|integer|in:'.$query['page'], 'meta.limit' => 'required|integer|in:'.$query['limit'], 'meta.total' => 'required|integer|min:0']);
+        } else {
+            $rules = match ($operation) {
+                'get-status' => ['resetDate' => 'required|string', 'version' => 'required|string'],
+                'get-my-ship-cargo' => ['capacity' => 'required|integer|min:0', 'units' => 'required|integer|min:0', 'inventory' => 'present|array'],
+                'get-ship-nav' => ['systemSymbol' => 'required|string', 'waypointSymbol' => 'required|string', 'status' => 'required|in:DOCKED,IN_ORBIT,IN_TRANSIT', 'flightMode' => 'required|in:DRIFT,STEALTH,CRUISE,BURN', 'route.arrival' => 'required|date'],
+                'get-ship-cooldown' => $data === [] ? [] : ['shipSymbol' => 'required|in:'.$ship, 'remainingSeconds' => 'required|integer|min:0', 'totalSeconds' => 'required|integer|min:0', 'expiration' => 'sometimes|nullable|date'],
+                'get-mounts', 'get-ship-modules' => ['*' => 'array', '*.symbol' => 'required|string'],
+                'get-repair-ship', 'get-scrap-ship' => ['transaction.shipSymbol' => 'required|in:'.$ship, 'transaction.totalPrice' => 'required|integer|min:0', 'transaction.timestamp' => 'required|date', 'transaction.waypointSymbol' => 'required|string'],
+                'get-supply-chain' => ['exportToImportMap' => 'present|array', 'exportToImportMap.*' => 'array', 'exportToImportMap.*.*' => 'string'],
+                'get-construction' => ['symbol' => 'required|in:'.$waypoint, 'materials' => 'present|array', 'materials.*.tradeSymbol' => 'required|string', 'materials.*.required' => 'required|integer|min:0', 'materials.*.fulfilled' => 'required|integer|min:0', 'isComplete' => 'required|boolean'],
+                'get-jump-gate' => ['symbol' => 'required|in:'.$waypoint, 'connections' => 'present|array', 'connections.*' => 'string'],
+                'get-contract' => ['id' => 'required|in:'.$parameters['contractId']],
+                default => ['symbol' => 'required|in:'.match ($operation) {
+                    'get-system' => $system, 'get-faction' => $parameters['factionSymbol'],
+                    'get-agent' => $parameters['agentSymbol'], 'get-my-agent' => $agent->name,
+                    'get-my-ship' => $ship, default => $waypoint,
+                }],
+            };
+            $this->validate($data, $rules);
+        }
+        $result = ['operation' => $operation, 'parameters' => $parameters, 'data' => $data, 'meta' => $body['meta'] ?? null,
+            'observed_at' => now()->utc()->toIso8601String(), 'source' => 'official_api', 'no_content' => ($body['_http_status'] ?? null) === 204];
+        if ($operation === 'get-ship-cooldown') {
+            $result['deadline'] = $data === [] ? null : Arr::only($this->cooldownData($data), ['readyAt', 'deadlineSource']);
+        }
+        app(AgentSynchronizer::class)->observe($agent, 'manual_read', $operation.'-'.substr(hash('sha256', json_encode($parameters)), 0, 16), $result);
+        if (in_array($operation, ['get-waypoint', 'get-market', 'get-shipyard'], true)) {
+            app(AgentSynchronizer::class)->observe($agent, match ($operation) {
+                'get-waypoint' => 'waypoint', 'get-market' => 'market', default => 'shipyard'
+            }, $waypoint, $data);
+        }
+        if ($operation === 'get-my-ships') {
+            foreach ($data as $row) {
+                app(AgentSynchronizer::class)->saveShip($agent, $this->shipData($row));
+            }
+        }
+
+        return $result;
     }
 
     public function contracts(Agent $agent): array
@@ -151,7 +233,7 @@ class SpaceTradersApi
             if ($row['systemSymbol'] !== $system) {
                 throw new GameException('Waypoint system mismatch.');
             }
-            $row = Arr::only($row, ['symbol', 'systemSymbol', 'type', 'x', 'y', 'traits', 'modifiers', 'chart']);
+            $row = Arr::only($row, ['symbol', 'systemSymbol', 'type', 'x', 'y', 'traits', 'modifiers', 'chart', 'isUnderConstruction', 'faction', 'orbitals', 'orbits']);
         }
 
         return $rows;
@@ -185,12 +267,13 @@ class SpaceTradersApi
                 'contract_accept' => 'accept', 'contract_deliver' => 'deliver', 'contract_fulfill' => 'fulfill', default => throw new GameException('Unsupported contract command.')
             }
         : ($command === 'buy_ship' ? '/my/ships' : '/my/ships/'.$ship.'/'.match ($command) {
-            'scan_waypoints' => 'scan/waypoints', 'chart' => 'chart', 'mine' => 'extract', 'mine_survey' => 'extract/survey', 'survey' => 'survey', 'transfer' => 'transfer', 'buy' => 'purchase', 'sell' => 'sell', 'navigate' => 'navigate', 'dock' => 'dock', 'orbit' => 'orbit', 'refuel' => 'refuel',
+            'flight_mode' => 'nav', 'scan_waypoints' => 'scan/waypoints', 'chart' => 'chart', 'mine' => 'extract', 'mine_survey' => 'extract/survey', 'survey' => 'survey', 'transfer' => 'transfer', 'buy' => 'purchase', 'sell' => 'sell', 'navigate' => 'navigate', 'dock' => 'dock', 'orbit' => 'orbit', 'refuel' => 'refuel',
             default => throw new GameException('Unsupported command.'),
         });
         $body = match ($command) {
             'contract_deliver' => ['shipSymbol' => $ship, 'tradeSymbol' => $arguments['symbol'], 'units' => $arguments['units']],
             'buy_ship' => Arr::only($arguments, ['shipType', 'waypointSymbol']),
+            'flight_mode' => Arr::only($arguments, ['flightMode']),
             'navigate' => Arr::only($arguments, ['waypointSymbol']),
             'buy', 'sell' => Arr::only($arguments, ['symbol', 'units']),
             'refuel' => Arr::only($arguments, ['units']),
@@ -198,10 +281,11 @@ class SpaceTradersApi
             'transfer' => ['tradeSymbol' => $arguments['symbol'], 'units' => $arguments['units'], 'shipSymbol' => $arguments['targetShip']],
             default => [],
         };
-        $data = $this->payload($this->call('post', $path, $body, $agent), true);
+        $data = $this->payload($this->call($command === 'flight_mode' ? 'patch' : 'post', $path, $body, $agent), true);
         $rules = match ($command) {
             'contract_accept', 'contract_fulfill' => ['contract' => 'required|array', 'agent.credits' => 'required|integer|min:0'],
             'contract_deliver' => ['contract' => 'required|array', 'cargo' => 'required|array'],
+            'flight_mode' => ['nav' => 'required|array', 'nav.flightMode' => 'required|in:DRIFT,STEALTH,CRUISE,BURN', 'fuel.current' => 'required|integer|min:0', 'events' => 'present|array'],
             'dock' => ['nav' => 'required|array', 'nav.status' => 'required|in:DOCKED'],
             'orbit' => ['nav' => 'required|array', 'nav.status' => 'required|in:IN_ORBIT'],
             'navigate' => ['nav' => 'required|array', 'nav.status' => 'required|in:IN_TRANSIT', 'nav.route.arrival' => 'required|date', 'fuel.current' => 'required|integer|min:0'],
@@ -226,9 +310,7 @@ class SpaceTradersApi
                             throw new GameException('Scan waypoint symbol does not match its system.');
                         }
                     }
-                    $data['cooldown']['expiration'] = isset($data['cooldown']['expiration'])
-                        ? CarbonImmutable::parse($data['cooldown']['expiration'])->utc()->toIso8601String()
-                        : now()->addSeconds($data['cooldown']['remainingSeconds'])->utc()->toIso8601String();
+                    $data['cooldown'] = $this->cooldownData($data['cooldown']);
                     if ($data['cooldown']['remainingSeconds'] > $data['cooldown']['totalSeconds']) {
                         throw new GameException('Inconsistent scan cooldown.');
                     }
@@ -254,7 +336,7 @@ class SpaceTradersApi
             'contract_accept', 'contract_fulfill' => ['contract', 'agent'],
             'contract_deliver' => ['contract', 'cargo'],
             'orbit', 'dock' => ['nav'],
-            'navigate' => ['nav', 'fuel', 'events'],
+            'navigate', 'flight_mode' => ['nav', 'fuel', 'events'],
             'mine', 'mine_survey' => ['cargo', 'cooldown', 'extraction', 'events', 'modifiers'],
             'scan_waypoints' => ['cooldown', 'waypoints'],
             'chart' => ['chart', 'waypoint', 'agent'],
@@ -290,8 +372,16 @@ class SpaceTradersApi
             throw new GameException('Inconsistent ship cargo or fuel response.');
         }
         $data = Arr::only($data, ['symbol', 'nav', 'fuel', 'cargo', 'cooldown', 'mounts', 'modules', 'crew', 'frame', 'reactor', 'engine', 'registration']);
-        $remaining = $data['cooldown']['remainingSeconds'];
-        $data['cooldown']['expiration'] = $data['cooldown']['expiration'] ?? now()->addSeconds($remaining)->toIso8601String();
+        $data['cooldown'] = $this->cooldownData($data['cooldown']);
+
+        return $data;
+    }
+
+    public function cooldownData(array $data): array
+    {
+        $this->validate($data, ['remainingSeconds' => 'required|integer|min:0', 'expiration' => 'sometimes|nullable|date']);
+        $data['readyAt'] = isset($data['expiration']) ? CarbonImmutable::parse($data['expiration'])->utc()->toIso8601String() : now()->addSeconds($data['remainingSeconds'])->utc()->toIso8601String();
+        $data['deadlineSource'] = isset($data['expiration']) ? 'api_expiration' : 'derived_from_remaining_seconds';
 
         return $data;
     }
@@ -329,7 +419,7 @@ class SpaceTradersApi
         $this->validate($body, ['data' => 'present|array|max:20', 'data.*' => 'array', 'data.*.'.$identity => 'required|string|distinct|max:80', 'meta.total' => 'required|integer|min:0', 'meta.page' => 'required|integer|in:'.$page, 'meta.limit' => 'required|integer|in:20']);
     }
 
-    private function call(string $method, string $path, array $body = [], ?Agent $agent = null): array
+    private function call(string $method, string $path, array $body = [], ?Agent $agent = null, bool $allowNoContent = false): array
     {
         $deadline = null;
         if ($this->readGuard) {
@@ -353,6 +443,9 @@ class SpaceTradersApi
         }
         if (strlen($response->body()) > 2 * 1024 * 1024) {
             throw new GameException('SpaceTraders response exceeds the local state limit.', uncertain: $method !== 'get');
+        }
+        if ($response->status() === 204 && $allowNoContent) {
+            return ['data' => [], '_http_status' => 204];
         }
         $data = $response->json();
         if (! is_array($data)) {
