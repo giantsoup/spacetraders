@@ -92,6 +92,15 @@ class RequestBudget
                 $bucket['capacity'] = min($bucket['capacity'], max(1, (int) $burst - 1));
             }
             $remaining = $response->header('X-RateLimit-Remaining');
+            $bucket['last_response'] = [
+                'observed_at' => $now, 'status' => $response->status(),
+                'scope' => match ($type) {
+                    'account' => 'Account', 'ip address' => 'IP address', default => 'Unspecified'
+                },
+                'per_second' => is_numeric($rate) && is_finite((float) $rate) && (float) $rate > 0 ? (float) $rate : null,
+                'burst' => is_numeric($burst) && is_finite((float) $burst) && (float) $burst >= 1 ? (float) $burst : null,
+                'remaining' => is_numeric($remaining) && is_finite((float) $remaining) && (float) $remaining >= 0 ? (float) $remaining : null,
+            ];
             // Live 2xx responses report Remaining=1 beside a separate burst=30 allowance.
             // A positive value is advisory, not the size of our sustained/burst budget.
             // Explicit exhaustion still enforces Retry-After/Reset below.
@@ -120,12 +129,26 @@ class RequestBudget
             $bucket = $this->refill($state['buckets'][$key] ?? [], $this->now());
             $result[$index === 0 ? 'host' : 'account'] = $bucket['usage'] + [
                 'requests_last_60_seconds' => count($bucket['recent']), 'requests_per_second_last_60' => count($bucket['recent']) / 60,
+                'requests_per_second_last_5' => count(array_filter($bucket['recent'], fn ($at) => $at > $this->now() - 5)) / 5,
                 'sustained_per_second' => $bucket['rate'], 'burst_capacity' => $bucket['capacity'],
                 'available' => $bucket['tokens'], 'blocked_until' => $bucket['blocked_until'],
+                'last_response' => $bucket['last_response'] ?? null,
             ];
         }
 
         return $result;
+    }
+
+    public function status(?string $token = null, ?string $account = null): array
+    {
+        $usage = $this->usage($token, $account);
+
+        return [
+            'as_of' => $this->now(),
+            'mode' => config('gameplay.fixture_path') ? 'offline' : 'live',
+            'pacing_enabled' => (bool) config('gameplay.request_budget_enabled'),
+            'buckets' => $usage,
+        ];
     }
 
     private function keys(?string $token, ?string $account): array

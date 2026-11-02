@@ -1,5 +1,6 @@
 <script setup>
 import FocusSheet from '@/Components/FocusSheet.vue';
+import RateLimitStatus from '@/Components/RateLimitStatus.vue';
 import { computed, ref } from 'vue';
 import { Link, usePage } from '@inertiajs/vue3';
 
@@ -22,6 +23,7 @@ const signedIn = computed(() => Boolean(page.props.auth?.user));
         <a :href="`#${skipTo}`" class="skip">{{ skipLabel }}</a>
         <header class="app-topbar">
             <Link :href="signedIn ? route('agents.index') : '/'" class="app-brand">{{ brand }}</Link>
+            <RateLimitStatus v-if="signedIn" :agent-id="agentId" />
             <button v-if="compact" class="shell-menu app-button app-button-secondary" type="button" @click="menuOpen = true">Menu</button>
             <component :is="compact ? FocusSheet : 'div'" :open="menuOpen" title="Navigation" @close="menuOpen = false">
             <nav aria-label="Main navigation">
@@ -48,5 +50,6 @@ const signedIn = computed(() => Boolean(page.props.auth?.user));
 .compact-shell .app-topbar { padding: calc(4px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 4px max(16px, env(safe-area-inset-left)); gap: 8px; border: 0; background: var(--color-space); flex-wrap: nowrap; }
 .compact-shell .app-brand { font-size: 13px; letter-spacing: .08em; }
 .compact-shell .app-topbar .focus-sheet nav { display: grid; }
-.compact-shell .shell-menu { padding: 8px 12px; }
+.compact-shell .shell-menu { padding: 8px 12px; white-space: nowrap; flex-shrink: 0; }
+@media(max-width:380px) { .compact-shell .app-brand { font-size: 12px; letter-spacing: .03em; min-width: 0; } }
 </style>

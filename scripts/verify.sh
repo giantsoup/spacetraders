@@ -12,6 +12,8 @@ PNPM_BIN="$pnpm_bin" node scripts/verify-build-sources.mjs
 node scripts/verify-store.mjs
 node scripts/verify-gameplay.mjs
 node scripts/verify-local-time.mjs
+node scripts/verify-rate-limit.mjs
+node --check scripts/verify-rate-limit-browser.mjs
 node scripts/verify-automation-selection.mjs
 node scripts/verify-ship-presentation.mjs
 node --check scripts/verify-native-ship-browser.mjs
@@ -56,7 +58,7 @@ node --check scripts/verify-batch2-browser.mjs
     config/gameplay.php config/database.php config/queue.php config/deployment.php \
     database/migrations/2026_10_31_00000*_*.php database/migrations/2026_11_01_*.php \
     tests/Feature/GameplayTest.php tests/Feature/PlayerGuideTest.php tests/Feature/GameConnectionTest.php app/Http/Controllers/PlayerGuideController.php tests/Support tests/TestCase.php \
-    tests/Feature/AgentArchiveTest.php tests/Feature/LocalAutomationTest.php tests/Feature/OpportunityTest.php tests/Feature/RequestBudgetTest.php tests/Feature/SQLiteConcurrencyTest.php tests/Feature/BudgetResponseTest.php \
+    tests/Feature/AgentArchiveTest.php tests/Feature/LocalAutomationTest.php tests/Feature/OpportunityTest.php tests/Feature/RequestBudgetTest.php tests/Feature/RateLimitStatusTest.php app/Http/Controllers/RateLimitController.php tests/Feature/SQLiteConcurrencyTest.php tests/Feature/BudgetResponseTest.php \
     tests/Feature/DeploymentGateTest.php scripts/verify-deployment.php \
     tests/Feature/CycleEconomicsTest.php \
     tests/Feature/ExplorationTest.php \
