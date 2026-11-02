@@ -54,7 +54,7 @@ function close(restore = true) {
     if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
     else canvas.value?.focus({ preventScroll: true });
 }
-function escape(event) { if (point.value) { event.preventDefault(); close(); } }
+function escape(event) { if (point.value && !event.target.closest('dialog[open]')) { event.preventDefault(); close(); } }
 const pointers = new Map();
 let gesture = null, start = null, dragged = false, multiTouch = false;
 function local(event) { const bounds = canvas.value.getBoundingClientRect(); return { x: event.clientX - bounds.left, y: event.clientY - bounds.top }; }
@@ -128,8 +128,8 @@ onBeforeUnmount(() => { observer?.disconnect(); clearInterval(timer); });
 
 <template>
     <Head :title="`System map · ${map.system || agent.name}`" />
-    <AppShell compact brand="SPACETRADERS" :agent-id="agent.id" :ship-symbol="shipSymbol" class="system-map-shell">
-        <main id="main-content" class="system-map-page" @click="outside" @keydown.esc="escape">
+    <AppShell compact brand="SPACETRADERS" :agent-id="agent.id" :ship-symbol="shipSymbol" class="system-map-shell" @keydown.esc="escape">
+        <main id="main-content" class="system-map-page" @click="outside">
             <header class="map-header"><div><p class="map-eyebrow">{{ agent.name }} / STORED EXPLORATION</p><h1>{{ map.system || 'System Unknown' }} <span>System map<span v-if="map.system_info?.type"> · {{ assetName(map.system_info.type) }}</span></span></h1></div><div class="map-header-actions"><label v-if="ships.length" class="map-ship-picker"><span class="sr-only">Selected ship</span><select aria-label="Selected ship" :value="shipSymbol" @change="chooseShip"><option v-for="ship in ships" :key="ship.symbol" :value="ship.symbol">{{ ship.symbol }}</option></select></label><Link class="map-button" :href="route('agents.show', { agent: agent.id, ship: shipSymbol })">Flight deck <span aria-hidden="true">↗</span></Link></div></header>
             <div class="map-knowledge"><span class="map-status-dot" /><span>Stored knowledge only</span><span>· {{ map.catalogue?.complete ? 'Complete catalogue when observed' : 'Partial catalogue · coverage unconfirmed' }}</span><span>· {{ plotted.length }} plotted<span v-if="unplotted.length"> / {{ unplotted.length }} unplotted</span></span><ObservationStamp v-if="map.catalogue" :at="map.catalogue.observed_at" :now="now" :seconds="freshnessSeconds" /></div>
             <div ref="viewport" class="map-viewport">
