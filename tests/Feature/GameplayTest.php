@@ -306,6 +306,14 @@ class GameplayTest extends TestCase
         $this->assertSame('X1-TEST-PORT', $ship['nav']['waypointSymbol']);
     }
 
+    public function test_cargo_trade_approvals_do_not_describe_a_tank_refuel(): void
+    {
+        $buy = $this->command('buy', ['symbol' => 'IRON_ORE', 'units' => 4, 'maxTotal' => 120]);
+        $this->assertArrayNotHasKey('tank_refuel', $buy->before_state['estimate']);
+        $sell = $this->preview('sell', ['symbol' => 'IRON_ORE', 'units' => 4, 'minTotal' => 100]);
+        $this->assertArrayNotHasKey('tank_refuel', $sell->before_state['estimate']);
+    }
+
     public function test_manual_endpoints_and_persistent_cargo_credit_outcomes(): void
     {
         $this->assertSame(ActionState::Confirmed, $this->command('buy', ['symbol' => 'IRON_ORE', 'units' => 4, 'maxTotal' => 120, 'reserve' => 1000])->state);

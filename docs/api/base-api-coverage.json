@@ -11,7 +11,7 @@
   },
   "source_files": {
     "app/Gameplay/SpaceTradersApi.php": "35afb3eb256e47826f9fbbc0e8049e040dd186b30c018e4c33095a0cd6e3f8b4",
-    "app/Gameplay/CommandRules.php": "89e0cd88c16ed1064f473d9c8111fa1a0162a54fb0f3923c14364c6bee653410",
+    "app/Gameplay/CommandRules.php": "813900f1e3e71f0c473c9e6bc08ef5748fc40ec213b406185576152a19c912dc",
     "app/Http/Requests/GameplayRequest.php": "a1d9512304d06aefabf5c83e3571c7784a4a22a5d2ce5ec94ea41c831d6b89e4",
     "app/Services/SpaceTradersClient.php": "f8b3823b6d75e8f3f3e36702c4291bb7478c476bf3ae0308faf70a268b9d0137",
     "app/Http/Controllers/AgentController.php": "3b29992032b3a206e64092008a5f81f446ce52f0a441eb7d383cf2fdd1301b72",

@@ -413,10 +413,12 @@ class CommandRules
             case 'buy':
             case 'sell':
             case 'refuel':
-                $tankUnits = min($arguments['units'] ?? ($ship['fuel']['capacity'] - $ship['fuel']['current']), $ship['fuel']['capacity'] - $ship['fuel']['current']);
-                $estimate['tank_refuel'] = ['source' => ($arguments['fromCargo'] ?? false) ? 'cargo' : 'market',
-                    'tank_before' => $ship['fuel']['current'], 'tank_after' => $ship['fuel']['current'] + $tankUnits,
-                    'tank_units' => $tankUnits, 'capacity' => $ship['fuel']['capacity'], 'omitted_units' => ! isset($arguments['units'])];
+                if ($command === 'refuel') {
+                    $tankUnits = min($arguments['units'] ?? ($ship['fuel']['capacity'] - $ship['fuel']['current']), $ship['fuel']['capacity'] - $ship['fuel']['current']);
+                    $estimate['tank_refuel'] = ['source' => ($arguments['fromCargo'] ?? false) ? 'cargo' : 'market',
+                        'tank_before' => $ship['fuel']['current'], 'tank_after' => $ship['fuel']['current'] + $tankUnits,
+                        'tank_units' => $tankUnits, 'capacity' => $ship['fuel']['capacity'], 'omitted_units' => ! isset($arguments['units'])];
+                }
                 if ($command === 'refuel' && ($arguments['fromCargo'] ?? false)) {
                     $estimate['cargo_refuel'] = CargoRefuel::preview($ship, $arguments, $this->api->contracts($agent), $agent->credits, $floor);
                     $estimate['effects'] = 'Uses owned FUEL cargo. Whole-unit and rounding evidence are shown separately. Returned cargo, fuel and credits are authoritative.';
