@@ -43,7 +43,7 @@ class OpportunityInvestigator
                     $record->update(['coverage' => $coverage]);
 
                     return (float) ($record->created_at->getTimestamp() + $coverage['seconds_limit']);
-                }, function () use ($agent, &$observations, &$coverage) {
+                }, function () use ($agent, $record, &$observations, &$coverage) {
                     switch ($coverage['phase']) {
                         case 'agent':
                             $reset = $this->api->status();
@@ -67,7 +67,7 @@ class OpportunityInvestigator
                             foreach ($observations['contracts'] as $contract) {
                                 $this->sync->observe($agent, 'contract', $contract['id'], $contract);
                             }
-                            $coverage['phase'] = 'waypoints';
+                            $coverage['phase'] = $record->strategy === 'contracts' && ! collect($observations['contracts'])->contains('fulfilled', false) ? 'done' : 'waypoints';
                             break;
                         case 'waypoints':
                             $points = $this->api->waypoints($agent, $observations['system']);

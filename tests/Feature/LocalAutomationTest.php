@@ -170,6 +170,38 @@ class LocalAutomationTest extends TestCase
         $this->assertSame('cancelled', $record->fresh()->status);
     }
 
+    public function test_completed_contracts_are_not_automation_candidates(): void
+    {
+        $record = $this->investigation();
+        $observations = $record->observations;
+        $completed = $observations['contracts'][0];
+        $completed['fulfilled'] = true;
+        $completed['id'] = 'completed-contract';
+        $observations['contracts'] = array_merge(array_fill(0, 110, $completed), $observations['contracts']);
+
+        $candidates = app(OpportunityEvaluator::class)->evaluate($observations, 'contracts', CarbonImmutable::now(), false);
+
+        $this->assertNotEmpty($candidates);
+        $this->assertSame(['contract-1'], array_values(array_unique(array_column($candidates, 'contract_id'))));
+        $observations['contracts'] = [$completed];
+        $this->assertSame([], app(OpportunityEvaluator::class)->evaluate($observations, 'contracts', CarbonImmutable::now(), false));
+    }
+
+    public function test_contract_search_stops_before_market_discovery_when_all_contracts_are_fulfilled(): void
+    {
+        $this->world(function (&$w) {
+            $w['contracts'][0]['fulfilled'] = true;
+        });
+        $before = count($this->world()['calls']);
+        $record = $this->investigation();
+
+        $this->assertSame([], $record->candidates);
+        $this->assertArrayNotHasKey('markets', $record->observations);
+        $calls = array_slice($this->world()['calls'], $before);
+        $this->assertFalse(collect($calls)->contains(fn ($call) => str_contains($call['path'], '/waypoints')));
+        $this->assertSame([], $this->world()['writes']);
+    }
+
     public function test_request_and_page_bounds_preserve_partial_status(): void
     {
         config(['gameplay.investigation_requests' => 2]);

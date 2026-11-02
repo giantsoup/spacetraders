@@ -60,6 +60,9 @@ class OpportunityEvaluator
             }
             if ($strategy === 'contracts') {
                 foreach ($observations['contracts'] ?? [] as $contract) {
+                    if ($contract['fulfilled']) {
+                        continue;
+                    }
                     foreach (array_unique(array_merge(array_keys($markets), [null]), SORT_REGULAR) as $source) {
                         foreach ([false, true] as $cargo) {
                             if ($cargo && $ship['cargo']['units'] === 0) {

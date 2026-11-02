@@ -23,7 +23,9 @@ const preview = computed(() => props.runs.find(r => r.state === 'preview' && r.p
 const active = computed(() => props.runs.find(r => r.active_agent_id));
 const outcome = computed(() => active.value || props.runs.find(r => r.state !== 'preview'));
 const runShip = computed(() => props.ships.find(s => s.symbol === outcome.value?.ship_symbol)?.snapshot);
-const candidates = computed(() => [...(investigation.value?.candidates || [])].sort((a, b) => sort.value === 'net' ? ((b.estimated_net ?? -Infinity) - (a.estimated_net ?? -Infinity) || (a.working_capital ?? Infinity) - (b.working_capital ?? Infinity) || (a.duration_seconds ?? Infinity) - (b.duration_seconds ?? Infinity) || a.id.localeCompare(b.id)) : 0));
+const completedContractIds = computed(() => new Set((investigation.value?.observations.contracts || []).filter(contract => contract.fulfilled).map(contract => contract.id)));
+const noOpenContracts = computed(() => investigation.value?.strategy === 'contracts' && Array.isArray(investigation.value.observations.contracts) && investigation.value.observations.contracts.every(contract => contract.fulfilled));
+const candidates = computed(() => (investigation.value?.candidates || []).filter(candidate => !completedContractIds.value.has(candidate.contract_id)).sort((a, b) => sort.value === 'net' ? ((b.estimated_net ?? -Infinity) - (a.estimated_net ?? -Infinity) || (a.working_capital ?? Infinity) - (b.working_capital ?? Infinity) || (a.duration_seconds ?? Infinity) - (b.duration_seconds ?? Infinity) || a.id.localeCompare(b.id)) : 0));
 const limits = ref({ reserve: 2000, max_spend: 100, max_loss: 100, minutes: 60, cycles: 1, delivery_limit: 10, purchase_limit: 40, max_extractions: 1, extraction_headroom: 40, site_seconds: 300, survey_signature: '', wear_allowance: '' });
 const optionalNumber = value => value === '' || value === null || value === undefined ? null : Number(value);
 watch(() => draft.value?.id, () => { if (draft.value) limits.value = { max_extractions: 1, extraction_headroom: 40, site_seconds: 300, survey_signature: '', wear_allowance: '', ...draft.value.limits }; }, { immediate: true });
@@ -156,6 +158,7 @@ async function reviewBalance() {
         <section class="panel" aria-labelledby="new-run-heading">
             <h2 id="new-run-heading">New automated run</h2>
             <p class="muted">Investigate, stage a draft, preview fresh state, then approve that exact plan once. Investigation only reads game state.</p>
+            <p v-if="strategy === 'contracts'" class="muted">Contract investigation evaluates your existing offers and accepted contracts. To obtain a new offer, use Negotiate a contract offer in Manual API.</p>
             <fieldset :disabled="busy || investigating || !!active"><legend>Choose a strategy</legend>
                 <div class="strategy-options"><label><input v-model="strategy" type="radio" value="mining" name="automation-strategy" @change="chosen = ''; investigationId = null">Mining</label><label><input v-model="strategy" type="radio" value="contracts" name="automation-strategy" @change="chosen = ''; investigationId = null">Contracts</label></div>
                 <label>Investigation system<select v-model="system"><option value="">Choose an owned system</option><option v-for="s in [...new Set(ships.map(s => s.snapshot.nav.systemSymbol))]" :key="s" :value="s">{{ s }}</option></select></label>
@@ -185,7 +188,14 @@ async function reviewBalance() {
                     </article>
                 </div>
             </template>
-            <p v-else-if="investigation?.status === 'complete'" class="warning">No candidates observed in this scope. No gameplay has been authorized.</p>
+            <div v-else-if="noOpenContracts" class="contract-next-step" role="status">
+                <h3>No open contracts to automate</h3>
+                <p>{{ investigation.observations.contracts.length ? 'All observed contracts are already fulfilled. Completed contracts cannot be automated again.' : 'No contract offers or accepted contracts were observed.' }}</p>
+                <p>To request a new offer:</p>
+                <ol><li>Choose Done, then Manual API. Select a ship docked at a waypoint with a faction.</li><li>Set Manual action to Negotiate a contract offer, then choose Preview selected action.</li><li>Review and approve the negotiation. Wait for confirmed in Activity history.</li><li>Return to Automation, choose Contracts, then Investigate opportunities.</li></ol>
+                <p>Negotiation requests an offer. Review its goods, destination, deadline and costs before approving an automation plan.</p>
+            </div>
+            <p v-else-if="['complete', 'partial'].includes(investigation?.status)" class="warning">No candidates observed in this scope. No gameplay has been authorized.</p>
             <p v-if="chosen" class="muted">Selection is local. Review limits below, then Stage plan.</p>
         </section>
 
