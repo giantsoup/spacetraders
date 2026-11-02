@@ -1,0 +1,18 @@
+Final implementation source 98d3f32877519e775b52305de12fd24ccd7a09c6
+Tutorial repro precedes the readiness fix; passing tutorial/browser/build evidence covers the matching final frontend. Backend and final worker evidence covers the final receipt guards. All gameplay used synthetic providers.
+
+PASS file-backed SQLite commits use FULL synchronization
+PASS SQLite enables macOS fullfsync support
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS install_mount lost response persists as uncertain
+PASS post-receipt budget deferral preserves the validated response and sending evidence
+PASS real database worker exited successfully
+PASS real database worker exited successfully
+PASS install_mount reconciliation keeps missing write evidence unresolved
+PASS install_mount reconciliation retains fresh observations
+PASS install_mount records installed evidence
+PASS install_mount actual worker used durable SQLite synchronization
+PASS install_mount restart/duplicate/reconciliation never replays write
+PASS install_mount workers have no failed jobs
+Owned disposable evidence: /var/folders/7d/h5dz__nj3c34c0qjw6rx3v800000gq/T/spacetraders-foundation-uncertainty-d48354ac3037

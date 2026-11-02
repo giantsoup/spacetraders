@@ -6,7 +6,7 @@
     "version": "2.3.0",
     "sha256": "c07d04f575df43e4d05eea4ba539f2d33ef8c5d9a3c863d49520193ef5431ad8",
     "retrieved_at_utc": "2026-11-01T23:56:00.475322+00:00",
-    "source_commit": "659f8aa6aeeef1398ee647a4fd378acb2553fb01",
+    "source_commit": "98d3f32877519e775b52305de12fd24ccd7a09c6",
     "snapshot": "docs/api/spacetraders-openapi-2.3.0.json"
   },
   "source_files": {

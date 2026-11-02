@@ -1,0 +1,9 @@
+Final implementation source 98d3f32877519e775b52305de12fd24ccd7a09c6
+Tutorial repro precedes the readiness fix; passing tutorial/browser/build evidence covers the matching final frontend. Backend and final worker evidence covers the final receipt guards. All gameplay used synthetic providers.
+
+PASS login, normal guide entry, keyboard focus and preparation persistence
+PASS agent-scoped progress, lesson links, flight-deck checklist and real manual mining loop
+PASS complete, undo, resume, reset cancellation and confirmed checklist reset
+PASS agent/reset boundaries, malformed and unavailable storage, cross-tab updates
+PASS dark appearance, mobile reflow, reference keyboard interaction and narrow flight deck
+Tutorial evidence: /Users/Taylor/.t3/worktrees/spacetraders/implement-base-api-foundation-20261101/storage/app/mvp-evidence/tutorial

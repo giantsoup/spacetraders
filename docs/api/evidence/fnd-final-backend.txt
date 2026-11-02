@@ -1,0 +1,11 @@
+Final implementation source 98d3f32877519e775b52305de12fd24ccd7a09c6
+Tutorial repro precedes the readiness fix; passing tutorial/browser/build evidence covers the matching final frontend. Backend and final worker evidence covers the final receipt guards. All gameplay used synthetic providers.
+
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.5.12
+Configuration: /Users/Taylor/.t3/worktrees/spacetraders/implement-base-api-foundation-20261101/phpunit.xml
+
+Time: 00:32.918, Memory: 89.00 MB
+
+[30;42mOK (477 tests, 2802 assertions)[0m

@@ -1,5 +1,5 @@
 {
-  "implementation_source": "659f8aa6aeeef1398ee647a4fd378acb2553fb01",
+  "implementation_source": "98d3f32877519e775b52305de12fd24ccd7a09c6",
   "variant_evidence": "docs/api/foundation-variant-gates.md",
   "scope": "Source implementation and synthetic verification. This is not an acceptance-stage record.",
   "operations": [

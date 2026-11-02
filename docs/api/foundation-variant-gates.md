@@ -1,6 +1,6 @@
 # Foundation variant and live gates
 
-Implementation source: `659f8aa6aeeef1398ee647a4fd378acb2553fb01`. This is an informational evidence index, not an acceptance-stage record. All official-API cases below remain pending. A synthetic success does not establish game mechanics. The unchanged completion verifier correctly rejects 0/59 accepted operations.
+Implementation source: `98d3f32877519e775b52305de12fd24ccd7a09c6`. This is an informational evidence index, not an acceptance-stage record. All official-API cases below remain pending. A synthetic success does not establish game mechanics. The unchanged completion verifier correctly rejects 0/59 accepted operations.
 
 | Operation family | Supported variants and local verification | Outstanding official cases |
 | --- | --- | --- |

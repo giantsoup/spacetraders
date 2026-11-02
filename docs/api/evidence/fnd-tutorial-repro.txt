@@ -1,0 +1,19 @@
+Final implementation source 98d3f32877519e775b52305de12fd24ccd7a09c6
+Tutorial repro precedes the readiness fix; passing tutorial/browser/build evidence covers the matching final frontend. Backend and final worker evidence covers the final receipt guards. All gameplay used synthetic providers.
+
+PASS login, normal guide entry, keyboard focus and preparation persistence
+node:internal/modules/run_main:111
+    triggerUncaughtException(
+    ^
+
+page.waitForFunction: Timeout 12000ms exceeded.
+    at post (/Users/Taylor/.t3/worktrees/spacetraders/implement-base-api-foundation-20261101/scripts/verify-tutorial-browser.mjs:76:16)
+    at async command (/Users/Taylor/.t3/worktrees/spacetraders/implement-base-api-foundation-20261101/scripts/verify-tutorial-browser.mjs:83:20)
+    at async file:///Users/Taylor/.t3/worktrees/spacetraders/implement-base-api-foundation-20261101/scripts/verify-tutorial-browser.mjs:139:9
+    at async record (/Users/Taylor/.t3/worktrees/spacetraders/implement-base-api-foundation-20261101/scripts/verify-tutorial-browser.mjs:58:40)
+    at async file:///Users/Taylor/.t3/worktrees/spacetraders/implement-base-api-foundation-20261101/scripts/verify-tutorial-browser.mjs:107:5 {
+  log: [],
+  name: 'TimeoutError'
+}
+
+Node.js v26.13.0
