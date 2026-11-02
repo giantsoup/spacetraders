@@ -95,11 +95,23 @@ class SpaceTradersApi
             }
             $result['deadline'] = $data === [] ? null : Arr::only($this->cooldownData($data), ['readyAt', 'deadlineSource']);
         }
+        $normalized = match ($operation) {
+            'get-market' => $this->marketData($data, $waypoint),
+            'get-shipyard' => $this->shipyardData($data, $waypoint),
+            'get-waypoint' => $this->waypointRows([$data], $system)[0],
+            'get-system-waypoints' => $this->waypointRows($data, $system),
+            default => $data,
+        };
         app(AgentSynchronizer::class)->observe($agent, 'manual_read', $operation.'-'.substr(hash('sha256', json_encode($parameters)), 0, 16), $result);
         if (in_array($operation, ['get-waypoint', 'get-market', 'get-shipyard'], true)) {
             app(AgentSynchronizer::class)->observe($agent, match ($operation) {
                 'get-waypoint' => 'waypoint', 'get-market' => 'market', default => 'shipyard'
-            }, $waypoint, $data);
+            }, $waypoint, $normalized);
+        }
+        if ($operation === 'get-system-waypoints') {
+            foreach ($normalized as $point) {
+                app(AgentSynchronizer::class)->observe($agent, 'waypoint', $point['symbol'], $point);
+            }
         }
         if ($operation === 'get-my-ships') {
             foreach ($data as $row) {
@@ -245,6 +257,12 @@ class SpaceTradersApi
     public function market(Agent $agent, string $waypoint): array
     {
         $data = $this->payload($this->call('get', $this->waypointPath($waypoint).'/market', [], $agent));
+
+        return $this->marketData($data, $waypoint);
+    }
+
+    private function marketData(array $data, string $waypoint): array
+    {
         $this->validate($data, [
             'symbol' => 'required|in:'.$waypoint, 'imports' => 'present|array', 'exports' => 'present|array', 'exchange' => 'present|array',
             'imports.*.symbol' => 'required|string|max:80', 'exports.*.symbol' => 'required|string|max:80', 'exchange.*.symbol' => 'required|string|max:80',
@@ -258,6 +276,12 @@ class SpaceTradersApi
     public function shipyard(Agent $agent, string $waypoint): array
     {
         $data = $this->payload($this->call('get', $this->waypointPath($waypoint).'/shipyard', [], $agent));
+
+        return $this->shipyardData($data, $waypoint);
+    }
+
+    private function shipyardData(array $data, string $waypoint): array
+    {
         $this->validate($data, ['symbol' => 'required|in:'.$waypoint, 'shipTypes' => 'present|array', 'ships' => 'sometimes|array', 'ships.*.purchasePrice' => 'required|integer|min:1']);
 
         return Arr::only($data, ['symbol', 'shipTypes', 'ships', 'transactions']);

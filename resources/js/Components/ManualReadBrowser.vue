@@ -14,20 +14,23 @@ const result = ref(null), error = ref(''), busy = ref(false), results = ref(null
 const labels = { systemSymbol: 'System', waypointSymbol: 'Waypoint', shipSymbol: 'Owned ship', factionSymbol: 'Faction', agentSymbol: 'Public agent symbol', contractId: 'Contract ID' };
 const rows = computed(() => Array.isArray(result.value?.data) ? result.value.data : null);
 watch(operation, () => { result.value = null; error.value = ''; form.page = 1; });
-watch(() => props.selected, value => { form.shipSymbol = value; }, { immediate: true });
-watch(() => props.ships, () => {
-    const ship = props.ships.find(row => row.symbol === props.selected)?.snapshot;
-    if (!form.systemSymbol) form.systemSymbol = ship?.nav?.systemSymbol || '';
-    if (!form.waypointSymbol) form.waypointSymbol = ship?.nav?.waypointSymbol || '';
+watch(() => props.selected, value => {
+    form.shipSymbol = value;
+    const ship = props.ships.find(row => row.symbol === value)?.snapshot;
+    form.systemSymbol = ship?.nav?.systemSymbol || '';
+    form.waypointSymbol = ship?.nav?.waypointSymbol || '';
+    result.value = null; form.page = 1;
 }, { immediate: true });
-async function read(page = form.page) {
+async function read(page = form.page, continuation = false) {
+    const saved = continuation ? result.value?.parameters : null;
     busy.value = true; error.value = ''; result.value = null;
-    const parameters = Object.fromEntries(definition.value[1].map(field => [field, form[field]]));
+    let parameters = Object.fromEntries(definition.value[1].map(field => [field, form[field]]));
     if (definition.value[2]) Object.assign(parameters, { page: Number(page), limit: Number(form.limit) });
     if (operation.value === 'get-system-waypoints') {
         if (form.type) parameters.type = form.type;
         if (form.traits.length) parameters.traits = form.traitForm === 'scalar' ? form.traits[0] : [...form.traits];
     }
+    if (saved) parameters = { ...saved, page: Number(page) };
     try {
         const response = await window.axios.post(route('game.reads', props.agent.id), { operation: operation.value, parameters });
         result.value = response.data; form.page = Number(page);
@@ -67,7 +70,7 @@ async function read(page = form.page) {
             <p v-if="result.deadline">Readiness {{ formatLocalTime(result.deadline.readyAt) }} · {{ readableLabel(result.deadline.deadlineSource) }}. Raw expiration stays unchanged below.</p>
             <p v-if="['get-repair-ship', 'get-scrap-ship'].includes(operation)" class="warning">This quote does not reserve a price. Execution requires a separate preview and approval.</p>
             <p v-if="result.meta">Page {{ result.meta.page }} · {{ result.meta.total }} total · This response contains only this page.</p>
-            <div v-if="result.meta" class="buttons"><SecondaryButton :disabled="busy || form.page <= 1" @click="read(form.page - 1)">Previous page</SecondaryButton><SecondaryButton :disabled="busy || form.page * form.limit >= result.meta.total" @click="read(form.page + 1)">Next page</SecondaryButton></div>
+            <div v-if="result.meta" class="buttons"><SecondaryButton :disabled="busy || result.meta.page <= 1" @click="read(result.meta.page - 1, true)">Previous page</SecondaryButton><SecondaryButton :disabled="busy || result.meta.page * result.meta.limit >= result.meta.total" @click="read(result.meta.page + 1, true)">Next page</SecondaryButton></div>
             <p v-if="rows?.length === 0">No results on this page.</p>
             <ol v-if="rows"><li v-for="(row, index) in rows" :key="row.symbol || row.id || index"><details><summary>{{ row.symbol || row.id || `Item ${index + 1}` }} <span v-if="row.type">· {{ readableLabel(row.type) }}</span><span v-if="row.isUnderConstruction"> · Under construction</span></summary><DataDetails :value="row" /></details></li></ol>
             <DataDetails v-else-if="!result.no_content" :value="result.data" />

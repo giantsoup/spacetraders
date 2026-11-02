@@ -10,6 +10,7 @@ use App\Gameplay\SpaceTradersApi;
 use App\Models\ShipAction;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Tests\Support\FakeSpaceTraders;
@@ -68,5 +69,22 @@ class FoundationBoundaryTest extends TestCase
         $this->expectException(GameException::class);
         $this->expectExceptionMessage('Cooldown HTTP 200 requires a cooldown object.');
         app(SpaceTradersApi::class)->manualRead($agent, 'get-ship-cooldown', ['shipSymbol' => 'LOCAL-1']);
+    }
+
+    public function test_stop_cannot_overwrite_a_reservation_between_its_read_and_write(): void
+    {
+        $agent = User::factory()->create()->agents()->create(['name' => 'LOCAL', 'token' => 'synthetic', 'account_id' => 'synthetic-account', 'faction' => 'COSMIC']);
+        $action = ShipAction::create(['agent_id' => $agent->id, 'reset_id' => '2026-10-25', 'key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'origin' => 'manual', 'command' => 'orbit', 'arguments' => [], 'before_state' => [], 'state' => ActionState::Pending, 'expires_at' => now()->addMinute()]);
+        $reserved = false;
+        ShipAction::retrieved(function ($row) use ($action, &$reserved) {
+            if ($row->id === $action->id && ! $reserved) {
+                $reserved = true;
+                DB::table('ship_actions')->where('id', $action->id)->update(['state' => 'sending', 'sent_at' => now(), 'outcome' => json_encode(['receipt' => 'retained'])]);
+            }
+        });
+        app(ShipCommandExecutor::class)->stopManual($action);
+        $this->assertSame(ActionState::Sending, $action->fresh()->state);
+        $this->assertSame('retained', $action->fresh()->outcome['receipt']);
+        $this->assertNotEmpty($action->fresh()->outcome['stop_requested_at']);
     }
 }

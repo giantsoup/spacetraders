@@ -8,10 +8,12 @@ use App\Gameplay\ShipCommandExecutor;
 use App\Gameplay\SurveyPool;
 use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
+use App\Models\GameObservation;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -243,6 +245,7 @@ class FoundationCommandTest extends TestCase
     {
         return [
             'market omitted' => [[], false], 'market explicit' => [['units' => 100], false], 'market capped' => [['units' => 1000], false],
+            'cargo maximum is not exact consumption' => [['units' => 100, 'fromCargo' => true, 'maxCargoUnits' => 2], true],
             'cargo boolean input' => [['units' => 100, 'fromCargo' => 1], true],
             'cargo whole' => [['units' => 100, 'fromCargo' => true], true], 'cargo omitted' => [['fromCargo' => true], true], 'cargo partial' => [['units' => 37, 'fromCargo' => true, 'maxCargoUnits' => 1], true],
         ];
@@ -443,5 +446,81 @@ class FoundationCommandTest extends TestCase
         $this->withSession(['_token' => $csrf])->withHeader('X-CSRF-TOKEN', $csrf)->postJson('/agents/'.$this->agent->id.'/reads', ['operation' => 'get-status', 'parameters' => []])->assertAccepted();
         $this->withSession(['_token' => $csrf])->withHeader('X-CSRF-TOKEN', $csrf)->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'orbit', 'arguments' => []])->assertAccepted();
         $this->assertEmpty($this->world()['writes']);
+    }
+
+    public function test_http_numeric_strings_have_canonical_integer_approval_arguments(): void
+    {
+        $this->world(function (&$world) {
+            $world['ships'][0]['nav']['status'] = 'IN_ORBIT';
+        });
+        $action = $this->preview('navigate', ['waypointSymbol' => 'X1-TEST-PORT', 'maxFuel' => '5', 'maxSeconds' => '60', 'acknowledgeUnknown' => true]);
+        $this->assertSame(5, $action->arguments['maxFuel']);
+        $this->assertSame(60, $action->arguments['maxSeconds']);
+        $this->world(function (&$world) {
+            $world['ships'][0]['nav']['status'] = 'DOCKED';
+            $world['ships'][0]['fuel']['current'] = 0;
+            $world['ships'][0]['cargo'] = ['capacity' => 40, 'units' => 2, 'inventory' => [['symbol' => 'FUEL', 'units' => 2]]];
+        });
+        $action = $this->preview('refuel', ['units' => 100, 'fromCargo' => true, 'maxTotal' => 0, 'protectedFuel' => '0', 'maxCargoUnits' => '2']);
+        $this->assertSame(0, $action->arguments['protectedFuel']);
+        $this->assertSame(2, $action->arguments['maxCargoUnits']);
+    }
+
+    public function test_agent_contract_preview_ignores_selected_transit_ship_and_unrelated_changes(): void
+    {
+        $this->world(function (&$w) {
+            $w['ships'][0]['nav']['status'] = 'IN_TRANSIT';
+            $w['ships'][0]['nav']['route']['arrival'] = now()->addHour()->toIso8601String();
+        });
+        $action = $this->preview('contract_accept', ['contractId' => 'contract-1'], 'LOCAL-1');
+        $this->assertSame('', $action->ship_symbol);
+        $this->assertNull($action->before_state['ship']);
+        $this->world(fn (&$w) => $w['ships'][0]['fuel']['current'] = 50);
+        $this->assertSame(ActionState::Confirmed, $this->execute($action)->state);
+    }
+
+    public function test_omitted_or_zero_manual_spending_reserve_cannot_drain_the_agent(): void
+    {
+        $this->world(fn (&$w) => $w['credits'] = 30);
+        foreach ([[], ['reserve' => 0]] as $reserve) {
+            $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'buy', 'arguments' => ['symbol' => 'IRON_ORE', 'units' => 1, 'maxTotal' => 30] + $reserve])->assertUnprocessable();
+        }
+        $this->world(fn (&$w) => $w['credits'] = 3000);
+        $action = $this->preview('buy', ['symbol' => 'IRON_ORE', 'units' => 1, 'maxTotal' => 30]);
+        $this->assertSame(2000, $action->before_state['estimate']['reserve']);
+        $this->assertEmpty($this->world()['writes']);
+    }
+
+    public function test_plain_signed_extraction_rejection_invalidates_the_survey_without_fallback(): void
+    {
+        $signed = ['signature' => 'rejected-signed', 'symbol' => 'X1-TEST-ROCK', 'deposits' => [['symbol' => 'IRON_ORE']], 'expiration' => now()->addHour()->toIso8601String(), 'size' => 'SMALL'];
+        app(SurveyPool::class)->save($this->agent, $signed, 'LOCAL-1');
+        $this->world(fn (&$w) => $w['ships'][0]['nav']['status'] = 'IN_ORBIT');
+        $action = $this->preview('mine', ['surveySignature' => 'rejected-signed', 'surveyWaypoint' => 'X1-TEST-ROCK']);
+        $this->world(fn (&$w) => $w['force_survey_error'] = 4224);
+        $this->assertSame(ActionState::Rejected, $this->execute($action)->state);
+        $survey = GameObservation::where('kind', 'survey')->where('symbol', 'rejected-signed')->firstOrFail();
+        $this->assertTrue($survey->data['exhausted']);
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'mine', 'arguments' => ['surveySignature' => 'rejected-signed', 'surveyWaypoint' => 'X1-TEST-ROCK']])->assertUnprocessable();
+        $this->assertCount(1, $this->world()['writes']);
+    }
+
+    public function test_confirmation_does_not_renew_an_unchanged_derived_cooldown_deadline(): void
+    {
+        Date::setTestNow(now());
+        try {
+            $this->world(function (&$w) {
+                unset($w['ships'][0]['cooldown']['expiration']);
+                $w['ships'][0]['cooldown']['remainingSeconds'] = 30;
+            });
+            $action = $this->preview('orbit');
+            $this->world(fn (&$w) => $w['advance_after_write'] = 5);
+            $action = $this->execute($action);
+            $this->assertSame(ActionState::Confirmed, $action->state);
+            $this->assertSame($action->before_state['ship']['cooldown']['readyAt'], Ship::firstOrFail()->snapshot['cooldown']['readyAt']);
+            $this->assertArrayNotHasKey('expiration', Ship::firstOrFail()->snapshot['cooldown']);
+        } finally {
+            Date::setTestNow();
+        }
     }
 }

@@ -1,1 +1,0 @@
-import{j as e,k as t,x as n}from"./app-C2E-MLCz.js";var r=[`type`],i={__name:`SecondaryButton`,props:{type:{type:String,default:`button`}},setup(i){return(a,o)=>(t(),n(`button`,{type:i.type,class:`app-button app-button-secondary`},[e(a.$slots,`default`)],8,r))}};export{i as t};

@@ -26,6 +26,10 @@ class ShipCommandExecutor
 
     public function preview(Agent $agent, string $ship, string $command, array $arguments, string $key): ShipAction
     {
+        if (in_array($command, ['contract_accept', 'contract_fulfill'], true)) {
+            $ship = '';
+        }
+
         return $this->locked($agent, function () use ($agent, $ship, $command, $arguments, $key) {
             $existing = ShipAction::where('agent_id', $agent->id)->where('key', $key)->first();
             if ($existing) {
@@ -93,7 +97,7 @@ class ShipCommandExecutor
             throw new GameException('Contract terms or progress changed. Create a fresh preview.');
         }
         $saved = $action->before_state['ship'];
-        if ($saved === null) {
+        if ($saved === null || in_array($action->command, ['contract_accept', 'contract_fulfill'], true)) {
             return;
         }
         $current = $before['ship'];
@@ -115,17 +119,23 @@ class ShipCommandExecutor
     public function stopManual(ShipAction $action): ShipAction
     {
         return DB::transaction(function () use ($action) {
-            $action->refresh();
+            $action = ShipAction::whereKey($action->id)->lockForUpdate()->firstOrFail();
             if ($action->origin !== 'manual' || $action->automation_run_id) {
                 throw new GameException('Stop the owning run for automated actions.');
             }
-            if (in_array($action->state, [ActionState::Preview, ActionState::Pending, ActionState::Sending], true)) {
-                $reserved = $action->state === ActionState::Sending;
-                $action->update(['state' => $reserved ? ActionState::Sending : ActionState::Rejected,
-                    'outcome' => array_merge($action->outcome ?? [], ['stop_requested_at' => now()->toIso8601String()]),
-                    'message' => $reserved ? 'Stop requested after reservation. This action may settle; no follow-up is authorized.' : 'Stopped before reservation. No manual request was sent.',
-                    'settled_at' => $reserved ? null : now()]);
+            $stopped = ShipAction::whereKey($action->id)->whereIn('state', ['preview', 'pending'])->update([
+                'state' => 'rejected',
+                'outcome' => json_encode(array_merge($action->outcome ?? [], ['stop_requested_at' => now()->utc()->toIso8601String()])),
+                'message' => 'Stopped before reservation. No manual request was sent.', 'settled_at' => now(),
+            ]);
+            if (! $stopped) {
+                $action->refresh();
+                ShipAction::whereKey($action->id)->where('state', 'sending')->update([
+                    'outcome' => json_encode(array_merge($action->outcome ?? [], ['stop_requested_at' => now()->utc()->toIso8601String()])),
+                    'message' => 'Stop requested after reservation. This action may settle; no follow-up is authorized.',
+                ]);
             }
+            $action->refresh();
 
             return $action;
         });
@@ -199,7 +209,7 @@ class ShipCommandExecutor
                 }
             } catch (GameException $e) {
                 $action->refresh();
-                if ($action->command === 'mine_survey' && in_array($e->apiCode, [4221, 4224], true)) {
+                if (in_array($action->command, ['mine', 'mine_survey'], true) && isset($action->arguments['surveySignature']) && in_array($e->apiCode, [4221, 4224], true)) {
                     app(SurveyPool::class)->invalidate($agent, $action->arguments['surveySignature'], $e->apiCode === 4224);
                 }
                 // Rate-budget failure before transport is safe to retry only while pending.
@@ -243,6 +253,9 @@ class ShipCommandExecutor
             }
         }
         $actualShip = $action->command === 'buy_ship' ? $this->api->shipData($data['ship']) : ($ship ? $this->api->shipData($ship) : null);
+        if ($actualShip && ! isset($data['cooldown']) && ! in_array($action->command, ['repair', 'buy_ship'], true)) {
+            $actualShip['cooldown'] = $before['ship']['cooldown'];
+        }
         if ($action->command === 'buy_ship' && in_array($actualShip['symbol'], $before['estimate']['fleet_symbols'] ?? [], true)) {
             throw new GameException('Purchase returned an existing ship identity. Reconcile without buying again.', uncertain: true);
         }
@@ -312,6 +325,7 @@ class ShipCommandExecutor
             $expected[$symbol] = ($expected[$symbol] ?? 0) + $units;
             $target['cargo'] = $data['targetCargo'];
             $target = $this->api->shipData($target);
+            $target['cooldown'] = $before['estimate']['target_ship']['cooldown'];
             $observed = MiningPlanner::inventory($target);
             ksort($expected);
             ksort($observed);
@@ -512,7 +526,7 @@ class ShipCommandExecutor
             if ($ship && in_array($action->command, ['sell', 'buy', 'refuel'], true)) {
                 $evidence['transactions'] = $this->api->market($agent, $ship['nav']['waypointSymbol'])['transactions'] ?? [];
             }
-            if (ExplorationPolicy::command($action->command) && isset($action->arguments['waypointSymbol'])) {
+            if ((ExplorationPolicy::command($action->command) || in_array($action->command, ['navigate', 'jump', 'warp'], true)) && isset($action->arguments['waypointSymbol'])) {
                 $evidence['waypoint'] = $this->api->waypoint($agent, $action->arguments['waypointSymbol']);
                 $this->sync->observe($agent, 'waypoint', $action->arguments['waypointSymbol'], $evidence['waypoint'], 'read', $ship['symbol'] ?? null);
             }

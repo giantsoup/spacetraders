@@ -1,4 +1,5 @@
 <script setup>
+import ContractApproval from '@/Components/ContractApproval.vue';
 import ManualCommandForm from '@/Components/ManualCommandForm.vue';
 import ManualReadBrowser from '@/Components/ManualReadBrowser.vue';
 import AdviserPanel from '@/Components/AdviserPanel.vue';
@@ -26,7 +27,7 @@ import OpportunityPanel from '@/Components/OpportunityPanel.vue';
 import OperationControls from '@/Components/OperationControls.vue';
 import { useGuidedFlight } from '@/Composables/useGuidedFlight.js';
 
-const props = defineProps({ manualCommands: Object, manualReads: Object, foundationEnums: Object, adviser: Object, agent: Object, ships: Array, capabilities: Object, observations: Array, actions: Array, runs: Array, health: Object, intelligence: Object, automationEnabled: Boolean, synthetic: Boolean, localAutomation: Boolean, engine: Object, engineOperator: Boolean, investigations: { type: Array, default: () => [] }, drafts: { type: Array, default: () => [] }, accounting: Object, guidedOffers: { type: Array, default: () => [] } });
+const props = defineProps({ manualReserveFloor: Number, manualCommands: Object, manualReads: Object, foundationEnums: Object, adviser: Object, agent: Object, ships: Array, capabilities: Object, observations: Array, actions: Array, runs: Array, health: Object, intelligence: Object, automationEnabled: Boolean, synthetic: Boolean, localAutomation: Boolean, engine: Object, engineOperator: Boolean, investigations: { type: Array, default: () => [] }, drafts: { type: Array, default: () => [] }, accounting: Object, guidedOffers: { type: Array, default: () => [] } });
 const archived = computed(() => props.agent.connection_state === 'reset');
 const manualFlightMode = ref('CRUISE');
 const selected = ref(props.ships[0]?.symbol || '');
@@ -127,7 +128,7 @@ const destination = ref('');
 const good = ref('');
 const quantity = ref(1);
 const priceBound = ref(0);
-const reserve = ref(0);
+const reserve = ref(props.manualReserveFloor);
 const offerIndex = ref('');
 const surveySignature = ref('');
 const runSurveySignature = ref('');
@@ -323,7 +324,7 @@ function distance(point) {
 
 
                 </div>
-                <ManualCommandForm v-if="view === 'manualApi'" :commands="manualCommands" :enums="foundationEnums" :selected="selected" :ships="ships" :disabled="archived || busy || !!pending || guiding" @preview="previewManual" />
+                <ManualCommandForm v-if="view === 'manualApi'" :reserve-floor="manualReserveFloor" :commands="manualCommands" :enums="foundationEnums" :selected="selected" :ships="ships" :disabled="archived || busy || !!pending || guiding" @preview="previewManual" />
                 <ManualReadBrowser v-if="view === 'library'" :agent="agent" :ships="ships" :selected="selected" :operations="manualReads" :enums="foundationEnums" :disabled="archived || guiding" />
                 <ShipReport v-if="view === 'report'" :ship="ship" :observed-at="shipRecord?.observed_at" :section="reportSection" :readiness="presentation.readiness" :capability="capabilities[selected]" @section="reportSection = $event" />
                 <AdviserPanel v-if="view === 'adviser'" :agent="agent" :ships="ships" :selected="selected" :history="adviser" :runs="runs" :investigations="investigations" :disabled="archived || guiding" @refresh="async done => { await reload(); done(); }" />
@@ -342,7 +343,7 @@ function distance(point) {
                     <section v-show="view === 'review'" v-if="!archived && (commandPreview || runPreview)" ref="previewPanel" tabindex="-1" class="panel approval" aria-labelledby="approval-heading">
                         <h2 id="approval-heading">Review {{ commandPreview?.command === 'buy_ship' ? 'ship purchase' : commandPreview ? 'manual command' : `${runPreview.plan.strategy || 'mining'} operation` }}</h2>
                         <template v-if="commandPreview">
-                            <p>{{ commandPreview.ship_symbol }} · {{ readableLabel(commandPreview.command) }} · Expires <time :datetime="commandPreview.expires_at">{{ formatLocalTime(commandPreview.expires_at) }}</time></p>
+                            <p>{{ commandPreview.ship_symbol || agent.name }} · {{ readableLabel(commandPreview.command) }} · Expires <time :datetime="commandPreview.expires_at">{{ formatLocalTime(commandPreview.expires_at) }}</time></p>
                             <template v-if="commandPreview.before_state.estimate.exploration">
                                 <p>{{ commandPreview.before_state.estimate.exploration.question }}</p>
                                 <dl><dt>Target</dt><dd>{{ commandPreview.arguments.waypointSymbol }}</dd><dt>Action limit</dt><dd>1 {{ commandPreview.command === 'chart' ? 'chart' : 'scan' }}; no follow-up</dd><dt>Travel / spending</dt><dd>0 tank units / 0 CR</dd><dt>Protected reserve</dt><dd>{{ cash(commandPreview.before_state.estimate.reserve) }} CR</dd><dt>Cooldown use</dt><dd>{{ commandPreview.command === 'chart' ? 'None' : `One cooldown, duration unknown; review above ${commandPreview.arguments.maxCooldownSeconds}s` }}</dd><dt>Safe continuation</dt><dd>{{ commandPreview.before_state.estimate.exploration.continuation.continuation }} · {{ commandPreview.before_state.estimate.exploration.continuation.required_fuel }} tank units including reserve</dd></dl>
@@ -351,6 +352,7 @@ function distance(point) {
                                 <details><summary>Inspect exploration limits and continuation</summary><DataDetails :value="commandPreview.before_state.estimate.exploration" /></details>
                             </template>
                             <template v-else>
+                            <ContractApproval v-if="commandPreview.before_state.contract" :contract="commandPreview.before_state.contract" :term-index="commandPreview.arguments.term_index" />
                             <p v-if="commandPreview.before_state.estimate.effects">{{ commandPreview.before_state.estimate.effects }}</p>
                             <DataDetails :value="commandPreview.arguments" class="command-arguments" />
                             <dl><dt>Observed cost</dt><dd>{{ cash(commandPreview.before_state.estimate.cost_estimate) }} CR</dd><dt>Observed sale</dt><dd>{{ cash(commandPreview.before_state.estimate.sale_estimate) }} CR</dd><dt>Protected reserve</dt><dd>{{ cash(commandPreview.before_state.estimate.reserve) }} CR</dd><dt>Available credits</dt><dd>{{ cash(commandPreview.before_state.credits) }} CR</dd><dt>Free cargo</dt><dd>{{ commandPreview.before_state.estimate.cargo_free }}</dd></dl>
@@ -358,10 +360,11 @@ function distance(point) {
                             <DataDetails v-if="commandPreview.before_state.estimate.route" :value="commandPreview.before_state.estimate.route" />
                             <details v-if="commandPreview.before_state.estimate.equipment || commandPreview.before_state.estimate.maintenance_quote || commandPreview.before_state.estimate.scrap_quote"><summary>Equipment, condition and quote evidence</summary><DataDetails :value="commandPreview.before_state.estimate" /></details>
                             <details v-if="commandPreview.before_state.estimate.configuration"><summary>Complete offered configuration and route</summary><DataDetails :value="commandPreview.before_state.estimate" /></details>
-                            <p class="warning">{{ commandPreview.before_state.estimate.quote_limit_warning }} Scouting movement also requires this explicit approval.</p>
+                            <p class="warning">{{ commandPreview.before_state.estimate.quote_limit_warning }}</p>
                             </template>
                             <div class="button-row approval-actions">
-                                <PrimaryButton data-guide="approve" :disabled="archived || busy || (guiding && guidedStep?.kind !== 'approve')" @click="approveCommand">Approve {{ commandPreview.command === 'buy_ship' ? 'purchase' : 'command' }}</PrimaryButton>
+                                <DangerButton v-if="['scrap', 'jettison', 'supply'].includes(commandPreview.command)" data-guide="approve" :disabled="archived || busy" @click="approveCommand">Approve {{ commandPreview.command === 'scrap' ? 'irreversible scrap' : 'permanent cargo loss' }}</DangerButton>
+                                <PrimaryButton v-else data-guide="approve" :disabled="archived || busy || (guiding && guidedStep?.kind !== 'approve')" @click="approveCommand">Approve {{ commandPreview.command === 'buy_ship' ? 'purchase' : 'command' }}</PrimaryButton>
                                 <DangerButton  :disabled="busy" @click="post(`commands/${commandPreview.id}/stop`); commandPreview = null; openView('commands')">Stop manual command</DangerButton>
                                 <SecondaryButton data-guide="cancel-preview" @click="commandPreview = null; openView('commands')">Cancel preview</SecondaryButton>
                             </div>

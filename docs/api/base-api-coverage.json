@@ -10,24 +10,30 @@
     "snapshot": "docs/api/spacetraders-openapi-2.3.0.json"
   },
   "source_files": {
-    "app/Gameplay/SpaceTradersApi.php": "72145c9788bba95af9ba237a50b3dc8b35ed862788bbac657f99bf7c41bfbe27",
-    "app/Gameplay/CommandRules.php": "e79196de2b4b5069adf2b76a9bcd5302102cddd38a0834b3c51e6a1ff1a5e6b2",
+    "app/Gameplay/SpaceTradersApi.php": "0ddca0164df305a74922b82142429a37318f0ed36aefaa9632952f5e8e732d68",
+    "app/Gameplay/CommandRules.php": "7970f923b41ee48c9987e14c1fec6349ea1d4c75ed4aa832c94d29bd9309caf3",
     "app/Http/Requests/GameplayRequest.php": "a9e551019d5614bfbbf1b84d063f7f7d1740f0bb929fe55c89606a594804ad25",
     "app/Services/SpaceTradersClient.php": "d379c65dca8a3ed534048be899a737d5f0181d61c9774b309648e8d8e474a704",
-    "app/Http/Controllers/AgentController.php": "68e29abd6a3909f17659c0122c31e763f4c08f75bcceab74df97424a35c62d97",
+    "app/Http/Controllers/AgentController.php": "3b29992032b3a206e64092008a5f81f446ce52f0a441eb7d383cf2fdd1301b72",
     "app/Http/Controllers/ForwarderController.php": "dcbf9dbb894fa723d211e133302bf49e7e642ff9dc8f05189c500a08c9dcc7c4",
     "routes/web.php": "7b91d1376ffceaf549d50a0326b3f043602bde382919ff250bdfc08dc63e81e6",
-    "resources/js/Pages/Agent/Dashboard.vue": "05715a23b3e3a4b2ae62f97019c742d856db202c73714aa0eee677dbccc81ddb",
+    "resources/js/Pages/Agent/Dashboard.vue": "2a5de4ac8efe97234dbe1bf7f85c284d3713171332ff50f04390f9eb399b887d",
     "app/Gameplay/ManualReads.php": "6c52b61b8db2507e8cbbda79350ca0392ce3639c15302cf00d9cbd99ff775016",
-    "resources/js/Components/ManualReadBrowser.vue": "8135041b5049f651fc00c474cf011779f565c31be7ebed3bc4d41a609d04c865",
+    "resources/js/Components/ManualReadBrowser.vue": "ecb7eac7dab53a9363609a85bb55bec04e29866ad3a0981f7a8e6d34055c1658",
     "app/Http/Controllers/AgentReadController.php": "f7cb77c4ba4f1e08dd49fa5508bbc7e457a7dbdca2a58e44117112e6f43603d6",
-    "app/Gameplay/ShipCommandExecutor.php": "16f9e0be1de468e230784e3f2e816853e2f3339690170f46141a10bd669fbe80",
+    "app/Gameplay/ShipCommandExecutor.php": "a874c0ec8ec88f43915cddefc754d14ecbbd101681e17f4c6c20edcbbc4dd79b",
     "config/foundation.php": "887e07c6d73d4cbe9c14a0976527bab0bd2de6312c94da2d7b18f3ab5469bd2a",
     "app/Gameplay/ManualCommands.php": "7f0cd3b88fc3596db2c1690dc290fa5792d48dc8eec6f1ead4ed107cad0d966c",
     "app/Gameplay/EquipmentRules.php": "28578466e5da851dd924ee95208377e1242ff6786c4d9b9b28e45372ce237bbb",
     "app/Gameplay/CargoAuthority.php": "ff715344bac98c9a9d6dc5c433b087b6d927a7920b56082842bae0197c162753",
-    "app/Gameplay/CargoRefuel.php": "70dd0caffa942190bbac4ab5acaae055b1e8d3d140f0cb005f4646a95bd8458e",
-    "resources/js/Components/ManualCommandForm.vue": "e47f8feaf98428e49bba086e61ff99f472a1e2eba5b2569986a7fdef949968d5"
+    "app/Gameplay/CargoRefuel.php": "ae407524b6dc7ad0a70aa802dde036f6ff3597985b88dab95681a49e7b8c95be",
+    "resources/js/Components/ManualCommandForm.vue": "605c92d0c2bacc3dbce83329c56522e2952044a871781dc4c131dc4aded73c74",
+    "resources/js/Components/ContractApproval.vue": "f87491efe2502583466b8b5033254dcd3a879c6c9888af1a93c88475ee323cdb",
+    "app/Http/Controllers/AgentCommandController.php": "c5eefed079b698e837e5566e6b83362dcc6d46510d8e5128204e4b56e305b479",
+    "app/Http/Controllers/AgentDashboardController.php": "968fa6accf4f8d07e26ded5b8a5a8841efcde9577daa3f48b8790bd2d7402cb6",
+    "resources/js/Pages/Agent/CreateAgent.vue": "3821aed242eb5aa40b544f9acf6f2730cc56a2c068bcf381e960ae3d97186c61",
+    "config/gameplay.php": "c193232f7b16ee93368f779ecaf43450923add7098123762da6a477b8e767ba2",
+    "public/build/manifest.json": "3c31a885e56add0124180abd9647e7ef4af407f14c6072093160570f0f42931c"
   },
   "tasks": {
     "FND-01": {
@@ -181,9 +187,9 @@
       "tags": [
         "Global"
       ],
-      "implementation": "partial",
+      "implementation": "source_mapped",
       "task": "FND-02",
-      "notes": "Real registration exists; full schema constraints and ambiguous-registration recovery need foundation acceptance.",
+      "notes": "Existing account-token registration supports all pinned factions, optional email and symbol bounds; unknown-outcome failures never retry automatically. Registration browser journey was not repeated in this run. Official acceptance remains pending.",
       "request_fields": [
         "email",
         "faction",
@@ -493,7 +499,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-11",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "shipSymbol",
         "tradeSymbol",
@@ -778,7 +784,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-04",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [],
       "query_fields": [],
       "source_evidence": [
@@ -812,7 +818,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-04",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "shipSymbol",
         "tradeSymbol",
@@ -850,7 +856,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-04",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [],
       "query_fields": [],
       "source_evidence": [
@@ -921,7 +927,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-03",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "shipType",
         "waypointSymbol"
@@ -1026,7 +1032,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-03",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [],
       "query_fields": [],
       "source_evidence": [
@@ -1060,7 +1066,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-07",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "produce"
       ],
@@ -1096,7 +1102,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-09",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [],
       "query_fields": [],
       "source_evidence": [
@@ -1164,7 +1170,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-03",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [],
       "query_fields": [],
       "source_evidence": [
@@ -1198,7 +1204,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-07",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [],
       "query_fields": [],
       "source_evidence": [
@@ -1232,7 +1238,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-07",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "survey"
       ],
@@ -1268,7 +1274,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-07",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [],
       "query_fields": [],
       "source_evidence": [
@@ -1302,7 +1308,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-07",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "deposits",
         "expiration",
@@ -1342,7 +1348,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-03",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "symbol",
         "units"
@@ -1379,7 +1385,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-10",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "waypointSymbol"
       ],
@@ -1415,7 +1421,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-08",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "waypointSymbol"
       ],
@@ -1451,7 +1457,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-08",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "flightMode"
       ],
@@ -1521,7 +1527,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-10",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "waypointSymbol"
       ],
@@ -1557,7 +1563,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-03",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "symbol",
         "units"
@@ -1594,7 +1600,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-09",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [],
       "query_fields": [],
       "source_evidence": [
@@ -1628,7 +1634,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-09",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [],
       "query_fields": [],
       "source_evidence": [
@@ -1662,7 +1668,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-09",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [],
       "query_fields": [],
       "source_evidence": [
@@ -1696,7 +1702,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-08",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "fromCargo",
         "units"
@@ -1733,7 +1739,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-03",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "symbol",
         "units"
@@ -1770,7 +1776,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-03",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "shipSymbol",
         "tradeSymbol",
@@ -1808,7 +1814,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-04",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [],
       "query_fields": [],
       "source_evidence": [
@@ -1876,7 +1882,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-06",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "symbol"
       ],
@@ -1912,7 +1918,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-06",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "symbol"
       ],
@@ -1982,7 +1988,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-12",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [],
       "query_fields": [],
       "source_evidence": [
@@ -2050,7 +2056,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-05",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [],
       "query_fields": [],
       "source_evidence": [
@@ -2152,7 +2158,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-06",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "symbol"
       ],
@@ -2188,7 +2194,7 @@
       ],
       "implementation": "source_mapped",
       "task": "FND-06",
-      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. Synthetic browser plus file-backed worker confirmed this action. Official API and per-variant calibration acceptance remain pending.",
+      "notes": "Native manual preview/approval, explicit transport, fresh domain checks and durable outcome/reconciliation implemented. One representative synthetic browser/worker journey confirmed this action; additional variants are enumerated in the evidence ledger. This does not establish every variant. Official API acceptance and live calibration remain pending.",
       "request_fields": [
         "symbol"
       ],

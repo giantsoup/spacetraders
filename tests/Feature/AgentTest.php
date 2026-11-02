@@ -131,6 +131,15 @@ class AgentTest extends TestCase
         $this->assertArrayNotHasKey('token', $user->agents()->first()->toArray());
     }
 
+    public function test_unknown_registration_faction_is_rejected_before_any_api_call(): void
+    {
+        Http::fake();
+        $this->actingAs(User::factory()->create())->post(route('agents.store'), [
+            'account_token' => 'synthetic-account', 'symbol' => 'TEST_AGENT', 'faction' => 'UNKNOWN_FACTION',
+        ])->assertSessionHasErrors('faction');
+        Http::assertNothingSent();
+    }
+
     public function test_registration_validates_fields_before_calling_the_api(): void
     {
         $this->actingAs(User::factory()->create())->from(route('agents.create'))

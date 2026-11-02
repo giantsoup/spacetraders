@@ -36,6 +36,7 @@ class AgentDashboardController extends Controller
 
         return Inertia::render('Agent/Dashboard', [
             'agent' => $agent, 'ships' => $ships,
+            'manualReserveFloor' => max(1, (int) config('gameplay.manual_reserve_floor')),
             'manualCommands' => ManualCommands::OPERATIONS,
             'manualReads' => ManualReads::OPERATIONS,
             'foundationEnums' => config('foundation.enums'),

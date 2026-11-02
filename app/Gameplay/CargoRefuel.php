@@ -34,12 +34,15 @@ class CargoRefuel
             }
         }
         $protected = max($arguments['protectedFuel'] ?? 0, min($fuel, $committed));
-        $cargoUnits = $exposure;
-        if ($cargoUnits > $fuel - $protected) {
+        $cargoUnits = $roundingUnknown ? $exposure : intdiv($units, 100);
+        if ($cargoUnits > $exposure) {
+            throw new GameException('Expected cargo consumption exceeds the approved cargo loss threshold.');
+        }
+        if ($exposure > $fuel - $protected) {
             throw new GameException('Insufficient unprotected FUEL cargo. User reserve and accepted contract fuel stay aboard.');
         }
 
-        return ['source' => 'cargo', 'rounding_unknown' => $roundingUnknown, 'omitted_units' => ! isset($arguments['units']), 'tank_units' => $units, 'cargo_units' => $cargoUnits,
+        return ['source' => 'cargo', 'rounding_unknown' => $roundingUnknown, 'omitted_units' => ! isset($arguments['units']), 'tank_units' => $units, 'cargo_units' => $cargoUnits, 'max_cargo_units' => $exposure,
             'fuel_cargo_before' => $fuel, 'user_protected_fuel' => $arguments['protectedFuel'] ?? 0, 'contract_fuel' => $committed, 'protected_fuel' => $protected,
             'tank_after' => $ship['fuel']['current'] + $units, 'tank_space_after' => $space - $units,
             'fuel_cargo_after' => $fuel - $cargoUnits, 'cargo_after' => $ship['cargo']['units'] - $cargoUnits,

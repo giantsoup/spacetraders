@@ -21,7 +21,8 @@ async (scenario) => {
     if (!document.querySelector('.approval')) return { command: scenario.command, previewed: false, error: document.querySelector('.notice.fault')?.innerText };
     const approval = document.querySelector('.approval');
     const focused = approval === document.activeElement;
-    const button = Array.from(approval.querySelectorAll('button')).find(button => button.textContent.trim() === (scenario.stop ? 'Stop manual command' : 'Approve command') || (!scenario.stop && button.textContent.trim() === 'Approve purchase'));
+    const button = scenario.stop ? Array.from(approval.querySelectorAll('button')).find(button => button.textContent.trim() === 'Stop manual command') : approval.querySelector('[data-guide=approve]');
+    if (scenario.previewOnly) return { command: scenario.command, previewed: true, focused, approval: approval.innerText, destructive: button?.className };
     if (!button || button.disabled) throw new Error('Approval/Stop button unavailable');
     button.click();
     await wait(() => !document.querySelector('.approval') || document.querySelector('.notice.fault'));

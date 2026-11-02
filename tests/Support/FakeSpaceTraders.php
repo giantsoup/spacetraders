@@ -8,6 +8,7 @@ use App\Models\AutomationRun;
 use App\Models\ShipAction;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
@@ -107,6 +108,9 @@ final class FakeSpaceTraders
             } finally {
                 flock($handle, LOCK_UN);
                 fclose($handle);
+            }
+            if (($world['advance_after_write'] ?? 0) && $request->method() !== 'GET') {
+                Date::setTestNow(now()->addSeconds($world['advance_after_write']));
             }
             if ($pauseBefore || $pauseAfter) {
                 $stage = $pauseBefore ? 'before' : 'after';
@@ -348,6 +352,9 @@ final class FakeSpaceTraders
                 return [['data' => ['nav' => $ship['nav'], 'fuel' => $ship['fuel']]], 200];
             }
             if (in_array($command, ['extract', 'extract/survey'], true)) {
+                if (isset($world['force_survey_error']) && ($command === 'extract/survey' || isset($args['survey']))) {
+                    return [['error' => ['code' => $world['force_survey_error']]], 400];
+                }
                 if ($command === 'extract/survey' && ($world['survey_exhausted'] ?? false)) {
                     return [['error' => ['code' => 4224]], 400];
                 }

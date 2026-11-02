@@ -14,13 +14,13 @@ class CommandRules
 
     public function inspect(Agent $agent, string $symbol, string $command, array $arguments, ?AutomationRun $run = null): array
     {
-        $agentCommand = in_array($command, ['contract_accept', 'contract_fulfill'], true);
+        $agentCommand = ! $run && in_array($command, ['contract_accept', 'contract_fulfill'], true);
         if (! $agentCommand && ! Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->exists()) {
             throw new GameException('Ship is not in the saved owned fleet. Synchronize first.');
         }
         $this->sync->guardReset($agent);
         $agent->update(['credits' => $this->api->agent($agent)['credits']]);
-        $ship = $agentCommand && $symbol === '' ? null : $this->sync->refreshShip($agent, $symbol)->snapshot;
+        $ship = $agentCommand ? null : $this->sync->refreshShip($agent, $symbol)->snapshot;
         if ($ship && $ship['nav']['status'] === 'IN_TRANSIT' && $command !== 'flight_mode') {
             throw new GameException('Ship is in transit. Reconcile after the reported arrival.');
         }
@@ -60,7 +60,8 @@ class CommandRules
                 throw new GameException('Unexplained balance change before reservation. Review before a fresh approval.');
             }
         }
-        $floor = max($arguments['reserve'] ?? 0, $active?->plan['reserve'] ?? 0);
+        $spending = in_array($command, ['buy', 'buy_ship', 'repair', 'install_mount', 'remove_mount', 'install_module', 'remove_module', 'jump', 'refuel'], true);
+        $floor = max($arguments['reserve'] ?? 0, $active?->plan['reserve'] ?? 0, ! $run && $spending ? max(1, (int) config('gameplay.manual_reserve_floor')) : 0);
         if ($active && ! $run) {
             $floor = max($floor, $active->plan['reserve'] + max(0, $active->plan['max_spend'] - ($active->totals['spending'] ?? $active->totals['fuel_cost'] ?? 0)));
         }
@@ -172,14 +173,14 @@ class CommandRules
             case 'refine':
                 $prefix = $arguments['produce'] === 'FUEL' ? 'MODULE_FUEL_REFINERY_' : 'MODULE_ORE_REFINERY_';
                 if (! collect($ship['modules'])->contains(fn ($item) => str_starts_with($item['symbol'], $prefix)) || now()->lt($ship['cooldown']['readyAt']) || $ship['cargo']['units'] < 100) {
-                    throw new GameException('Refining needs a suitable refinery, ready cooldown and at least 100 input cargo units.');
+                    throw new GameException('Refinery client policy requires suitable equipment, ready cooldown and at least 100 input cargo units; recipe calibration is pending and no override is available.');
                 }
                 foreach (MiningPlanner::inventory($ship) as $good => $owned) {
                     if (app(CargoAuthority::class)->available($agent, $ship, $good) !== $owned) {
                         throw new GameException('Protected cargo may not be exposed to an uncalibrated refinery recipe.');
                     }
                 }
-                $estimate['effects'] = 'Requests the selected product. The API chooses inputs and batch size. Exact recipe and yield remain uncalibrated; consumed and produced cargo are recorded from the response.';
+                $estimate['effects'] = 'Refinery client policy requires at least 100 cargo units; no local override is available. Requests the selected product. The API chooses inputs and batch size. Exact recipe and yield remain uncalibrated; consumed and produced cargo are recorded from the response.';
                 break;
             case 'scrap':
                 if (($arguments['confirmShip'] ?? null) !== $symbol || empty($arguments['acknowledgeLoss']) || $active) {
@@ -255,25 +256,32 @@ class CommandRules
                 $estimate['effects'] = 'One observation only. Scan range and duration are unknown. Orbit and cooldown readiness are conservative client policies. No strategy question, travel or follow-up is required.';
                 break;
             case 'contract_accept':
+                $estimate['effects'] = 'Accepts the displayed delivery obligations and deadline. Pays the displayed acceptance reward; no cargo purchase or automatic delivery is authorized.';
                 if ($contract['accepted'] || $contract['fulfilled']) {
                     throw new GameException('Contract is already accepted or fulfilled.');
                 }
                 break;
             case 'contract_deliver':
+                $estimate['effects'] = 'Transfers the selected cargo permanently toward the displayed obligation. Fulfillment and its reward require a separate approval.';
                 $term = $contract['terms']['deliver'][$arguments['term_index']] ?? null;
                 if (! $term || ! $contract['accepted'] || $contract['fulfilled'] || $ship['nav']['status'] !== 'DOCKED' || $ship['nav']['waypointSymbol'] !== $term['destinationSymbol'] || $arguments['symbol'] !== $term['tradeSymbol'] || $arguments['units'] > min($term['unitsRequired'] - $term['unitsFulfilled'], MiningPlanner::inventory($ship)[$arguments['symbol']] ?? 0)) {
                     throw new GameException('Delivery does not fit the approved ship, cargo, destination or remaining requirement.');
                 }
                 break;
             case 'contract_fulfill':
+                $estimate['effects'] = 'Closes the displayed completed contract and collects its fulfillment reward. No follow-up is authorized.';
                 if (! $contract['accepted'] || $contract['fulfilled'] || collect($contract['terms']['deliver'])->contains(fn ($t) => $t['unitsFulfilled'] !== $t['unitsRequired'])) {
                     throw new GameException('Contract cannot be fulfilled before every delivery is confirmed.');
                 }
                 break;
             case 'navigate':
                 $this->orbit($ship);
-                $target = $this->waypoint($agent, $arguments['waypointSymbol']);
-                $from = $this->waypoint($agent, $ship['nav']['waypointSymbol']);
+                $target = $run ? $this->waypoint($agent, $arguments['waypointSymbol']) : $this->api->waypoint($agent, $arguments['waypointSymbol']);
+                $from = $run ? $this->waypoint($agent, $ship['nav']['waypointSymbol']) : $this->api->waypoint($agent, $ship['nav']['waypointSymbol']);
+                if (! $run) {
+                    $this->sync->observe($agent, 'waypoint', $target['symbol'], $target);
+                    $this->sync->observe($agent, 'waypoint', $from['symbol'], $from);
+                }
                 if ($target['systemSymbol'] !== $ship['nav']['systemSymbol'] || $target['symbol'] === $from['symbol']) {
                     throw new GameException('Choose a different waypoint in this system.');
                 }
@@ -289,9 +297,17 @@ class CommandRules
                 if (in_array('MARKETPLACE', array_column($from['traits'], 'symbol'), true)) {
                     $this->sync->observe($agent, 'market', $from['symbol'], $this->api->market($agent, $from['symbol']));
                 }
-                $estimate['route'] = $run?->strategy === 'mining'
-                    ? app(FuelPlanner::class)->miningLeg($agent, $ship, $target['symbol'], $run->plan)
-                    : app(FuelPlanner::class)->leg($agent, $ship, $target['symbol'], $floor, policy: $run ? null : 'conservative');
+                try {
+                    $estimate['route'] = $run?->strategy === 'mining'
+                        ? app(FuelPlanner::class)->miningLeg($agent, $ship, $target['symbol'], $run->plan)
+                        : app(FuelPlanner::class)->leg($agent, $ship, $target['symbol'], $floor, policy: $run ? null : 'conservative');
+                } catch (GameException $e) {
+                    if ($run) {
+                        throw $e;
+                    }
+                    throw new GameException('CRUISE client policy requires fresh fuel sellers and a verified continuation: '.$e->getMessage().' Use explicit maxFuel/maxSeconds and acknowledgement to review the uncalibrated manual variant.');
+                }
+                $estimate['effects'] = 'CRUISE client policy requires a fresh route, known fuel sellers and a verified continuation. Explicit fuel/time review limits with acknowledgement select the uncalibrated manual variant instead.';
                 $estimate['fuel_estimate'] = $estimate['route']['outbound_fuel'];
                 if ($run && isset($run->plan['max_fuel']) && ($run->totals['travel_fuel'] ?? 0) + $estimate['fuel_estimate'] > $run->plan['max_fuel']) {
                     throw new GameException('Navigation exceeds the remaining approved travel-fuel budget. Replan; do not repeat a failed rescue route.');
@@ -299,15 +315,16 @@ class CommandRules
                 break;
             case 'mine':
             case 'mine_survey':
+                $estimate['effects'] = 'Mining client policy requires a mining laser, mineral processor, 50% condition/integrity floor and a non-hazardous asteroid. One extraction only; no strategy or automatic follow-up.';
                 $this->orbit($ship);
                 if ($reason = $this->planner->capability($ship)) {
-                    throw new GameException($reason);
+                    throw new GameException('Mining client policy: '.$reason);
                 }
                 $point = $this->waypoint($agent, $ship['nav']['waypointSymbol']);
                 $point = $this->api->waypoint($agent, $point['symbol']);
                 $this->sync->observe($agent, 'waypoint', $point['symbol'], $point, 'read', $symbol);
                 if ($reason = MiningPlanner::hazard($point)) {
-                    throw new GameException($reason);
+                    throw new GameException('Mining client policy: '.$reason);
                 }
                 if ($run) {
                     app(FuelPlanner::class)->miningLeg($agent, $ship, $run->plan['market'], $run->plan);
@@ -327,6 +344,7 @@ class CommandRules
                 }
                 break;
             case 'survey':
+                $estimate['effects'] = 'Survey client policy requires a surveyor, ready cooldown and a non-hazardous asteroid. No local override is available.';
                 $this->orbit($ship);
                 if (! collect($ship['mounts'])->contains(fn ($mount) => str_starts_with($mount['symbol'], 'MOUNT_SURVEYOR_')) || now()->lt($ship['cooldown']['readyAt'])) {
                     throw new GameException('Survey creation requires a Surveyor mount and expired cooldown.');

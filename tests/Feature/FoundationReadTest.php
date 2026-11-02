@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\ManualReads;
 use App\Models\Agent;
+use App\Models\GameObservation;
 use App\Models\Ship;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -111,5 +112,19 @@ class FoundationReadTest extends TestCase
     {
         $this->postJson('/agents/'.$this->agent->id.'/reads', ['operation' => 'get-system-waypoints', 'parameters' => ['systemSymbol' => 'X1-TEST', 'traits' => ['MARKETPLACE', 'SHIPYARD']]])->assertAccepted()->assertJsonPath('meta.total', 1);
         Http::assertSent(fn ($request) => str_contains($request->url(), 'traits=MARKETPLACE&traits=SHIPYARD') && ! str_contains($request->url(), 'traits%5B'));
+    }
+
+    public function test_malformed_manual_market_yard_and_waypoint_reads_cannot_replace_planning_observations(): void
+    {
+        $before = GameObservation::where('agent_id', $this->agent->id)->where('kind', 'market')->where('symbol', 'X1-TEST-ROCK')->firstOrFail()->data;
+        $world = json_decode(file_get_contents($this->file), true);
+        $world['goods'][0]['purchasePrice'] = 'invalid';
+        $world['offer']['purchasePrice'] = -1;
+        unset($world['waypoints'][0]['x']);
+        file_put_contents($this->file, json_encode($world));
+        foreach (['get-market', 'get-shipyard', 'get-waypoint'] as $operation) {
+            $this->postJson('/agents/'.$this->agent->id.'/reads', ['operation' => $operation, 'parameters' => ['systemSymbol' => 'X1-TEST', 'waypointSymbol' => 'X1-TEST-ROCK']])->assertUnprocessable();
+        }
+        $this->assertSame($before, GameObservation::where('agent_id', $this->agent->id)->where('kind', 'market')->where('symbol', 'X1-TEST-ROCK')->firstOrFail()->data);
     }
 }
