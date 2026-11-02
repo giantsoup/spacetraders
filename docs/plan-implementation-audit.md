@@ -1,5 +1,8 @@
 # Documentation plan implementation audit
 
+> Priority update, November 1, 2026: the [base API foundation plan](base-api-foundation-plan.md) supersedes this document's implementation order. Finish first-class manual coverage and acceptance for the official API before new strategy, adviser, or investment automation. Preserve the dated evidence below. Already-authorized local cutover and bounded real playtesting can continue.
+
+
 Audited November 1, 2026. Local source `221fbae7a1ecbdf5159211316039f016355c900e`. Remote `main` `98b8792ffc0ce36a50ba5b9149b3049f5bd1e6fb`. This is a source and offline-test audit, not a live deployment or gameplay verification.
 
 ## Current status index

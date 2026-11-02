@@ -1,5 +1,8 @@
 # Local automation implementation plan
 
+> Priority update, November 1, 2026: the [base API foundation plan](base-api-foundation-plan.md) supersedes this document's implementation order. Finish first-class manual coverage and acceptance for the official API before new strategy, adviser, or investment automation. Preserve the dated evidence below. Already-authorized local cutover and bounded real playtesting can continue.
+
+
 Status: approved and implemented locally. See [offline acceptance evidence](local-automation-verification.html). Live installation and gameplay remain a separate approval.
 
 Prepared 2026-11-01 against the current working tree on `feature/early-game-player-guide`, based on commit `6a99cfe`. The checkout contains existing uncommitted frontend, verification, and build changes. Preserve that work.

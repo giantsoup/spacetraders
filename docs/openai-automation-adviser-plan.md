@@ -1,5 +1,8 @@
 # OpenAI adviser for the next ship activity
 
+> Priority update, November 1, 2026: the [base API foundation plan](base-api-foundation-plan.md) supersedes this document's implementation order. Finish first-class manual coverage and acceptance for the official API before new strategy, adviser, or investment automation. Preserve the dated evidence below. Already-authorized local cutover and bounded real playtesting can continue.
+
+
 Status: ADV01 policy/selection foundation is implemented locally; see [implementation and verification](issue-37/implementation.md). Model integration, policy-executed actions and live acceptance remain future work. This plan incorporates Taylor's answers on 2026-11-01.
 
 Source review: local `main` at `88bc0262b65b70e611e2fdc37e64a5225591d5c0`. Existing untracked exploration research and its HTML comparison are separate work and remain unchanged.

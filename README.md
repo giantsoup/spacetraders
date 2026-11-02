@@ -4,6 +4,12 @@ A Laravel 13, Inertia 3, Vue 3, and Pinia 4 client for SpaceTraders. Register or
 
 The [batch-two integration report](docs/integration-batch2-20261101/README.md) records the combined OPS02, OPS03, ADV01, EXP01, EXP09 and OPT02 implementation and verification. The original six PRs merged only briefs. Their dated branch reports remain historical evidence; their old instructions to update those PRs are superseded by this integration report. The [publication handoff](docs/integration-batch2-20261101/publication.md) records the authorized PR preparation and refreshed base. Issue acceptance remains pending.
 
+## Base API completion standard
+
+This release is an early-game baseline, not a complete SpaceTraders API client. The [base API foundation plan](docs/base-api-foundation-plan.md) is the current delivery priority: implement and accept every operation and supported input variant in the pinned official specification through first-class manual controls before adding strategies, adviser execution, or fleet-investment automation. Existing bounded playtesting and the authorized live-local cutover can continue.
+
+The [59-operation inventory](docs/api/base-api-inventory.md) separates source mappings, known restrictions, aggregate-only reads, local-only branches, and missing functionality. Mapping an endpoint or merging a task brief does not establish completion. Run `python3 scripts/verify-base-api-coverage.py` to check the inventory, `--refresh` to detect official-spec drift, and `--require-complete` for the full acceptance gate.
+
 ## Design direction
 
 Use the [design brief](docs/design-brief.md) for new UI work. It records the approved dark, phone-first screen family, shared visual rules, ship-report interactions, and gameplay safeguards. The [interactive redesign report](docs/single-ship-redesigns.html) and screenshots in `docs/design-reference/` provide the visual references. Horizon is the recommended starting point, with Logbook and Voyage retained as alternatives. These are design references; the current app styling is described in [app-styling.md](docs/app-styling.md).
