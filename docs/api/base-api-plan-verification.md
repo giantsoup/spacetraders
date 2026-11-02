@@ -39,3 +39,8 @@ Future operation acceptance uses repository-relative JSON artifact records for `
 The verifier checks structural integrity, paths, hashes and record identity. It cannot decide whether a human-authored evidence record honestly proves behavior. Reviewers must inspect actual artifacts, reproduce the relevant path and confirm the live boundary. A fabricated JSON record is not acceptance, even if it satisfies the file format. Aggregate-only, partial, local-only and missing operations cannot be accepted by the unchanged completion gate.
 
 This work makes no GitHub issue, PR, push, remote merge, production deployment, game mutation or paid call. The primary dirty checkout and separately authorized live-local cutover are preserved.
+
+
+## Implementation follow-up
+
+This planning verification remains historical. See [actual implementation and verification](foundation-implementation.md), the [native capability map](foundation-capability-map.md) and [per-variant gates](foundation-variant-gates.md). Source implementation now covers all59 operations; no row has full-foundation acceptance. The completion verifier remains unchanged.

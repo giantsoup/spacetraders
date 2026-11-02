@@ -6,9 +6,16 @@ The [batch-two integration report](docs/integration-batch2-20261101/README.md) r
 
 ## Base API completion standard
 
-This release is an early-game baseline, not a complete SpaceTraders API client. The [base API foundation plan](docs/base-api-foundation-plan.md) is the current delivery priority: implement and accept every operation and supported input variant in the pinned official specification through first-class manual controls before adding strategies, adviser execution, or fleet-investment automation. Existing bounded playtesting and the authorized live-local cutover can continue.
+The foundation implementation exposes all 59 pinned operations through native controls, including 26 dedicated reads, 32 manual gameplay actions and existing account-token registration. Official-API acceptance remains incomplete; this is not a fully accepted API client. The [base API foundation plan](docs/base-api-foundation-plan.md) is the current delivery priority: implement and accept every operation and supported input variant in the pinned official specification through first-class manual controls before adding strategies, adviser execution, or fleet-investment automation. Existing bounded playtesting and the authorized live-local cutover can continue.
 
-The [59-operation inventory](docs/api/base-api-inventory.md) separates source mappings, known restrictions, aggregate-only reads, local-only branches, and missing functionality. Mapping an endpoint or merging a task brief does not establish completion. Run `python3 scripts/verify-base-api-coverage.py` to check the inventory, `--refresh` to detect official-spec drift, and `--require-complete` for the full acceptance gate.
+The [59-operation inventory](docs/api/base-api-inventory.md) records source coverage independently of acceptance. The [capability map](docs/api/foundation-capability-map.md) locates each manual path, and the [variant gates](docs/api/foundation-variant-gates.md) distinguish tested fixtures from pending official behavior. Mapping an endpoint or merging a task brief does not establish completion. Run `python3 scripts/verify-base-api-coverage.py` to check the inventory, `--refresh` to detect official-spec drift, and `--require-complete` for the full acceptance gate.
+
+
+Open **API library** on the flight deck to refresh a dedicated read, inspect its full response, or page through directories. Open **Manual API** to choose an exact action, enter its arguments and limits, inspect a fresh preview, then approve one durable intent. These controls need no strategy or mining setup. Contract acceptance and fulfillment work without a selected ship; their previews show obligations, rewards and deadlines.
+
+Manual spending preserves a configured minimum 2,000 CR reserve; higher requested or active-run reserves take precedence. Quotes and local review thresholds cannot cap official execution prices, fuel or timing. Stop cancels any unsent manual intent; a reserved request may settle. Uncertain writes are reconciled and never replayed automatically. Jettison, construction contributions and scrap require explicit loss acknowledgement; scrap also requires the exact ship symbol. No real-game mutation was performed for this implementation.
+
+The [implementation and verification record](docs/api/foundation-implementation.md) identifies the tested code and remaining gates. Do not treat source coverage or synthetic-provider success as live mechanics or permission to spend.
 
 ## Design direction
 

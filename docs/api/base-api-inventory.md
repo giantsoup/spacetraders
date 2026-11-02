@@ -1,6 +1,6 @@
 # Base API operation inventory
 
-Source: [official OpenAPI](https://spacetraders.io/SpaceTraders.json), version 2.3.0. Snapshot SHA-256 `c07d04f575df43e4d05eea4ba539f2d33ef8c5d9a3c863d49520193ef5431ad8`. Audited source `99be3c474dddd7bf9fd1c1aec5bf2147cf9b5868`. See the [foundation plan](../base-api-foundation-plan.md).
+Source: [official OpenAPI](https://spacetraders.io/SpaceTraders.json), version 2.3.0. Snapshot SHA-256 `c07d04f575df43e4d05eea4ba539f2d33ef8c5d9a3c863d49520193ef5431ad8`. Audited implementation source `308ccb9c86d9180b05fd5d05934d0bc5c069131c`. See the [foundation plan](../base-api-foundation-plan.md).
 
 This is source coverage, not completed acceptance. No operation is marked accepted by this audit. `source_mapped` means a mapping exists; `partial` means known capability restrictions; `aggregate_only` means data is exposed through a broader response without accepted operation equivalence; `local_only` means unpublished implementation; `missing` means no first-class support was identified.
 
