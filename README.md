@@ -178,13 +178,13 @@ In engine practice, `Reset -Force` performs a verified force stop if graceful En
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\web.ps1 Install   # also: Status, Uninstall; -Port to change 8081
-& "C:\Program Files\Tailscale\tailscale.exe" serve --bg 8081                            # tailnet only; never use `tailscale funnel`
+& "C:\Program Files\Tailscale\tailscale.exe" serve --service=svc:spacetraders --https=443 http://127.0.0.1:8081   # tailnet only; never use `tailscale funnel`
 ```
 
-- **Access:** open `https://<machine>.<tailnet>.ts.net` from any device signed into the tailnet. The server listens only on loopback, so no firewall rule is needed.
+- **Access:** open `https://spacetraders.chimp-hamal.ts.net` from any device signed into the tailnet. It is a [Tailscale Service](https://tailscale.com/kb/1552/tailscale-services) (`svc:spacetraders`), so the address doesn't depend on the machine name: the PC is `taylor-pc`, tagged `tag:server`, and the tailnet policy auto-approves it as the host. The server listens only on loopback, so no firewall rule is needed.
 - **Engine controls:** install, start and stop answer 403 from this address, because they require the `spacetraders.test` host and a loopback client. Never proxy with a `Host: spacetraders.test` rewrite.
 - **One request at a time:** PHP's built-in server can't run several workers on Windows. Use Herd at `spacetraders.test` for heavy work on the PC.
-- **Removal:** run `tailscale serve reset`, then `web.ps1 Uninstall`.
+- **Removal:** run `tailscale serve drain svc:spacetraders`, then `tailscale serve clear svc:spacetraders`, then `web.ps1 Uninstall`.
 
 See the [Tailscale iPad plan](docs/tailscale-ipad-plan.md).
 
