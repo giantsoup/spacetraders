@@ -16,7 +16,7 @@ final class ScheduledTaskXml
             .'<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>'
             .'<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>'
             .'<AllowHardTerminate>true</AllowHardTerminate><IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd></IdleSettings>'
-            .'<ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings>'
+            .'<ExecutionTimeLimit>PT0S</ExecutionTimeLimit><Priority>5</Priority></Settings>'
             .'<Actions Context="Owner"><Exec><Command>'.$escape($php).'</Command><Arguments>'.$escape($arguments).'</Arguments>'
             .'<WorkingDirectory>'.$escape($base).'</WorkingDirectory></Exec></Actions></Task>';
 

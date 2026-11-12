@@ -50,7 +50,7 @@ class WindowsEngineHostTest extends TestCase
         $xml = mb_convert_encoding(substr($bytes, 2), 'UTF-8', 'UTF-16LE');
         foreach (['<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>', '<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>',
             '<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>', '<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>',
-            '<StopOnIdleEnd>false</StopOnIdleEnd>', '<AllowHardTerminate>true</AllowHardTerminate>',
+            '<StopOnIdleEnd>false</StopOnIdleEnd>', '<AllowHardTerminate>true</AllowHardTerminate>', '<Priority>5</Priority>',
             '<LogonType>InteractiveToken</LogonType>', '<RunLevel>LeastPrivilege</RunLevel>', '<UserId>S-1-5-21-123</UserId>',
             'php-win.exe</Command>', 'scripts/engine-launch.php', htmlspecialchars(base_path(), ENT_XML1 | ENT_QUOTES, 'UTF-8')] as $expected) {
             $this->assertStringContainsString($expected, $xml);

@@ -155,7 +155,7 @@ try {
     verifyWindows($document->loadXML(mb_check_encoding($taskXml, 'UTF-8') ? $taskXml : mb_convert_encoding($taskXml, 'UTF-8', 'Windows-1252')), 'Task XML parses successfully');
     $xml = new DOMXPath($document);
     verifyWindows($xml->query('//*[local-name()="Triggers"]/*')->length === 0, 'Task XML has no login or timer triggers');
-    foreach (['MultipleInstancesPolicy' => 'IgnoreNew', 'ExecutionTimeLimit' => 'PT0S', 'DisallowStartIfOnBatteries' => 'false', 'StopIfGoingOnBatteries' => 'false', 'LogonType' => 'InteractiveToken', 'RunLevel' => 'LeastPrivilege'] as $element => $expected) {
+    foreach (['MultipleInstancesPolicy' => 'IgnoreNew', 'ExecutionTimeLimit' => 'PT0S', 'Priority' => '5', 'DisallowStartIfOnBatteries' => 'false', 'StopIfGoingOnBatteries' => 'false', 'LogonType' => 'InteractiveToken', 'RunLevel' => 'LeastPrivilege'] as $element => $expected) {
         $nodes = $xml->query('//*[local-name()="'.$element.'"]');
         // Task Scheduler omits RunLevel from exported XML when it is the LeastPrivilege default.
         $omittedDefault = $element === 'RunLevel' && $nodes->length === 0;
