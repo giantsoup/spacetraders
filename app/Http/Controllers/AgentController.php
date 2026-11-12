@@ -47,6 +47,9 @@ class AgentController extends Controller
 
     public function store(Request $request, SpaceTradersClient $client): RedirectResponse
     {
+        if (PHP_SAPI !== 'cli') {
+            set_time_limit(90);
+        }
         if (is_string($request->input('faction'))) {
             $request->merge(['faction' => strtoupper($request->input('faction'))]);
         }
@@ -71,6 +74,9 @@ class AgentController extends Controller
 
     public function storeExisting(Request $request, SpaceTradersClient $client): RedirectResponse
     {
+        if (PHP_SAPI !== 'cli') {
+            set_time_limit(90);
+        }
         $data = $request->validate([
             'token' => ['required', 'string', 'regex:/\A[A-Za-z0-9\-._~+\/]+=*\z/'],
         ]);
@@ -107,7 +113,7 @@ class AgentController extends Controller
                 }
                 $existing ??= Agent::where('name', $payload['symbol'])->where('user_id', $request->user()->id)->whereNull('reset_id')->orderBy('id')->first();
                 $attributes = [
-                    'token' => $token, 'name' => $payload['symbol'], 'account_id' => $payload['accountId'],
+                    'token' => $token, 'name' => $payload['symbol'], 'account_id' => $payload['accountId'] ?? null,
                     'faction' => $payload['startingFaction'], 'email' => $email, 'reset_id' => $reset,
                     'canonical_identity' => $identity, 'connection_state' => 'unsynchronized',
                 ];

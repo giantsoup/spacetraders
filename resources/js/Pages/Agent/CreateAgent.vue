@@ -6,7 +6,7 @@ import PrimaryButton from '@/Components/PrimaryButton.vue';
 import TextInput from '@/Components/TextInput.vue';
 import GuidedFlight from '@/Components/GuidedFlight.vue';
 import GameConnection from '@/Components/GameConnection.vue';
-import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
+import { Head, Link, useForm } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import { assetName } from '@/dataPresentation.js';
 
@@ -16,7 +16,7 @@ const form = useForm({
     account_token: '',
     symbol: '',
     faction: '',
-    email: usePage().props.auth.user.email,
+    email: '',
 });
 
 const formExisting = useForm({
@@ -105,8 +105,13 @@ function toggleForm() {
                             :aria-invalid="Boolean(formExisting.errors.token)"
                             :aria-describedby="formExisting.errors.token ? 'token-error' : undefined"
                             id="token" data-guide="agent-token"
-                            type="password"
-                            class="mt-1 block w-full"
+                            type="text"
+                            class="token-input mt-1 block w-full"
+                            data-1p-ignore
+                            data-lpignore="true"
+                            data-bwignore
+                            spellcheck="false"
+                            autocapitalize="off"
                             v-model="formExisting.token"
                             autocomplete="off"
                             required
@@ -134,8 +139,13 @@ function toggleForm() {
                             :aria-invalid="Boolean(form.errors.account_token)"
                             :aria-describedby="'account-token-help' + (form.errors.account_token ? ' account_token-error' : '')"
                             id="account_token" data-guide="account-token"
-                            type="password"
-                            class="mt-1 block w-full"
+                            type="text"
+                            class="token-input mt-1 block w-full"
+                            data-1p-ignore
+                            data-lpignore="true"
+                            data-bwignore
+                            spellcheck="false"
+                            autocapitalize="off"
                             v-model="form.account_token"
                             autocomplete="off"
                             required
@@ -215,3 +225,9 @@ function toggleForm() {
         </div>
     </AuthenticatedLayout>
 </template>
+
+<style scoped>
+.token-input {
+    -webkit-text-security: disc;
+}
+</style>
