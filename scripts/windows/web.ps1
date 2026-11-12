@@ -2,16 +2,18 @@
 .SYNOPSIS
 Install, uninstall or inspect a loopback-only web server for this checkout, for `tailscale serve`.
 .DESCRIPTION
-Registers a per-user Scheduled Task that starts PHP's built-in server on 127.0.0.1 at logon,
-inside a headless console host so no window appears (php-win.exe cannot run the built-in server). It never listens on the LAN. Publish it on the tailnet with
-`tailscale serve --bg <port>`. Engine controls stay limited to the local Herd host.
+Registers a per-user Scheduled Task that runs this script's Run loop at logon inside a
+headless console host, so no window appears (php-win.exe cannot run the built-in server).
+Run keeps PHP's built-in server on 127.0.0.1 alive and restarts it whenever it exits, because
+Herd kills php.exe processes when it restarts. It never listens on the LAN. Publish it on the
+tailnet with `tailscale serve --bg <port>`. Engine controls stay limited to the local Herd host.
 .EXAMPLE
 .\scripts\windows\web.ps1 Install
 .EXAMPLE
 .\scripts\windows\web.ps1 Status
 #>
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('Install', 'Uninstall', 'Status')][string]$Operation,
+    [Parameter(Mandatory = $true)][ValidateSet('Install', 'Uninstall', 'Status', 'Run')][string]$Operation,
     [ValidateRange(1024, 65535)][int]$Port = 8081
 )
 Set-StrictMode -Version Latest
@@ -25,13 +27,12 @@ function Test-WebTask {
 }
 
 function Get-WebTaskXml {
-    param([string]$Php, [string]$Root, [int]$Port)
+    param([string]$Root, [int]$Port)
     $escape = { param($value) [Security.SecurityElement]::Escape($value) }
     $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    $router = Join-Path $Root 'vendor\laravel\framework\src\Illuminate\Foundation\resources\server.php'
-    if (-not (Test-Path -LiteralPath $router -PathType Leaf)) { throw "Laravel router script not found: $router" }
     $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
-    $arguments = "--headless `"$Php`" -S 127.0.0.1:$Port -t `"$(Join-Path $Root 'public')`" `"$router`""
+    $powershell = Join-Path $PSHOME 'powershell.exe'
+    $arguments = "--headless `"$powershell`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$(Join-Path $PSScriptRoot 'web.ps1')`" Run -Port $Port"
     return @"
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -56,7 +57,11 @@ function Get-WebTaskXml {
 function Stop-WebServer {
     param([int]$Port)
     if (Test-WebTask) { [void](Invoke-NativeResult 'schtasks.exe' @('/End', '/TN', (Get-WebTaskName))) }
-    # Ending the task stops conhost; make sure its PHP child for this checkout and port goes too.
+    # Ending the task stops conhost. Stop the Run loop first so it cannot respawn PHP, then PHP itself.
+    $script = Join-Path $PSScriptRoot 'web.ps1'
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object {
+        $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.Contains($script) -and $_.CommandLine -match '\sRun\s'
+    } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     $public = Join-Path (Get-RepositoryRoot) 'public'
     Get-CimInstance Win32_Process -Filter "Name='php.exe'" | Where-Object {
         $_.CommandLine -and $_.CommandLine.Contains("-S 127.0.0.1:$Port") -and $_.CommandLine.Contains($public)
@@ -84,14 +89,32 @@ try {
     Write-Host "Web checkout: $root"
     Write-Host "Task: $name"
 
-    if ($Operation -eq 'Install') {
+    if ($Operation -eq 'Run') {
         $php = Get-HerdPhp
+        $router = Join-Path $root 'vendor\laravel\framework\src\Illuminate\Foundation\resources\server.php'
+        $public = Join-Path $root 'public'
+        $log = Join-Path $root 'storage\logs\web-server.log'
+        Set-Location -LiteralPath $public
+        while ($true) {
+            Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) starting php -S 127.0.0.1:$Port"
+            # PHP logs to stderr; PowerShell 5.1 would turn redirected native stderr into terminating errors.
+            $arguments = @('-S', "127.0.0.1:$Port", '-t', (ConvertTo-NativeArgument $public), (ConvertTo-NativeArgument $router))
+            $server = Start-Process -FilePath $php -ArgumentList $arguments -NoNewWindow -PassThru -Wait `
+                -RedirectStandardOutput (Join-Path $root 'storage\logs\web-server-php.out.log') `
+                -RedirectStandardError (Join-Path $root 'storage\logs\web-server-php.log')
+            Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) php exited with code $($server.ExitCode); restarting in 2 seconds"
+            Start-Sleep -Seconds 2
+        }
+    } elseif ($Operation -eq 'Install') {
+        Get-HerdPhp | Out-Null
+        $router = Join-Path $root 'vendor\laravel\framework\src\Illuminate\Foundation\resources\server.php'
+        if (-not (Test-Path -LiteralPath $router -PathType Leaf)) { throw "Laravel router script not found: $router" }
         Stop-WebServer $Port
         $listener = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue
         if ($listener) { throw "Port $Port is already in use by process $($listener[0].OwningProcess)." }
         $xmlPath = Join-Path ([IO.Path]::GetTempPath()) "$name.xml"
         try {
-            [IO.File]::WriteAllText($xmlPath, (Get-WebTaskXml $php $root $Port), [Text.Encoding]::Unicode)
+            [IO.File]::WriteAllText($xmlPath, (Get-WebTaskXml $root $Port), [Text.Encoding]::Unicode)
             Invoke-Checked 'schtasks.exe' @('/Create', '/F', '/TN', $name, '/XML', $xmlPath)
         } finally { Remove-Item -LiteralPath $xmlPath -Force -ErrorAction SilentlyContinue }
         Invoke-Checked 'schtasks.exe' @('/Run', '/TN', $name)
