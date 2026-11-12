@@ -1,6 +1,6 @@
 # Plan: view SpaceTraders on the iPad over Tailscale
 
-Status: implemented 2026-11-12. Live at `https://spacetraders.chimp-hamal.ts.net` (machine `spacetraders`, tailnet `chimp-hamal.ts.net`). See "Implementation notes" for where the build departs from the draft.
+Status: implemented 2026-11-12. Live at `https://spacetraders.chimp-hamal.ts.net` (tailnet `chimp-hamal.ts.net`). Since 2026-11-12 that address is the Tailscale Service `svc:spacetraders`, hosted by the PC `taylor-pc` (tagged `tag:server`). The machine-level `tailscale serve --bg 8081` below was replaced by `tailscale serve --service=svc:spacetraders --https=443 http://127.0.0.1:8081`. See "Implementation notes" for where the build departs from the draft.
 
 ## Goal
 
