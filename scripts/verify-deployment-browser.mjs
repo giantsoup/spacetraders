@@ -96,10 +96,10 @@ try {
     const pending = cli(`echo json_encode(['jobs'=>Illuminate\\Support\\Facades\\DB::table('jobs')->get(),'state'=>App\\Models\\ShipAction::find(${action.id})->state->value]);`);
     assert.equal(pending.state, 'pending');
     control('close', '--generation=browser-pending');
-    execFileSync(php, ['artisan', 'queue:work', 'database', '--once', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env });
+    execFileSync(php, ['artisan', 'queue:work', 'database', '--queue=spacetraders', '--once', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env });
     assert.deepEqual(cli(`echo json_encode(['jobs'=>Illuminate\\Support\\Facades\\DB::table('jobs')->get(),'state'=>App\\Models\\ShipAction::find(${action.id})->state->value]);`), pending);
     control('open', '--generation=browser-pending');
-    execFileSync(php, ['artisan', 'queue:work', 'database', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env });
+    execFileSync(php, ['artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env });
     await page.goto(deck);
     await shipView(page, 'activity');
     await page.locator('#activity').getByText(/Confirmed · Manual/).waitFor();

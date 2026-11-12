@@ -180,6 +180,8 @@ When the native local engine is disabled, the terminal alternative is one worker
 
 Run those commands in separate terminals. Do not start a second worker or scheduler alongside the native engine. All processes must share the intended database, lock directory, and request budget. Closing a tab does not stop them.
 
+Disable Herd's automatic development processes for this checkout. The database connection defaults to the unrelated `default` queue; gameplay jobs explicitly use `spacetraders`. When the local engine is enabled, gameplay jobs also require the current engine-owned worker session. Other workers release those jobs for five seconds without executing them. Do not set `SPACETRADERS_ENGINE_WORKER_SESSION` yourself; the engine hosts supply it only to their worker child.
+
 See the [local automation plan](docs/local-automation-implementation-plan.md), [gameplay implementation notes](docs/mvp-implementation.md), and [deployment drain runbook](docs/issue-11/deployment-gates.md) for lifecycle, migration, and recovery details. Those documents contain dated plans and evidence; check their status against the current source before a cutover.
 
 ## Verification

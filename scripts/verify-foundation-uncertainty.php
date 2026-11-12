@@ -70,7 +70,7 @@ function workers(string $root, array $env, string $directory): void
 {
     $children = [];
     for ($i = 0; $i < 2; $i++) {
-        $children[] = proc_open([PHP_BINARY, 'artisan', 'queue:work', 'database', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'],
+        $children[] = proc_open([PHP_BINARY, 'artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'],
             [0 => ['file', '/dev/null', 'r'], 1 => ['file', $directory.'/worker-'.$i.'.log', 'a'], 2 => ['file', $directory.'/worker-'.$i.'.log', 'a']], $pipes, $root, array_merge(getenv(), $env));
     }
     foreach ($children as $child) {

@@ -152,6 +152,18 @@ The supervisor is therefore php-win itself: a real PID and no console window.
 
 ## Protocol on Windows
 
+### Gameplay worker ownership
+
+Both engine hosts set `SPACETRADERS_ENGINE_WORKER_SESSION` to the current session only for their worker child. Scheduler children never inherit that marker. The launchd host does not add the Windows watcher variables: macOS does not hold engine leases, so activating that watcher would stop the worker.
+
+Both queued gameplay entry points, `ExecuteShipCommand` and `AdvanceAutomationRun`, run `RequireEngineWorker` middleware before their handlers. With the engine enabled, a missing marker, missing engine, non-running engine, or mismatched session releases the job for five seconds. The middleware logs at most one warning per process. It does not update actions, automation, or the gameplay heartbeat, or call upstream. Engine-disabled terminal and practice workers are unchanged. Investigation is a synchronous read workflow, not a separate queued job; automation advances through the guarded job.
+
+Middleware releases count as Laravel attempts. These jobs therefore allow unlimited releases (`tries=0`) but fail on their first unexpected exception (`maxExceptions=1`), preserving the no-blind-retry policy. The existing engine gate still checks approval sessions, health, and admission at the mutation boundary.
+
+The database connection defaults to `default`, not `spacetraders`. Both gameplay constructors select the database connection and gameplay queue explicitly; engine, terminal, practice, and verification workers select `--queue=spacetraders`.
+
+Deployment participants use process-lifetime file leases. While admission is open, each gate operation removes finished participants and participants with an unheld lease before capturing a deployment's required acknowledgements. Dead worker records therefore cannot block a new drain. A participant lost after closure remains a deliberate fail-closed blocker: losing its lease does not prove an interrupted write settled. The deployment deadline aborts the drain rather than inventing that acknowledgement. Heartbeat age alone never expires a live participant.
+
 ### Liveness
 
 - The supervisor and each child hold an exclusive lock on `leases/{session}-{role}.lease` for their whole life.

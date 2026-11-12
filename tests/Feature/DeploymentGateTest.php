@@ -104,7 +104,7 @@ class DeploymentGateTest extends TestCase
         $id = Queue::connection('database')->pushRaw(json_encode(['displayName' => 'retained', 'job' => 'unused']), 'spacetraders');
         $this->gate->close('race');
         Queue::resume('database', 'spacetraders');
-        $this->assertNull(Queue::connection('database')->pop());
+        $this->assertNull(Queue::connection('database')->pop('spacetraders'));
         $this->assertTrue(Queue::isPaused('database', 'spacetraders'));
         $this->assertDatabaseHas('jobs', ['id' => $id, 'attempts' => 0, 'reserved_at' => null]);
         $this->assertSame(0, Artisan::call('spacetraders:dispatch-due'));
@@ -112,7 +112,7 @@ class DeploymentGateTest extends TestCase
         $this->gate->begin('scheduler');
         $this->assertTrue($this->gate->status()['drained']);
         $this->gate->open('race');
-        $job = Queue::connection('database')->pop();
+        $job = Queue::connection('database')->pop('spacetraders');
         $this->assertNotNull($job);
         $this->assertDatabaseHas('jobs', ['id' => $id, 'attempts' => 1]);
     }
@@ -154,6 +154,26 @@ class DeploymentGateTest extends TestCase
         $this->assertFalse($status['drained']);
         $this->assertTrue(collect($status['blockers'])->contains(fn ($blocker) => str_contains($blocker, 'lost_without_ack')));
         $this->gate->open('lost-writer');
+    }
+
+    public function test_dead_workers_are_removed_before_close_but_live_workers_remain_required(): void
+    {
+        $dead = new DeploymentGate;
+        $dead->workerPolling();
+        $deadId = array_key_first($dead->status()['participants']);
+        unset($dead);
+        $live = new DeploymentGate;
+        $live->workerPolling();
+        $closed = $this->gate->close('worker-leases');
+        $this->assertArrayNotHasKey($deadId, $closed['participants']);
+        $this->assertNotContains($deadId, $closed['required']);
+        $this->assertFileDoesNotExist(config('deployment.path').'/'.$deadId.'.lease');
+        $this->assertCount(1, $closed['required']);
+        $this->assertFalse($this->gate->status()['drained']);
+        $live->workerPolling();
+        $this->gate->begin('scheduler');
+        $this->assertTrue($this->gate->status()['drained']);
+        $this->gate->open('worker-leases');
     }
 
     public function test_release_with_different_cache_paths_cannot_acknowledge_a_shared_gate(): void

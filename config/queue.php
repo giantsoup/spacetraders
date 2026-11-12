@@ -37,7 +37,7 @@ return [
         'database' => [
             'driver' => 'database',
             'table' => 'jobs',
-            'queue' => 'spacetraders',
+            'queue' => 'default',
             'retry_after' => 180,
             'after_commit' => true,
         ],

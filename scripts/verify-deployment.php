@@ -205,7 +205,7 @@ try {
         $world = json_decode(file_get_contents($directory.'/world.json'), true);
         $world['failure'] = 'pause_after';
         file_put_contents($directory.'/world.json', json_encode($world));
-        $worker = start([PHP_BINARY, 'artisan', 'queue:work', 'database', '--sleep=1', '--tries=1', '--timeout=120', '--max-time=170'], 'worker');
+        $worker = start([PHP_BINARY, 'artisan', 'queue:work', 'database', '--queue=spacetraders', '--sleep=1', '--tries=1', '--timeout=120', '--max-time=170'], 'worker');
         until(fn () => is_file($directory.'/world.json.sent'));
         $web = start([PHP_BINARY, __FILE__, 'web', $directory], 'web');
         until(fn () => is_file($directory.'/web.started'));
@@ -219,7 +219,7 @@ try {
         $initial = $gate->status();
         check(! $initial['drained'] && in_array('queue:reserved_jobs', $initial['blockers'], true), 'close waits for an actually reserved gameplay job');
         check(collect($initial['participants'])->contains(fn ($p) => $p['role'] === 'web' && $p['busy']), 'close includes the real HTTP-kernel writer');
-        $worker2 = start([PHP_BINARY, 'artisan', 'queue:work', 'database', '--sleep=1', '--tries=1', '--timeout=120', '--max-time=170'], 'worker-2', overrides: ['SPACETRADERS_RELEASE' => 'candidate']);
+        $worker2 = start([PHP_BINARY, 'artisan', 'queue:work', 'database', '--queue=spacetraders', '--sleep=1', '--tries=1', '--timeout=120', '--max-time=170'], 'worker-2', overrides: ['SPACETRADERS_RELEASE' => 'candidate']);
         Artisan::call('spacetraders:dispatch-due');
         check(DB::table('jobs')->where('id', $delayed->id)->first() == $delayed, 'closed dispatch preserves delayed queue bytes and attempts');
         check(DB::table('game_runtime')->where('key', 'owned-web')->value('value') === 'started', 'active writer remains alive during drain');
@@ -267,7 +267,7 @@ BOOT, $entry);
         $rollback = start([PHP_BINARY, 'artisan', 'spacetraders:deployment', 'status'], 'rollback-status', $release, ['SPACETRADERS_RELEASE' => 'rollback']);
         check($rollback->wait() === 0 && json_decode($rollback->getOutput(), true)['version'] === 1, 'frozen rollback release reads the shared version 1 contract and existing SQLite schema');
         $gate->close('rollback-cutover');
-        $rollbackWorker = start([PHP_BINARY, 'artisan', 'queue:work', 'database', '--once', '--sleep=0'], 'rollback-worker', $release, ['SPACETRADERS_RELEASE' => 'rollback']);
+        $rollbackWorker = start([PHP_BINARY, 'artisan', 'queue:work', 'database', '--queue=spacetraders', '--once', '--sleep=0'], 'rollback-worker', $release, ['SPACETRADERS_RELEASE' => 'rollback']);
         check($rollbackWorker->wait() === 0, 'rollback artifact worker observes persistent pause without reserving');
         start([PHP_BINARY, 'artisan', 'schedule:run'], 'rollback-scheduler', $release, ['SPACETRADERS_RELEASE' => 'rollback']);
         until(fn () => $gate->status()['drained']);
