@@ -152,6 +152,18 @@ class FoundationCommandTest extends TestCase
         $this->assertCount(1, $this->world()['writes']);
     }
 
+    public function test_approval_without_a_local_engine_has_actionable_guidance_and_never_dispatches(): void
+    {
+        $action = $this->preview('orbit');
+        config(['gameplay.local_engine_enabled' => true]);
+        $this->postJson('/agents/'.$this->agent->id.'/commands/'.$action->id.'/approve')
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'The local engine is not running. Open Automation and choose Start local engine, then create a fresh preview.');
+        $this->assertSame(ActionState::Preview, $action->fresh()->state);
+        $this->assertEmpty($this->world()['writes']);
+        Queue::assertNotPushed(ExecuteShipCommand::class);
+    }
+
     #[DataProvider('postWriteRefuelReads')]
     public function test_cargo_refuel_without_optional_response_cargo_confirms_from_a_fresh_read(bool $deferred): void
     {
