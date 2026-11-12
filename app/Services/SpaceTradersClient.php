@@ -16,21 +16,30 @@ class SpaceTradersClient
 
     public const BASE_URL = 'https://api.spacetraders.io/v2';
 
+    public const TOKEN_INVALID = 'Token is invalid.';
+
+    public const TOKEN_FORBIDDEN = 'Token does not have permission to complete this request.';
+
     private int $scopeDepth = 0;
 
     private string $priority = 'discovery';
 
     private array $reads = [];
 
-    public function scope(callable $work, string $priority = 'critical'): mixed
+    private ?float $scopeDeadline = null;
+
+    public function scope(callable $work, string $priority = 'critical', ?float $deadline = null): mixed
     {
         $previous = $this->priority;
+        $previousDeadline = $this->scopeDeadline;
+        $this->scopeDeadline = $deadline === null ? $previousDeadline : min($deadline, $previousDeadline ?? $deadline);
         $this->priority = $priority;
         $this->scopeDepth++;
         try {
             return $work();
         } finally {
             $this->priority = $previous;
+            $this->scopeDeadline = $previousDeadline;
             if (--$this->scopeDepth === 0) {
                 $this->reads = [];
             }
@@ -39,6 +48,7 @@ class SpaceTradersClient
 
     public function request(string $method, string $path, array $data = [], ?string $token = null, ?float $deadline = null, ?string $account = null): Response
     {
+        $deadline = $this->scopeDeadline === null ? $deadline : min($this->scopeDeadline, $deadline ?? $this->scopeDeadline);
         $read = strtolower($method) === 'get';
         $key = hash('sha256', json_encode([$path, $data, $token]));
         if ($read && $this->scopeDepth > 0 && isset($this->reads[$key]) && microtime(true) - $this->reads[$key]['at'] < 2) {
@@ -103,7 +113,7 @@ class SpaceTradersClient
     {
         return $this->agentData('post', '/register', $data, $accountToken, [
             'token' => ['required', 'string'],
-            'agent.accountId' => ['required', 'string', 'max:255'],
+            'agent.accountId' => ['sometimes', 'string', 'max:255'],
             'agent.symbol' => ['required', 'string', 'min:3', 'max:14'],
             'agent.startingFaction' => ['required', 'string', 'max:255'],
         ]);
@@ -112,7 +122,7 @@ class SpaceTradersClient
     public function agent(string $token): array
     {
         return $this->agentData('get', '/my/agent', [], $token, [
-            'accountId' => ['required', 'string', 'max:255'],
+            'accountId' => ['sometimes', 'string', 'max:255'],
             'symbol' => ['required', 'string', 'min:3', 'max:14'],
             'startingFaction' => ['required', 'string', 'max:255'],
         ]);
@@ -129,13 +139,15 @@ class SpaceTradersClient
         }
 
         if (! $response->successful()) {
-            if ($method === 'post' && ($response->serverError() || $response->status() === 429)) {
+            if ($method === 'post' && ($response->serverError() || $response->status() < 400 || in_array($response->status(), [408, 429], true))) {
                 throw ValidationException::withMessages(['api' => self::REGISTRATION_UNKNOWN]);
             }
             throw ValidationException::withMessages([
                 'api' => match ($response->status()) {
-                    401 => 'Token is invalid.',
-                    422 => 'Invalid symbol.',
+                    401 => self::TOKEN_INVALID,
+                    403 => self::TOKEN_FORBIDDEN,
+                    409 => 'That agent symbol is already registered. Choose another symbol, or Import the agent if it is yours.',
+                    422 => $this->validationMessage($response, $token),
                     429 => 'Rate limit reached.',
                     default => 'SpaceTraders could not complete the request. Please try again later.',
                 },
@@ -151,5 +163,19 @@ class SpaceTradersClient
         }
 
         return $payload;
+    }
+
+    private function validationMessage(Response $response, string $token): string
+    {
+        $message = $response->json('error.message');
+        if (! is_string($message)) {
+            return 'SpaceTraders rejected the submitted details. Check the fields and try again.';
+        }
+        $message = strip_tags(html_entity_decode(strip_tags($message), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        $message = str_replace($token, '[redacted]', $message);
+        $message = preg_replace('/\bBearer\s+[A-Za-z0-9\-._~+\/]+=*/i', 'Bearer [redacted]', $message);
+        $message = trim(preg_replace('/[\x00-\x1F\x7F]/u', ' ', $message) ?? '');
+
+        return $message === '' ? 'SpaceTraders rejected the submitted details. Check the fields and try again.' : mb_substr($message, 0, 300);
     }
 }

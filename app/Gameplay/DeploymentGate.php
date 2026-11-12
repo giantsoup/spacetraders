@@ -2,11 +2,14 @@
 
 namespace App\Gameplay;
 
+use App\Queue\EngineWorkerGate;
 use Illuminate\Cache\FileStore;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use RuntimeException;
+use Throwable;
 
 class DeploymentGate
 {
@@ -17,6 +20,8 @@ class DeploymentGate
     private array $leases = [];
 
     private ?string $worker = null;
+
+    private int $lastForeignPoll = 0;
 
     public function begin(string $role): ?string
     {
@@ -46,10 +51,18 @@ class DeploymentGate
     // JobPopping runs even when Laravel's persistent queue pause prevents pop().
     public function workerPolling(): void
     {
-        $this->locked(function (array &$state) {
+        $workers = app(EngineWorkerGate::class);
+        $owned = $workers->allowsPolling() || $workers->ownsSession();
+        $now = hrtime(true);
+        if (! $owned && $now - $this->lastForeignPoll < 1000000000) {
+            return;
+        }
+        $this->locked(function (array &$state) use ($owned) {
             $this->worker ??= $this->participant($state, 'worker');
+            $state['participants'][$this->worker]['engine_owned'] = $owned;
             $this->acknowledge($state, $this->worker, false);
         });
+        $this->lastForeignPoll = $owned ? 0 : $now;
     }
 
     public function workerStopped(): void
@@ -57,7 +70,22 @@ class DeploymentGate
         if ($this->worker !== null) {
             $this->finish($this->worker);
             $this->worker = null;
+            $this->lastForeignPoll = 0;
         }
+    }
+
+    public function hasForeignWorker(): bool
+    {
+        return $this->locked(function (array &$state) {
+            foreach ($state['participants'] as $id => $participant) {
+                if ($participant['role'] === 'worker' && ! $participant['finished']
+                    && ($participant['engine_owned'] ?? true) === false && $this->alive($id)) {
+                    return true;
+                }
+            }
+
+            return false;
+        });
     }
 
     // Serialize close with the actual SQL reservation, not just the worker loop.
@@ -241,18 +269,71 @@ class DeploymentGate
     {
         $path = $this->path();
         $temporary = $path.'/state-'.bin2hex(random_bytes(8)).'.tmp';
-        if (file_put_contents($temporary, json_encode($state, JSON_THROW_ON_ERROR)) === false) {
-            throw new RuntimeException('Cannot persist deployment state.');
-        }
-        chmod($temporary, 0600);
-        $file = fopen($temporary, 'r+');
+        $failure = null;
         try {
-            if (! fsync($file) || ! rename($temporary, $path.'/state.json')) {
+            if (@file_put_contents($temporary, json_encode($state, JSON_THROW_ON_ERROR)) === false) {
+                throw new RuntimeException('Cannot persist deployment state.');
+            }
+            if (PHP_OS_FAMILY !== 'Windows') {
+                chmod($temporary, 0600);
+            }
+            $file = @fopen($temporary, 'r+');
+            if ($file === false) {
+                throw new RuntimeException('Cannot open deployment state for sync.');
+            }
+            try {
+                if (! fsync($file)) {
+                    throw new RuntimeException('Cannot sync deployment state.');
+                }
+            } finally {
+                fclose($file);
+            }
+            if (! $this->retryFileOperation(fn () => @rename($temporary, $path.'/state.json'))) {
                 throw new RuntimeException('Cannot commit deployment state.');
             }
+        } catch (Throwable $error) {
+            $failure = $error;
+            throw $error;
         } finally {
-            fclose($file);
+            try {
+                if (! $this->remove($temporary)) {
+                    throw new RuntimeException('Cannot remove temporary deployment state.');
+                }
+            } catch (Throwable $cleanup) {
+                if ($failure === null) {
+                    throw $cleanup;
+                }
+                try {
+                    Log::warning('Cannot remove temporary deployment state.', ['path' => $temporary, 'exception' => $cleanup]);
+                } catch (Throwable) {
+                }
+            }
         }
+    }
+
+    protected function remove(string $file): bool
+    {
+        return $this->retryFileOperation(function () use ($file) {
+            clearstatcache(true, $file);
+
+            return ! is_file($file) || @unlink($file);
+        });
+    }
+
+    private function retryFileOperation(callable $operation): bool
+    {
+        if (PHP_OS_FAMILY !== 'Windows') {
+            return $operation();
+        }
+        $deadline = hrtime(true) + 250000000;
+        while (! $operation()) {
+            if (hrtime(true) >= $deadline) {
+                return false;
+            }
+            usleep(2000);
+        }
+
+        return true;
     }
 
     private function locked(callable $work): mixed
@@ -302,16 +383,21 @@ class DeploymentGate
                         $role = $participant['role'];
                         if (isset($latest[$role])) {
                             unset($state['participants'][$latest[$role]]);
-                            @unlink($path.'/'.$latest[$role].'.lease');
+                            if (! $this->alive($latest[$role])) {
+                                $this->remove($path.'/'.$latest[$role].'.lease');
+                            }
                         }
                         $latest[$role] = $id;
                     }
                 }
             } else {
                 foreach ($state['participants'] as $id => $participant) {
-                    if ($participant['finished'] || ! $this->alive($id)) {
+                    $alive = $this->alive($id);
+                    if ($participant['finished'] || ! $alive) {
                         unset($state['participants'][$id]);
-                        @unlink($path.'/'.$id.'.lease');
+                        if (! $alive) {
+                            $this->remove($path.'/'.$id.'.lease');
+                        }
                     }
                 }
             }

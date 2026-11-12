@@ -88,7 +88,7 @@ const key = guidedKey(identities.user, identities.agent);
 const session = () => page.evaluate(key => JSON.parse(localStorage.getItem(key)), key);
 const state = () => cli("echo json_encode(['actions'=>App\\Models\\ShipAction::orderBy('id')->get(),'ships'=>App\\Models\\Ship::all(),'agent'=>App\\Models\\Agent::first()]);");
 const reload = async () => { await page.reload(); await coach.waitFor(); };
-const drain = () => execFileSync(php, ['artisan', 'queue:work', 'database', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' });
+const drain = () => execFileSync(php, ['artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' });
 const shot = name => page.screenshot({ path: path.join(output, name), animations: 'disabled' });
 async function verifyScrollFreedom() {
     await page.evaluate(() => {

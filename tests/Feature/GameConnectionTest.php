@@ -47,14 +47,16 @@ class GameConnectionTest extends TestCase
             ->assertJsonPath('props.gameConnection.endpoint', SpaceTradersClient::BASE_URL);
     }
 
-    public function test_default_database_worker_consumes_the_queue_used_by_gameplay_jobs(): void
+    public function test_gameplay_jobs_are_isolated_from_the_default_database_queue(): void
     {
         foreach ([new ExecuteShipCommand(1), new AdvanceAutomationRun(1)] as $job) {
             $this->assertSame('database', $job->connection);
             $this->assertSame('spacetraders', $job->queue);
-            $this->assertSame($job->queue, config('queue.connections.database.queue'));
+            $this->assertSame('default', config('queue.connections.database.queue'));
+            $this->assertNotSame($job->queue, config('queue.connections.database.queue'));
             $this->assertLessThan(config('queue.connections.database.retry_after'), $job->timeout);
-            $this->assertSame(1, $job->tries);
+            $this->assertSame(0, $job->tries);
+            $this->assertSame(1, $job->maxExceptions);
         }
     }
 }

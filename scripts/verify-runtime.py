@@ -20,34 +20,41 @@ def probe(arguments, expected, message, env=None):
 
 probe([php, str(root / 'scripts/runtime-preflight.php')], 0, 'PASS PHP')
 print('PASS real selected PHP and matching runtime pins')
+if os.name == 'nt':
+    probe([php, str(root / 'scripts/runtime-preflight.php')], 0,
+          'Windows engine profile (cooperative stop; no pcntl/posix)')
+    print('PASS Windows cooperative engine runtime profile')
 with tempfile.TemporaryDirectory(prefix='ops01-runtime-') as directory:
     fixture = Path(directory)
     (fixture / 'scripts').mkdir()
     for file in ['.php-version', 'composer.json', 'composer.lock', 'scripts/runtime-preflight.php']:
         shutil.copyfile(root / file, fixture / file)
     script = str(fixture / 'scripts/runtime-preflight.php')
-    lock = json.loads((fixture / 'composer.lock').read_text())
+    lock = json.loads((fixture / 'composer.lock').read_text(encoding='utf-8'))
     lock['platform-overrides']['php'] = '8.4.1'
-    (fixture / 'composer.lock').write_text(json.dumps(lock))
+    (fixture / 'composer.lock').write_text(json.dumps(lock), encoding='utf-8')
     probe([php, script], 1, 'PHP pins differ')
     print('PASS stale Composer lock pin rejected')
     shutil.copyfile(root / 'composer.lock', fixture / 'composer.lock')
-    (fixture / '.php-version').write_text('8.5.0\n')
-    composer = json.loads((fixture / 'composer.json').read_text())
+    (fixture / '.php-version').write_text('8.5.0\n', encoding='utf-8')
+    composer = json.loads((fixture / 'composer.json').read_text(encoding='utf-8'))
     composer['require']['php'] = '~8.5.0'
     composer['config']['platform']['php'] = '8.5.0'
     lock['platform']['php'] = '~8.5.0'
     lock['platform-overrides']['php'] = '8.5.0'
-    (fixture / 'composer.json').write_text(json.dumps(composer))
-    (fixture / 'composer.lock').write_text(json.dumps(lock))
+    (fixture / 'composer.json').write_text(json.dumps(composer), encoding='utf-8')
+    (fixture / 'composer.lock').write_text(json.dumps(lock), encoding='utf-8')
     probe([php, script], 1, 'Expected PHP 8.5.0; got')
     print('PASS untested PHP patch rejected even when manifest pins agree')
-    wrapper = fixture / 'PHP wrapper with spaces'
-    shutil.copyfile(root / 'scripts/herd-php', wrapper)
-    wrapper.chmod(0o700)
-    env = {**os.environ, 'HERD_PHP85_BIN': binary}
-    output = subprocess.check_output([str(wrapper), '-r', 'echo json_encode(array_slice($argv, 1));', '--', 'a b', '$literal'], env=env, text=True)
-    assert json.loads(output) == ['a b', '$literal'], output
-    print('PASS executable PHP_BIN wrapper preserves paths and literal arguments with spaces')
-    probe([str(wrapper), '-v'], 1, 'Herd PHP 8.5 executable not found', {**env, 'HERD_PHP85_BIN': str(fixture / 'missing')})
-    print('PASS missing Herd executable fails without falling back to global PHP')
+    if os.name == 'nt':
+        print('SKIP POSIX Herd PHP shell-wrapper checks on Windows')
+    else:
+        wrapper = fixture / 'PHP wrapper with spaces'
+        shutil.copyfile(root / 'scripts/herd-php', wrapper)
+        wrapper.chmod(0o700)
+        env = {**os.environ, 'HERD_PHP85_BIN': binary}
+        output = subprocess.check_output([str(wrapper), '-r', 'echo json_encode(array_slice($argv, 1));', '--', 'a b', '$literal'], env=env, text=True)
+        assert json.loads(output) == ['a b', '$literal'], output
+        print('PASS executable PHP_BIN wrapper preserves paths and literal arguments with spaces')
+        probe([str(wrapper), '-v'], 1, 'Herd PHP 8.5 executable not found', {**env, 'HERD_PHP85_BIN': str(fixture / 'missing')})
+        print('PASS missing Herd executable fails without falling back to global PHP')

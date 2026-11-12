@@ -2,6 +2,7 @@
 
 namespace App\Gameplay;
 
+use App\Gameplay\Engine\EngineHost;
 use App\Models\AutomationRun;
 use App\Models\LocalEngine;
 use App\Models\ShipAction;
@@ -10,6 +11,8 @@ use Illuminate\Support\Str;
 
 class EngineGate
 {
+    private const NOT_RUNNING_MESSAGE = 'The local engine is not running. Open Automation and choose Start local engine, then create a fresh preview.';
+
     public function enabled(): bool
     {
         return (bool) config('gameplay.local_engine_enabled');
@@ -22,7 +25,7 @@ class EngineGate
         }
         $engine = LocalEngine::find(1);
         if (! $engine || ! $engine->gate_open || $engine->state !== 'running' || ! $engine->heartbeat_at || $engine->heartbeat_at->lt(now()->subSeconds(15)) || ! $this->processesAlive($engine)) {
-            throw new GameException('Local engine is not healthy. Start the engine and create a fresh preview.');
+            throw new GameException(self::NOT_RUNNING_MESSAGE);
         }
 
         return $engine->session_id;
@@ -37,18 +40,17 @@ class EngineGate
         $engine = LocalEngine::find(1);
         if (! $engine || ! $this->processesAlive($engine)) {
             $this->close('faulted', 'Owned engine processes are no longer alive. Fresh session and preview required.');
-            throw new GameException('Owned engine processes are not alive.');
+            throw new GameException(self::NOT_RUNNING_MESSAGE);
         }
         if (! $session || ! LocalEngine::whereKey(1)->where('session_id', $session)->where('state', 'running')->where('gate_open', true)->where('heartbeat_at', '>=', now()->subSeconds(15))->update(['updated_at' => now()])) {
-            throw new GameException('Engine session closed or changed. Refresh state and approve a new preview.');
+            throw new GameException('The local engine session closed or changed. Open Automation and choose Start local engine, then create a fresh preview.');
         }
     }
 
     private function processesAlive(LocalEngine $engine): bool
     {
         foreach (['supervisor', 'worker', 'scheduler'] as $name) {
-            $pid = $engine->processes[$name] ?? null;
-            if (! is_int($pid) || $pid < 1 || ! posix_kill($pid, 0)) {
+            if (! app(EngineHost::class)->alive($engine, $name)) {
                 return false;
             }
         }

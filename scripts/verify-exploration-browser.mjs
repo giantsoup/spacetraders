@@ -69,7 +69,7 @@ page.on('console', message => { if (message.type() === 'error') errors.push(mess
 page.on('response', response => { if (response.status() >= 500) errors.push(`HTTP ${response.status()} ${new URL(response.url()).pathname}`); });
 const button = name => page.getByRole('button', { name, exact: true });
 const actions = () => cli("echo App\\Models\\ShipAction::orderBy('id')->get()->toJson();");
-const worker = () => execFileSync(php, ['artisan', 'queue:work', 'database', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' });
+const worker = () => execFileSync(php, ['artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' });
 async function click(name, suffix, status = 202) {
     const waiting = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(suffix));
     await button(name).click();
@@ -137,7 +137,7 @@ try {
     await shot('approval-mobile');
     await click('Approve command', `/commands/${scan.id}/approve`);
     cli(`App\\Jobs\\ExecuteShipCommand::dispatch(${scan.id}); echo '{}';`);
-    const competing = [0, 1].map(() => spawn(php, ['artisan', 'queue:work', 'database', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' }));
+    const competing = [0, 1].map(() => spawn(php, ['artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' }));
     const exits = await Promise.all(competing.map(child => once(child, 'exit')));
     assert.ok(exits.every(([code]) => code === 0));
     await page.reload();

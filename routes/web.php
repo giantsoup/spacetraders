@@ -36,6 +36,7 @@ Route::get('/', function () {
 });
 
 Route::middleware('auth')->group(function () {
+    Route::delete('/agents/account-token', [AgentController::class, 'forgetAccountToken'])->name('agents.accountToken.forget');
     Route::get('/rate-limit', RateLimitController::class)->name('game.rate-limit');
     Route::get('/guide', [PlayerGuideController::class, 'show'])->name('guide');
     Route::get('/agents/{agent}/guide', [PlayerGuideController::class, 'show'])->name('agents.guide');

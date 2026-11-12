@@ -8,6 +8,7 @@ use App\Gameplay\AutomationRunner;
 use App\Gameplay\AutomationStaging;
 use App\Gameplay\ContractPlanner;
 use App\Gameplay\CreditAccounting;
+use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\EngineGate;
 use App\Gameplay\GameException;
 use App\Gameplay\MiningPlanner;
@@ -30,6 +31,8 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Inertia\ResponseFactory;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\EngineFixture;
+use Tests\Support\FakeEngineHost;
 use Tests\Support\FakeSpaceTraders;
 use Tests\TestCase;
 
@@ -44,6 +47,7 @@ class LocalAutomationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->app->instance(EngineHost::class, new FakeEngineHost);
         config(['gameplay.enabled' => true, 'gameplay.local_engine_enabled' => true]);
         $this->file = tempnam(sys_get_temp_dir(), 'st-automation-');
         file_put_contents($this->file, json_encode(FakeSpaceTraders::world()));
@@ -64,7 +68,7 @@ class LocalAutomationTest extends TestCase
 
     private function engine(): void
     {
-        LocalEngine::updateOrCreate(['id' => 1], ['state' => 'running', 'session_id' => (string) Str::uuid(), 'gate_open' => true, 'heartbeat_at' => now(), 'processes' => ['supervisor' => getmypid(), 'worker' => getmypid(), 'scheduler' => getmypid()]]);
+        EngineFixture::healthy();
     }
 
     private function world(?callable $edit = null): array
@@ -502,14 +506,19 @@ class LocalAutomationTest extends TestCase
 
     public function test_engine_controls_reject_non_operator_and_browser_supplied_process_commands(): void
     {
+        config(['gameplay.local_engine_enabled' => true]);
+        $processId = getmypid();
         config(['gameplay.operator_id' => 99999]);
-        $this->postJson('/agents/'.$this->agent->id.'/engine/start', ['command' => 'touch /tmp/no', 'pid' => getmypid()])->assertForbidden();
+        $this->postJson('/agents/'.$this->agent->id.'/engine/start', ['command' => 'touch /tmp/no', 'pid' => $processId])->assertForbidden();
         $this->postJson('/agents/'.$this->agent->id.'/engine/force-stop')->assertUnprocessable();
-        $this->assertTrue(posix_kill(getmypid(), 0));
+        $this->assertSame($processId, getmypid());
+        $commands = array_filter(app(EngineHost::class)->calls, fn ($call) => in_array($call[0], ['install', 'launch', 'forceStop', 'uninstall', 'spawn'], true));
+        $this->assertSame([], $commands);
     }
 
     public function test_staged_routes_validate_integer_limits_and_revision(): void
     {
+        config(['gameplay.local_engine_enabled' => true]);
         $investigation = $this->investigation();
         $this->postJson('/agents/'.$this->agent->id.'/drafts', ['investigation_id' => $investigation->id, 'candidate_id' => $investigation->candidates[0]['id'], 'limits' => ['reserve' => -1, 'max_spend' => 1.5]])->assertUnprocessable()->assertJsonValidationErrors(['limits.reserve', 'limits.max_spend']);
         $draft = $this->draft();
@@ -518,6 +527,7 @@ class LocalAutomationTest extends TestCase
 
     public function test_balance_reviews_keep_the_first_observation_and_never_invent_operating_receipts(): void
     {
+        config(['gameplay.local_engine_enabled' => true]);
         $this->world(function (&$w) {
             $w['credits'] += 123;
         });
@@ -584,7 +594,7 @@ class LocalAutomationTest extends TestCase
         $this->assertTrue(collect($record->candidates)->contains(fn ($c) => str_contains(implode(' ', $c['reasons']), 'deadline')));
     }
 
-    public function test_a_fresh_preview_cannot_expand_approved_limits_or_cross_a_sleep_gap(): void
+    public function test_a_fresh_preview_cannot_expand_approved_limits(): void
     {
         $draft = $this->draft('contracts', ['purchase_limit' => 1]);
         try {
@@ -593,6 +603,10 @@ class LocalAutomationTest extends TestCase
         } catch (GameException $e) {
             $this->assertStringContainsString('bounds', $e->getMessage());
         }
+    }
+
+    public function test_a_fresh_preview_cannot_cross_an_engine_sleep_gap(): void
+    {
         $run = $this->preview();
         LocalEngine::whereKey(1)->update(['heartbeat_at' => now()->subSeconds(16)]);
         $this->expectException(GameException::class);
@@ -609,7 +623,7 @@ class LocalAutomationTest extends TestCase
         app(AutomationRunner::class)->start($this->agent, $run, true);
         app(AutomationRunner::class)->advance($run->id);
         $action = ShipAction::where('state', 'pending')->firstOrFail();
-        LocalEngine::whereKey(1)->update(['processes' => json_encode(['supervisor' => 2147483647, 'worker' => getmypid(), 'scheduler' => getmypid()])]);
+        EngineFixture::kill('supervisor');
         app(ShipCommandExecutor::class)->execute($action->id);
         $this->assertSame('rejected', $action->fresh()->state->value);
         $this->assertFalse(LocalEngine::find(1)->gate_open);
@@ -667,10 +681,17 @@ class LocalAutomationTest extends TestCase
 
     public function test_new_responses_and_jobs_do_not_contain_credentials_or_process_identifiers(): void
     {
+        config(['gameplay.local_engine_enabled' => true]);
         $draft = $this->draft();
         $response = $this->postJson('/agents/'.$this->agent->id.'/drafts/'.$draft->id.'/preview', ['revision' => 1])->assertAccepted();
         $this->assertStringNotContainsString('synthetic-only', $response->getContent());
         $this->assertStringNotContainsString(config('app.key'), $response->getContent());
+    }
+
+    public function test_engine_status_does_not_contain_credentials_or_process_identifiers(): void
+    {
+        $draft = $this->draft();
+        $this->postJson('/agents/'.$this->agent->id.'/drafts/'.$draft->id.'/preview', ['revision' => 1])->assertAccepted();
         $dashboard = $this->get('/agents/'.$this->agent->id, ['X-Inertia' => 'true', 'X-Inertia-Version' => app(ResponseFactory::class)->getVersion()])->assertOk();
         $this->assertStringNotContainsString('synthetic-only', $dashboard->getContent());
         $this->assertStringNotContainsString(config('app.key'), $dashboard->getContent());
@@ -689,6 +710,7 @@ class LocalAutomationTest extends TestCase
 
     public function test_same_owner_cannot_reuse_another_agents_or_resets_draft_and_investigation(): void
     {
+        config(['gameplay.local_engine_enabled' => true]);
         $draft = $this->draft();
         $sibling = $this->agent->user->agents()->create(['name' => 'OTHER', 'token' => 'synthetic-other', 'account_id' => 'synthetic', 'faction' => 'COSMIC', 'reset_id' => $this->agent->reset_id, 'canonical_identity' => AgentSynchronizer::identity($this->agent->reset_id, 'OTHER')]);
         foreach (['investigations/'.$draft->investigation_id.'/advance', 'investigations/'.$draft->investigation_id.'/cancel'] as $path) {

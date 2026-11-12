@@ -23,6 +23,13 @@ $app = new Application(
     $_ENV['APP_BASE_PATH'] ?? dirname(__DIR__)
 );
 
+if (PHP_OS_FAMILY === 'Windows') {
+    foreach (array_merge(range('A', 'Z'), range('a', 'z')) as $drive) {
+        $app->addAbsoluteCachePathPrefix($drive.':/');
+        $app->addAbsoluteCachePathPrefix($drive.':\\');
+    }
+}
+
 /*
 |--------------------------------------------------------------------------
 | Bind Important Interfaces

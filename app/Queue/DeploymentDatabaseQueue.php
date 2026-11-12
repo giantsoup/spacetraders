@@ -13,6 +13,10 @@ class DeploymentDatabaseQueue extends DatabaseQueue
             return parent::pop($queue);
         }
 
+        if (! app(EngineWorkerGate::class)->allowsPolling()) {
+            return null;
+        }
+
         return app(DeploymentGate::class)->reserve(fn () => parent::pop($queue));
     }
 }
