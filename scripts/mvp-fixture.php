@@ -15,6 +15,17 @@ require __DIR__.'/../vendor/autoload.php';
 $root = dirname(__DIR__);
 $isolated = in_array('--isolated', $argv, true);
 $directory = $isolated ? sys_get_temp_dir().'/spacetraders-fixture-'.bin2hex(random_bytes(6)) : $root.'/storage/app/mvp-fixture';
+$directoryOption = array_search('--directory', $argv, true);
+if ($directoryOption !== false) {
+    $requested = $argv[$directoryOption + 1] ?? '';
+    if (! $isolated || ! preg_match('~^(?:[A-Za-z]:[\\\\/]|/)~', $requested)) {
+        throw new RuntimeException('--directory requires --isolated and an absolute path.');
+    }
+    $directory = $requested;
+}
+if (PHP_OS_FAMILY === 'Windows') {
+    $directory = str_replace('\\', '/', $directory);
+}
 $environmentFile = $isolated ? $directory.'/.env' : $root.'/.env';
 if (! $isolated && file_exists($environmentFile)) {
     fwrite(STDERR, "An environment already exists. Refusing to replace it. Use the documented isolated fixture.\n");
@@ -39,10 +50,27 @@ $values = [
     'SPACETRADERS_LOCK_PATH' => $directory.'/locks',
     'SPACETRADERS_FIXTURE_PATH' => $directory.'/world.json', 'SPACETRADERS_AUTOMATION_ENABLED' => 'true',
 ];
+if ($isolated && PHP_OS_FAMILY === 'Windows') {
+    foreach (['app', 'framework/cache/data', 'framework/sessions', 'framework/views', 'logs'] as $path) {
+        mkdir($directory.'/storage/'.$path, 0700, true);
+    }
+    $values = array_merge($values, [
+        'APP_URL' => 'http://127.0.0.1:8010', 'APP_BASE_PATH' => str_replace('\\', '/', $root),
+        'DATABASE_URL' => '', 'DB_URL' => '', 'SPACETRADERS_LOCAL_ENGINE_ENABLED' => 'false',
+        'SPACETRADERS_OPERATOR_ID' => '', 'SPACETRADERS_PHP_BINARY' => str_replace('\\', '/', PHP_BINARY),
+        'LARAVEL_STORAGE_PATH' => $directory.'/storage', 'APP_CONFIG_CACHE' => $directory.'/no-config.php',
+        'APP_ROUTES_CACHE' => $directory.'/no-routes.php', 'APP_EVENTS_CACHE' => $directory.'/no-events.php',
+        'APP_SERVICES_CACHE' => $directory.'/services.php', 'APP_PACKAGES_CACHE' => $directory.'/packages.php',
+        'SPACETRADERS_REQUEST_BUDGET_PATH' => $directory.'/request-budget',
+    ]);
+}
 foreach ($values as $name => $value) {
+    if (PHP_OS_FAMILY === 'Windows') {
+        $value = '"'.str_replace(['\\', '"', '$'], ['\\\\', '\\"', '\\$'], $value).'"';
+    }
     $line = $name.'='.$value;
     $environment = preg_match('/^'.preg_quote($name, '/').'=/m', $environment)
-        ? preg_replace('/^'.preg_quote($name, '/').'=.*$/m', $line, $environment)
+        ? preg_replace_callback('/^'.preg_quote($name, '/').'=.*$/m', fn () => $line, $environment)
         : $environment."\n".$line;
 }
 file_put_contents($environmentFile, $environment."\n");
@@ -81,7 +109,13 @@ $encrypted = $restore->query('select token from agents limit 1')->fetchColumn();
 if (decrypt($encrypted, false) !== 'synthetic-offline-only') {
     throw new RuntimeException('Backup restore credential round-trip failed.');
 }
+if (PHP_OS_FAMILY === 'Windows') {
+    $restore = null;
+}
 unlink($directory.'/restore-check.sqlite');
+if ($isolated && PHP_OS_FAMILY === 'Windows') {
+    file_put_contents($directory.'/.windows-ready', 'fixture and backup verified');
+}
 echo "Synthetic fixture ready. All SpaceTraders HTTP is intercepted. Database/key backup restore verified.\n";
 
 echo 'Owned fixture directory: '.$directory."\n";
