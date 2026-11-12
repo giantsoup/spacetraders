@@ -8,6 +8,7 @@ use App\Gameplay\AutomationRunner;
 use App\Gameplay\AutomationStaging;
 use App\Gameplay\ContractPlanner;
 use App\Gameplay\CreditAccounting;
+use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\EngineGate;
 use App\Gameplay\GameException;
 use App\Gameplay\MiningPlanner;
@@ -30,6 +31,8 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Inertia\ResponseFactory;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\EngineFixture;
+use Tests\Support\FakeEngineHost;
 use Tests\Support\FakeSpaceTraders;
 use Tests\TestCase;
 
@@ -44,7 +47,8 @@ class LocalAutomationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        config(['gameplay.enabled' => true, 'gameplay.local_engine_enabled' => PHP_OS_FAMILY !== 'Windows']);
+        $this->app->instance(EngineHost::class, new FakeEngineHost);
+        config(['gameplay.enabled' => true, 'gameplay.local_engine_enabled' => true]);
         $this->file = tempnam(sys_get_temp_dir(), 'st-automation-');
         file_put_contents($this->file, json_encode(FakeSpaceTraders::world()));
         FakeSpaceTraders::install($this->file);
@@ -64,14 +68,7 @@ class LocalAutomationTest extends TestCase
 
     private function engine(): void
     {
-        LocalEngine::updateOrCreate(['id' => 1], ['state' => 'running', 'session_id' => (string) Str::uuid(), 'gate_open' => true, 'heartbeat_at' => now(), 'processes' => ['supervisor' => getmypid(), 'worker' => getmypid(), 'scheduler' => getmypid()]]);
-    }
-
-    private function requireNativeEngine(): void
-    {
-        if (PHP_OS_FAMILY === 'Windows') {
-            $this->markTestSkipped('Windows engine port (M2): native process liveness and engine session checks require POSIX.');
-        }
+        EngineFixture::healthy();
     }
 
     private function world(?callable $edit = null): array
@@ -409,9 +406,6 @@ class LocalAutomationTest extends TestCase
     #[DataProvider('materialChanges')]
     public function test_material_changes_cannot_execute_an_old_preview(string $change): void
     {
-        if ($change === 'session') {
-            $this->requireNativeEngine();
-        }
         $run = $this->preview();
         $this->world(function (&$w) use ($change) {
             match ($change) {
@@ -518,9 +512,8 @@ class LocalAutomationTest extends TestCase
         $this->postJson('/agents/'.$this->agent->id.'/engine/start', ['command' => 'touch /tmp/no', 'pid' => $processId])->assertForbidden();
         $this->postJson('/agents/'.$this->agent->id.'/engine/force-stop')->assertUnprocessable();
         $this->assertSame($processId, getmypid());
-        if (function_exists('posix_kill')) {
-            $this->assertTrue(posix_kill($processId, 0));
-        }
+        $commands = array_filter(app(EngineHost::class)->calls, fn ($call) => in_array($call[0], ['install', 'launch', 'forceStop', 'uninstall', 'spawn'], true));
+        $this->assertSame([], $commands);
     }
 
     public function test_staged_routes_validate_integer_limits_and_revision(): void
@@ -614,7 +607,6 @@ class LocalAutomationTest extends TestCase
 
     public function test_a_fresh_preview_cannot_cross_an_engine_sleep_gap(): void
     {
-        $this->requireNativeEngine();
         $run = $this->preview();
         LocalEngine::whereKey(1)->update(['heartbeat_at' => now()->subSeconds(16)]);
         $this->expectException(GameException::class);
@@ -627,12 +619,11 @@ class LocalAutomationTest extends TestCase
 
     public function test_dead_processes_close_permission_even_with_a_fresh_heartbeat(): void
     {
-        $this->requireNativeEngine();
         $run = $this->preview();
         app(AutomationRunner::class)->start($this->agent, $run, true);
         app(AutomationRunner::class)->advance($run->id);
         $action = ShipAction::where('state', 'pending')->firstOrFail();
-        LocalEngine::whereKey(1)->update(['processes' => json_encode(['supervisor' => 2147483647, 'worker' => getmypid(), 'scheduler' => getmypid()])]);
+        EngineFixture::kill('supervisor');
         app(ShipCommandExecutor::class)->execute($action->id);
         $this->assertSame('rejected', $action->fresh()->state->value);
         $this->assertFalse(LocalEngine::find(1)->gate_open);
@@ -699,7 +690,6 @@ class LocalAutomationTest extends TestCase
 
     public function test_engine_status_does_not_contain_credentials_or_process_identifiers(): void
     {
-        $this->requireNativeEngine();
         $draft = $this->draft();
         $this->postJson('/agents/'.$this->agent->id.'/drafts/'.$draft->id.'/preview', ['revision' => 1])->assertAccepted();
         $dashboard = $this->get('/agents/'.$this->agent->id, ['X-Inertia' => 'true', 'X-Inertia-Version' => app(ResponseFactory::class)->getVersion()])->assertOk();

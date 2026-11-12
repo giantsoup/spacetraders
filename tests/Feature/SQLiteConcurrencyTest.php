@@ -4,12 +4,14 @@ namespace Tests\Feature;
 
 use App\Enums\ActionState;
 use App\Gameplay\AgentSynchronizer;
+use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\ShipCommandExecutor;
-use App\Models\LocalEngine;
 use App\Models\User;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Support\EngineFixture;
+use Tests\Support\FakeEngineHost;
 use Tests\Support\FakeSpaceTraders;
 use Tests\TestCase;
 
@@ -17,20 +19,19 @@ class SQLiteConcurrencyTest extends TestCase
 {
     public function test_engine_heartbeat_cannot_break_action_reservation_by_invalidating_a_read_snapshot(): void
     {
-        if (PHP_OS_FAMILY === 'Windows') {
-            $this->markTestSkipped('Windows engine port (M2): the competing writer must exercise the real POSIX engine gate.');
-        }
+        $this->app->instance(EngineHost::class, new FakeEngineHost);
         $file = tempnam(sys_get_temp_dir(), 'st-sqlite-race-');
         $world = $file.'.json';
         file_put_contents($world, json_encode(FakeSpaceTraders::world()));
         config(['database.default' => 'sqlite', 'database.connections.sqlite.database' => $file, 'gameplay.local_engine_enabled' => true]);
         DB::purge();
+        $contender = null;
         try {
             Artisan::call('migrate:fresh', ['--force' => true]);
             FakeSpaceTraders::install($world);
             $user = User::factory()->create();
             $agent = $user->agents()->create(['name' => 'LOCAL', 'token' => 'synthetic-race-token', 'account_id' => 'fixture', 'faction' => 'COSMIC', 'reset_id' => '2026-10-25', 'canonical_identity' => AgentSynchronizer::identity('2026-10-25', 'LOCAL')]);
-            LocalEngine::create(['id' => 1, 'state' => 'running', 'session_id' => (string) Str::uuid(), 'gate_open' => true, 'heartbeat_at' => now(), 'processes' => ['supervisor' => getmypid(), 'worker' => getmypid(), 'scheduler' => getmypid()]]);
+            EngineFixture::healthy();
             app(AgentSynchronizer::class)->sync($agent);
             $executor = app(ShipCommandExecutor::class);
             $action = $executor->preview($agent, 'LOCAL-1', 'orbit', [], (string) Str::uuid());
@@ -38,7 +39,7 @@ class SQLiteConcurrencyTest extends TestCase
             $contender = new \PDO('sqlite:'.$file);
             $contender->exec('PRAGMA busy_timeout = 1');
             $injected = false;
-            DB::listen(function ($query) use (&$injected, $contender) {
+            DB::listen(function ($query) use (&$injected, &$contender) {
                 if (! $injected && $query->connection->transactionLevel() > 0 && str_starts_with($query->sql, 'select * from "local_engines"')) {
                     $injected = true;
                     try {
@@ -56,6 +57,7 @@ class SQLiteConcurrencyTest extends TestCase
             $this->assertSame(ActionState::Confirmed, $action->fresh()->state, $action->fresh()->message);
             $this->assertCount(1, json_decode(file_get_contents($world), true)['writes']);
         } finally {
+            $contender = null;
             DB::purge();
             foreach ([$file, $file.'-wal', $file.'-shm', $world] as $owned) {
                 if (is_file($owned)) {
