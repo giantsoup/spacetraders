@@ -3,6 +3,8 @@
 namespace App\Console\Commands;
 
 use App\Gameplay\DeploymentGate;
+use App\Gameplay\Engine\EngineChildWatch;
+use App\Gameplay\Engine\EngineHost;
 use App\Models\LocalEngine;
 use Illuminate\Console\Command;
 
@@ -14,15 +16,12 @@ class ScheduleLocalEngine extends Command
 
     public function handle(): int
     {
-        pcntl_async_signals(true);
         $stop = false;
-        pcntl_signal(SIGTERM, function () use (&$stop) {
+        app(EngineHost::class)->onStopSignal(function () use (&$stop) {
             $stop = true;
         });
-        pcntl_signal(SIGINT, function () use (&$stop) {
-            $stop = true;
-        });
-        while (! $stop) {
+        $watch = app(EngineChildWatch::class);
+        while (! $stop && ! $watch->shouldStop()) {
             $gate = app(DeploymentGate::class);
             $id = $gate->begin('scheduler');
             try {
@@ -34,7 +33,7 @@ class ScheduleLocalEngine extends Command
                     $gate->finish($id);
                 }
             }
-            for ($i = 0; $i < 25 && ! $stop; $i++) {
+            for ($i = 0; $i < 25 && ! $stop && ! $watch->shouldStop(); $i++) {
                 usleep(200000);
             }
         }

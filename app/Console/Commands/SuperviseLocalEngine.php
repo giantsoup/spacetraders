@@ -3,14 +3,15 @@
 namespace App\Console\Commands;
 
 use App\Gameplay\AutomationRunner;
+use App\Gameplay\Engine\EngineChildWatch;
+use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\EngineGate;
 use App\Gameplay\HostLock;
-use App\Gameplay\LocalEngineManager;
 use App\Models\AutomationRun;
 use App\Models\LocalEngine;
 use App\Models\ShipAction;
 use Illuminate\Console\Command;
-use Symfony\Component\Process\Process;
+use Illuminate\Support\Facades\Log;
 
 class SuperviseLocalEngine extends Command
 {
@@ -18,47 +19,56 @@ class SuperviseLocalEngine extends Command
 
     protected $description = 'Own exactly one worker and scheduler until the local session ends';
 
-    public function handle(HostLock $lock, EngineGate $gate, LocalEngineManager $manager): int
+    public function handle(HostLock $lock, EngineGate $gate, EngineHost $host): int
     {
-        if (! $gate->enabled() || ! app()->environment('local') || ! is_file($manager->directory().'/service.plist')) {
+        if (! $gate->enabled() || ! app()->environment('local') || ! $host->hasServiceMarker()) {
             return self::FAILURE;
         }
 
-        return $lock->run('engine-instance', function () use ($gate) {
+        return $lock->run('engine-instance', function () use ($gate, $host) {
             $engine = $gate->begin();
-            $engine->update(['processes' => ['supervisor' => getmypid()]]);
-            pcntl_async_signals(true);
-            $stop = fn () => $gate->close();
-            pcntl_signal(SIGTERM, $stop);
-            pcntl_signal(SIGINT, $stop);
             $children = [];
             try {
+                $host->claim($engine->session_id, 'supervisor');
+                $engine->update(['processes' => ['supervisor' => getmypid()]]);
+                $host->onStopSignal(fn () => $gate->close());
                 foreach ([
                     'worker' => ['queue:work', 'database', '--queue=spacetraders', '--sleep=1', '--tries=1', '--timeout=120'],
                     'scheduler' => ['spacetraders:engine-schedule'],
                 ] as $name => $arguments) {
-                    $child = new Process(array_merge([config('gameplay.php_binary'), base_path('artisan')], $arguments), base_path());
-                    $child->setTimeout(null)->disableOutput()->start();
-                    $children[$name] = $child;
+                    $children[$name] = $host->spawn($engine->session_id, $name, $arguments);
                 }
-                usleep(300000);
-                if (! $children['worker']->isRunning() || ! $children['scheduler']->isRunning()) {
+                $workerReady = $children['worker']->ready(10);
+                $schedulerReady = $children['scheduler']->ready(10);
+                if (! $workerReady || ! $schedulerReady) {
                     throw new \RuntimeException('Owned child failed to start.');
                 }
-                $engine->update(['processes' => ['supervisor' => getmypid(), 'worker' => $children['worker']->getPid(), 'scheduler' => $children['scheduler']->getPid()]]);
-                LocalEngine::whereKey(1)->where('session_id', $engine->session_id)->whereNull('stop_requested_at')->update(['state' => 'running', 'gate_open' => true, 'heartbeat_at' => now(), 'processes' => json_encode(['supervisor' => getmypid(), 'worker' => $children['worker']->getPid(), 'scheduler' => $children['scheduler']->getPid()]), 'message' => 'Worker and scheduler alive. Awaiting new approvals.']);
+                $processes = ['supervisor' => getmypid(), 'worker' => $children['worker']->pid(), 'scheduler' => $children['scheduler']->pid()];
+                $processes['identity'] = $host->identify($processes);
+                $engine->update(['processes' => $processes]);
+                LocalEngine::whereKey(1)->where('session_id', $engine->session_id)->whereNull('stop_requested_at')->update(['state' => 'running', 'gate_open' => true, 'heartbeat_at' => now(), 'processes' => json_encode($processes), 'message' => 'Worker and scheduler alive. Awaiting new approvals.']);
                 $last = microtime(true);
+                $lastMonotonic = hrtime(true);
                 $shutdown = null;
                 $signalled = false;
                 while (true) {
-                    $gap = microtime(true) - $last;
-                    $last = microtime(true);
+                    $wall = microtime(true);
+                    $monotonic = hrtime(true);
+                    $gap = max($wall - $last, ($monotonic - $lastMonotonic) / 1e9);
+                    $last = $wall;
+                    $lastMonotonic = $monotonic;
                     $engine->refresh();
                     if ($gap > 15) {
                         $gate->close('faulted', 'Sleep or heartbeat gap detected. Refresh state and start a fresh session.');
                         $engine->refresh();
                     }
-                    if (! $engine->stop_requested_at && (! $children['worker']->isRunning() || ! $children['scheduler']->isRunning())) {
+                    $jobStartedAt = $this->jobStartedAt($engine->session_id);
+                    $jobTimedOut = $children['worker']->isRunning() && $jobStartedAt !== null && microtime(true) - $jobStartedAt > 150;
+                    if ($jobTimedOut) {
+                        Log::error('Owned worker job exceeded 150 seconds. Terminating worker.', ['session' => $engine->session_id]);
+                        $children['worker']->kill();
+                    }
+                    if ($jobTimedOut || (! $engine->stop_requested_at && (! $children['worker']->isRunning() || ! $children['scheduler']->isRunning()))) {
                         $gate->close('faulted', 'An owned child exited. New approvals are closed.');
                         $engine->refresh();
                     }
@@ -68,7 +78,7 @@ class SuperviseLocalEngine extends Command
                         if (! $signalled) {
                             foreach ($children as $child) {
                                 if ($child->isRunning()) {
-                                    $child->signal(SIGTERM);
+                                    $child->requestStop();
                                 }
                             }
                             $signalled = true;
@@ -94,12 +104,17 @@ class SuperviseLocalEngine extends Command
                 $gate->close('faulted', 'Supervisor failed. Reconcile any reserved action before a fresh preview.');
                 foreach ($children as $child) {
                     if ($child->isRunning()) {
-                        $child->stop(2, SIGTERM);
+                        $child->kill();
                     }
                 }
 
                 return self::FAILURE;
             }
         });
+    }
+
+    protected function jobStartedAt(string $session): ?float
+    {
+        return EngineChildWatch::jobStartedAt($session);
     }
 }
