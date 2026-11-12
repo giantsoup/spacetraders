@@ -5,6 +5,7 @@ require __DIR__.'/../vendor/autoload.php';
 
 use App\Gameplay\AutomationRunner;
 use App\Gameplay\AutomationStaging;
+use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\EngineGate;
 use App\Gameplay\OpportunityInvestigator;
 use App\Gameplay\ShipCommandExecutor;
@@ -56,8 +57,33 @@ function checkAutomation(bool $value, string $message): void
     }
     $steps[] = $message;
 }
+function readWorld(string $file): array
+{
+    $handle = fopen($file, 'r');
+    if ($handle === false) {
+        throw new RuntimeException('Cannot open owned fixture world.');
+    }
+    try {
+        if (! flock($handle, LOCK_SH)) {
+            throw new RuntimeException('Cannot lock owned fixture world.');
+        }
+
+        return json_decode(stream_get_contents($handle), true, flags: JSON_THROW_ON_ERROR);
+    } finally {
+        flock($handle, LOCK_UN);
+        fclose($handle);
+    }
+}
 function pulse(): void
 {
+    static $claimed = null;
+    $engine = LocalEngine::findOrFail(1);
+    if ($claimed !== $engine->session_id) {
+        foreach (['supervisor', 'worker', 'scheduler'] as $role) {
+            app(EngineHost::class)->claim($engine->session_id, $role);
+        }
+        $claimed = $engine->session_id;
+    }
     LocalEngine::whereKey(1)->update(['state' => 'running', 'gate_open' => true, 'heartbeat_at' => now(), 'processes' => json_encode(['supervisor' => getmypid(), 'worker' => getmypid(), 'scheduler' => getmypid()])]);
 }
 function finiteWorkers(): void
@@ -82,7 +108,7 @@ while ($investigation->fresh()->status === 'investigating') {
 }
 $candidate = collect($investigation->fresh()->candidates)->firstWhere('classification', 'ready');
 checkAutomation($candidate !== null, 'Read-only investigation found a verified contract');
-checkAutomation(json_decode(file_get_contents($file), true)['writes'] === [], 'Investigation caused no game mutations');
+checkAutomation(readWorld($file)['writes'] === [], 'Investigation caused no game mutations');
 $draft = app(AutomationStaging::class)->save($agent, $investigation->fresh(), $candidate['id'], ['reserve' => 2000, 'max_spend' => 500, 'max_loss' => 500, 'minutes' => 60, 'cycles' => 1, 'delivery_limit' => 10, 'purchase_limit' => 40]);
 app(EngineGate::class)->begin();
 pulse();
@@ -100,7 +126,7 @@ if ($case === 'complete') {
         finiteWorkers();
     }
     $run->refresh();
-    $world = json_decode(file_get_contents($file), true);
+    $world = readWorld($file);
     checkAutomation($run->state->value === 'completed', 'Complete contract crossed real worker restarts: '.($run->blocked_reason ?? ''));
     checkAutomation($run->totals['cash_contribution'] === 1300 && $run->totals['receipts'] === 1600 && $run->totals['acquisition_cost'] === 300, 'Confirmed contract contribution and receipts persisted separately');
     checkAutomation(count($world['writes']) === ShipAction::where('state', 'confirmed')->count(), 'Duplicate jobs and two workers produced exactly one write per confirmed intent');
@@ -127,7 +153,7 @@ if ($case === 'complete') {
         finiteWorkers();
     }
     checkAutomation($target !== null, 'Reached crash boundary '.$case);
-    $world = json_decode(file_get_contents($file), true);
+    $world = readWorld($file);
     $world['failure'] = 'pause_after';
     file_put_contents($file, json_encode($world));
     ExecuteShipCommand::dispatch($target->id);
@@ -139,16 +165,16 @@ if ($case === 'complete') {
             usleep(20000);
         }
         checkAutomation(is_file($file.'.sent'), 'Real worker reached committed-upstream/lost-response window for '.$case);
-        $worker->signal(SIGKILL);
+        $worker->signal(9);
         $worker->wait();
     } finally {
         if ($worker->isRunning()) {
-            $worker->stop(1, SIGKILL);
+            $worker->stop(1, 9);
         }
     }
     $target->refresh();
     checkAutomation($target->state->value === 'sending', 'Killed sender retains durable sending intent');
-    $world = json_decode(file_get_contents($file), true);
+    $world = readWorld($file);
     $world['failure'] = null;
     $writes = count($world['writes']);
     file_put_contents($file, json_encode($world));
@@ -159,14 +185,14 @@ if ($case === 'complete') {
     ExecuteShipCommand::dispatch($target->id);
     finiteWorkers();
     checkAutomation($target->fresh()->state->value === 'uncertain', 'Recovery holds the uncertain '.$case.' rather than replaying');
-    checkAutomation(count(json_decode(file_get_contents($file), true)['writes']) === $writes, 'No duplicate game mutation after '.$case.' process death');
+    checkAutomation(count(readWorld($file)['writes']) === $writes, 'No duplicate game mutation after '.$case.' process death');
     app(ShipCommandExecutor::class)->reconcile($agent, $target);
     checkAutomation(isset($target->fresh()->outcome['contract']), 'Fresh contract progress retained as reconciliation evidence');
     app(EngineGate::class)->begin();
     pulse();
     AdvanceAutomationRun::dispatch($run->id);
     finiteWorkers();
-    checkAutomation(count(json_decode(file_get_contents($file), true)['writes']) === $writes, 'Engine session restart cannot replay uncertain work');
+    checkAutomation(count(readWorld($file)['writes']) === $writes, 'Engine session restart cannot replay uncertain work');
 }
 checkAutomation(DB::table('failed_jobs')->count() === 0, 'No failed jobs in the disposable queue');
 file_put_contents($directory.'/automation-worker-result.json', json_encode(['case' => $case, 'passed' => true, 'steps' => $steps], JSON_PRETTY_PRINT));

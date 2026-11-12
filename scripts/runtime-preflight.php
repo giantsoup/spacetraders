@@ -17,9 +17,15 @@ if ($expected !== PHP_VERSION) {
     exit(1);
 }
 $required = ['curl', 'dom', 'fileinfo', 'mbstring', 'openssl', 'pcntl', 'pdo_sqlite', 'posix', 'session', 'sqlite3', 'tokenizer', 'xml'];
+if (PHP_OS_FAMILY === 'Windows') {
+    $required = array_values(array_diff($required, ['pcntl', 'posix']));
+}
 $missing = array_values(array_filter($required, fn ($extension) => ! extension_loaded($extension)));
 if ($missing !== []) {
     fwrite(STDERR, 'Missing PHP extensions: '.implode(', ', $missing)."\n");
     exit(1);
 }
 echo 'PASS PHP '.PHP_VERSION.' matches Composer, lockfile and CI pin; worker/SQLite extensions loaded.'.PHP_EOL;
+if (PHP_OS_FAMILY === 'Windows') {
+    echo 'PASS Windows engine profile (cooperative stop; no pcntl/posix)'.PHP_EOL;
+}
