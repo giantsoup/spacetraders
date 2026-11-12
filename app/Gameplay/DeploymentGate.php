@@ -6,8 +6,10 @@ use App\Queue\EngineWorkerGate;
 use Illuminate\Cache\FileStore;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use RuntimeException;
+use Throwable;
 
 class DeploymentGate
 {
@@ -266,6 +268,7 @@ class DeploymentGate
     {
         $path = $this->path();
         $temporary = $path.'/state-'.bin2hex(random_bytes(8)).'.tmp';
+        $failure = null;
         try {
             if (@file_put_contents($temporary, json_encode($state, JSON_THROW_ON_ERROR)) === false) {
                 throw new RuntimeException('Cannot persist deployment state.');
@@ -287,14 +290,27 @@ class DeploymentGate
             if (! $this->retryFileOperation(fn () => @rename($temporary, $path.'/state.json'))) {
                 throw new RuntimeException('Cannot commit deployment state.');
             }
+        } catch (Throwable $error) {
+            $failure = $error;
+            throw $error;
         } finally {
-            if (! $this->remove($temporary)) {
-                throw new RuntimeException('Cannot remove temporary deployment state.');
+            try {
+                if (! $this->remove($temporary)) {
+                    throw new RuntimeException('Cannot remove temporary deployment state.');
+                }
+            } catch (Throwable $cleanup) {
+                if ($failure === null) {
+                    throw $cleanup;
+                }
+                try {
+                    Log::warning('Cannot remove temporary deployment state.', ['path' => $temporary, 'exception' => $cleanup]);
+                } catch (Throwable) {
+                }
             }
         }
     }
 
-    private function remove(string $file): bool
+    protected function remove(string $file): bool
     {
         return $this->retryFileOperation(function () use ($file) {
             clearstatcache(true, $file);
@@ -366,16 +382,21 @@ class DeploymentGate
                         $role = $participant['role'];
                         if (isset($latest[$role])) {
                             unset($state['participants'][$latest[$role]]);
-                            $this->remove($path.'/'.$latest[$role].'.lease');
+                            if (! $this->alive($latest[$role])) {
+                                $this->remove($path.'/'.$latest[$role].'.lease');
+                            }
                         }
                         $latest[$role] = $id;
                     }
                 }
             } else {
                 foreach ($state['participants'] as $id => $participant) {
-                    if ($participant['finished'] || ! $this->alive($id)) {
+                    $alive = $this->alive($id);
+                    if ($participant['finished'] || ! $alive) {
                         unset($state['participants'][$id]);
-                        $this->remove($path.'/'.$id.'.lease');
+                        if (! $alive) {
+                            $this->remove($path.'/'.$id.'.lease');
+                        }
                     }
                 }
             }

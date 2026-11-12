@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
+use PHPUnit\Framework\Attributes\TestWith;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -31,6 +32,47 @@ class DeploymentGateTest extends TestCase
     {
         unset($this->gate);
         parent::tearDown();
+    }
+
+    #[TestWith([false])]
+    #[TestWith([true])]
+    public function test_obsolete_held_leases_are_not_submitted_for_deletion(bool $closed): void
+    {
+        $gate = new class extends DeploymentGate
+        {
+            public array $removed = [];
+
+            protected function remove(string $file): bool
+            {
+                $this->removed[] = $file;
+
+                return parent::remove($file);
+            }
+        };
+        if ($closed) {
+            $gate->close('held-lease-test');
+            $gate->begin('scheduler');
+            $state = $gate->status();
+            $id = array_key_first($state['participants']);
+        } else {
+            $id = $gate->begin('web');
+            $gate->finish($id);
+        }
+        $path = config('deployment.path').'/'.$id.'.lease';
+        $held = fopen($path, 'r+');
+        $this->assertTrue(flock($held, LOCK_EX | LOCK_NB));
+        try {
+            if ($closed) {
+                $gate->begin('scheduler');
+            }
+            $gate->removed = [];
+            $state = $gate->status();
+            $this->assertArrayNotHasKey($id, $state['participants']);
+            $this->assertNotContains($path, $gate->removed);
+            $this->assertFileExists($path);
+        } finally {
+            fclose($held);
+        }
     }
 
     public function test_close_requires_actual_generation_acknowledgements_and_preserves_pending_jobs(): void

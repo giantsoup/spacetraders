@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Gameplay\DeploymentGate;
 use App\Gameplay\Engine\Windows\PowerShell;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
@@ -49,12 +50,44 @@ class DeploymentFileTest extends TestCase
         });
     }
 
-    private function withHeldDestination(bool $briefly, callable $work): void
+    public function test_cleanup_failure_does_not_replace_the_original_commit_error(): void
+    {
+        $gate = new class extends DeploymentGate
+        {
+            public bool $failCleanup = false;
+
+            protected function remove(string $file): bool
+            {
+                return ! $this->failCleanup && parent::remove($file);
+            }
+        };
+        $logger = Log::getFacadeRoot();
+        Log::spy();
+        try {
+            $this->withHeldDestination(false, function (DeploymentGate $gate, string $path) {
+                $before = file_get_contents($path.'/state.json');
+                $gate->failCleanup = true;
+                try {
+                    $gate->begin('web');
+                    $this->fail('A held destination must reject the commit.');
+                } catch (RuntimeException $error) {
+                    $this->assertSame('Cannot commit deployment state.', $error->getMessage());
+                }
+                $this->assertSame($before, file_get_contents($path.'/state.json'));
+                $this->assertCount(1, glob($path.'/state-*.tmp'));
+                Log::shouldHaveReceived('warning')->once()->with('Cannot remove temporary deployment state.', \Mockery::any());
+            }, $gate);
+        } finally {
+            Log::swap($logger);
+        }
+    }
+
+    private function withHeldDestination(bool $briefly, callable $work, ?DeploymentGate $gate = null): void
     {
         if (PHP_OS_FAMILY !== 'Windows') {
             $this->markTestSkipped('Windows sharing violations require a second process holding the destination open.');
         }
-        $gate = new DeploymentGate;
+        $gate ??= new DeploymentGate;
         $gate->status();
         $path = config('deployment.path');
         $script = <<<'POWERSHELL'
