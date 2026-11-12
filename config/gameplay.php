@@ -12,7 +12,9 @@ return [
     'enabled' => env('SPACETRADERS_AUTOMATION_ENABLED', false),
     'lock_path' => env('SPACETRADERS_LOCK_PATH', storage_path('framework/game-locks')),
     'request_budget_enabled' => ! env('SPACETRADERS_FIXTURE_PATH'),
-    'request_budget_path' => (env('SPACETRADERS_REQUEST_BUDGET_PATH') ?: (env('SPACETRADERS_FIXTURE_PATH') ? dirname(env('SPACETRADERS_FIXTURE_PATH')).'/request-budget' : (getenv('HOME') ?: sys_get_temp_dir()).'/Library/Application Support/SpaceTraders/request-budget')),
+    'request_budget_path' => (env('SPACETRADERS_REQUEST_BUDGET_PATH') ?: (env('SPACETRADERS_FIXTURE_PATH') ? dirname(env('SPACETRADERS_FIXTURE_PATH')).'/request-budget' : (PHP_OS_FAMILY === 'Windows'
+        ? (getenv('LOCALAPPDATA') ?: sys_get_temp_dir()).'/SpaceTraders/request-budget'
+        : (getenv('HOME') ?: sys_get_temp_dir()).'/Library/Application Support/SpaceTraders/request-budget'))),
     'max_pages' => 10,
     'max_observations' => 24,
     'manual_reserve_floor' => 2000,
