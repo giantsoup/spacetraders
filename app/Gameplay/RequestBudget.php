@@ -295,7 +295,14 @@ foreach ($name in @('budget.json', 'budget.lock')) {
 }
 $acl = Get-Acl -LiteralPath $path
 if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $user.Value) { exit 1 }
-if ($env:SPACETRADERS_BUDGET_CREATE -eq '1') {
+$allowed = @($user.Value, 'S-1-5-18', 'S-1-5-32-544')
+$secured = $acl.AreAccessRulesProtected
+foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+    if ($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Value -notin $allowed) { $secured = $false }
+}
+# Rewriting an inheritable ACL propagates to existing files and can briefly block a
+# concurrent replace of budget.json, so only rewrite a directory that is not yet private.
+if ($env:SPACETRADERS_BUDGET_CREATE -eq '1' -and -not $secured) {
     $acl.SetAccessRuleProtection($true, $false)
     foreach ($rule in @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) {
         $acl.RemoveAccessRuleSpecific($rule)
@@ -392,7 +399,7 @@ POWERSHELL;
             $state = $this->readState($file);
             $result = $work($state);
             $temporary = tempnam($directory, '.budget-');
-            if (! $temporary || file_put_contents($temporary, json_encode($state, JSON_THROW_ON_ERROR)) === false || ! chmod($temporary, 0600) || ! rename($temporary, $file)) {
+            if (! $temporary || file_put_contents($temporary, json_encode($state, JSON_THROW_ON_ERROR)) === false || ! chmod($temporary, 0600) || ! $this->replace($temporary, $file)) {
                 throw new \RuntimeException('Cannot persist request budget.');
             }
 
@@ -406,5 +413,27 @@ POWERSHELL;
             flock($handle, LOCK_UN);
             fclose($handle);
         }
+    }
+
+    /**
+     * Atomically replace the state file. Windows denies a replace while another
+     * process briefly holds the destination open (unlocked safety stat calls,
+     * antivirus or indexing), so retry within a short bound while the writer
+     * lock is still held. POSIX rename does not have this failure mode.
+     */
+    private function replace(string $temporary, string $file): bool
+    {
+        if (PHP_OS_FAMILY !== 'Windows') {
+            return rename($temporary, $file);
+        }
+        $deadline = hrtime(true) + 250000000;
+        while (! @rename($temporary, $file)) {
+            if (hrtime(true) >= $deadline) {
+                return false;
+            }
+            usleep(2000);
+        }
+
+        return true;
     }
 }
