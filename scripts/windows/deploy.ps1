@@ -40,6 +40,26 @@ function Test-Page {
     Write-Host "OK: $Url (HTTP 200, built assets)"
 }
 
+function Get-TailnetHosts {
+    # The published name may be this machine's or a Tailscale Service's, so read what serve actually proxies.
+    param([string]$Tailscale, [int]$Port)
+    $config = (& $Tailscale serve status --json) -join "`n" | ConvertFrom-Json
+    if (-not $config) { return @() }
+    $webs = @()
+    if ($config.PSObject.Properties.Name -contains 'Web') { $webs += $config.Web }
+    if ($config.PSObject.Properties.Name -contains 'Services') {
+        foreach ($service in $config.Services.PSObject.Properties.Value) {
+            if ($service.PSObject.Properties.Name -contains 'Web') { $webs += $service.Web }
+        }
+    }
+    foreach ($web in $webs) {
+        foreach ($site in $web.PSObject.Properties) {
+            $proxies = @($site.Value.Handlers.PSObject.Properties.Value | ForEach-Object { $_.Proxy })
+            if ($proxies -match "^http://(127\.0\.0\.1|localhost):$Port/?$") { $site.Name -replace ':443$', '' }
+        }
+    }
+}
+
 function Assert-NoDevProcesses {
     param([string]$Root)
     $hot = Join-Path $Root 'public\hot'
@@ -111,9 +131,9 @@ try {
     Test-Page 'http://127.0.0.1:8081/login'
     $tailscale = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
     if (Test-Path -LiteralPath $tailscale) {
-        # The site is the Tailscale Service svc:spacetraders, not the machine name.
-        $suffix = ((& $tailscale status --json | ConvertFrom-Json).MagicDNSSuffix).TrimEnd('.')
-        if ($suffix) { Test-Page "https://spacetraders.$suffix/login" }
+        $hosts = @(Get-TailnetHosts $tailscale 8081)
+        if ($hosts.Count -eq 0) { Write-Warning 'tailscale serve publishes nothing that proxies to 127.0.0.1:8081; the tailnet site was not checked.' }
+        foreach ($name in $hosts) { Test-Page "https://$name/login" }
     }
     Write-Host "Deployed $((Invoke-Git @('rev-parse', '--short', 'HEAD'))) to production."
 } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
