@@ -111,8 +111,9 @@ try {
     Test-Page 'http://127.0.0.1:8081/login'
     $tailscale = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
     if (Test-Path -LiteralPath $tailscale) {
-        $name = ((& $tailscale status --json | ConvertFrom-Json).Self.DNSName).TrimEnd('.')
-        if ($name) { Test-Page "https://$name/login" }
+        # The site is the Tailscale Service svc:spacetraders, not the machine name.
+        $suffix = ((& $tailscale status --json | ConvertFrom-Json).MagicDNSSuffix).TrimEnd('.')
+        if ($suffix) { Test-Page "https://spacetraders.$suffix/login" }
     }
     Write-Host "Deployed $((Invoke-Git @('rev-parse', '--short', 'HEAD'))) to production."
 } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }

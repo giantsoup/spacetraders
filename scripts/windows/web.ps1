@@ -6,7 +6,7 @@ Registers a per-user Scheduled Task that runs this script's Run loop at logon in
 headless console host, so no window appears (php-win.exe cannot run the built-in server).
 Run keeps PHP's built-in server on 127.0.0.1 alive and restarts it whenever it exits, because
 Herd kills php.exe processes when it restarts. It never listens on the LAN. Publish it on the
-tailnet with `tailscale serve --bg <port>`. Engine controls stay limited to the local Herd host.
+tailnet as the Tailscale Service svc:spacetraders (see README). Engine controls stay limited to the local Herd host.
 .EXAMPLE
 .\scripts\windows\web.ps1 Install
 .EXAMPLE
@@ -126,7 +126,7 @@ try {
         }
         if (-not $status -or $status -ge 500) { throw "Web server did not answer on http://127.0.0.1:$Port/ (status: $status)." }
         Write-Host "Web server answers on http://127.0.0.1:$Port/ (HTTP $status)."
-        Write-Host "Publish it on the tailnet with: tailscale serve --bg $Port"
+        Write-Host "Publish it on the tailnet with: tailscale serve --service=svc:spacetraders --https=443 http://127.0.0.1:$Port"
     } elseif ($Operation -eq 'Uninstall') {
         if (Test-WebTask) {
             Stop-WebServer $Port
