@@ -659,6 +659,9 @@ class OpportunityTest extends TestCase
 
     public function test_expanded_operations_use_the_automation_branch_engine_gate_and_credit_ledger(): void
     {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('Windows engine port (M2): this integration exercises the real POSIX engine gate.');
+        }
         config(['gameplay.local_engine_enabled' => true]);
         LocalEngine::create(['id' => 1, 'state' => 'running', 'session_id' => (string) Str::uuid(), 'gate_open' => true, 'heartbeat_at' => now(), 'processes' => ['supervisor' => getmypid(), 'worker' => getmypid(), 'scheduler' => getmypid()]]);
         app(AgentSynchronizer::class)->sync($this->agent);
@@ -676,7 +679,7 @@ class OpportunityTest extends TestCase
 
     public function test_bounded_loads_use_the_existing_investigation_staging_and_versioned_approval_flow(): void
     {
-        config(['gameplay.enabled' => true, 'gameplay.local_engine_enabled' => true]);
+        config(['gameplay.enabled' => true, 'gameplay.local_engine_enabled' => PHP_OS_FAMILY !== 'Windows']);
         LocalEngine::create(['id' => 1, 'state' => 'running', 'session_id' => (string) Str::uuid(), 'gate_open' => true, 'heartbeat_at' => now(), 'processes' => ['supervisor' => getmypid(), 'worker' => getmypid(), 'scheduler' => getmypid()]]);
         app(AgentSynchronizer::class)->sync($this->agent);
         $investigator = app(OpportunityInvestigator::class);

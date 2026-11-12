@@ -17,6 +17,9 @@ class SQLiteConcurrencyTest extends TestCase
 {
     public function test_engine_heartbeat_cannot_break_action_reservation_by_invalidating_a_read_snapshot(): void
     {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('Windows engine port (M2): the competing writer must exercise the real POSIX engine gate.');
+        }
         $file = tempnam(sys_get_temp_dir(), 'st-sqlite-race-');
         $world = $file.'.json';
         file_put_contents($world, json_encode(FakeSpaceTraders::world()));
