@@ -110,10 +110,19 @@ final class PracticeEnvironment
             return $status;
         }
         app(LocalEngineManager::class)->end();
-        $deadline = hrtime(true) + 45_000_000_000;
+        $deadline = hrtime(true) + ($force ? 120_000_000_000 : 45_000_000_000);
         do {
             $status = self::snapshot();
             if (self::stopped($status)) {
+                return $status;
+            }
+            if ($force && $status['state'] === 'faulted' && ($status['stop_requested_at'] ?? null)?->lte(now()->subSeconds(40))) {
+                app(LocalEngineManager::class)->forceStop();
+                $status = self::snapshot();
+                if (! self::stopped($status)) {
+                    throw new RuntimeException('Verified force stop did not confirm all engine leases released. Serve was left running.');
+                }
+
                 return $status;
             }
             usleep(200000);
@@ -121,13 +130,7 @@ final class PracticeEnvironment
         if (! $force) {
             throw new RuntimeException('Engine processes remain after 45 seconds. Serve was left running. Inspect Status; retry Stop -Force for verified force stop.');
         }
-        app(LocalEngineManager::class)->forceStop();
-        $status = self::snapshot();
-        if (! self::stopped($status)) {
-            throw new RuntimeException('Verified force stop did not confirm all engine leases released. Serve was left running.');
-        }
-
-        return $status;
+        throw new RuntimeException('Engine force-stop allowance did not become available within 120 seconds. Serve was left running. Inspect Status before retrying Stop -Force.');
     }
 
     public static function verify(): array

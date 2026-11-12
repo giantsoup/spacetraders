@@ -139,6 +139,43 @@ class PracticeEnvironmentTest extends TestCase
         $this->assertTrue(PracticeEnvironment::stopped(PracticeEnvironment::end(false)));
     }
 
+    public function test_force_end_waits_for_the_current_stop_allowance_after_a_mid_shutdown_fault(): void
+    {
+        $started = now()->startOfSecond();
+        $this->travelTo($started);
+        $forced = false;
+        $poll = 0;
+        $manager = Mockery::mock(LocalEngineManager::class);
+        $manager->shouldReceive('end')->once();
+        $manager->shouldReceive('status')->times(6)->andReturnUsing(function () use ($started, &$poll, &$forced) {
+            $seconds = [0, 39, 45, 69, 70, 70][$poll++];
+            $this->travelTo($started->copy()->addSeconds($seconds));
+
+            return [
+                'state' => $forced ? 'off' : ($seconds < 45 ? 'stopping' : 'faulted'),
+                'gate_open' => false,
+                'stop_requested_at' => $started->copy()->addSeconds($seconds < 45 ? 0 : 30),
+            ];
+        });
+        $manager->shouldReceive('alive')->times(18)->andReturnUsing(function ($engine, $role) use (&$forced) {
+            return $role === 'worker' && ! $forced;
+        });
+        $manager->shouldReceive('forceStop')->once()->andReturnUsing(function () use ($started, &$forced) {
+            $this->assertSame($started->copy()->addSeconds(70)->getTimestamp(), now()->getTimestamp());
+            $forced = true;
+
+            return [];
+        });
+        $host = Mockery::mock(EngineHost::class);
+        $host->shouldReceive('serviceName')->times(6)->andReturn('practice-task');
+        $host->shouldReceive('registered')->times(6)->andReturn(true);
+        $host->shouldReceive('hasServiceMarker')->times(6)->andReturn(true);
+        $this->app->instance(LocalEngineManager::class, $manager);
+        $this->app->instance(EngineHost::class, $host);
+        $this->assertTrue(PracticeEnvironment::stopped(PracticeEnvironment::end(true)));
+        $this->assertTrue($forced);
+    }
+
     #[TestWith(['http://localhost:8010', '127.0.0.1'])]
     #[TestWith(['http://127.0.0.1:8010', 'spacetraders.test'])]
     public function test_engine_host_must_match_the_loopback_browser_url(string $url, string $host): void
