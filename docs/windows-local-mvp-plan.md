@@ -23,6 +23,12 @@ Two independent Claude reviews found no critical defects. Every medium and low f
 
 The full 59-operation live acceptance ledger remains the longer-term gate.
 
+## Upgrade notes
+
+- Contract snapshots stored before this upgrade lack `factionSymbol`. Pre-upgrade previews and runs fail closed once as "changed"; create a fresh preview before approving again.
+- Gameplay jobs queued before the upgrade may fail once into `failed_jobs` under the updated retry policy. This is harmless: the scheduler redispatches eligible pending work.
+- Rolling back the nullable-account migration with `down()` fails if any agent has a null `account_id`. Resolve those records before rollback.
+
 ## Goal
 
 Play SpaceTraders and run bounded automation entirely on one Windows 11 PC through Laravel Herd for Windows, with the same safety rules the macOS build has: previews, explicit approvals, reserves, Stop, End session, and uncertainty reconciliation. Everything must be ready before a SpaceTraders token exists, so the first live session only needs the token pasted into the web UI.

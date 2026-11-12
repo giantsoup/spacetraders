@@ -166,7 +166,13 @@ The database connection defaults to `default`, not `spacetraders`. Both gameplay
 
 Deployment participants use process-lifetime file leases. While admission is open, each gate operation removes finished participants and participants with an unheld lease before capturing a deployment's required acknowledgements. Dead worker records therefore cannot block a new drain. A participant lost after closure remains a deliberate fail-closed blocker: losing its lease does not prove an interrupted write settled. The deployment deadline aborts the drain rather than inventing that acknowledgement. Heartbeat age alone never expires a live participant.
 
-Deployment state commits sync and close the temporary file before atomic replacement. While holding the admission lock, Windows retries failed replacements for up to 250 ms with 2 ms sleeps, matching the request-budget policy. Temporary-state and obsolete-lease deletion use the same Windows-only retry policy. A failed commit preserves the old state and removes its temporary file; cleanup failure raises an explicit error. POSIX file operations do not retry.
+Deployment state commits sync and close the temporary file before atomic replacement. While holding the admission lock, Windows retries failed replacements for up to 250 ms with 2 ms sleeps, matching the request-budget policy. Temporary-state and unheld obsolete-lease deletion use the same Windows-only retry policy. Held obsolete leases are skipped rather than spending the retry window under the admission lock. A failed commit preserves the old state and attempts to remove its temporary file; cleanup failure is logged without replacing the original exception, even if logging also fails. A cleanup-only failure still raises an explicit error. POSIX file operations do not retry.
+
+### Agent setup privacy and time bounds
+
+Agent and account tokens use native password inputs by default, with explicit Show/Hide controls labelled for assistive technology. Switching forms or finishing a request clears the token and hides it again. We use `autocomplete="new-password"`, rather than `off`, to tell browsers not to fill the operator's saved login password into these unrelated credentials. Password-manager ignore attributes and `data-form-type="other"` are additional hints, not a guarantee that every extension will comply. CSS masking is not used.
+
+Registration and import set PHP's web-request limit to 55 seconds, below Herd's default 60-second FastCGI read timeout. The status preflight and registration/import request share a 45-second transport deadline, rather than each consuming 30 seconds sequentially. Each HTTP call still caps total time at 30 seconds and connect time at 10 seconds (inside, not in addition to, its remaining total budget). This leaves headroom for validation, local credential persistence and the response.
 
 ### Liveness
 
