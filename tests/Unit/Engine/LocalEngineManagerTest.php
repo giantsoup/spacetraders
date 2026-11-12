@@ -12,6 +12,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
 
 class LocalEngineManagerTest extends TestCase
@@ -49,6 +50,36 @@ class LocalEngineManagerTest extends TestCase
         $gate = new EngineGate;
         $this->assertNull($gate->session());
         $gate->check(null);
+    }
+
+    public function test_engine_authorization_does_not_resolve_the_platform_host(): void
+    {
+        config(['gameplay.local_engine_enabled' => true]);
+        $this->app->forgetInstance(EngineHost::class);
+        $this->app->bind(EngineHost::class, fn () => throw new \LogicException('Authorization must run before host resolution.'));
+        $manager = $this->app->make(LocalEngineManager::class);
+        try {
+            $manager->authorize(\Illuminate\Http\Request::create('/'));
+            $this->fail('Engine controls must reject a non-local application.');
+        } catch (HttpException $exception) {
+            $this->assertSame(403, $exception->getStatusCode());
+        }
+    }
+
+    public function test_an_injected_host_resolver_is_lazy_and_resolves_only_once(): void
+    {
+        $resolutions = 0;
+        $manager = new LocalEngineManager(new HostLock, new EngineGate, function () use (&$resolutions) {
+            $resolutions++;
+
+            return $this->host;
+        });
+        $this->assertSame(0, $resolutions);
+        $engine = $this->engine();
+        $this->host->shouldReceive('alive')->twice()->with($engine, 'worker')->andReturn(true);
+        $this->assertTrue($manager->alive($engine, 'worker'));
+        $this->assertTrue($manager->alive($engine, 'worker'));
+        $this->assertSame(1, $resolutions);
     }
 
     public function test_gate_checks_each_role_through_the_host_without_requiring_pids(): void

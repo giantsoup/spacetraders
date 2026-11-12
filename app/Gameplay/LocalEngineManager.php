@@ -6,12 +6,22 @@ use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\Engine\EngineIdentity;
 use App\Models\LocalEngine;
 use App\Models\User;
+use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\Process\Process;
 
 class LocalEngineManager
 {
-    public function __construct(private HostLock $lock, private EngineGate $gate, private EngineHost $host) {}
+    public function __construct(private HostLock $lock, private EngineGate $gate, private EngineHost|Closure|null $host = null) {}
+
+    private function host(): EngineHost
+    {
+        if (! $this->host instanceof EngineHost) {
+            $this->host = $this->host ? ($this->host)() : app(EngineHost::class);
+        }
+
+        return $this->host;
+    }
 
     public function authorize(Request $request): void
     {
@@ -33,7 +43,7 @@ class LocalEngineManager
 
     public function install(): void
     {
-        if (! $this->host->supported() || ! app()->environment('local') || ! $this->gate->enabled() || ! config('gameplay.operator_id') || config('database.default') !== 'sqlite') {
+        if (! $this->host()->supported() || ! app()->environment('local') || ! $this->gate->enabled() || ! config('gameplay.operator_id') || config('database.default') !== 'sqlite') {
             throw new GameException('Engine installation requires a supported platform (macOS or Windows), local mode, an operator, SQLite and the local engine feature.');
         }
         if (! User::find(config('gameplay.operator_id'))) {
@@ -53,7 +63,7 @@ class LocalEngineManager
             throw new GameException('Configure a PHP '.$version.' executable with the required worker extensions and matching Composer pins.');
         }
         $this->lock->run('engine-control', function () use ($php) {
-            if ($this->host->registered()) {
+            if ($this->host()->registered()) {
                 throw new GameException('Owned engine is already installed. End the session and uninstall before reconfiguration.');
             }
             $directory = $this->directory();
@@ -69,7 +79,7 @@ class LocalEngineManager
                 'SPACETRADERS_LOCAL_ENGINE_ENABLED' => 'true', 'SPACETRADERS_OPERATOR_ID' => (string) config('gameplay.operator_id'),
                 'SPACETRADERS_LOCAL_HOST' => config('gameplay.local_host'), 'SPACETRADERS_PHP_BINARY' => $php,
             ];
-            $this->host->install($php, $env);
+            $this->host()->install($php, $env);
         });
     }
 
@@ -83,10 +93,10 @@ class LocalEngineManager
             if ($this->alive(LocalEngine::find(1), 'supervisor')) {
                 throw new GameException('The previous owned supervisor is still exiting. Wait for shutdown or review the force-stop control.');
             }
-            if (! $this->host->hasServiceMarker() || ! $this->host->registered()) {
+            if (! $this->host()->hasServiceMarker() || ! $this->host()->registered()) {
                 throw new GameException('Install this checkout’s owned engine service from the CLI first.');
             }
-            $this->host->launch();
+            $this->host()->launch();
 
             return ['state' => 'starting', 'message' => 'Start requested. Waiting for verified child processes.'];
         });
@@ -106,7 +116,7 @@ class LocalEngineManager
             throw new GameException('Force stop is available only after the 40-second graceful shutdown allowance.');
         }
         $this->gate->close('faulted', 'Force stop requested. Interrupted writes require reconciliation.');
-        $this->host->forceStop($engine);
+        $this->host()->forceStop($engine);
 
         return $this->status();
     }
@@ -117,12 +127,12 @@ class LocalEngineManager
         if (in_array($status['state'], ['starting', 'running', 'stopping'], true) || $this->alive(LocalEngine::find(1), 'supervisor')) {
             throw new GameException('End the session and wait for all owned processes to exit before uninstalling.');
         }
-        $this->host->uninstall();
+        $this->host()->uninstall();
     }
 
     public function alive(?LocalEngine $engine, string $role): bool
     {
-        return $engine && $this->host->alive($engine, $role);
+        return $engine && $this->host()->alive($engine, $role);
     }
 
     public function status(): array
