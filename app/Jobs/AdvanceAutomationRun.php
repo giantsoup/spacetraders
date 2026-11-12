@@ -17,6 +17,8 @@ class AdvanceAutomationRun implements ShouldQueue
 
     public int $maxExceptions = 1;
 
+    public bool $countCrashesAsExceptions = true;
+
     public int $timeout = 120;
 
     public function __construct(public int $runId)

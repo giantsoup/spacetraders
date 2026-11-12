@@ -4,7 +4,9 @@ namespace Tests\Feature;
 
 use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\AutomationRunner;
+use App\Gameplay\DeploymentGate;
 use App\Gameplay\Engine\EngineHost;
+use App\Gameplay\LocalEngineManager;
 use App\Gameplay\ShipCommandExecutor;
 use App\Jobs\AdvanceAutomationRun;
 use App\Jobs\ExecuteShipCommand;
@@ -12,10 +14,12 @@ use App\Models\LocalEngine;
 use App\Models\ShipAction;
 use App\Models\User;
 use App\Queue\RequireEngineWorker;
+use Illuminate\Contracts\Queue\Job;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -74,7 +78,7 @@ class EngineWorkerGuardTest extends TestCase
     }
 
     #[DataProvider('unauthorizedWorkers')]
-    public function test_unowned_workers_release_without_gameplay_effects(?string $session, string $state, bool $engineExists): void
+    public function test_unowned_workers_never_reserve_or_delay_gameplay_jobs(?string $session, string $state, bool $engineExists): void
     {
         if ($session !== null) {
             putenv('SPACETRADERS_ENGINE_WORKER_SESSION='.($session === 'matching' ? $this->engine->session_id : $session));
@@ -93,7 +97,7 @@ class EngineWorkerGuardTest extends TestCase
         $this->assertSame($before, $this->action->fresh()->getRawOriginal());
         $this->assertSame($runtime, DB::table('game_runtime')->get()->toJson());
         $this->assertDatabaseCount('jobs', 1);
-        $this->assertDatabaseHas('jobs', ['queue' => 'spacetraders', 'reserved_at' => null, 'attempts' => 1, 'available_at' => now()->addSeconds(5)->timestamp]);
+        $this->assertDatabaseHas('jobs', ['queue' => 'spacetraders', 'reserved_at' => null, 'attempts' => 0, 'available_at' => now()->timestamp]);
         $this->assertDatabaseCount('failed_jobs', 0);
         Http::assertNothingSent();
     }
@@ -111,15 +115,15 @@ class EngineWorkerGuardTest extends TestCase
         ];
     }
 
-    public function test_repeated_releases_do_not_exhaust_the_one_exception_limit_before_owned_execution(): void
+    public function test_foreign_polling_cannot_starve_the_owned_worker(): void
     {
         Bus::dispatch(new ExecuteShipCommand($this->action->id));
         for ($attempt = 0; $attempt < 3; $attempt++) {
-            $this->work();
-            $this->travel(5)->seconds();
+            $this->assertNull(Queue::connection('database')->pop('spacetraders'));
         }
         Http::assertNothingSent();
         $this->engine->update(['heartbeat_at' => now()]);
+        $this->assertSame(0, DB::table('jobs')->sum('attempts'));
         putenv('SPACETRADERS_ENGINE_WORKER_SESSION='.$this->engine->session_id);
         Http::swap(new Factory);
         FakeSpaceTraders::install($this->worldFile);
@@ -152,11 +156,13 @@ class EngineWorkerGuardTest extends TestCase
         $logger = Log::getFacadeRoot();
         Log::shouldReceive('warning')->once()->with('Gameplay job released: this worker does not own the current running engine session.');
         try {
-            Bus::dispatch(new AdvanceAutomationRun(123));
-            Bus::dispatch(new ExecuteShipCommand($this->action->id));
-            $this->work();
-            $this->work();
-            $this->assertDatabaseCount('jobs', 2);
+            foreach ([new AdvanceAutomationRun(123), new ExecuteShipCommand($this->action->id)] as $job) {
+                $queued = \Mockery::mock(Job::class);
+                $queued->shouldReceive('release')->once()->with(5);
+                $job->setJob($queued);
+                (new RequireEngineWorker)->handle($job, fn () => $this->fail('Foreign worker reached a gameplay handler.'));
+            }
+            $this->assertDatabaseCount('jobs', 0);
             $this->assertDatabaseCount('automation_runs', 0);
             $this->assertDatabaseCount('failed_jobs', 0);
             Http::assertNothingSent();
@@ -210,6 +216,47 @@ class EngineWorkerGuardTest extends TestCase
         $this->assertNull(Queue::connection('database')->pop());
         $this->assertDatabaseCount('jobs', 2);
         $this->assertSame(0, DB::table('jobs')->sum('attempts'));
+        Http::assertNothingSent();
+    }
+
+    public function test_status_warns_only_while_a_foreign_worker_is_polling(): void
+    {
+        $gate = app(DeploymentGate::class);
+        $gate->workerPolling();
+        $status = app(LocalEngineManager::class)->status();
+        $this->assertSame('Another queue worker is polling gameplay jobs outside the engine; stop it.', $status['warning'] ?? null);
+        $this->assertStringNotContainsString($this->engine->session_id, $status['warning']);
+        $gate->workerStopped();
+        $this->assertNull(app(LocalEngineManager::class)->status()['warning'] ?? null);
+        putenv('SPACETRADERS_ENGINE_WORKER_SESSION='.$this->engine->session_id);
+        $gate->workerPolling();
+        $this->assertNull(app(LocalEngineManager::class)->status()['warning'] ?? null);
+        $gate->workerStopped();
+        config(['gameplay.local_engine_enabled' => false]);
+        putenv('SPACETRADERS_ENGINE_WORKER_SESSION');
+        $gate->workerPolling();
+        $this->assertNull(app(LocalEngineManager::class)->status()['warning'] ?? null);
+        $gate->workerStopped();
+    }
+
+    #[TestWith([true])]
+    #[TestWith([false])]
+    public function test_a_crashed_attempt_fails_without_reentering_either_gameplay_handler(bool $automation): void
+    {
+        putenv('SPACETRADERS_ENGINE_WORKER_SESSION='.$this->engine->session_id);
+        $handler = \Mockery::mock($automation ? AutomationRunner::class : ShipCommandExecutor::class);
+        $handler->shouldNotReceive($automation ? 'advance' : 'execute');
+        $this->app->instance($automation ? AutomationRunner::class : ShipCommandExecutor::class, $handler);
+        Bus::dispatch($automation ? new AdvanceAutomationRun(123) : new ExecuteShipCommand($this->action->id));
+        $abandoned = Queue::connection('database')->pop('spacetraders');
+        $this->assertNotNull($abandoned);
+        Cache::put('job-processing:'.$abandoned->uuid(), true, now()->addDay());
+        $this->travel(config('queue.connections.database.retry_after') + 1)->seconds();
+        $this->work();
+
+        $this->assertDatabaseCount('jobs', 0);
+        $this->assertDatabaseCount('failed_jobs', 1);
+        $this->assertSame('pending', $this->action->fresh()->state->value);
         Http::assertNothingSent();
     }
 

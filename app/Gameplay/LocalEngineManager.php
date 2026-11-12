@@ -152,6 +152,9 @@ class LocalEngineManager
             $engine->refresh();
         }
 
-        return $engine->only(['state', 'gate_open', 'session_id', 'heartbeat_at', 'message', 'stop_requested_at']);
+        return array_merge($engine->only(['state', 'gate_open', 'session_id', 'heartbeat_at', 'message', 'stop_requested_at']), [
+            'warning' => $this->gate->enabled() && app(DeploymentGate::class)->hasForeignWorker()
+                ? 'Another queue worker is polling gameplay jobs outside the engine; stop it.' : null,
+        ]);
     }
 }

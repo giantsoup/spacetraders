@@ -2,6 +2,7 @@
 
 namespace App\Gameplay;
 
+use App\Queue\EngineWorkerGate;
 use Illuminate\Cache\FileStore;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -17,6 +18,8 @@ class DeploymentGate
     private array $leases = [];
 
     private ?string $worker = null;
+
+    private int $lastForeignPoll = 0;
 
     public function begin(string $role): ?string
     {
@@ -46,10 +49,17 @@ class DeploymentGate
     // JobPopping runs even when Laravel's persistent queue pause prevents pop().
     public function workerPolling(): void
     {
-        $this->locked(function (array &$state) {
+        $owned = app(EngineWorkerGate::class)->allowsPolling();
+        $now = hrtime(true);
+        if (! $owned && $now - $this->lastForeignPoll < 1000000000) {
+            return;
+        }
+        $this->locked(function (array &$state) use ($owned) {
             $this->worker ??= $this->participant($state, 'worker');
+            $state['participants'][$this->worker]['engine_owned'] = $owned;
             $this->acknowledge($state, $this->worker, false);
         });
+        $this->lastForeignPoll = $owned ? 0 : $now;
     }
 
     public function workerStopped(): void
@@ -57,7 +67,22 @@ class DeploymentGate
         if ($this->worker !== null) {
             $this->finish($this->worker);
             $this->worker = null;
+            $this->lastForeignPoll = 0;
         }
+    }
+
+    public function hasForeignWorker(): bool
+    {
+        return $this->locked(function (array &$state) {
+            foreach ($state['participants'] as $id => $participant) {
+                if ($participant['role'] === 'worker' && ! $participant['finished']
+                    && ($participant['engine_owned'] ?? true) === false && $this->alive($id)) {
+                    return true;
+                }
+            }
+
+            return false;
+        });
     }
 
     // Serialize close with the actual SQL reservation, not just the worker loop.
