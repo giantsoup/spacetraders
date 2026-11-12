@@ -2,7 +2,7 @@
 
 A private web client and gameplay engine for [SpaceTraders](https://spacetraders.io/), an online space game controlled through an API. Use the flight deck to inspect your fleet, travel, mine resources, trade cargo, and complete contracts. Every gameplay command has a preview, an approval, and a recorded outcome.
 
-The app currently runs locally on macOS through Laravel Herd. Laravel 13 owns the gameplay rules, encrypted SpaceTraders credentials, queue jobs, and activity history. Inertia 3, Vue 3, Pinia 4, and Tailwind 4 provide the dark web interface. SpaceTraders remains the authority for the game world, prices, travel, cargo, and credits.
+The app currently runs locally through Laravel Herd on macOS or Windows. Laravel 13 owns the gameplay rules, encrypted SpaceTraders credentials, queue jobs, and activity history. Inertia 3, Vue 3, Pinia 4, and Tailwind 4 provide the dark web interface. SpaceTraders remains the authority for the game world, prices, travel, cargo, and credits.
 
 The next product goal is a personal iPhone app connected to an always-available Laravel engine. The mobile roadmap below builds on the existing engine rather than moving gameplay execution onto the phone.
 
@@ -117,6 +117,52 @@ For an existing environment, retain its application key and database. Verify the
 
 The default local configuration uses SQLite, file sessions and cache, database queues, and non-delivering array mail. Public account signup and password-reset delivery are disabled. Provision a private operator account with `"$PHP_BIN" artisan spacetraders:operator create`; use the command's interactive input rather than placing credentials in shell history. SpaceTraders agent registration is a separate action after login.
 
+### Windows
+
+The app also runs on Windows 11 with Laravel Herd for Windows, using the same PHP, Node and pnpm pins. Herd's PHP has no `pcntl` or `posix` extension. On Windows, the local engine runs as an on-demand, per-user Scheduled Task instead of a launchd agent. Run the PowerShell entry points from the checkout root. If script execution is already allowed, `.\scripts\windows\setup.ps1` works without the `powershell -File` prefix.
+
+```powershell
+# Dependencies, build, and a new .env/database only when none exists. Never overwrites .env, APP_KEY or the database.
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\setup.ps1 -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\setup.ps1
+# Interactive operator account (prompts appear in this console).
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\php.ps1 artisan spacetraders:operator create
+```
+
+`setup.ps1` writes an absolute `DB_DATABASE` path and sets `SPACETRADERS_REQUEST_BUDGET_PATH` to `%LOCALAPPDATA%\SpaceTraders\request-budget`. The request-budget directory is restricted to the current user, SYSTEM and Administrators. To migrate an existing environment, pass `-Migrate`; the script prints the effective database first.
+
+To enable the local engine and automation, set these values in `.env`, then install the engine's Scheduled Task:
+
+```dotenv
+SPACETRADERS_OPERATOR_ID=<your operator user id>
+SPACETRADERS_LOCAL_ENGINE_ENABLED=true
+SPACETRADERS_AUTOMATION_ENABLED=true
+SPACETRADERS_PHP_BINARY=C:/Users/<you>/.config/herd/bin/php85/php.exe
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\engine.ps1 Install   # also: Status, Uninstall
+```
+
+- **What install does:** it registers a task with no triggers, so the engine never starts by itself. The task runs one supervisor at a time, with no time limit, and it keeps running on battery power.
+- **Starting and stopping:** use **Start local engine**, **Stop automation**, and **End session** on the flight deck as on macOS. The supervisor's worker and scheduler run without console windows. Closing the browser does not stop approved work. Signing out of Windows does stop it; the next status check then reports a fault.
+- **Logs:** they are written to `storage\framework\game-locks\engine\`.
+- **Before changing configuration:** End the session, run `engine.ps1 Uninstall`, change `.env`, and run `engine.ps1 Install` again.
+- **Back up before any migration or cutover:** run `scripts\windows\backup.ps1`. It writes a consistent SQLite snapshot and a copy of `.env` to a private folder under `%LOCALAPPDATA%\SpaceTraders\backups`.
+
+**Offline practice** runs a synthetic game world in a private folder under `%LOCALAPPDATA%\SpaceTraders\practice`. Its separate database, locks and engine task never touch your real `.env` or agent, and it needs no SpaceTraders token:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\practice.ps1 Start -Engine   # http://127.0.0.1:8010 with the full automation workflow
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\practice.ps1 Status
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\practice.ps1 Stop            # Ends the practice engine session, then stops the server
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\practice.ps1 Reset -Force    # Removes the practice world and its task
+```
+
+The script prints the location of the generated practice login file. Without `-Engine`, practice runs one plain worker and scheduler instead of the engine. In that mode, manual commands work, but the Investigate → Stage automation console is hidden.
+
+The [Windows local MVP plan](docs/windows-local-mvp-plan.md) and [Windows engine design](docs/windows-engine-design.md) describe the port, its safety protocol, and its verification evidence.
+
 ### Local engine and offline practice
 
 With `SPACETRADERS_FIXTURE_PATH` unset or empty, the app uses the real SpaceTraders API and shows **Live SpaceTraders API**. An owned fixture shows **Offline practice**. Never put live credentials into a fixture.
@@ -142,6 +188,8 @@ With locked dependencies and the pinned runtimes installed:
 PHP_BIN="$PWD/scripts/herd-php" ./scripts/verify.sh
 python3 scripts/verify-base-api-coverage.py
 ```
+
+On Windows, `scripts\windows\verify.ps1` runs every portable `verify.sh` check. It reads Pint's exact file list from `verify.sh` and names each POSIX-only step it skips. `php scripts\verify-windows-engine.php` runs the real Scheduled Task lifecycle against an isolated fixture: start, approved execution, End, restart, crash and orphan recovery, the sleep gap, and verified force stop.
 
 Set `PNPM_BIN` if pnpm is not on your path. The verification entry point checks runtime pins, builds assets, runs backend and frontend checks, and checks PHP style and whitespace. PHPUnit uses guarded in-memory SQLite and isolated test storage. Fake-provider browser and worker journeys verify local behavior without spending live credits.
 
