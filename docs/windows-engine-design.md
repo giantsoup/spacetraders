@@ -164,6 +164,8 @@ The database connection defaults to `default`, not `spacetraders`. Both gameplay
 
 Deployment participants use process-lifetime file leases. While admission is open, each gate operation removes finished participants and participants with an unheld lease before capturing a deployment's required acknowledgements. Dead worker records therefore cannot block a new drain. A participant lost after closure remains a deliberate fail-closed blocker: losing its lease does not prove an interrupted write settled. The deployment deadline aborts the drain rather than inventing that acknowledgement. Heartbeat age alone never expires a live participant.
 
+Deployment state commits sync and close the temporary file before atomic replacement. While holding the admission lock, Windows retries failed replacements for up to 250 ms with 2 ms sleeps, matching the request-budget policy. Temporary-state and obsolete-lease deletion use the same Windows-only retry policy. A failed commit preserves the old state and removes its temporary file; cleanup failure raises an explicit error. POSIX file operations do not retry.
+
 ### Liveness
 
 - The supervisor and each child hold an exclusive lock on `leases/{session}-{role}.lease` for their whole life.

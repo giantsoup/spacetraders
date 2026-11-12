@@ -241,18 +241,57 @@ class DeploymentGate
     {
         $path = $this->path();
         $temporary = $path.'/state-'.bin2hex(random_bytes(8)).'.tmp';
-        if (file_put_contents($temporary, json_encode($state, JSON_THROW_ON_ERROR)) === false) {
-            throw new RuntimeException('Cannot persist deployment state.');
-        }
-        chmod($temporary, 0600);
-        $file = fopen($temporary, 'r+');
         try {
-            if (! fsync($file) || ! rename($temporary, $path.'/state.json')) {
+            if (@file_put_contents($temporary, json_encode($state, JSON_THROW_ON_ERROR)) === false) {
+                throw new RuntimeException('Cannot persist deployment state.');
+            }
+            if (PHP_OS_FAMILY !== 'Windows') {
+                chmod($temporary, 0600);
+            }
+            $file = @fopen($temporary, 'r+');
+            if ($file === false) {
+                throw new RuntimeException('Cannot open deployment state for sync.');
+            }
+            try {
+                if (! fsync($file)) {
+                    throw new RuntimeException('Cannot sync deployment state.');
+                }
+            } finally {
+                fclose($file);
+            }
+            if (! $this->retryFileOperation(fn () => @rename($temporary, $path.'/state.json'))) {
                 throw new RuntimeException('Cannot commit deployment state.');
             }
         } finally {
-            fclose($file);
+            if (! $this->remove($temporary)) {
+                throw new RuntimeException('Cannot remove temporary deployment state.');
+            }
         }
+    }
+
+    private function remove(string $file): bool
+    {
+        return $this->retryFileOperation(function () use ($file) {
+            clearstatcache(true, $file);
+
+            return ! is_file($file) || @unlink($file);
+        });
+    }
+
+    private function retryFileOperation(callable $operation): bool
+    {
+        if (PHP_OS_FAMILY !== 'Windows') {
+            return $operation();
+        }
+        $deadline = hrtime(true) + 250000000;
+        while (! $operation()) {
+            if (hrtime(true) >= $deadline) {
+                return false;
+            }
+            usleep(2000);
+        }
+
+        return true;
     }
 
     private function locked(callable $work): mixed
@@ -302,7 +341,7 @@ class DeploymentGate
                         $role = $participant['role'];
                         if (isset($latest[$role])) {
                             unset($state['participants'][$latest[$role]]);
-                            @unlink($path.'/'.$latest[$role].'.lease');
+                            $this->remove($path.'/'.$latest[$role].'.lease');
                         }
                         $latest[$role] = $id;
                     }
@@ -311,7 +350,7 @@ class DeploymentGate
                 foreach ($state['participants'] as $id => $participant) {
                     if ($participant['finished'] || ! $this->alive($id)) {
                         unset($state['participants'][$id]);
-                        @unlink($path.'/'.$id.'.lease');
+                        $this->remove($path.'/'.$id.'.lease');
                     }
                 }
             }
