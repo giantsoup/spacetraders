@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Agent;
 use App\Models\User;
 use App\Services\SpaceTradersClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -122,6 +123,53 @@ class AgentTest extends TestCase
             'account_token' => 'account-secret-token', 'token' => 'agent-secret-token', 'symbol' => 'TEST_AGENT', 'faction' => 'COSMIC',
         ])->assertSessionHasNoErrors()->assertRedirect(route('agents.index'));
         $this->assertDatabaseHas('agents', ['name' => 'TEST_AGENT', 'account_id' => null]);
+    }
+
+    public function test_reimport_without_account_id_preserves_the_known_account_and_replaces_the_token(): void
+    {
+        $withoutAccount = $this->agent();
+        unset($withoutAccount['accountId']);
+        Http::fake(['api.spacetraders.io/v2/my/agent' => Http::sequence()
+            ->push(['data' => $this->agent()])->push(['data' => $withoutAccount])]);
+        $this->actingAs(User::factory()->create());
+        $this->post(route('agents.storeExisting'), ['token' => 'first-agent-token'])->assertSessionHasNoErrors();
+        $this->post(route('agents.storeExisting'), ['token' => 'replacement-agent-token'])->assertSessionHasNoErrors();
+
+        $this->assertDatabaseCount('agents', 1);
+        $this->assertDatabaseHas('agents', ['name' => 'TEST_AGENT', 'account_id' => 'account-123']);
+        $this->assertSame('replacement-agent-token', Agent::sole()->token);
+    }
+
+    #[DataProvider('agentSaveRoutes')]
+    public function test_registration_and_import_share_a_deadline_including_status_and_connect_time(string $route): void
+    {
+        $options = [];
+        Http::fake(function (Request $request, array $requestOptions) use (&$options) {
+            $options[] = $requestOptions;
+
+            return Http::response(match (true) {
+                str_ends_with($request->url(), '/register') => ['data' => ['token' => 'new-agent-token', 'agent' => $this->agent()]],
+                str_ends_with($request->url(), '/my/agent') => ['data' => $this->agent()],
+                default => ['version' => 'v2.3.0', 'resetDate' => '2026-10-25'],
+            });
+        });
+        $client = app(SpaceTradersClient::class);
+        $client->scope(function () use ($client, $route) {
+            $client->request('get', '/');
+            $client->scope(fn () => $route === 'agents.store'
+                ? $client->register(['symbol' => 'TEST_AGENT', 'faction' => 'COSMIC'], 'account-token')
+                : $client->agent('agent-token'), deadline: microtime(true) + 100);
+        }, deadline: microtime(true) + 5);
+
+        $this->assertCount(2, $options);
+        foreach ($options as $requestOptions) {
+            $this->assertGreaterThan(0, $requestOptions['timeout']);
+            $this->assertLessThanOrEqual(5, $requestOptions['timeout']);
+            $this->assertLessThanOrEqual($requestOptions['timeout'], $requestOptions['connect_timeout']);
+        }
+        $client->request('get', '/');
+        $this->assertSame(30, $options[2]['timeout']);
+        $this->assertSame(10, $options[2]['connect_timeout']);
     }
 
     public static function agentSaveRoutes(): array

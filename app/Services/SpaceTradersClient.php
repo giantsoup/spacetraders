@@ -22,15 +22,20 @@ class SpaceTradersClient
 
     private array $reads = [];
 
-    public function scope(callable $work, string $priority = 'critical'): mixed
+    private ?float $scopeDeadline = null;
+
+    public function scope(callable $work, string $priority = 'critical', ?float $deadline = null): mixed
     {
         $previous = $this->priority;
+        $previousDeadline = $this->scopeDeadline;
+        $this->scopeDeadline = $deadline === null ? $previousDeadline : min($deadline, $previousDeadline ?? $deadline);
         $this->priority = $priority;
         $this->scopeDepth++;
         try {
             return $work();
         } finally {
             $this->priority = $previous;
+            $this->scopeDeadline = $previousDeadline;
             if (--$this->scopeDepth === 0) {
                 $this->reads = [];
             }
@@ -39,6 +44,7 @@ class SpaceTradersClient
 
     public function request(string $method, string $path, array $data = [], ?string $token = null, ?float $deadline = null, ?string $account = null): Response
     {
+        $deadline = $this->scopeDeadline === null ? $deadline : min($this->scopeDeadline, $deadline ?? $this->scopeDeadline);
         $read = strtolower($method) === 'get';
         $key = hash('sha256', json_encode([$path, $data, $token]));
         if ($read && $this->scopeDepth > 0 && isset($this->reads[$key]) && microtime(true) - $this->reads[$key]['at'] < 2) {

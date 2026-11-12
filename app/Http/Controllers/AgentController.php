@@ -48,7 +48,8 @@ class AgentController extends Controller
     public function store(Request $request, SpaceTradersClient $client): RedirectResponse
     {
         if (PHP_SAPI !== 'cli') {
-            set_time_limit(90);
+            // Leave headroom below Herd's 60-second FastCGI timeout; upstream work shares 45 seconds.
+            set_time_limit(55);
         }
         if (is_string($request->input('faction'))) {
             $request->merge(['faction' => strtoupper($request->input('faction'))]);
@@ -60,14 +61,16 @@ class AgentController extends Controller
             'email' => ['nullable', 'email', 'max:255'],
         ]);
 
-        $reset = $this->reset($request);
-        $payload = $client->register(array_filter([
-            'symbol' => strtoupper($data['symbol']),
-            'faction' => strtoupper($data['faction']),
-            'email' => $data['email'] ?? null,
-        ], fn ($value) => $value !== null), $data['account_token']);
+        $saved = $client->scope(function () use ($request, $client, $data) {
+            $reset = $this->reset($request);
+            $payload = $client->register(array_filter([
+                'symbol' => strtoupper($data['symbol']),
+                'faction' => strtoupper($data['faction']),
+                'email' => $data['email'] ?? null,
+            ], fn ($value) => $value !== null), $data['account_token']);
 
-        $saved = $this->save($request, $payload['agent'], $payload['token'], $reset, $data['email'] ?? null);
+            return $this->save($request, $payload['agent'], $payload['token'], $reset, $data['email'] ?? null);
+        }, deadline: microtime(true) + 45);
 
         return $request->boolean('guided') ? redirect()->route('agents.show', ['agent' => $saved->id, 'guided' => 1]) : redirect()->route('agents.index');
     }
@@ -75,16 +78,19 @@ class AgentController extends Controller
     public function storeExisting(Request $request, SpaceTradersClient $client): RedirectResponse
     {
         if (PHP_SAPI !== 'cli') {
-            set_time_limit(90);
+            // Leave headroom below Herd's 60-second FastCGI timeout; upstream work shares 45 seconds.
+            set_time_limit(55);
         }
         $data = $request->validate([
             'token' => ['required', 'string', 'regex:/\A[A-Za-z0-9\-._~+\/]+=*\z/'],
         ]);
 
-        $reset = $this->reset($request);
-        $agent = $client->agent($data['token']);
+        $saved = $client->scope(function () use ($request, $client, $data) {
+            $reset = $this->reset($request);
+            $agent = $client->agent($data['token']);
 
-        $saved = $this->save($request, $agent, $data['token'], $reset);
+            return $this->save($request, $agent, $data['token'], $reset);
+        }, deadline: microtime(true) + 45);
 
         return $request->boolean('guided') ? redirect()->route('agents.show', ['agent' => $saved->id, 'guided' => 1]) : redirect()->route('agents.index');
     }
@@ -113,7 +119,7 @@ class AgentController extends Controller
                 }
                 $existing ??= Agent::where('name', $payload['symbol'])->where('user_id', $request->user()->id)->whereNull('reset_id')->orderBy('id')->first();
                 $attributes = [
-                    'token' => $token, 'name' => $payload['symbol'], 'account_id' => $payload['accountId'] ?? null,
+                    'token' => $token, 'name' => $payload['symbol'], 'account_id' => $payload['accountId'] ?? $existing?->account_id,
                     'faction' => $payload['startingFaction'], 'email' => $email, 'reset_id' => $reset,
                     'canonical_identity' => $identity, 'connection_state' => 'unsynchronized',
                 ];
