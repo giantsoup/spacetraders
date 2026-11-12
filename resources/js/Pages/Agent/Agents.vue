@@ -63,7 +63,7 @@ const credits = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
                     <h2 :id="`${group.id}-heading`">{{ group.title }} <span class="count">{{ group.agents.length }}</span></h2>
                     <p class="muted">Saved snapshots · Times shown in {{ localTimeZone }}</p>
                 </div>
-                <p v-if="group.archived" class="archive-help muted">Agents from previous worlds are archived automatically. Their snapshots and activity remain available, but they cannot play in the current world.</p>
+                <p v-if="group.archived" class="archive-help muted">Agents from previous worlds are archived automatically. Their snapshots and activity remain available, but they cannot play in the current world. You can register the same name again after a reset.</p>
 
                 <ul v-if="group.agents.length" class="agent-grid">
                     <li v-for="agent in group.agents" :key="agent.id" class="agent-card" :class="{ archived: group.archived }">
@@ -81,6 +81,7 @@ const credits = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
                         <div class="card-actions">
                             <Link :href="route('agents.show', agent.id)" class="action secondary" :aria-label="group.archived ? `View archived record for ${agent.name} from ${agent.reset_id || 'unknown world'}` : `Open flight deck for ${agent.name}`">{{ group.archived ? 'View archived record' : 'Open flight deck' }} <span aria-hidden="true">→</span></Link>
                             <Link v-if="connection(agent).reconnect" :href="route('agents.create', { existing: 1 })" class="reconnect" :aria-label="`Import current token for ${agent.name}`">Import current token</Link>
+                            <Link v-if="group.archived && !props.agents.some(current => current.name === agent.name)" :href="route('agents.create', { from: agent.id })" class="reconnect" :aria-label="`Register ${agent.name} again for the current world`">Register again for this world</Link>
                         </div>
                     </li>
                 </ul>

@@ -1,22 +1,29 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
+import Checkbox from '@/Components/Checkbox.vue';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import TextInput from '@/Components/TextInput.vue';
 import GuidedFlight from '@/Components/GuidedFlight.vue';
 import GameConnection from '@/Components/GameConnection.vue';
-import { Head, Link, useForm } from '@inertiajs/vue3';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import { assetName } from '@/dataPresentation.js';
+import { formatLocalTime } from '@/dateTime.js';
 
-defineProps({ factions: Array });
+const props = defineProps({
+    factions: Array,
+    savedAccountToken: { type: Object, required: true },
+    prefill: { type: Object, default: null },
+});
 
 const form = useForm({
     account_token: '',
-    symbol: '',
-    faction: '',
-    email: '',
+    remember_account_token: false,
+    symbol: props.prefill?.symbol ?? '',
+    faction: props.prefill?.faction ?? '',
+    email: props.prefill?.email ?? '',
 });
 
 const formExisting = useForm({
@@ -32,7 +39,7 @@ const setupStage = ref('path');
 const setupStep = computed(() => {
     const definitions = {
         path: { target: 'setup-path', title: 'Choose your starting point', body: 'Choose I already have a SpaceTraders agent to import it, or I need a new SpaceTraders agent to register one. Your login to this client is already complete.', kind: 'select' },
-        token: { target: showExistingForm.value ? 'agent-token' : 'account-token', title: showExistingForm.value ? 'Paste your agent token' : 'Paste your account token', body: showExistingForm.value ? 'Open the official dashboard, select your existing agent, and generate its agent token. Paste it in the highlighted Agent token field, then Continue. The token stays in this form only.' : 'In the official dashboard open Settings and generate an account token. Paste it in the highlighted Account token field, then Continue. Do not paste an agent token here.', kind: 'read', canContinue: (showExistingForm.value ? formExisting.token : form.account_token).trim().length > 0 },
+        token: { target: showExistingForm.value ? 'agent-token' : 'account-token', title: showExistingForm.value ? 'Paste your agent token' : 'Choose your account token', body: showExistingForm.value ? 'Open the official dashboard, select your existing agent, and generate its agent token. Paste it in the highlighted Agent token field, then Continue. The token stays in this form only.' : props.savedAccountToken.saved ? 'Your saved account token will be used. Leave the field empty to keep using it, or paste a new account token, then Continue.' : 'In the official dashboard open Settings and generate an account token. Paste it in the highlighted Account token field, then Continue. Do not paste an agent token here.', kind: 'read', canContinue: showExistingForm.value ? formExisting.token.trim().length > 0 : form.account_token.trim().length > 0 || props.savedAccountToken.saved },
         name: { target: 'agent-name', title: 'Choose your agent name', body: 'Enter a unique call sign of 3 to 14 characters in Agent name, then Continue. This will identify your fleet in SpaceTraders.', kind: 'read', canContinue: form.symbol.trim().length >= 3 && form.symbol.trim().length <= 14 },
         faction: { target: 'agent-faction', title: 'Select Cosmic as your faction', body: 'For this starting path, select Cosmic in Faction, then Continue. The faction determines your starting location. Email is filled from your client account; you can edit it or leave it blank.', kind: 'read', canContinue: form.faction === 'COSMIC' },
         submit: { target: showExistingForm.value ? 'save-agent' : 'register-agent', title: showExistingForm.value ? 'Save this existing agent' : 'Register this agent once', body: 'Review the filled form and click the highlighted submit button. A successful connection opens the flight deck and starts the guided trip. If the request reports an ambiguous registration failure, check the official dashboard before repeating it.', kind: 'submit' },
@@ -142,6 +149,7 @@ function toggleForm() {
                     </div>
                 </form>
                 <form class="app-panel" v-else @submit.prevent="createAgent">
+                    <p v-if="prefill" class="mb-4 text-sm text-muted">Registering {{ prefill.fromName }} again for the current world. Review the details, then register.</p>
                     <div>
                         <InputLabel for="account_token" value="Account token" />
 
@@ -159,18 +167,30 @@ function toggleForm() {
                             autocapitalize="off"
                             v-model="form.account_token"
                             autocomplete="new-password"
-                            required
+                            :required="!savedAccountToken.saved"
                         />
 
                         <button type="button" class="app-link mt-2 text-sm" :aria-pressed="showAccountToken" aria-controls="account_token" :aria-label="showAccountToken ? 'Hide account token' : 'Show account token'" @click="showAccountToken = !showAccountToken">
                             {{ showAccountToken ? 'Hide' : 'Show' }}
                         </button>
+                        <button v-if="savedAccountToken.saved" type="button" class="app-link ml-4 mt-2 text-sm" :disabled="form.processing" @click="router.delete(route('agents.accountToken.forget'), { preserveScroll: true })">
+                            Forget saved token
+                        </button>
 
                         <p id="account-token-help" class="mt-2 text-sm text-muted">
                             Use your SpaceTraders account token to register a new agent.
-                            Your account token is used for this request and is not saved.
+                            <template v-if="savedAccountToken.saved">A saved account token (saved {{ formatLocalTime(savedAccountToken.savedAt) }}) will be used. Paste a new token here to use it instead.</template>
+                            <template v-else>Your account token is used for this request. It is saved only if you choose Remember below.</template>
                         </p>
                         <InputError id="account_token-error" class="mt-2" :message="form.errors.account_token" />
+                    </div>
+
+                    <div v-if="form.account_token || !savedAccountToken.saved" class="block mt-4">
+                        <label class="flex items-center">
+                            <Checkbox name="remember_account_token" v-model:checked="form.remember_account_token" />
+                            <span class="ml-2 text-sm text-muted">Remember this account token on this computer (stored encrypted)</span>
+                        </label>
+                        <InputError class="mt-2" :message="form.errors.remember_account_token" />
                     </div>
 
                     <div class="mt-4">

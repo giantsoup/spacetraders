@@ -20,7 +20,7 @@ The current implementation has useful authentication and API boundaries, but no 
 | --- | --- |
 | `composer.json`, `composer.lock`, `package.json` | Laravel 13.39.0, PHP 8.4, Inertia 3, Vue 3, Pinia 4, Tailwind 4, and Vite 8. Keep the locked stack and JavaScript conventions. A framework migration is unnecessary. |
 | `app/Services/SpaceTradersClient.php` | Laravel HTTP transport with fixed upstream host, timeouts, and redirects disabled. Registration and agent lookup validate responses. There are no gameplay operations or retry policies. |
-| `app/Http/Controllers/AgentController.php` | Registers and imports agents and lists owner-scoped records. Registration retains the agent token and discards the account token. |
+| `app/Http/Controllers/AgentController.php` | Registers and imports agents and lists owner-scoped records. Registration retains the agent token and saves the account token encrypted only when the user opts in. |
 | `app/Models/Agent.php`, agent migration | Tokens are hidden from serialization but stored without an encryption cast. There is no reset identity or uniqueness constraint. Repeated imports can create duplicate local records. |
 | `resources/js/Pages/Agent/Agents.vue` | Lists agents. Agent cards do not open a gameplay page. |
 | `resources/js/store.js` | Persists `activeAgentAccountID`. Account identity must not become the gameplay identity: one account can have multiple agents. |
@@ -148,7 +148,7 @@ Before unattended jobs, migrate stored agent tokens to Laravel encrypted casting
 
 Deduplicate imports before adding the canonical-agent constraint. Re-importing an agent for its owner updates credentials rather than creating a second runner. An import belonging to another local user fails without leaking that user's details. Resolve existing ownership conflicts explicitly. Lock and rate-limit by canonical upstream identity so two local rows cannot drive the same fleet independently.
 
-Keep tokens out of Inertia props, Pinia, URLs, action history, exceptions, failed-job payloads, and HTTP diagnostics. Continue discarding account tokens after registration. Redact upstream errors before showing or storing them.
+Keep tokens out of Inertia props, Pinia, URLs, action history, exceptions, failed-job payloads, and HTTP diagnostics. Discard account tokens after registration unless the user opts in to encrypted storage with the app key. Allow users to forget saved account tokens and forget them automatically when SpaceTraders rejects them. Redact upstream errors before showing or storing them.
 
 ### Request limits, retries, and uncertain writes
 

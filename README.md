@@ -42,7 +42,7 @@ The same executor serves manual commands and approved automation. The interfaces
 - Quotes and fuel or time thresholds are local checks. They cannot guarantee the server's execution price, consumption, or arrival time.
 - Stop cancels work that has not been reserved. A reserved request may still settle. Uncertain writes require reconciliation and are never replayed automatically.
 - World resets archive the old agent and its history. Recovery requires current credentials and fresh previews, not automatic registration.
-- SpaceTraders agent tokens stay encrypted on the server and are omitted from page data. Account tokens are used for registration and are not saved.
+- SpaceTraders agent tokens stay encrypted on the server and are omitted from page data. Account tokens are saved only when you opt in, encrypted with the app key, and never shown again. You can forget a saved account token from Register new agent. The app forgets it automatically if SpaceTraders rejects it.
 
 ## Roadmap to mobile
 

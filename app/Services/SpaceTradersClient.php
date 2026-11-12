@@ -16,6 +16,10 @@ class SpaceTradersClient
 
     public const BASE_URL = 'https://api.spacetraders.io/v2';
 
+    public const TOKEN_INVALID = 'Token is invalid.';
+
+    public const TOKEN_FORBIDDEN = 'Token does not have permission to complete this request.';
+
     private int $scopeDepth = 0;
 
     private string $priority = 'discovery';
@@ -140,8 +144,8 @@ class SpaceTradersClient
             }
             throw ValidationException::withMessages([
                 'api' => match ($response->status()) {
-                    401 => 'Token is invalid.',
-                    403 => 'Token does not have permission to complete this request.',
+                    401 => self::TOKEN_INVALID,
+                    403 => self::TOKEN_FORBIDDEN,
                     409 => 'That agent symbol is already registered. Choose another symbol, or Import the agent if it is yours.',
                     422 => $this->validationMessage($response, $token),
                     429 => 'Rate limit reached.',

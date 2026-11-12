@@ -40,9 +40,35 @@ class AgentController extends Controller
         ]);
     }
 
-    public function create(): Response
+    public function create(Request $request): Response
     {
-        return Inertia::render('Agent/CreateAgent', ['factions' => config('foundation.enums.FactionSymbol')]);
+        $user = $request->user();
+        $factions = config('foundation.enums.FactionSymbol');
+        $from = $request->query('from');
+        $fromId = is_string($from) ? filter_var($from, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) : false;
+        $agent = $fromId ? $user->agents()->archived()->find($fromId) : null;
+        $hasSavedToken = $user->hasSavedAccountToken();
+
+        return Inertia::render('Agent/CreateAgent', [
+            'factions' => $factions,
+            'savedAccountToken' => [
+                'saved' => $hasSavedToken,
+                'savedAt' => $hasSavedToken ? $user->spacetraders_account_token_saved_at?->toIso8601String() : null,
+            ],
+            'prefill' => $agent ? [
+                'symbol' => $agent->name,
+                'faction' => in_array($agent->faction, $factions, true) ? $agent->faction : null,
+                'email' => $agent->email,
+                'fromName' => $agent->name,
+            ] : null,
+        ]);
+    }
+
+    public function forgetAccountToken(Request $request): RedirectResponse
+    {
+        $request->user()->forgetAccountToken();
+
+        return redirect()->route('agents.create');
     }
 
     public function store(Request $request, SpaceTradersClient $client): RedirectResponse
@@ -54,23 +80,41 @@ class AgentController extends Controller
         if (is_string($request->input('faction'))) {
             $request->merge(['faction' => strtoupper($request->input('faction'))]);
         }
+        $savedToken = $request->filled('account_token') ? null : $request->user()->savedAccountToken();
+        $usingSavedToken = $savedToken !== null;
         $data = $request->validate([
-            'account_token' => ['required', 'string', 'regex:/\A[A-Za-z0-9\-._~+\/]+=*\z/'],
+            'account_token' => ['nullable', Rule::requiredIf(! $usingSavedToken), 'string', 'regex:/\A[A-Za-z0-9\-._~+\/]+=*\z/'],
+            'remember_account_token' => ['sometimes', 'boolean'],
             'symbol' => ['required', 'string', 'min:3', 'max:14'],
             'faction' => ['required', 'string', Rule::in(config('foundation.enums.FactionSymbol'))],
             'email' => ['nullable', 'email', 'max:255'],
-        ]);
+        ], ['account_token.required' => 'Enter your account token.']);
+        $accountToken = $usingSavedToken ? $savedToken : $data['account_token'];
 
-        $saved = $client->scope(function () use ($request, $client, $data) {
+        $saved = $client->scope(function () use ($request, $client, $data, $accountToken, $usingSavedToken) {
             $reset = $this->reset($request);
-            $payload = $client->register(array_filter([
-                'symbol' => strtoupper($data['symbol']),
-                'faction' => strtoupper($data['faction']),
-                'email' => $data['email'] ?? null,
-            ], fn ($value) => $value !== null), $data['account_token']);
+            try {
+                $payload = $client->register(array_filter([
+                    'symbol' => strtoupper($data['symbol']),
+                    'faction' => strtoupper($data['faction']),
+                    'email' => $data['email'] ?? null,
+                ], fn ($value) => $value !== null), $accountToken);
+            } catch (ValidationException $e) {
+                if ($usingSavedToken && in_array($e->errors()['api'][0] ?? null, [SpaceTradersClient::TOKEN_INVALID, SpaceTradersClient::TOKEN_FORBIDDEN], true)) {
+                    $request->user()->forgetAccountToken();
+
+                    throw ValidationException::withMessages(['api' => 'Your saved account token was rejected and has been forgotten. Paste a current account token from the SpaceTraders dashboard.']);
+                }
+
+                throw $e;
+            }
 
             return $this->save($request, $payload['agent'], $payload['token'], $reset, $data['email'] ?? null);
         }, deadline: microtime(true) + 45);
+
+        if (! $usingSavedToken && ($data['remember_account_token'] ?? false)) {
+            $request->user()->rememberAccountToken($accountToken);
+        }
 
         return $request->boolean('guided') ? redirect()->route('agents.show', ['agent' => $saved->id, 'guided' => 1]) : redirect()->route('agents.index');
     }

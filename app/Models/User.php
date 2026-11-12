@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -32,6 +33,8 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'spacetraders_account_token',
+        'spacetraders_account_token_saved_at',
     ];
 
     /**
@@ -41,7 +44,41 @@ class User extends Authenticatable
      */
     protected $casts = [
         'email_verified_at' => 'datetime',
+        'spacetraders_account_token' => 'encrypted',
+        'spacetraders_account_token_saved_at' => 'immutable_datetime',
     ];
+
+    public function hasSavedAccountToken(): bool
+    {
+        return $this->savedAccountToken() !== null;
+    }
+
+    public function savedAccountToken(): ?string
+    {
+        try {
+            return $this->spacetraders_account_token;
+        } catch (DecryptException) {
+            $this->forgetAccountToken();
+
+            return null;
+        }
+    }
+
+    public function rememberAccountToken(string $token): void
+    {
+        $this->forceFill([
+            'spacetraders_account_token' => $token,
+            'spacetraders_account_token_saved_at' => now(),
+        ])->save();
+    }
+
+    public function forgetAccountToken(): void
+    {
+        $this->forceFill([
+            'spacetraders_account_token' => null,
+            'spacetraders_account_token_saved_at' => null,
+        ])->save();
+    }
 
     public function agents(): HasMany
     {
