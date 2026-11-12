@@ -48,6 +48,7 @@ $values = [
     'DB_CONNECTION' => 'sqlite', 'DB_DATABASE' => $directory.'/database.sqlite', 'QUEUE_CONNECTION' => 'database',
     'MAIL_MAILER' => 'array', 'SESSION_COOKIE' => 'spacetraders_mvp_fixture',
     'SPACETRADERS_LOCK_PATH' => $directory.'/locks',
+    'SPACETRADERS_DEPLOYMENT_PATH' => $directory.'/deployment',
     'SPACETRADERS_FIXTURE_PATH' => $directory.'/world.json', 'SPACETRADERS_AUTOMATION_ENABLED' => 'true',
 ];
 if ($isolated && PHP_OS_FAMILY === 'Windows') {
@@ -62,6 +63,10 @@ if ($isolated && PHP_OS_FAMILY === 'Windows') {
         'APP_ROUTES_CACHE' => $directory.'/no-routes.php', 'APP_EVENTS_CACHE' => $directory.'/no-events.php',
         'APP_SERVICES_CACHE' => $directory.'/services.php', 'APP_PACKAGES_CACHE' => $directory.'/packages.php',
         'SPACETRADERS_REQUEST_BUDGET_PATH' => $directory.'/request-budget',
+        'CACHE_STORE' => 'file', 'CACHE_PATH' => $directory.'/storage/framework/cache/data',
+        'VIEW_COMPILED_PATH' => $directory.'/storage/framework/views',
+        'SPACETRADERS_ENGINE_LOG' => $directory.'/storage/logs/engine.log',
+        'SPACETRADERS_ENGINE_SESSION' => '', 'SPACETRADERS_ENGINE_ROLE' => '', 'SPACETRADERS_ENGINE_LEASE' => '',
     ]);
 }
 foreach ($values as $name => $value) {

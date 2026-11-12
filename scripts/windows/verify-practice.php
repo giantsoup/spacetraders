@@ -4,12 +4,9 @@ use App\Enums\ActionState;
 use App\Gameplay\ShipCommandExecutor;
 use App\Models\Ship;
 use App\Models\User;
-use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
-$app = require $root.'/bootstrap/app.php';
-$app->make(Kernel::class)->bootstrap();
 if (config('gameplay.local_engine_enabled') || config('gameplay.fixture_path') !== $directory.'/world.json') {
     throw new RuntimeException('Worker verification requires isolated offline practice with no engine.');
 }
