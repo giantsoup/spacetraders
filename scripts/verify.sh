@@ -54,7 +54,7 @@ node --check scripts/verify-batch2-browser.mjs
     app/Gameplay app/Enums app/Jobs app/Queue app/Console app/Http/Middleware/DeploymentAdmission.php app/Http/Requests/GameplayRequest.php app/Http/Requests/LocalAutomationRequest.php \
     app/Http/Controllers/AdviserController.php app/Http/Requests/AdviserRequest.php tests/Feature/AdviserTest.php \
     app/Http/Controllers/AgentDashboardController.php app/Http/Controllers/AgentCommandController.php \
-    app/Http/Controllers/ProfileController.php app/Http/Controllers/AutomationRunController.php app/Http/Controllers/LocalAutomationController.php app/Models app/Providers/AppServiceProvider.php app/Providers/RouteServiceProvider.php \
+    app/Http/Controllers/ProfileController.php app/Http/Controllers/AutomationRunController.php app/Http/Controllers/LocalAutomationController.php app/Models app/Providers/AppServiceProvider.php app/Providers/EngineServiceProvider.php app/Providers/RouteServiceProvider.php \
     config/gameplay.php config/database.php config/queue.php config/deployment.php \
     database/migrations/2026_10_31_00000*_*.php database/migrations/2026_11_01_*.php \
     tests/Feature/GameplayTest.php tests/Feature/PlayerGuideTest.php tests/Feature/GameConnectionTest.php app/Http/Controllers/PlayerGuideController.php tests/Support tests/TestCase.php \
