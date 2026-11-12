@@ -14,6 +14,7 @@ use App\Models\ShipAction;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -87,6 +88,14 @@ class FoundationCommandTest extends TestCase
         $this->assertSame('LOCAL-2', $action->outcome['delivered_ship']);
         $this->assertSame([], Ship::where('symbol', 'LOCAL-2')->firstOrFail()->snapshot['mounts']);
         $this->assertSame(80000, $this->agent->fresh()->credits);
+        $transaction = $action->outcome['response']['transaction'];
+        $spec = json_decode(file_get_contents(base_path('docs/api/spacetraders-openapi-2.3.0.json')), true, flags: JSON_THROW_ON_ERROR);
+        foreach ($spec['components']['schemas']['ShipyardTransaction']['required'] as $field) {
+            $this->assertArrayHasKey($field, $transaction);
+        }
+        $this->assertSame('SHIP_LIGHT_HAULER', $transaction['shipSymbol']);
+        $this->assertSame('SHIP_LIGHT_HAULER', $transaction['shipType']);
+        $this->assertNotSame($action->outcome['delivered_ship'], $transaction['shipSymbol']);
     }
 
     public function test_changed_offer_and_insufficient_reserve_never_dispatch_a_purchase(): void
@@ -100,6 +109,38 @@ class FoundationCommandTest extends TestCase
         $this->assertEmpty($this->world()['writes']);
     }
 
+    #[DataProvider('purchaseTypeFields')]
+    public function test_purchase_with_a_different_transaction_type_is_uncertain_without_replay(string $field): void
+    {
+        $this->world(fn (&$world) => $world[$field] = 'SHIP_LIGHT_HAULER');
+        $action = $this->execute($this->preview('buy_ship', ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => 20000, 'reserve' => 1000]));
+        $this->assertSame(ActionState::Uncertain, $action->state);
+        $this->assertSame(80000, $this->world()['credits']);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertCount(1, $this->world()['writes']);
+    }
+
+    public static function purchaseTypeFields(): array
+    {
+        return [['purchase_transaction_symbol'], ['purchase_transaction_type']];
+    }
+
+    public function test_spec_shaped_transfer_confirms_using_a_fresh_receiver_read(): void
+    {
+        $this->world(function (&$world) {
+            $world['ships'][0]['cargo'] = ['capacity' => 40, 'units' => 4, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 4]]];
+            $world['ships'][] = FakeSpaceTraders::ship('LOCAL-2');
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $action = $this->execute($this->preview('transfer', ['symbol' => 'IRON_ORE', 'units' => 3, 'targetShip' => 'LOCAL-2']));
+        $this->assertSame(ActionState::Confirmed, $action->state);
+        $this->assertSame(1, Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot['cargo']['units']);
+        $this->assertSame(3, Ship::where('symbol', 'LOCAL-2')->firstOrFail()->snapshot['cargo']['units']);
+        $this->assertArrayNotHasKey('targetCargo', $action->outcome['response']);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertCount(1, $this->world()['writes']);
+    }
+
     public function test_jettison_has_explicit_permanent_loss_and_exact_cargo_delta(): void
     {
         $this->world(fn (&$w) => $w['ships'][0]['cargo'] = ['capacity' => 40, 'units' => 4, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 4]]]);
@@ -109,6 +150,39 @@ class FoundationCommandTest extends TestCase
         $this->assertSame(0, $action->outcome['credit_delta']);
         app(ShipCommandExecutor::class)->execute($action->id);
         $this->assertCount(1, $this->world()['writes']);
+    }
+
+    #[DataProvider('postWriteRefuelReads')]
+    public function test_cargo_refuel_without_optional_response_cargo_confirms_from_a_fresh_read(bool $deferred): void
+    {
+        $this->world(function (&$world) use ($deferred) {
+            $world['omit_refuel_cargo'] = true;
+            $world['defer_followup_after_write'] = $deferred;
+            $world['ships'][0]['fuel']['current'] = 0;
+            $world['ships'][0]['cargo'] = ['capacity' => 40, 'units' => 1, 'inventory' => [['symbol' => 'FUEL', 'units' => 1]]];
+        });
+        $action = $this->execute($this->preview('refuel', ['fromCargo' => true, 'units' => 100, 'maxTotal' => 0, 'reserve' => 1000]));
+        $response = Http::recorded(fn ($request) => str_ends_with($request->url(), '/refuel'))->sole()[1];
+        $this->assertNull($response->json('data.cargo'));
+        if ($deferred) {
+            $this->assertSame(ActionState::Uncertain, $action->state);
+            $this->assertStringContainsString('Write response retained', $action->message);
+            app(ShipCommandExecutor::class)->execute($action->id);
+            $this->assertCount(1, $this->world()['writes']);
+
+            return;
+        }
+        $this->assertSame(ActionState::Confirmed, $action->state);
+        $this->assertSame(100, Ship::firstOrFail()->snapshot['fuel']['current']);
+        $this->assertSame(0, Ship::firstOrFail()->snapshot['cargo']['units']);
+        $this->assertSame(0, $action->outcome['credit_delta']);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertCount(1, $this->world()['writes']);
+    }
+
+    public static function postWriteRefuelReads(): array
+    {
+        return [['deferred' => false], ['deferred' => true]];
     }
 
     public function test_jettison_rejects_missing_acknowledgement_and_contract_committed_goods(): void
