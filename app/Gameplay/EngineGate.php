@@ -2,6 +2,7 @@
 
 namespace App\Gameplay;
 
+use App\Gameplay\Engine\EngineHost;
 use App\Models\AutomationRun;
 use App\Models\LocalEngine;
 use App\Models\ShipAction;
@@ -47,8 +48,7 @@ class EngineGate
     private function processesAlive(LocalEngine $engine): bool
     {
         foreach (['supervisor', 'worker', 'scheduler'] as $name) {
-            $pid = $engine->processes[$name] ?? null;
-            if (! is_int($pid) || $pid < 1 || ! posix_kill($pid, 0)) {
+            if (! app(EngineHost::class)->alive($engine, $name)) {
                 return false;
             }
         }
