@@ -51,7 +51,8 @@ class DeploymentGate
     // JobPopping runs even when Laravel's persistent queue pause prevents pop().
     public function workerPolling(): void
     {
-        $owned = app(EngineWorkerGate::class)->allowsPolling();
+        $workers = app(EngineWorkerGate::class);
+        $owned = $workers->allowsPolling() || $workers->ownsSession();
         $now = hrtime(true);
         if (! $owned && $now - $this->lastForeignPoll < 1000000000) {
             return;

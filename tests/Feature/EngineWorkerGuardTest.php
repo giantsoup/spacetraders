@@ -219,6 +219,26 @@ class EngineWorkerGuardTest extends TestCase
         Http::assertNothingSent();
     }
 
+    #[TestWith(['starting'])]
+    #[TestWith(['stopping'])]
+    public function test_the_engines_own_worker_is_not_reported_as_foreign_outside_running(string $state): void
+    {
+        $this->engine->update(['state' => $state, 'gate_open' => false]);
+        putenv('SPACETRADERS_ENGINE_WORKER_SESSION='.$this->engine->session_id);
+        $gate = app(DeploymentGate::class);
+        $gate->workerPolling();
+
+        $this->assertFalse($gate->hasForeignWorker());
+        $this->assertNull(app(LocalEngineManager::class)->status()['warning'] ?? null);
+        $gate->workerStopped();
+
+        putenv('SPACETRADERS_ENGINE_WORKER_SESSION='.Str::uuid());
+        $stale = app(DeploymentGate::class);
+        $stale->workerPolling();
+        $this->assertTrue($stale->hasForeignWorker());
+        $stale->workerStopped();
+    }
+
     public function test_status_warns_only_while_a_foreign_worker_is_polling(): void
     {
         $gate = app(DeploymentGate::class);

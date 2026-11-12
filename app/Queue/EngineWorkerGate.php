@@ -28,4 +28,20 @@ class EngineWorkerGate
 
         return $this->allowed;
     }
+
+    /**
+     * Whether this process is the worker spawned for the current engine session,
+     * whatever state that session is in. Used to tell the engine's own worker
+     * apart from foreign workers while the session is still starting or stopping,
+     * when polling is not yet (or no longer) allowed.
+     */
+    public function ownsSession(): bool
+    {
+        if (! config('gameplay.local_engine_enabled')) {
+            return true;
+        }
+        $session = getenv('SPACETRADERS_ENGINE_WORKER_SESSION');
+
+        return $session && LocalEngine::whereKey(1)->where('session_id', $session)->exists();
+    }
 }
