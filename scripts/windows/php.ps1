@@ -9,6 +9,6 @@ $ErrorActionPreference = 'Stop'
 try {
     . "$PSScriptRoot/common.ps1"
     $php = Get-HerdPhp
-    & $php @args
-    exit $LASTEXITCODE
+    $exitCode = Invoke-NativeConsole $php $args
+    exit $exitCode
 } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }

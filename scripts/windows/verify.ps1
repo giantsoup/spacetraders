@@ -96,6 +96,31 @@ try {
         if ($result.ExitCode -ne 0 -or (($result.Output | ConvertFrom-Json) | ConvertTo-Json -Compress) -ne $wanted) { throw 'PHP wrapper argument forwarding failed.' }
         $result = Invoke-NativeResult $powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $wrapper, '-r', 'exit(37);')
         if ($result.ExitCode -ne 37) { throw 'PHP wrapper did not preserve exit code 37.' }
+        $start = New-Object Diagnostics.ProcessStartInfo
+        $start.FileName = $powershell
+        $promptCode = 'echo "ready".PHP_EOL; fflush(STDOUT); echo trim(fgets(STDIN)); exit(23);'
+        $start.Arguments = (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $wrapper, '-r', $promptCode) | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
+        $start.UseShellExecute = $false
+        $start.CreateNoWindow = $true
+        $start.RedirectStandardInput = $true
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $process = New-Object Diagnostics.Process
+        $process.StartInfo = $start
+        try {
+            [void]$process.Start()
+            $prompt = $process.StandardOutput.ReadLineAsync()
+            if (-not $prompt.Wait(10000) -or $prompt.Result -ne 'ready') { throw 'PHP wrapper buffered the interactive prompt.' }
+            $process.StandardInput.WriteLine('interactive-response')
+            $process.StandardInput.Close()
+            $response = $process.StandardOutput.ReadToEndAsync()
+            if (-not $process.WaitForExit(10000) -or $response.Result -ne 'interactive-response' -or $process.ExitCode -ne 23) { throw 'PHP wrapper interactive input or exit code forwarding failed.' }
+        } finally {
+            if ($process.Id -and -not $process.HasExited) { $process.Kill() }
+            $process.Dispose()
+        }
+        $result = Invoke-NativeResult $powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'composer.ps1'), '--version', '--no-ansi')
+        if ($result.ExitCode -ne 0 -or $result.Output -notmatch 'Composer version') { throw 'Composer wrapper failed.' }
         $oldOverride = $env:HERD_PHP85_BIN
         try {
             $env:HERD_PHP85_BIN = Join-Path $root 'missing-herd-php.exe'

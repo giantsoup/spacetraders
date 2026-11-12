@@ -15,6 +15,22 @@ function ConvertTo-NativeArgument {
     return '"' + [regex]::Replace([regex]::Replace($Value, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
 }
 
+function Invoke-NativeConsole {
+    param([string]$FilePath, [string[]]$ArgumentList = @())
+    $start = New-Object Diagnostics.ProcessStartInfo
+    $start.FileName = $FilePath
+    $start.Arguments = ($ArgumentList | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
+    $start.WorkingDirectory = Get-RepositoryRoot
+    $start.UseShellExecute = $false
+    $process = New-Object Diagnostics.Process
+    $process.StartInfo = $start
+    try {
+        [void]$process.Start()
+        $process.WaitForExit()
+        return $process.ExitCode
+    } finally { $process.Dispose() }
+}
+
 function Invoke-NativeResult {
     param([string]$FilePath, [string[]]$ArgumentList = @())
     $start = New-Object Diagnostics.ProcessStartInfo
