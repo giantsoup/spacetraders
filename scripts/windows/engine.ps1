@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-Install, uninstall or inspect this checkout's native local engine service.
+Install, uninstall, inspect, start or end this checkout's native local engine service.
 .EXAMPLE
 .\scripts\windows\engine.ps1 Status
 #>
-param([Parameter(Mandatory = $true)][ValidateSet('Install', 'Uninstall', 'Status')][string]$Operation)
+param([Parameter(Mandatory = $true)][ValidateSet('Install', 'Uninstall', 'Status', 'Start', 'End')][string]$Operation)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 try {

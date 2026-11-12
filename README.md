@@ -190,6 +190,8 @@ See the [Tailscale iPad plan](docs/tailscale-ipad-plan.md).
 
 **Production and development on one PC.** The Herd checkout `C:\Users\taylo\Herd\spacetraders` is production. It stays on `main` and changes only through `scripts\windows\deploy.ps1`: run it alone for a preview, or with `-Yes` to deploy. Development happens in `C:\Users\taylo\Projects\spacetraders`, linked in Herd as `spacetraders-dev.test`, with its own `.env` and database. [AGENTS.md](AGENTS.md) has the full ship-and-deploy procedure.
 
+The deploy gracefully ends a running local engine and restarts it after the site checks pass; ending cancels unsent previews and stops automation runs, which you re-approve afterwards.
+
 The [Windows local MVP plan](docs/windows-local-mvp-plan.md) and [Windows engine design](docs/windows-engine-design.md) describe the port, its safety protocol, and its verification evidence.
 
 ### Local engine and offline practice
