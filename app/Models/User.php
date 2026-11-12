@@ -80,6 +80,21 @@ class User extends Authenticatable
         ])->save();
     }
 
+    /**
+     * Forget the saved token only if it is still the one this request read, so a
+     * slow rejected registration cannot erase a token saved meanwhile elsewhere.
+     */
+    public function forgetAccountTokenIfUnchanged(?string $ciphertext): void
+    {
+        if ($ciphertext === null) {
+            return;
+        }
+        static::whereKey($this->getKey())->where('spacetraders_account_token', $ciphertext)->update([
+            'spacetraders_account_token' => null,
+            'spacetraders_account_token_saved_at' => null,
+        ]);
+    }
+
     public function agents(): HasMany
     {
         return $this->hasMany(Agent::class);

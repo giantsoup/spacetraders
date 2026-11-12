@@ -184,7 +184,7 @@ class SavedAccountTokenTest extends TestCase
         $this->assertSame('saved-account-secret', $user->fresh()->savedAccountToken());
     }
 
-    public function test_forgetting_a_token_is_owner_scoped_and_redirects_without_query_parameters(): void
+    public function test_forgetting_a_token_is_owner_scoped_and_keeps_only_a_valid_register_again_context(): void
     {
         $user = User::factory()->create();
         $user->rememberAccountToken('saved-account-secret');
@@ -193,10 +193,30 @@ class SavedAccountTokenTest extends TestCase
 
         $this->actingAs($user)->from(route('agents.create', ['from' => 42, 'guided' => 1]))
             ->delete(route('agents.accountToken.forget'), ['user_id' => $other->id])->assertRedirect(route('agents.create'));
+        $this->actingAs($user)->delete(route('agents.accountToken.forget', ['from' => 42]))->assertRedirect(route('agents.create', ['from' => 42]));
+        $this->actingAs($user)->delete(route('agents.accountToken.forget', ['from' => 'https://example.com']))->assertRedirect(route('agents.create'));
 
         $this->assertNoSavedToken($user);
         $this->assertSame('other-account-secret', $other->fresh()->savedAccountToken());
         Http::assertNothingSent();
+    }
+
+    public function test_a_rejected_saved_token_does_not_erase_a_token_saved_during_the_request(): void
+    {
+        $user = User::factory()->create();
+        $user->rememberAccountToken('saved-account-secret');
+        Http::fake(['api.spacetraders.io/v2/register' => function () use ($user) {
+            // Another tab replaces the saved token while this registration is in flight.
+            User::find($user->id)->rememberAccountToken('replacement-account-secret');
+
+            return Http::response([], 401);
+        }]);
+
+        $this->actingAs($user)->postJson(route('agents.store'), $this->registration(['account_token' => '']))
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.api.0', 'Your saved account token was rejected and has been forgotten. Paste a current account token from the SpaceTraders dashboard.');
+
+        $this->assertSame('replacement-account-secret', $user->fresh()->savedAccountToken());
     }
 
     public function test_forgetting_a_token_requires_authentication(): void

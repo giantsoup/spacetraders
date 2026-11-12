@@ -74,6 +74,12 @@ function fetchAndSaveAgent() {
     });
 }
 
+function forgetSavedToken() {
+    const from = new URL(window.location.href).searchParams.get('from');
+    // Keep the typed details, guided step and "register again" context.
+    router.delete(route('agents.accountToken.forget', from ? { from } : {}), { preserveScroll: true, preserveState: true });
+}
+
 function toggleForm() {
     showExistingForm.value = !showExistingForm.value;
     form.clearErrors();
@@ -173,7 +179,7 @@ function toggleForm() {
                         <button type="button" class="app-link mt-2 text-sm" :aria-pressed="showAccountToken" aria-controls="account_token" :aria-label="showAccountToken ? 'Hide account token' : 'Show account token'" @click="showAccountToken = !showAccountToken">
                             {{ showAccountToken ? 'Hide' : 'Show' }}
                         </button>
-                        <button v-if="savedAccountToken.saved" type="button" class="app-link ml-4 mt-2 text-sm" :disabled="form.processing" @click="router.delete(route('agents.accountToken.forget'), { preserveScroll: true })">
+                        <button v-if="savedAccountToken.saved" type="button" class="app-link ml-4 mt-2 text-sm" :disabled="form.processing" @click="forgetSavedToken">
                             Forget saved token
                         </button>
 

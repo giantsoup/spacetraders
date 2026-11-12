@@ -67,8 +67,11 @@ class AgentController extends Controller
     public function forgetAccountToken(Request $request): RedirectResponse
     {
         $request->user()->forgetAccountToken();
+        $from = $request->query('from');
+        $fromId = is_string($from) ? filter_var($from, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) : false;
 
-        return redirect()->route('agents.create');
+        // Keep the "register again" context; create() re-checks ownership and archive state.
+        return redirect()->route('agents.create', $fromId ? ['from' => $fromId] : []);
     }
 
     public function store(Request $request, SpaceTradersClient $client): RedirectResponse
@@ -82,6 +85,7 @@ class AgentController extends Controller
         }
         $savedToken = $request->filled('account_token') ? null : $request->user()->savedAccountToken();
         $usingSavedToken = $savedToken !== null;
+        $savedCiphertext = $usingSavedToken ? $request->user()->getRawOriginal('spacetraders_account_token') : null;
         $data = $request->validate([
             'account_token' => ['nullable', Rule::requiredIf(! $usingSavedToken), 'string', 'regex:/\A[A-Za-z0-9\-._~+\/]+=*\z/'],
             'remember_account_token' => ['sometimes', 'boolean'],
@@ -91,7 +95,7 @@ class AgentController extends Controller
         ], ['account_token.required' => 'Enter your account token.']);
         $accountToken = $usingSavedToken ? $savedToken : $data['account_token'];
 
-        $saved = $client->scope(function () use ($request, $client, $data, $accountToken, $usingSavedToken) {
+        $saved = $client->scope(function () use ($request, $client, $data, $accountToken, $usingSavedToken, $savedCiphertext) {
             $reset = $this->reset($request);
             try {
                 $payload = $client->register(array_filter([
@@ -101,7 +105,7 @@ class AgentController extends Controller
                 ], fn ($value) => $value !== null), $accountToken);
             } catch (ValidationException $e) {
                 if ($usingSavedToken && in_array($e->errors()['api'][0] ?? null, [SpaceTradersClient::TOKEN_INVALID, SpaceTradersClient::TOKEN_FORBIDDEN], true)) {
-                    $request->user()->forgetAccountToken();
+                    $request->user()->forgetAccountTokenIfUnchanged($savedCiphertext);
 
                     throw ValidationException::withMessages(['api' => 'Your saved account token was rejected and has been forgotten. Paste a current account token from the SpaceTraders dashboard.']);
                 }

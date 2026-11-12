@@ -96,13 +96,16 @@ $handle = [IO.File]::Open($env:ST_STATE, [IO.FileMode]::Open, [IO.FileAccess]::R
 try {
     [IO.File]::WriteAllText($env:ST_READY, 'ready')
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
-    while (-not (Test-Path -LiteralPath $env:ST_GO)) {
-        if ([DateTime]::UtcNow -gt $deadline) { throw 'Timed out waiting for writer.' }
-        Start-Sleep -Milliseconds 2
-    }
     if ($env:ST_BRIEF -eq 'yes') {
-        Start-Sleep -Milliseconds 80
+        # Release on a fixed timer from "ready" rather than after polling for "go", and use
+        # Thread.Sleep: Windows PowerShell 5.1 can spend 150+ ms loading the module behind the
+        # first Test-Path/Start-Sleep, which alone exceeds the writer's 250 ms retry window.
+        [Threading.Thread]::Sleep(120)
     } else {
+        while (-not (Test-Path -LiteralPath $env:ST_GO)) {
+            if ([DateTime]::UtcNow -gt $deadline) { throw 'Timed out waiting for writer.' }
+            Start-Sleep -Milliseconds 2
+        }
         while (-not (Test-Path -LiteralPath $env:ST_STOP)) {
             if ([DateTime]::UtcNow -gt $deadline) { throw 'Timed out waiting for cleanup.' }
             Start-Sleep -Milliseconds 2
