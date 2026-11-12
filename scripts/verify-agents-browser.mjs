@@ -134,10 +134,21 @@ try {
     await page.getByLabel('Agent token', { exact: true }).waitFor();
     const assertTokenInput = async label => {
         const input = page.getByLabel(label, { exact: true });
-        for (const [attribute, value] of Object.entries({ type: 'text', autocomplete: 'off', 'data-1p-ignore': '', 'data-lpignore': 'true', 'data-bwignore': '', spellcheck: 'false', autocapitalize: 'off' })) {
+        for (const [attribute, value] of Object.entries({ type: 'password', autocomplete: 'new-password', 'data-1p-ignore': '', 'data-lpignore': 'true', 'data-bwignore': '', 'data-form-type': 'other', spellcheck: 'false', autocapitalize: 'off' })) {
             assert.equal(await input.getAttribute(attribute), value, label + ' ' + attribute);
         }
-        assert.equal(await input.evaluate(element => getComputedStyle(element).webkitTextSecurity), 'disc');
+        const toggle = page.getByRole('button', { name: 'Show ' + label.toLowerCase(), exact: true });
+        assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
+        assert.equal(await toggle.getAttribute('aria-controls'), await input.getAttribute('id'));
+        await input.fill('synthetic-hidden-token');
+        await toggle.click();
+        const hide = page.getByRole('button', { name: 'Hide ' + label.toLowerCase(), exact: true });
+        assert.equal(await hide.getAttribute('aria-pressed'), 'true');
+        assert.equal(await input.getAttribute('type'), 'text');
+        assert.equal(await input.inputValue(), 'synthetic-hidden-token');
+        await hide.click();
+        assert.equal(await input.getAttribute('type'), 'password');
+        assert.equal(await input.inputValue(), 'synthetic-hidden-token');
         assert.equal(await input.getAttribute('aria-invalid'), 'false');
     };
     await assertTokenInput('Agent token');

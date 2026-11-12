@@ -23,6 +23,9 @@ const formExisting = useForm({
     token: '',
 });
 
+const showAgentToken = ref(false);
+const showAccountToken = ref(false);
+
 const showExistingForm = ref(new URL(window.location.href).searchParams.get('existing') === '1');
 const setupGuided = ref(new URL(window.location.href).searchParams.get('guided') === '1');
 const setupStage = ref('path');
@@ -51,7 +54,7 @@ function createAgent() {
     form.post(route('agents.store', setupGuided.value ? { guided: 1 } : {}), {
         preserveScroll: true,
         onError: () => { if (setupGuided.value) setupStage.value = 'token'; },
-        onFinish: () => form.reset('account_token'),
+        onFinish: () => { form.reset('account_token'); showAccountToken.value = false; },
     });
 }
 
@@ -60,7 +63,7 @@ function fetchAndSaveAgent() {
     formExisting.post(route('agents.storeExisting', setupGuided.value ? { guided: 1 } : {}), {
         preserveScroll: true,
         onError: () => { if (setupGuided.value) setupStage.value = 'token'; },
-        onFinish: () => formExisting.reset('token'),
+        onFinish: () => { formExisting.reset('token'); showAgentToken.value = false; },
     });
 }
 
@@ -70,6 +73,8 @@ function toggleForm() {
     formExisting.clearErrors();
     form.reset('account_token');
     formExisting.reset('token');
+    showAgentToken.value = false;
+    showAccountToken.value = false;
 }
 </script>
 
@@ -105,17 +110,22 @@ function toggleForm() {
                             :aria-invalid="Boolean(formExisting.errors.token)"
                             :aria-describedby="formExisting.errors.token ? 'token-error' : undefined"
                             id="token" data-guide="agent-token"
-                            type="text"
-                            class="token-input mt-1 block w-full"
+                            :type="showAgentToken ? 'text' : 'password'"
+                            class="mt-1 block w-full"
                             data-1p-ignore
                             data-lpignore="true"
                             data-bwignore
+                            data-form-type="other"
                             spellcheck="false"
                             autocapitalize="off"
                             v-model="formExisting.token"
-                            autocomplete="off"
+                            autocomplete="new-password"
                             required
                         />
+
+                        <button type="button" class="app-link mt-2 text-sm" :aria-pressed="showAgentToken" aria-controls="token" :aria-label="showAgentToken ? 'Hide agent token' : 'Show agent token'" @click="showAgentToken = !showAgentToken">
+                            {{ showAgentToken ? 'Hide' : 'Show' }}
+                        </button>
 
                         <InputError id="token-error" class="mt-2" :message="formExisting.errors.token" />
                     </div>
@@ -139,17 +149,22 @@ function toggleForm() {
                             :aria-invalid="Boolean(form.errors.account_token)"
                             :aria-describedby="'account-token-help' + (form.errors.account_token ? ' account_token-error' : '')"
                             id="account_token" data-guide="account-token"
-                            type="text"
-                            class="token-input mt-1 block w-full"
+                            :type="showAccountToken ? 'text' : 'password'"
+                            class="mt-1 block w-full"
                             data-1p-ignore
                             data-lpignore="true"
                             data-bwignore
+                            data-form-type="other"
                             spellcheck="false"
                             autocapitalize="off"
                             v-model="form.account_token"
-                            autocomplete="off"
+                            autocomplete="new-password"
                             required
                         />
+
+                        <button type="button" class="app-link mt-2 text-sm" :aria-pressed="showAccountToken" aria-controls="account_token" :aria-label="showAccountToken ? 'Hide account token' : 'Show account token'" @click="showAccountToken = !showAccountToken">
+                            {{ showAccountToken ? 'Hide' : 'Show' }}
+                        </button>
 
                         <p id="account-token-help" class="mt-2 text-sm text-muted">
                             Use your SpaceTraders account token to register a new agent.
@@ -225,9 +240,3 @@ function toggleForm() {
         </div>
     </AuthenticatedLayout>
 </template>
-
-<style scoped>
-.token-input {
-    -webkit-text-security: disc;
-}
-</style>
