@@ -43,6 +43,7 @@ The same executor serves manual commands and approved automation. The interfaces
 - Stop cancels work that has not been reserved. A reserved request may still settle. Uncertain writes require reconciliation and are never replayed automatically.
 - World resets archive the old agent and its history. Recovery requires current credentials and fresh previews, not automatic registration.
 - SpaceTraders agent tokens stay encrypted on the server and are omitted from page data. Account tokens are saved only when you opt in, encrypted with the app key, and never shown again. You can forget a saved account token from Register new agent. The app forgets it automatically if SpaceTraders rejects it.
+  The Profile page lets you save, replace, or forget this server's OpenAI API key, which is verified before saving, stored encrypted, and never shown again.
 
 ## Roadmap to mobile
 
