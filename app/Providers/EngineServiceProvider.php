@@ -2,7 +2,9 @@
 
 namespace App\Providers;
 
+use App\Gameplay\Engine\EngineChildWatch;
 use App\Gameplay\Engine\EngineHost;
+use App\Gameplay\Engine\EngineLease;
 use App\Gameplay\Engine\LaunchdEngineHost;
 use App\Gameplay\Engine\Windows\WindowsEngineHost;
 use Illuminate\Support\ServiceProvider;
@@ -18,6 +20,12 @@ class EngineServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        // Owned-child wiring (lease hold and cooperative stop listeners) is added in M2 task B.
+        if (! $this->app->runningInConsole() || ! getenv('SPACETRADERS_ENGINE_SESSION') || ! getenv('SPACETRADERS_ENGINE_ROLE')) {
+            return;
+        }
+        if ($lease = getenv('SPACETRADERS_ENGINE_LEASE')) {
+            EngineLease::hold($lease);
+        }
+        EngineChildWatch::listen();
     }
 }

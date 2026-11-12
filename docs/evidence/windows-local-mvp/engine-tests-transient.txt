@@ -1,0 +1,53 @@
+PHPUnit 13.4.5 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.5.12
+Configuration: C:\Users\taylo\.t3\worktrees\spacetraders\t3-405d3484-50152e7243ca9f7f\phpunit.xml
+
+...............................................................  63 / 556 ( 11%)
+............................................................... 126 / 556 ( 22%)
+............................................................... 189 / 556 ( 33%)
+............................................................... 252 / 556 ( 45%)
+............................................................... 315 / 556 ( 56%)
+.................................................S............. 378 / 556 ( 67%)
+SS....S....................................S................... 441 / 556 ( 79%)
+..............................................................F 504 / 556 ( 90%)
+...S................................................            556 / 556 (100%)
+
+Time: 05:07.708, Memory: 92.00 MB
+
+There was 1 failure:
+
+1) Tests\Feature\RequestBudgetTest::test_three_process_response_recording_has_no_losses_or_lock_failures
+Failed asserting that two strings are identical.
+--- Expected
++++ Actual
+@@ @@
+-'0'
++'1'
+
+C:\Users\taylo\.t3\worktrees\spacetraders\t3-405d3484-50152e7243ca9f7f\tests\Feature\RequestBudgetTest.php:336
+
+--
+
+There were 6 skipped tests:
+
+1) Tests\Feature\LocalAutomationTest::test_material_changes_cannot_execute_an_old_preview#8 with data ('session')
+Windows engine port (M2): native process liveness and engine session checks require POSIX.
+
+2) Tests\Feature\LocalAutomationTest::test_a_fresh_preview_cannot_cross_an_engine_sleep_gap
+Windows engine port (M2): native process liveness and engine session checks require POSIX.
+
+3) Tests\Feature\LocalAutomationTest::test_dead_processes_close_permission_even_with_a_fresh_heartbeat
+Windows engine port (M2): native process liveness and engine session checks require POSIX.
+
+4) Tests\Feature\LocalAutomationTest::test_engine_status_does_not_contain_credentials_or_process_identifiers
+Windows engine port (M2): native process liveness and engine session checks require POSIX.
+
+5) Tests\Feature\OpportunityTest::test_expanded_operations_use_the_automation_branch_engine_gate_and_credit_ledger
+Windows engine port (M2): this integration exercises the real POSIX engine gate.
+
+6) Tests\Feature\SQLiteConcurrencyTest::test_engine_heartbeat_cannot_break_action_reservation_by_invalidating_a_read_snapshot
+Windows engine port (M2): the competing writer must exercise the real POSIX engine gate.
+
+FAILURES!
+Tests: 556, Assertions: 3093, Failures: 1, Skipped: 6.

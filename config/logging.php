@@ -52,6 +52,13 @@ return [
     */
 
     'channels' => [
+        'engine' => [
+            'driver' => 'single',
+            'path' => env('SPACETRADERS_ENGINE_LOG', storage_path('logs/engine.log')),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'replace_placeholders' => true,
+        ],
+
         'stack' => [
             'driver' => 'stack',
             'channels' => ['single'],
