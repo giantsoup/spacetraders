@@ -41,7 +41,7 @@ await withBrowserVerification({ root, php, output }, async ({ parsed, env, origi
         for (let pass = 0; pass < 45 && state().runs.some(run => run.active_agent_id); pass++) {
             cli("App\\Models\\AutomationRun::whereNotNull('active_agent_id')->update(['next_action_at'=>now(),'last_dispatched_at'=>null]); Illuminate\\Support\\Facades\\Artisan::call('spacetraders:dispatch-due'); echo '{}';");
             signal.throwIfAborted();
-            execute(['artisan', 'queue:work', 'database', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], env);
+            execute(['artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], env);
             if (state().runs[0]?.state === 'blocked') throw new Error(state().runs[0].blocked_reason);
         }
         assert.equal(state().runs[0].state, 'completed');

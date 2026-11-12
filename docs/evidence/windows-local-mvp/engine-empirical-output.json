@@ -1,0 +1,135 @@
+{
+    "date": "2026-11-12T02:30:41+00:00",
+    "php": "C:\\Users\\taylo\\.config\\herd\\bin\\php85\\php.exe",
+    "task": "SpaceTraders-Engine-Test-d7ebfb5020810b33",
+    "temporary_directory": "C:\\Users\\taylo\\AppData\\Local\\Temp/SpaceTraders-Engine-Test-f288204f4453263a",
+    "non_elevated": true,
+    "E2_create": {
+        "argv": [
+            "C:\\WINDOWS/System32/schtasks.exe",
+            "/Create",
+            "/TN",
+            "SpaceTraders-Engine-Test-d7ebfb5020810b33",
+            "/XML",
+            "C:\\Users\\taylo\\AppData\\Local\\Temp/SpaceTraders-Engine-Test-f288204f4453263a/task.xml"
+        ],
+        "exit": 0,
+        "out": "SUCCESS: The scheduled task \"SpaceTraders-Engine-Test-d7ebfb5020810b33\" has successfully been created.",
+        "err": ""
+    },
+    "E2_run": {
+        "argv": [
+            "C:\\WINDOWS/System32/schtasks.exe",
+            "/Run",
+            "/TN",
+            "SpaceTraders-Engine-Test-d7ebfb5020810b33"
+        ],
+        "exit": 0,
+        "out": "SUCCESS: Attempted to run the scheduled task \"SpaceTraders-Engine-Test-d7ebfb5020810b33\".",
+        "err": ""
+    },
+    "E3_second_run": {
+        "argv": [
+            "C:\\WINDOWS/System32/schtasks.exe",
+            "/Run",
+            "/TN",
+            "SpaceTraders-Engine-Test-d7ebfb5020810b33"
+        ],
+        "exit": 0,
+        "out": "INFO: scheduled task \"SpaceTraders-Engine-Test-d7ebfb5020810b33\" is currently running.\r\nSUCCESS: Attempted to run the scheduled task \"SpaceTraders-Engine-Test-d7ebfb5020810b33\".",
+        "err": ""
+    },
+    "E3_start_count": 1,
+    "E4_windows": [
+        {
+            "Id": 35360,
+            "ProcessName": "php-win",
+            "MainWindowHandle": 0
+        },
+        {
+            "Id": 47308,
+            "ProcessName": "php-win",
+            "MainWindowHandle": 0
+        }
+    ],
+    "E4_output": "child",
+    "E4_engine_channel": "[2026-11-12 02:30:44] production.INFO: engine channel empirical check  \n",
+    "E8_identities": {
+        "parent": {
+            "created_at": "2026-11-12T02:30:42.5893500Z",
+            "pid": 35360,
+            "command_hash": "e3a251ddf0f2aa974f840e1f74d2f37721cf28ba3797d1e328cc5cb6f8eeadf6"
+        },
+        "descendant": {
+            "created_at": "2026-11-12T02:30:42.6520540Z",
+            "pid": 47308,
+            "command_hash": "29abb0a65e88fb60d24010bdb1d53896caf9e5b4c287329362a824399d61ba2c"
+        }
+    },
+    "E8_stable": true,
+    "E5_end": {
+        "argv": [
+            "C:\\WINDOWS/System32/schtasks.exe",
+            "/End",
+            "/TN",
+            "SpaceTraders-Engine-Test-d7ebfb5020810b33"
+        ],
+        "exit": 0,
+        "out": "SUCCESS: The scheduled task \"SpaceTraders-Engine-Test-d7ebfb5020810b33\" has been terminated successfully.",
+        "err": ""
+    },
+    "E5_remaining": {
+        "descendant": {
+            "created_at": "2026-11-12T02:30:42.6520540Z",
+            "pid": 47308,
+            "command_hash": "29abb0a65e88fb60d24010bdb1d53896caf9e5b4c287329362a824399d61ba2c"
+        }
+    },
+    "E10_proc_pid": 26696,
+    "E10_php_pid": 26696,
+    "E10_identity": {
+        "worker": {
+            "created_at": "2026-11-12T02:30:47.7015910Z",
+            "pid": 26696,
+            "command_hash": "f2fe1c3e0e8476af9372e0d2e5d31b50d869fc391ad29233cca6c8e5e9d70520"
+        }
+    },
+    "E4_direct_output": "child stdout",
+    "E6_taskkill_exit": 0,
+    "E6_lease_free": true,
+    "E6_release_ms_including_taskkill": 221.915,
+    "engine_acl": {
+        "allowed": [
+            "S-1-5-18",
+            "S-1-5-32-544",
+            "S-1-5-21-2728290705-1462560497-2239689547-1001"
+        ],
+        "protected": true
+    },
+    "cleanup_owned": "47308",
+    "cleanup_delete": {
+        "argv": [
+            "C:\\WINDOWS/System32/schtasks.exe",
+            "/Delete",
+            "/TN",
+            "SpaceTraders-Engine-Test-d7ebfb5020810b33",
+            "/F"
+        ],
+        "exit": 0,
+        "out": "SUCCESS: The scheduled task \"SpaceTraders-Engine-Test-d7ebfb5020810b33\" was successfully deleted.",
+        "err": ""
+    },
+    "cleanup_query": {
+        "argv": [
+            "C:\\WINDOWS/System32/schtasks.exe",
+            "/Query",
+            "/TN",
+            "SpaceTraders-Engine-Test-d7ebfb5020810b33"
+        ],
+        "exit": 1,
+        "out": "",
+        "err": "ERROR: The system cannot find the file specified."
+    },
+    "cleanup_processes": [],
+    "powershell_failures": []
+}

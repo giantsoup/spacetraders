@@ -149,6 +149,7 @@ async function reviewBalance() {
         <section class="panel engine-panel" aria-labelledby="engine-heading">
             <div class="section-title"><h2 id="engine-heading">Local engine</h2><span class="state-tag" :class="{ healthy: engineHealthy }">{{ readableLabel(engine?.state || 'off') }}</span></div>
             <p>{{ engine?.message || 'Local engine is off.' }}</p>
+            <p v-if="engine?.warning" class="warning" role="status">{{ engine.warning }}</p>
             <p class="muted">Engine controls are separate from run approval. Start authorizes no gameplay. Closing this page leaves the engine running. Sleep can miss contract deadlines.</p>
             <div v-if="operator" class="button-row">
                 <PrimaryButton :disabled="busy || ['running','starting','stopping'].includes(engine?.state)" @click="engineOperation('start')">Start local engine</PrimaryButton>

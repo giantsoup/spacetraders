@@ -4,10 +4,13 @@ namespace App\Gameplay;
 
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\Process\Process;
 
 class RequestBudget
 {
     private static array $processPauses = [];
+
+    private static array $windowsDirectories = [];
 
     public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75): void
     {
@@ -227,11 +230,22 @@ class RequestBudget
     private function directory(bool $create): string
     {
         $directory = config('gameplay.request_budget_path');
-        if (! is_string($directory) || ! str_starts_with($directory, '/')) {
+        if (! is_string($directory) || (PHP_OS_FAMILY === 'Windows'
+            ? ! preg_match('~\A[A-Za-z]:[\\\\/]~', $directory)
+            : ! str_starts_with($directory, '/'))) {
             throw new RequestDeferred('Host request-budget storage requires an absolute shared path.', 10);
         }
         if (is_link($directory)) {
             throw new RequestDeferred('Host request-budget storage is unsafe.', 10);
+        }
+        if (PHP_OS_FAMILY === 'Windows') {
+            $directory = rtrim(str_replace('\\', '/', $directory), '/');
+            foreach (explode('/', substr($directory, 3)) as $component) {
+                if ($component === '' || str_contains($component, ':') || rtrim($component, '. ') !== $component) {
+                    throw new RequestDeferred('Host request-budget storage is unsafe.', 10);
+                }
+            }
+            $this->windowsPathIdentity($directory);
         }
         if (! is_dir($directory)) {
             if (! $create) {
@@ -241,17 +255,112 @@ class RequestBudget
                 throw new RequestDeferred('Host request-budget storage is unavailable.', 10);
             }
         }
-        if (fileowner($directory) !== posix_geteuid()) {
-            throw new RequestDeferred('Host request-budget storage is unavailable.', 10);
-        }
-        if ($create) {
-            @chmod($directory, 0700);
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->windowsDirectory($directory, $create);
+        } else {
+            if (fileowner($directory) !== posix_geteuid()) {
+                throw new RequestDeferred('Host request-budget storage is unavailable.', 10);
+            }
+            if ($create) {
+                @chmod($directory, 0700);
+            }
         }
         if (is_link($directory.'/budget.json') || is_link($directory.'/budget.lock')) {
             throw new RequestDeferred('Host request-budget storage is unsafe.', 10);
         }
 
         return $directory;
+    }
+
+    private function windowsDirectory(string $directory, bool $create): void
+    {
+        $identity = $this->windowsPathIdentity($directory);
+        $key = strtolower($directory);
+        $verified = self::$windowsDirectories[$key] ?? null;
+        if ($identity !== '' && $verified && $verified['identity'] === $identity
+            && $verified['until'] > microtime(true) && (! $create || $verified['secured'])) {
+            return;
+        }
+        $script = <<<'POWERSHELL'
+$ErrorActionPreference = 'Stop'
+$path = $env:SPACETRADERS_BUDGET_DIRECTORY
+$user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$item = Get-Item -LiteralPath $path -Force
+for ($ancestor = $item; $null -ne $ancestor; $ancestor = $ancestor.Parent) {
+    if ($ancestor.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { exit 1 }
+}
+foreach ($name in @('budget.json', 'budget.lock')) {
+    $file = Get-Item -LiteralPath (Join-Path $path $name) -Force -ErrorAction SilentlyContinue
+    if ($null -ne $file -and (($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or $file.PSIsContainer)) { exit 1 }
+}
+$acl = Get-Acl -LiteralPath $path
+if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $user.Value) { exit 1 }
+$allowed = @($user.Value, 'S-1-5-18', 'S-1-5-32-544')
+$secured = $acl.AreAccessRulesProtected
+foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+    if ($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Value -notin $allowed) { $secured = $false }
+}
+# Rewriting an inheritable ACL propagates to existing files and can briefly block a
+# concurrent replace of budget.json, so only rewrite a directory that is not yet private.
+if ($env:SPACETRADERS_BUDGET_CREATE -eq '1' -and -not $secured) {
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($rule in @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) {
+        $acl.RemoveAccessRuleSpecific($rule)
+    }
+    foreach ($sid in @($user.Value, 'S-1-5-18', 'S-1-5-32-544')) {
+        $identity = New-Object System.Security.Principal.SecurityIdentifier($sid)
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($identity, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')
+        $acl.AddAccessRule($rule)
+    }
+    $item.SetAccessControl($acl)
+    $acl = Get-Acl -LiteralPath $path
+}
+foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+    if ($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Value -notin @($user.Value, 'S-1-5-18', 'S-1-5-32-544')) { exit 1 }
+}
+exit 0
+POWERSHELL;
+        try {
+            $process = new Process([
+                (getenv('SystemRoot') ?: 'C:/Windows').'/System32/WindowsPowerShell/v1.0/powershell.exe',
+                '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand',
+                base64_encode(mb_convert_encoding($script, 'UTF-16LE', 'UTF-8')),
+            ], env: ['SPACETRADERS_BUDGET_DIRECTORY' => $directory, 'SPACETRADERS_BUDGET_CREATE' => $create ? '1' : '0'], timeout: 10);
+            $process->mustRun();
+        } catch (\Throwable) {
+            throw new RequestDeferred('Host request-budget storage is unavailable.', 10);
+        }
+        self::$windowsDirectories[$key] = ['identity' => $identity, 'secured' => $create, 'until' => microtime(true) + 60];
+    }
+
+    private function windowsPathIdentity(string $directory): string
+    {
+        $identity = [];
+        $cacheable = true;
+        for ($ancestor = $directory; ; $ancestor = dirname($ancestor)) {
+            clearstatcache(true, $ancestor);
+            $stat = @lstat($ancestor);
+            if ($stat !== false) {
+                if (($stat['mode'] & 0170000) !== 0040000) {
+                    throw new RequestDeferred('Host request-budget storage is unsafe.', 10);
+                }
+                $cacheable = $cacheable && $stat['ino'] > 0;
+                $identity[] = [$stat['dev'], $stat['ino'], $stat['ctime']];
+            }
+            if (dirname($ancestor) === $ancestor) {
+                break;
+            }
+        }
+        foreach (['budget.json', 'budget.lock'] as $name) {
+            $file = $directory.'/'.$name;
+            clearstatcache(true, $file);
+            $stat = @lstat($file);
+            if ($stat !== false && ($stat['mode'] & 0170000) !== 0100000) {
+                throw new RequestDeferred('Host request-budget storage is unsafe.', 10);
+            }
+        }
+
+        return $cacheable ? serialize($identity) : '';
     }
 
     private function readState(string $file): array
@@ -290,7 +399,7 @@ class RequestBudget
             $state = $this->readState($file);
             $result = $work($state);
             $temporary = tempnam($directory, '.budget-');
-            if (! $temporary || file_put_contents($temporary, json_encode($state, JSON_THROW_ON_ERROR)) === false || ! chmod($temporary, 0600) || ! rename($temporary, $file)) {
+            if (! $temporary || file_put_contents($temporary, json_encode($state, JSON_THROW_ON_ERROR)) === false || ! chmod($temporary, 0600) || ! $this->replace($temporary, $file)) {
                 throw new \RuntimeException('Cannot persist request budget.');
             }
 
@@ -304,5 +413,27 @@ class RequestBudget
             flock($handle, LOCK_UN);
             fclose($handle);
         }
+    }
+
+    /**
+     * Atomically replace the state file. Windows denies a replace while another
+     * process briefly holds the destination open (unlocked safety stat calls,
+     * antivirus or indexing), so retry within a short bound while the writer
+     * lock is still held. POSIX rename does not have this failure mode.
+     */
+    private function replace(string $temporary, string $file): bool
+    {
+        if (PHP_OS_FAMILY !== 'Windows') {
+            return rename($temporary, $file);
+        }
+        $deadline = hrtime(true) + 250000000;
+        while (! @rename($temporary, $file)) {
+            if (hrtime(true) >= $deadline) {
+                return false;
+            }
+            usleep(2000);
+        }
+
+        return true;
     }
 }

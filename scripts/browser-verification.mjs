@@ -98,9 +98,10 @@ export async function withBrowserVerification({ root, php, output, engine = fals
         if (engine) {
             // Register before install, which can fail after writing a plist or bootstrapping the job.
             run.defer('service', async () => {
-                const result = cli(`$m=app(App\\Gameplay\\LocalEngineManager::class); $p=App\\Models\\LocalEngine::find(1)?->processes ?? []; $m->end();
-                    $deadline=microtime(true)+50; do { $p=array_merge($p, App\\Models\\LocalEngine::find(1)?->processes ?? []);
-                    $alive=array_filter($p, fn($pid)=>$m->alive($pid)); if (!$alive) break; usleep(100000); } while(microtime(true)<$deadline);
+                // alive() checks a role against the engine record's owned processes; keep the pre-End snapshot.
+                const result = cli(`$m=app(App\\Gameplay\\LocalEngineManager::class); $e=App\\Models\\LocalEngine::find(1); $p=$e?->processes ?? []; $m->end();
+                    $deadline=microtime(true)+50; do { $alive=$e ? array_filter(['supervisor','worker','scheduler'], fn($role)=>$m->alive($e, $role)) : [];
+                    if (!$alive) break; usleep(100000); } while(microtime(true)<$deadline);
                     if ($alive) throw new RuntimeException('Owned engine processes did not exit'); $m->uninstall();
                     if (is_file($m->directory().'/service.plist')) throw new RuntimeException('Owned service plist remains');
                     echo json_encode(['processesExited'=>array_values($p),'serviceRemoved'=>true,'serviceLabel'=>$m->label()]);`);

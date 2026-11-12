@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Gameplay\DeploymentGate;
 use App\Gameplay\SpaceTradersApi;
 use App\Queue\DeploymentDatabaseQueue;
+use App\Queue\EngineWorkerGate;
 use App\Services\SpaceTradersClient;
 use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Console\Events\CommandStarting;
@@ -28,6 +29,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->scoped(SpaceTradersClient::class);
         $this->app->scoped(SpaceTradersApi::class);
         $this->app->singleton(DeploymentGate::class);
+        $this->app->singleton(EngineWorkerGate::class);
         $this->app->resolving('queue', function ($manager) {
             $manager->addConnector('database', fn () => new class($this->app['db']) extends DatabaseConnector
             {
@@ -46,7 +48,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Event::listen(JobPopping::class, function (JobPopping $event) {
-            if ($event->connectionName === 'database' && in_array('spacetraders', explode(',', $event->queue ?? 'spacetraders'), true)) {
+            if ($event->connectionName === 'database' && in_array('spacetraders', explode(',', $event->queue ?? config('queue.connections.database.queue')), true)) {
                 app(DeploymentGate::class)->workerPolling();
             }
         });

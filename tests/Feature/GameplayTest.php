@@ -776,6 +776,8 @@ class GameplayTest extends TestCase
             $this->assertSame('legacy-synthetic', $this->agent->fresh()->credential());
         } finally {
             app()->maintenanceMode()->deactivate();
+            $statement = null;
+            $restored = null;
             unlink($backup.'/database.sqlite');
             unlink($backup.'/app-key.txt');
             rmdir($backup);

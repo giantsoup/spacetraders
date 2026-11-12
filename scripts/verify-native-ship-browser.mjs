@@ -113,7 +113,7 @@ try {
     await post('Approve command', `/commands/${action.id}/approve`);
     await page.getByRole('dialog', { name: 'Activity history', exact: true }).waitFor();
     assert.equal(cli(`echo json_encode(App\\Models\\ShipAction::find(${action.id})->state->value);`), 'pending');
-    execFileSync(php, ['artisan', 'queue:work', 'database', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' });
+    execFileSync(php, ['artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' });
     await page.reload(); await page.locator('#activity').getByText(/Confirmed · Manual/).waitFor(); await capture('confirmed-activity');
     steps.push('Manual preview, exact approval, queued intent, real finite worker, confirmed persistence and activity navigation verified.');
     for (const state of ['pending', 'sending', 'uncertain', 'confirmed']) {

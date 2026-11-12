@@ -36,7 +36,7 @@ const oldAgentId = cli("echo json_encode(App\\Models\\Agent::where('name','LOCAL
 const output = path.resolve(process.env.QA_ARTIFACT_DIR || path.join(root, 'storage/app/mvp-evidence/agents'));
 await fs.mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE } : {}) });
-const server = spawn(php, ['-S', `127.0.0.1:${port}`, path.join(root, 'vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php')], { cwd: path.join(root, 'public'), env, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(php, ['-S', `127.0.0.1:${port}`, path.join(root, 'vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php')], { cwd: path.join(root, 'public'), env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 let serverLog = '';
 server.stdout.on('data', value => { serverLog += value; });
 server.stderr.on('data', value => { serverLog += value; });
@@ -132,9 +132,31 @@ try {
     await page.goto(`${origin}/agents`);
     await page.getByRole('link', { name: 'Import current token for TOKEN_PILOT', exact: true }).click();
     await page.getByLabel('Agent token', { exact: true }).waitFor();
+    const assertTokenInput = async label => {
+        const input = page.getByLabel(label, { exact: true });
+        for (const [attribute, value] of Object.entries({ type: 'password', autocomplete: 'new-password', 'data-1p-ignore': '', 'data-lpignore': 'true', 'data-bwignore': '', 'data-form-type': 'other', spellcheck: 'false', autocapitalize: 'off' })) {
+            assert.equal(await input.getAttribute(attribute), value, label + ' ' + attribute);
+        }
+        const toggle = page.getByRole('button', { name: 'Show ' + label.toLowerCase(), exact: true });
+        assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
+        assert.equal(await toggle.getAttribute('aria-controls'), await input.getAttribute('id'));
+        await input.fill('synthetic-hidden-token');
+        await toggle.click();
+        const hide = page.getByRole('button', { name: 'Hide ' + label.toLowerCase(), exact: true });
+        assert.equal(await hide.getAttribute('aria-pressed'), 'true');
+        assert.equal(await input.getAttribute('type'), 'text');
+        assert.equal(await input.inputValue(), 'synthetic-hidden-token');
+        await hide.click();
+        assert.equal(await input.getAttribute('type'), 'password');
+        assert.equal(await input.inputValue(), 'synthetic-hidden-token');
+        assert.equal(await input.getAttribute('aria-invalid'), 'false');
+    };
+    await assertTokenInput('Agent token');
     assert.equal(await page.getByLabel('Account token', { exact: true }).count(), 0);
     await page.getByRole('button', { name: 'Back to Create New Agent', exact: true }).click();
     await page.getByLabel('Account token', { exact: true }).waitFor();
+    await assertTokenInput('Account token');
+    assert.equal(await page.getByLabel('Email', { exact: true }).inputValue(), '', 'Local operator email must not default into upstream registration');
     await page.getByRole('button', { name: 'Already have an Agent?', exact: true }).click();
     await page.getByLabel('Agent token', { exact: true }).fill('synthetic-offline-only');
     await page.getByRole('button', { name: 'Save Existing Agent', exact: true }).click();

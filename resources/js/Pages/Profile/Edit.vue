@@ -1,9 +1,17 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import DeleteUserForm from './Partials/DeleteUserForm.vue';
+import UpdateOpenAiKeyForm from './Partials/UpdateOpenAiKeyForm.vue';
 import UpdatePasswordForm from './Partials/UpdatePasswordForm.vue';
 import UpdateProfileInformationForm from './Partials/UpdateProfileInformationForm.vue';
 import { Head } from '@inertiajs/vue3';
+
+defineProps({
+    openAiKey: {
+        type: Object,
+        required: true,
+    },
+});
 
 </script>
 
@@ -27,6 +35,10 @@ import { Head } from '@inertiajs/vue3';
 
                 <div class="app-panel">
                     <UpdatePasswordForm class="max-w-xl" />
+                </div>
+
+                <div class="app-panel">
+                    <UpdateOpenAiKeyForm :open-ai-key="openAiKey" class="max-w-xl" />
                 </div>
 
                 <div class="app-panel">

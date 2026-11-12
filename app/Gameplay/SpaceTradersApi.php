@@ -140,16 +140,17 @@ class SpaceTradersApi
     public function contractData(array $data, bool $uncertain = false): array
     {
         $this->validate($data, [
-            'id' => 'required|string|max:80|regex:/^[a-zA-Z0-9_-]+$/', 'type' => 'required|string|max:80',
+            'id' => 'required|string|max:80|regex:/^[a-zA-Z0-9_-]+$/', 'factionSymbol' => 'required|string', 'type' => 'required|string|max:80',
             'accepted' => 'required|boolean', 'fulfilled' => 'required|boolean',
             'deadlineToAccept' => 'sometimes|nullable|date', 'expiration' => 'required|date',
             'terms.deadline' => 'required|date', 'terms.payment.onAccepted' => 'required|integer|between:0,1000000000',
-            'terms.payment.onFulfilled' => 'required|integer|between:0,1000000000', 'terms.deliver' => 'present|array|max:20',
+            'terms.payment.onFulfilled' => 'required|integer|between:0,1000000000', 'terms.deliver' => 'sometimes|array|max:20',
             'terms.deliver.*.tradeSymbol' => 'required|string|max:80|regex:/^[A-Z0-9_]+$/',
             'terms.deliver.*.destinationSymbol' => 'required|string|max:80|regex:/^[A-Z0-9-]+$/',
             'terms.deliver.*.unitsRequired' => 'required|integer|between:1,1000000',
             'terms.deliver.*.unitsFulfilled' => 'required|integer|between:0,1000000',
         ], $uncertain);
+        $data['terms']['deliver'] ??= [];
         foreach ($data['terms']['deliver'] as $term) {
             if ($term['unitsFulfilled'] > $term['unitsRequired']) {
                 throw new GameException('Contract delivery exceeds requirement.', uncertain: $uncertain);
@@ -355,21 +356,41 @@ class SpaceTradersApi
             'scan_waypoints' => ['cooldown.shipSymbol' => 'required|in:'.$ship, 'cooldown.totalSeconds' => 'required|integer|min:0', 'cooldown.remainingSeconds' => 'required|integer|min:0', 'cooldown.expiration' => 'sometimes|nullable|date', 'waypoints' => 'present|array|max:1000', 'waypoints.*.symbol' => 'required|string|distinct'],
             'chart' => ['chart' => 'present|array', 'chart.waypointSymbol' => 'sometimes|in:'.$arguments['waypointSymbol'], 'chart.submittedBy' => 'sometimes|in:'.$agent->name, 'chart.submittedOn' => 'sometimes|date', 'waypoint' => 'required|array', 'agent.symbol' => 'required|in:'.$agent->name, 'agent.credits' => 'required|integer|min:0'],
             'survey' => ['cooldown.remainingSeconds' => 'required|integer|min:0', 'surveys' => 'present|array', 'surveys.*.signature' => 'required|string|max:255', 'surveys.*.symbol' => 'required|string|max:80', 'surveys.*.expiration' => 'required|date', 'surveys.*.size' => 'required|in:SMALL,MODERATE,LARGE', 'surveys.*.deposits' => 'required|array', 'surveys.*.deposits.*.symbol' => 'required|string|max:80'],
-            'transfer' => ['cargo' => 'required|array', 'targetCargo' => 'required|array'],
-            'buy_ship' => ['ship' => 'required|array', 'ship.symbol' => 'required|string', 'agent.credits' => 'required|integer|min:0', 'transaction.price' => 'required|integer|min:0'],
+            'transfer' => ['cargo' => 'required|array'],
+            'buy_ship' => ['ship' => 'required|array', 'ship.symbol' => 'required|string', 'ship.nav.waypointSymbol' => 'required|in:'.$arguments['waypointSymbol'], 'agent.credits' => 'required|integer|min:0', 'transaction.price' => 'required|integer|min:0', 'transaction.shipSymbol' => 'required|in:'.$arguments['shipType'], 'transaction.shipType' => 'required|in:'.$arguments['shipType'], 'transaction.agentSymbol' => 'required|in:'.$agent->name, 'transaction.waypointSymbol' => 'required|in:'.$arguments['waypointSymbol']],
             'refuel' => ['fuel.current' => 'required|integer|min:0', 'agent.credits' => 'required|integer|min:0', 'transaction.totalPrice' => 'required|integer|min:0'],
             default => ['cargo' => 'required|array', 'agent.credits' => 'required|integer|min:0', 'transaction.totalPrice' => 'required|integer|min:0', 'transaction.units' => 'required|integer|min:1', 'transaction.tradeSymbol' => 'required|string'],
         };
         if ($command === 'refuel' && ($arguments['fromCargo'] ?? false)) {
-            $rules['cargo'] = 'required|array';
+            $rules['cargo'] = 'sometimes|array';
+        }
+        if (in_array($command, ['buy_ship', 'buy', 'sell', 'refuel', 'jump', 'repair', 'scrap', 'install_mount', 'remove_mount', 'install_module', 'remove_module'], true)) {
+            $rules += ['transaction.waypointSymbol' => 'required|string', 'transaction.timestamp' => 'required|date', 'transaction.shipSymbol' => 'required|in:'.$ship];
+        }
+        if (in_array($command, ['buy', 'sell', 'refuel', 'jump'], true)) {
+            $rules += ['transaction.type' => 'required|in:'.($command === 'sell' ? 'SELL' : 'PURCHASE'), 'transaction.units' => 'required|integer|min:0', 'transaction.pricePerUnit' => 'required|integer|min:0', 'transaction.tradeSymbol' => 'required|string'];
+        }
+        if (in_array($command, ['buy', 'sell', 'install_mount', 'remove_mount', 'install_module', 'remove_module'], true)) {
+            $rules['transaction.tradeSymbol'] = 'required|in:'.$arguments['symbol'];
+        }
+        if ($command === 'refuel') {
+            $rules['transaction.tradeSymbol'] = 'required|in:FUEL';
+        }
+        if (in_array($command, ['mine', 'mine_survey', 'navigate'], true)) {
+            $rules['events'] = 'present|array';
+        }
+        if (in_array($command, ['mine', 'mine_survey'], true)) {
+            $rules['extraction.shipSymbol'] = 'required|in:'.$ship;
         }
         $this->validate($data, $rules, true);
         if (isset($data['agent']['symbol']) && $data['agent']['symbol'] !== $agent->name) {
             throw new GameException('Returned agent differs from the credential owner.', uncertain: true);
         }
-        $expectedShip = $command === 'buy_ship' ? $data['ship']['symbol'] : $ship;
-        if (isset($data['transaction']['shipSymbol']) && $data['transaction']['shipSymbol'] !== $expectedShip) {
+        if ($command !== 'buy_ship' && isset($data['transaction']['shipSymbol']) && $data['transaction']['shipSymbol'] !== $ship) {
             throw new GameException('Transaction ship differs from the approved actor.', uncertain: true);
+        }
+        if ($command === 'refuel' && ($arguments['fromCargo'] ?? false) && ! isset($data['cargo'])) {
+            $data['cargo'] = $this->ship($agent, $ship)['cargo'];
         }
 
         if (ExplorationPolicy::command($command)) {
@@ -436,7 +457,7 @@ class SpaceTradersApi
             'scan_waypoints' => ['cooldown', 'waypoints'],
             'chart' => ['chart', 'waypoint', 'agent'],
             'survey' => ['cooldown', 'surveys'],
-            'transfer' => ['cargo', 'targetCargo'],
+            'transfer' => ['cargo'],
             'buy_ship' => ['ship', 'agent', 'transaction'],
             'refuel' => ($arguments['fromCargo'] ?? false) ? ['fuel', 'cargo', 'agent', 'transaction'] : ['fuel', 'agent', 'transaction'],
             'buy', 'sell' => ['cargo', 'agent', 'transaction'],

@@ -255,7 +255,9 @@ class RequestBudgetTest extends TestCase
         $this->assertSame(2, $this->budget()->usage()['host']['requests']);
         $state = file_get_contents($directory.'/budget.json');
         $this->assertStringNotContainsString('never-store-this', $state);
-        $this->assertSame(0600, fileperms($directory.'/budget.json') & 0777);
+        if (PHP_OS_FAMILY !== 'Windows') {
+            $this->assertSame(0600, fileperms($directory.'/budget.json') & 0777);
+        }
         file_put_contents($directory.'/budget.json', '{broken');
         $this->expectException(RequestDeferred::class);
         $budget->reserve('a');

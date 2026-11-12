@@ -1,0 +1,32 @@
+{
+    "passed": true,
+    "failure": null,
+    "cleanup_errors": [],
+    "steps": [
+        "Fresh fixture owns an absent temporary task identity",
+        "Temporary on-demand task is registered",
+        "Task XML parses successfully",
+        "Task XML has no login or timer triggers",
+        "Task MultipleInstancesPolicy is IgnoreNew",
+        "Task ExecutionTimeLimit is PT0S",
+        "Task DisallowStartIfOnBatteries is false",
+        "Task StopIfGoingOnBatteries is false",
+        "Task LogonType is InteractiveToken",
+        "Task RunLevel is LeastPrivilege",
+        "Actual leased worker and scheduler are alive",
+        "Repeated Start preserves one supervisor and child pair",
+        "Owned Windows worker executes one explicitly approved fake command",
+        "End waits for actual leased child exit",
+        "End invalidates previews and leaves unrelated PHP alive",
+        "Restart creates a fresh session",
+        "Old queue delivery cannot bypass the new session gate",
+        "Scheduler crash faults and stops its owned sibling",
+        "Supervisor death faults the engine",
+        "Orphaned worker and scheduler exit within five seconds",
+        "Suspended supervisor with a sleep-length heartbeat gap closes approval",
+        "Crash and wake recovery never replay approvals",
+        "Force stop removes only the verified owned processes and task",
+        "Force stop preserves unrelated PHP sentinel"
+    ],
+    "service_removed": true
+}

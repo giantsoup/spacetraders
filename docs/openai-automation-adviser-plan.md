@@ -146,7 +146,7 @@ The Decisions API is another documented Luna option. It accepts JSON evidence an
 
 The current standard short-context Luna rates are $0.10 per million input tokens and $0.50 per million output tokens. Pricing, cache charges, service tiers, and account access must be rechecked before implementation. No latency, quality, or actual cost has been measured for this app. [API pricing](https://developers.openai.com/api/docs/pricing)
 
-Keep the API key in server configuration and out of the browser. An existing Laravel HTTP transport is sufficient for the narrow request; select a PHP package only if it removes useful work. Keep provider-specific parsing in one adapter.
+Read the API key from the operator's encrypted setting via `User::openAiApiKey()`. It is set on the Profile page. Recommend a dedicated OpenAI project with a spending limit. An existing Laravel HTTP transport is sufficient for the narrow request; select a PHP package only if it removes useful work. Keep provider-specific parsing in one adapter.
 
 `store: false` does not mean zero retention. OpenAI documents separate abuse-monitoring and prompt-cache rules, and says API data is not used for training unless the customer opts in. Start without hosted tools, files, or conversations. Retain sanitized local evidence and decisions under a documented retention policy. [Data controls](https://developers.openai.com/api/docs/guides/your-data)
 

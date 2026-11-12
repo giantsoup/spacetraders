@@ -2,8 +2,8 @@
 
 namespace Tests;
 
+use Illuminate\Filesystem\Filesystem;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
-use Illuminate\Support\Facades\File;
 
 abstract class TestCase extends BaseTestCase
 {
@@ -21,24 +21,37 @@ abstract class TestCase extends BaseTestCase
 
     protected function tearDown(): void
     {
+        $this->beforeApplicationDestroyed(function () {
+            foreach ($this->app['log']->getChannels() as $channel) {
+                $channel->getLogger()->close();
+            }
+        });
         parent::tearDown();
         if ($this->isolatedTestStorage && is_dir($this->isolatedTestStorage)) {
-            File::deleteDirectory($this->isolatedTestStorage);
+            $this->deleteTestDirectory($this->isolatedTestStorage);
         }
         if ($this->gameLockDirectory && is_dir($this->gameLockDirectory)) {
-            if (is_dir($this->gameLockDirectory.'/deployment')) {
-                File::deleteDirectory($this->gameLockDirectory.'/deployment');
-            }
-            foreach (glob($this->gameLockDirectory.'/*.lock') as $file) {
-                unlink($file);
-            }
-            foreach (glob($this->gameLockDirectory.'/budget/*') as $file) {
-                unlink($file);
-            }
-            if (is_dir($this->gameLockDirectory.'/budget')) {
-                rmdir($this->gameLockDirectory.'/budget');
-            }
-            rmdir($this->gameLockDirectory);
+            $this->deleteTestDirectory($this->gameLockDirectory);
         }
+    }
+
+    private function deleteTestDirectory(string $directory): void
+    {
+        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS));
+        foreach ($files as $file) {
+            if (! $file->isLink()) {
+                @chmod($file->getPathname(), 0600);
+            }
+        }
+        unset($files, $file);
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            (new Filesystem)->deleteDirectory($directory);
+            clearstatcache(true, $directory);
+            if (! is_dir($directory)) {
+                return;
+            }
+            usleep(20000);
+        }
+        throw new \RuntimeException('Could not remove isolated test directory: '.$directory);
     }
 }
