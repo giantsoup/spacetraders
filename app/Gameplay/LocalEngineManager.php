@@ -69,8 +69,12 @@ class LocalEngineManager
             $directory = $this->directory();
             $env = [
                 'APP_ENV' => 'local', 'APP_DEBUG' => 'false', 'APP_KEY' => config('app.key'),
+                'APP_URL' => config('app.url'), 'APP_BASE_PATH' => base_path(),
                 'APP_CONFIG_CACHE' => $directory.'/no-config.php', 'LARAVEL_STORAGE_PATH' => storage_path(),
-                'DB_CONNECTION' => 'sqlite', 'DB_DATABASE' => config('database.connections.sqlite.database'), 'DATABASE_URL' => '',
+                'APP_ROUTES_CACHE' => app()->getCachedRoutesPath(), 'APP_EVENTS_CACHE' => app()->getCachedEventsPath(),
+                'APP_SERVICES_CACHE' => app()->getCachedServicesPath(), 'APP_PACKAGES_CACHE' => app()->getCachedPackagesPath(),
+                'VIEW_COMPILED_PATH' => config('view.compiled'),
+                'DB_CONNECTION' => 'sqlite', 'DB_DATABASE' => config('database.connections.sqlite.database'), 'DATABASE_URL' => '', 'DB_URL' => '',
                 'QUEUE_CONNECTION' => 'database', 'CACHE_STORE' => 'file', 'CACHE_DRIVER' => 'file', 'CACHE_PATH' => config('cache.stores.file.path'), 'LOG_CHANNEL' => 'stderr',
                 'SPACETRADERS_DEPLOYMENT_PATH' => config('deployment.path'), 'SPACETRADERS_RELEASE' => config('deployment.release'),
                 'SPACETRADERS_LOCK_PATH' => config('gameplay.lock_path'), 'SPACETRADERS_FIXTURE_PATH' => config('gameplay.fixture_path') ?: '',

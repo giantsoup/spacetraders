@@ -216,6 +216,54 @@ Use the DB signal, never `queue:restart`: it is a global cache key and stops unr
 - Windows fixtures set explicit deployment, cache, lock, request-budget, storage, and application-cache paths inside their owned directory.
 - The practice runner checks effective configuration after boot, including path boundaries and resolved ancestors. It refuses commands when mutable paths escape the practice directory.
 
+### Engine-backed offline practice
+
+Run these commands from the project checkout, not the Herd checkout:
+
+~~~powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/practice.ps1 Start -Engine
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/practice.ps1 Status
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/practice.ps1 Stop
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/practice.ps1 Reset -Force
+~~~
+
+`Init -Engine` creates and installs without serving. The persisted
+`environment/.practice-mode` selects engine or worker mode for later operations;
+old environments without that marker remain worker environments. Stop and reset
+before switching modes. `Start` without a flag preserves an existing engine mode.
+
+Engine practice serves only at `http://127.0.0.1:8010`. Use that host in the
+browser: the seeded operator, `APP_URL`, and local engine host must agree.
+The generated login stays in `environment/browser.json`; commands never print
+its password. Press **Start local engine** in the flight deck to start the
+separate practice Scheduled Task. Starting practice does not start the engine
+or approve gameplay. No separate practice worker or scheduler runs in this mode.
+`Worker` and direct plain-worker runner commands refuse engine mode; engine
+controls refuse worker mode.
+
+The database, fixture, locks, engine service configuration, lifetime leases,
+request budget, deployment state, storage, caches, and logs stay inside the
+practice directory. Installation preserves those paths in the service's
+environment. Before any engine control, the runner compares the practice task
+identity against the main checkout's effective database identity, loading only
+main environment/configuration (no providers or database connection). A matching
+identity is refused. The real `.env` is only read, never rewritten.
+
+`Stop` requests the same End session operation as the UI and waits up to 45
+seconds for a terminal engine state, closed gate, and all three released leases,
+then stops only the recorded HTTP server tree. If graceful shutdown times out,
+the server and environment are preserved. `Stop -Force` may invoke the existing
+identity-verified force-stop path only after the manager's 40-second allowance.
+`Reset -Force` first stops, uninstalls with the isolated environment, verifies
+`schtasks /Query` fails for the practice task, then deletes the owned directory.
+
+For a repeatable lifecycle check, run `practice.ps1 Verify` in engine mode. This
+explicitly starts the engine, waits for running state, checks the open gate's
+session and all three lifetime leases, and prints state/task/PIDs (no secrets).
+Run `Stop`, then `Start -Engine` to return to a served practice with the engine
+off and ready for a browser test. Worker-mode `Verify` keeps its existing queued
+command check.
+
 ## Operator configuration (Herd checkout)
 
 1. Check out the branch.

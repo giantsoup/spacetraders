@@ -3,6 +3,8 @@
 namespace Tests\Unit;
 
 use App\Gameplay\Engine\HostCommands;
+use App\Gameplay\Engine\HostResult;
+use Dotenv\Dotenv;
 use PHPUnit\Framework\Attributes\RequiresOperatingSystemFamily;
 use PHPUnit\Framework\Attributes\TestWith;
 use Tests\TestCase;
@@ -43,7 +45,7 @@ class WindowsPracticeTest extends TestCase
         ];
     }
 
-    private function runPractice(array $overrides = []): \App\Gameplay\Engine\HostResult
+    private function runPractice(array $overrides = []): HostResult
     {
         $lines = [];
         foreach (array_replace($this->environment, $overrides) as $name => $value) {
@@ -72,7 +74,7 @@ class WindowsPracticeTest extends TestCase
         }
         $result = (new HostCommands)->run([PHP_BINARY, base_path('scripts/mvp-fixture.php'), '--isolated', '--directory', $directory], 60, $inherited);
         $this->assertSame(0, $result->exit, $result->out.$result->err);
-        $values = \Dotenv\Dotenv::parse(file_get_contents($directory.'/.env'));
+        $values = Dotenv::parse(file_get_contents($directory.'/.env'));
         foreach (array_keys($inherited) as $key) {
             $this->assertStringStartsWith($directory.'/', $values[$key], $key);
             $this->assertFileDoesNotExist($inherited[$key]);
@@ -101,5 +103,43 @@ class WindowsPracticeTest extends TestCase
         $result = $this->runPractice(['SPACETRADERS_DEPLOYMENT_PATH' => $this->directory.'/../escaped']);
         $this->assertNotSame(0, $result->exit, $result->out.$result->err);
         $this->assertStringContainsString('Effective practice configuration escaped its directory: deployment', $result->out.$result->err);
+    }
+
+    public function test_engine_practice_boots_with_isolated_paths_and_refuses_plain_workers(): void
+    {
+        $directory = str_replace('\\', '/', config('gameplay.lock_path')).'/engine-fixture/environment';
+        mkdir(dirname($directory), 0700, true);
+        file_put_contents(dirname($directory).'/.checkout', base_path());
+        $commands = new HostCommands;
+        $result = $commands->run([PHP_BINARY, base_path('scripts/mvp-fixture.php'), '--isolated', '--directory', $directory], 60);
+        $this->assertSame(0, $result->exit, $result->out.$result->err);
+        $runner = [PHP_BINARY, base_path('scripts/windows/practice-runner.php'), $directory];
+        $result = $commands->run([...$runner, '--configure-engine'], 15);
+        $this->assertSame(0, $result->exit, $result->out.$result->err);
+        $this->assertSame('engine', file_get_contents($directory.'/.practice-mode'));
+        $result = $commands->run([...$runner, '--engine-status'], 15);
+        $this->assertSame(0, $result->exit, $result->out.$result->err);
+        $status = json_decode($result->out, true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame('off', $status['state']);
+        $this->assertFalse($status['registered']);
+        $this->assertSame(['supervisor' => false, 'worker' => false, 'scheduler' => false], $status['leases']);
+        $result = $commands->run([...$runner, 'queue:work', '--once'], 15);
+        $this->assertNotSame(0, $result->exit, $result->out.$result->err);
+        $this->assertStringContainsString('Plain workers and schedulers are forbidden', $result->out.$result->err);
+        $mainConfig = dirname($directory).'/main-config.php';
+        file_put_contents($mainConfig, '<?php return '.var_export([
+            'app' => ['env' => 'local', 'timezone' => 'UTC'],
+            'database' => ['connections' => ['sqlite' => ['database' => $directory.'/database.sqlite']]],
+        ], true).';');
+        $result = $commands->run([...$runner, '--engine-status'], 15, ['APP_CONFIG_CACHE' => $mainConfig]);
+        $this->assertNotSame(0, $result->exit, $result->out.$result->err);
+        $this->assertStringContainsString('Practice must never use the main checkout engine task', $result->out.$result->err);
+    }
+
+    public function test_runner_refuses_database_url_overrides(): void
+    {
+        $result = $this->runPractice(['DATABASE_URL' => 'sqlite:///outside.sqlite']);
+        $this->assertNotSame(0, $result->exit, $result->out.$result->err);
+        $this->assertStringContainsString('Practice environment isolation guard failed', $result->out.$result->err);
     }
 }

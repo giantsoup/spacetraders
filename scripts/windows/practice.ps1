@@ -1,21 +1,29 @@
 <#
 .SYNOPSIS
-Manage an owned offline fixture, HTTP server and one worker/scheduler pair.
+Manage an owned offline fixture with plain workers or the local engine.
 .DESCRIPTION
 Uses LOCALAPPDATA/SpaceTraders/practice/checkout-hash with private ACLs. No real
 .env/database is changed. Background PHP windows are hidden; logs stay in the
-practice folder. The native engine is always disabled. Windows has no pcntl
-job timeout: --timeout=120 is retained, but cannot kill a hung job on Windows.
+practice folder. Engine mode installs a separate on-demand Scheduled Task.
+Start local engine from the UI; Start itself only starts the HTTP server.
+Windows has no pcntl job timeout: --timeout=120 is retained, but cannot kill
+a hung job on Windows.
 .PARAMETER Operation
-Start performs Init, Serve and Worker. Verify exercises a real queued command.
+Start initializes and serves; worker mode also starts workers. Verify starts
+and checks the engine in engine mode, or exercises a queued command in worker mode.
 .PARAMETER Force
 Required to Reset (delete) this checkout's owned practice folder.
+With Stop, permits verified force stop after the graceful engine shutdown allowance.
+.PARAMETER Engine
+Create engine practice instead of worker practice. Reset to change modes.
 .EXAMPLE
 .\scripts\windows\practice.ps1 Start
 .EXAMPLE
+.\scripts\windows\practice.ps1 Start -Engine
+.EXAMPLE
 .\scripts\windows\practice.ps1 Stop
 #>
-param([ValidateSet('Init', 'Serve', 'Worker', 'Stop', 'Status', 'Reset', 'Start', 'Verify')][string]$Operation = 'Status', [switch]$Force)
+param([ValidateSet('Init', 'Serve', 'Worker', 'Stop', 'Status', 'Reset', 'Start', 'Verify')][string]$Operation = 'Status', [switch]$Force, [switch]$Engine)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $mutex = $null
@@ -31,6 +39,9 @@ try {
     $ownerFile = Join-Path $practiceHome '.checkout'
     $stateFile = Join-Path $practiceHome 'processes.json'
     $runner = Join-Path $PSScriptRoot 'practice-runner.php'
+    $modeFile = Join-Path $fixture '.practice-mode'
+    $script:mode = 'worker'
+    if ($Engine -and $Operation -notin @('Start', 'Init')) { throw '-Engine is only valid with Init or Start. Other operations use the persisted mode.' }
     $mutex = New-Object Threading.Mutex($false, ('Local\SpaceTradersPractice-' + $hash))
     try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
     if (-not $locked) { throw 'Another practice operation is running for this checkout.' }
@@ -40,6 +51,9 @@ try {
             throw 'Practice folder ownership does not match this checkout; nothing was changed.'
         }
     }
+    if (Test-Path -LiteralPath $modeFile) { $script:mode = [IO.File]::ReadAllText($modeFile).Trim() }
+    if ($script:mode -notin @('worker', 'engine')) { throw 'Invalid persisted practice mode; nothing was changed.' }
+    if ($Engine -and $script:mode -eq 'worker' -and (Test-Path -LiteralPath $fixture)) { throw 'Existing practice uses worker mode. Stop and Reset -Force before changing modes.' }
     $script:owned = @()
     if (Test-Path -LiteralPath $stateFile) {
         $decoded = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
@@ -105,13 +119,37 @@ try {
             Invoke-Checked $php @('scripts/mvp-fixture.php', '--isolated', '--directory', $fixture)
         }
         if (-not (Test-Path -LiteralPath (Join-Path $fixture '.windows-ready'))) { throw 'Fixture initialization did not complete. Inspect its folder, then Reset -Force before retrying.' }
+        if ($Engine -and $script:mode -eq 'worker') {
+            Invoke-Checked $php @($runner, $fixture, '--configure-engine')
+            $script:mode = 'engine'
+        }
+        if (-not (Test-Path -LiteralPath $modeFile)) { [IO.File]::WriteAllText($modeFile, $script:mode) }
         Invoke-Checked $php @($runner, $fixture, 'env')
+        if ($script:mode -eq 'engine') { Install-PracticeEngine }
+        Write-Host "Practice mode: $script:mode"
         Write-Host "Practice environment: $fixture"
         Write-Host "Generated login file (password not displayed): $fixture/browser.json"
     }
 
+    function Get-PracticeEngineStatus {
+        if (-not $php) { $script:php = Get-HerdPhp }
+        $result = Invoke-NativeResult $php @($runner, $fixture, '--engine-status')
+        if ($result.ExitCode -ne 0) { Show-NativeResult $result; throw 'Cannot safely inspect the isolated practice engine.' }
+        return $result.Output | ConvertFrom-Json
+    }
+
+    function Install-PracticeEngine {
+        $status = Get-PracticeEngineStatus
+        if ($status.registered -and -not $status.installed) { throw 'Practice task exists without its private service marker. Inspect it before proceeding.' }
+        if (-not $status.registered) { Invoke-Checked $php @($runner, $fixture, 'spacetraders:engine-service', 'install') }
+        $status = Get-PracticeEngineStatus
+        if (-not $status.registered -or -not $status.installed) { throw 'Practice engine installation could not be verified.' }
+        Write-Host "Practice task: $($status.task); engine state: $($status.state). Start local engine from the UI."
+    }
+
     function Start-PracticeProcess {
         param([string]$Role, [string[]]$Arguments)
+        if ($script:mode -eq 'engine' -and $Role -ne 'serve') { throw 'Engine practice owns its worker and scheduler. Plain workers are forbidden.' }
         foreach ($record in @($script:owned | Where-Object { $_.Role -eq $Role })) {
             if (Get-MatchingProcess $record) {
                 if (-not $record.Root) { throw "An orphaned $Role child remains; run Stop first." }
@@ -154,6 +192,16 @@ try {
 
     function Stop-Practice {
         if (-not (Test-Path -LiteralPath $practiceHome)) { Write-Host 'Practice is not initialized.'; return }
+        if ($script:mode -eq 'engine') {
+            foreach ($record in @($script:owned | Where-Object { $_.Role -ne 'serve' })) {
+                if (Get-MatchingProcess $record) { throw 'Unexpected plain worker in engine practice. Refusing to kill engine or mixed-mode processes.' }
+            }
+            if (-not $php) { $script:php = Get-HerdPhp }
+            $endArguments = @($runner, $fixture, '--engine-end')
+            if ($Force) { $endArguments += '--force' }
+            Invoke-Checked $php $endArguments
+            Write-Host 'Engine End session confirmed; all engine leases released.'
+        }
         Find-OwnedDescendants
         foreach ($record in @($script:owned | Sort-Object Root -Descending)) {
             if (Get-MatchingProcess $record) {
@@ -172,17 +220,34 @@ try {
     if ($Operation -in @('Start', 'Init')) { Initialize-Practice }
     if ($Operation -in @('Start', 'Serve', 'Worker', 'Verify')) {
         if (-not (Test-Path -LiteralPath (Join-Path $fixture 'browser.json'))) { throw 'Run Init first.' }
+        if ($Operation -eq 'Worker' -and $script:mode -eq 'engine') { throw 'Worker is forbidden in engine practice. Use Start local engine in the UI.' }
+        if ($script:mode -eq 'engine') {
+            foreach ($record in @($script:owned | Where-Object { $_.Role -ne 'serve' })) {
+                if (Get-MatchingProcess $record) { throw 'Plain practice workers remain. Refusing mixed-mode startup.' }
+            }
+            if ($Operation -eq 'Serve') { Install-PracticeEngine }
+        }
         if ($Operation -in @('Start', 'Serve')) { Start-PracticeServer }
-        if ($Operation -in @('Start', 'Worker')) {
+        if ($Operation -in @('Start', 'Worker') -and $script:mode -eq 'worker') {
             Start-PracticeProcess 'worker' @('queue:work', 'database', '--queue=spacetraders', '--sleep=1', '--tries=1', '--timeout=120')
             Start-PracticeProcess 'scheduler' @('schedule:work')
         }
-        if ($Operation -eq 'Verify') { Invoke-Checked $php @($runner, $fixture, '--verify-worker') }
+        if ($Operation -eq 'Verify') {
+            if ($script:mode -eq 'engine') { Invoke-Checked $php @($runner, $fixture, '--engine-verify') }
+            else { Invoke-Checked $php @($runner, $fixture, '--verify-worker') }
+        }
     }
     if ($Operation -eq 'Stop') { Stop-Practice }
     if ($Operation -eq 'Status') {
         Write-Host "Practice folder: $practiceHome"
+        Write-Host "Practice mode: $script:mode"
         if (Test-Path -LiteralPath $practiceHome) {
+            if ($script:mode -eq 'engine') {
+                $status = Get-PracticeEngineStatus
+                Write-Host "Task name: $($status.task)"
+                Write-Host "Registered: $(if ($status.registered) { 'yes' } else { 'no' }); engine state: $($status.state); gate open: $($status.gate_open)"
+                Write-Host "Engine leases: $($status.leases | ConvertTo-Json -Compress); recorded engine PIDs: $($status.pids | ConvertTo-Json -Compress)"
+            } else { Write-Host 'Task name: none; registered: no; engine state: disabled' }
             Find-OwnedDescendants
             $rows = foreach ($record in $script:owned) {
                 [pscustomobject]@{ Role = $record.Role; Id = $record.Id; Root = $record.Root; Running = [bool](Get-MatchingProcess $record) }
@@ -194,6 +259,13 @@ try {
         if (-not $Force) { throw 'Reset deletes the practice environment, credentials and logs. Confirm with -Force.' }
         Stop-Practice
         if (Test-Path -LiteralPath $practiceHome) {
+            if ($script:mode -eq 'engine') {
+                $status = Get-PracticeEngineStatus
+                Invoke-Checked $php @($runner, $fixture, 'spacetraders:engine-service', 'uninstall')
+                $query = Invoke-NativeResult 'schtasks.exe' @('/Query', '/TN', $status.task)
+                if ($query.ExitCode -eq 0) { throw 'Practice engine task is still registered. Refusing to delete its environment.' }
+                Write-Host "Confirmed practice task removed: $($status.task)"
+            }
             $expected = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA ('SpaceTraders/practice/' + $hash)))
             if ($practiceHome -ne $expected -or [IO.File]::ReadAllText($ownerFile).Trim() -ne $root) { throw 'Reset path/ownership guard failed.' }
             Assert-PlainPath $practiceHome
