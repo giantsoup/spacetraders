@@ -137,7 +137,7 @@ To enable the local engine and automation, set these values in `.env`, then inst
 SPACETRADERS_OPERATOR_ID=<your operator user id>
 SPACETRADERS_LOCAL_ENGINE_ENABLED=true
 SPACETRADERS_AUTOMATION_ENABLED=true
-SPACETRADERS_PHP_BINARY=C:/Users/<you>/.config/herd/bin/php85/php.exe
+SPACETRADERS_PHP_BINARY=C:/Users/<you>/.config/herd/bin/php85/php.exe # already set by setup.ps1
 ```
 
 ```powershell
@@ -160,6 +160,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\practice.ps1
 ```
 
 The script prints the location of the generated practice login file. Without `-Engine`, practice runs one plain worker and scheduler instead of the engine. In that mode, manual commands work, but the Investigate → Stage automation console is hidden.
+
+In engine practice, `Reset -Force` performs a verified force stop if graceful End times out, before removing the practice world and its task.
 
 The [Windows local MVP plan](docs/windows-local-mvp-plan.md) and [Windows engine design](docs/windows-engine-design.md) describe the port, its safety protocol, and its verification evidence.
 
@@ -189,7 +191,7 @@ PHP_BIN="$PWD/scripts/herd-php" ./scripts/verify.sh
 python3 scripts/verify-base-api-coverage.py
 ```
 
-On Windows, `scripts\windows\verify.ps1` runs every portable `verify.sh` check. It reads Pint's exact file list from `verify.sh` and names each POSIX-only step it skips. `php scripts\verify-windows-engine.php` runs the real Scheduled Task lifecycle against an isolated fixture: start, approved execution, End, restart, crash and orphan recovery, the sleep gap, and verified force stop.
+On Windows, `scripts\windows\verify.ps1` runs every portable `verify.sh` check. It reads Pint's exact file list from `verify.sh` and names each POSIX-only step it skips. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\php.ps1 scripts\verify-windows-engine.php` runs the real Scheduled Task lifecycle against an isolated fixture: start, approved execution, End, restart, crash and orphan recovery, the sleep gap, and verified force stop.
 
 Set `PNPM_BIN` if pnpm is not on your path. The verification entry point checks runtime pins, builds assets, runs backend and frontend checks, and checks PHP style and whitespace. PHPUnit uses guarded in-memory SQLite and isolated test storage. Fake-provider browser and worker journeys verify local behavior without spending live credits.
 

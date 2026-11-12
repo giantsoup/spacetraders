@@ -71,7 +71,7 @@ final class EngineChildWatch { public function shouldStop(): bool; public static
   | Lines | Change |
   |---|---|
   | :23 | `$host->installed()` |
-  | after `begin()` (:28) | `$host->claim($session, 'supervisor')` |
+  | after `begin()` (:28) | `$host->claim($session, 'supervisor')`, identify that PID, and persist `identity.supervisor` before child startup (Darwin still returns `[]`) |
   | :30-33 | `$host->onStopSignal(fn () => $gate->close())` |
   | :40-41 | `$host->spawn($name, $arguments)` |
   | :44-47 | `ready(10)` for each child |
@@ -139,7 +139,7 @@ The supervisor is therefore php-win itself: a real PID and no console window.
 
 - Spawned with array-form `proc_open([$phpWin, artisan, ...args], [0 => ['file','NUL','r'], 1 => ['file',$log,'a'], 2 => ['file',$log,'a']], …, ['bypass_shell' => true])`. There is no cmd wrapper, so `proc_get_status()['pid']` is the real php PID.
 - The env adds `SPACETRADERS_ENGINE_SESSION`, `SPACETRADERS_ENGINE_ROLE` and `SPACETRADERS_ENGINE_LEASE`.
-- The supervisor holds the proc handle, so the PID cannot be reused. `kill()` runs `taskkill /PID <pid> /T /F`.
+- The supervisor holds the proc handle, so the PID cannot be reused. `kill()` runs `taskkill /PID <pid> /F`, targeting only that owned PID. It never follows parent-PID links into descendants.
 - `ready(10)` waits until `EngineLease::held()` reports the child's lease.
 - `requestStop()` is a no-op, because children stop by watching the DB.
 
@@ -148,7 +148,7 @@ The supervisor is therefore php-win itself: a real PID and no console window.
 - Logs go to `{lock_path}\engine\supervisor.log`, `worker.log` and `scheduler.log`.
 - Each file rotates to `.1` above 10 MB when the supervisor starts.
 - The launcher rotates `supervisor.log` before Laravel boots. Child logs rotate before spawn. Rotation failures warn without blocking startup.
-- Pre-Laravel launcher failures append a timestamp, exception class, and message to `supervisor.log`. Supervisor exceptions use the engine log channel without dumping the service environment.
+- Pre-Laravel launcher failures append a timestamp, exception class, message, and the rejected `service.json` argument path to `supervisor.log`, without service contents. Before the marker directory is validated, even a practice launch can log in the launching checkout's engine directory; the path identifies the rejected practice configuration. Supervisor exceptions use the engine log channel without dumping the service environment.
 
 ## Protocol on Windows
 
@@ -195,7 +195,9 @@ Use the DB signal, never `queue:restart`: it is a global cache key and stops unr
 - Each attempt holds a separate empty lease at `{marker}.{attempt}.lease`. The marker itself stays readable and unlocked.
 - Processed, failed, and exception events publish `{attempt, started_at:null, finished_at}` and release the attempt lease, even if publication fails.
 - The watchdog ignores idle content and attempts whose lease is free. A stale start marker therefore cannot time out a completed job.
-- Marker failures warn on the engine channel and never fail the job. If a start marker cannot be published, the watchdog has no data for that attempt.
+- Marker failures warn on the engine channel and never fail the job. **The job watchdog fails open for an attempt whose start marker cannot be published:** it has no start time, so the 150 s kill cannot protect that attempt. Stop, orphan, admission, and heartbeat checks still apply.
+- Repeated marker failures do not automatically fault the session. A safe supervisor-side threshold would need a separate, session-guarded failure signal; reading log warnings or relying on the same failing marker path is not a reliable cross-process protocol. Inspect warnings and End the session before repairing marker storage.
+- Job timestamps use `microtime(true)`, a wall clock shared between processes, not a monotonic elapsed timer. A backward clock adjustment can delay the 150 s timeout; a forward adjustment can trigger it early. The heartbeat-gap check also compares `hrtime`, but does not make job-duration measurements monotonic.
 - The supervisor kills the worker if a job has run for more than 150 s. The engine then faults on "owned child exited".
 - Upstream HTTP is already bounded (30 s, 10 s connect; `SpaceTradersClient.php:58-65`), and SQLite `busy_timeout` is 5000.
 - `retry_after=180` is longer than the 150 s watchdog.
@@ -204,15 +206,17 @@ Use the DB signal, never `queue:restart`: it is a global cache key and stops unr
 
 1. `close('faulted', …)`.
 2. Run one PowerShell CIM query for the stored PIDs: `ProcessId`, `CreationDate` as UTC ISO, and `CommandLine`.
-3. A process is killed only if its creation time matches exactly **and** its command-line SHA-256 matches. Kill children first, then the supervisor, with `taskkill /PID n /T /F`.
+3. A process is killed only if its creation time matches exactly **and** its command-line SHA-256 matches. Kill children first, then the supervisor, with `taskkill /PID n /F`. Do not use `/T`: descendant discovery follows parent PIDs, which can be stale and point at unrelated processes. Each recorded role is verified and killed explicitly.
 4. `schtasks /End`, then `/Delete /F`.
 5. Re-query. If a match remains, throw "Could not confirm…".
 6. A different creation time means the recorded process exited and its PID was reused. Skip it, even if its command line is unreadable.
 7. When creation time matches, a missing or different command hash refuses force stop before any kills. Exit confirmation also refuses a surviving matching creation time.
+8. If a role has no stored identity, skip its live PID with an explicit warning only when the recorded session's role lease is free: the original lease-owning process is gone. Never kill that PID. A held lease, unknown session, or unreadable lease still refuses force stop.
 
 ### Windows wrappers and offline practice
 
-- `php.ps1` and `composer.ps1` inherit console input and output so prompts appear before exit. Inspection scripts retain buffered native-command capture.
+- `php.ps1` and `composer.ps1` use `System.Diagnostics.Process` with native argument quoting, the repository working directory, and inherited console streams (no redirection). Embedded quotes and trailing backslashes survive PowerShell 5.1; prompts appear before input and the native exit code is forwarded. Inspection scripts retain buffered native-command capture.
+- Practice `Stop -Force` and `Reset -Force` re-read the stop timestamp on every poll and wait for the current `stop_requested_at + 40 s` gate and a faulted session before verified force stop. A mid-wait fault can restart that allowance. The total wait is bounded at 120 s; if eligibility never arrives, the server stays running for inspection.
 - Windows fixtures set explicit deployment, cache, lock, request-budget, storage, and application-cache paths inside their owned directory.
 - The practice runner checks effective configuration after boot, including path boundaries and resolved ancestors. It refuses commands when mutable paths escape the practice directory.
 
