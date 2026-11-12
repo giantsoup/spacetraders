@@ -109,6 +109,43 @@ class AgentTest extends TestCase
         ]);
     }
 
+    #[DataProvider('agentSaveRoutes')]
+    public function test_optional_account_id_does_not_discard_valid_agent_details(string $route): void
+    {
+        $agent = $this->agent();
+        unset($agent['accountId']);
+        Http::fake([
+            'api.spacetraders.io/v2/register' => Http::response(['data' => ['token' => 'new-agent-token', 'agent' => $agent]], 201),
+            'api.spacetraders.io/v2/my/agent' => Http::response(['data' => $agent]),
+        ]);
+        $this->actingAs(User::factory()->create())->post(route($route), [
+            'account_token' => 'account-secret-token', 'token' => 'agent-secret-token', 'symbol' => 'TEST_AGENT', 'faction' => 'COSMIC',
+        ])->assertSessionHasNoErrors()->assertRedirect(route('agents.index'));
+        $this->assertDatabaseHas('agents', ['name' => 'TEST_AGENT', 'account_id' => null]);
+    }
+
+    public static function agentSaveRoutes(): array
+    {
+        return [['agents.store'], ['agents.storeExisting']];
+    }
+
+    public function test_registration_validation_message_is_bounded_plain_text_without_credentials_in_responses_or_logs(): void
+    {
+        Http::fake(['api.spacetraders.io/v2/register' => Http::response(['error' => ['message' => '<b>Faction unavailable.</b> account-secret-token Bearer another-secret '.str_repeat('x', 400)]], 422)]);
+        $response = $this->actingAs(User::factory()->create())->postJson(route('agents.store'), [
+            'account_token' => 'account-secret-token', 'symbol' => 'TEST_AGENT', 'faction' => 'COSMIC',
+        ])->assertUnprocessable();
+        $message = $response->json('errors.api.0');
+        $this->assertStringStartsWith('Faction unavailable. [redacted] Bearer [redacted] ', $message);
+        $this->assertSame(300, mb_strlen($message));
+        foreach (['account-secret-token', 'another-secret', '<b>'] as $secret) {
+            $this->assertStringNotContainsString($secret, $response->getContent());
+        }
+        $this->assertLogsHaveNoSecrets(['account-secret-token', 'another-secret']);
+        $this->assertSessionHasNoSecrets();
+        $this->assertDatabaseCount('agents', 0);
+    }
+
     public function test_agent_pages_do_not_expose_tokens_or_other_users_agents(): void
     {
         $user = User::factory()->create();
@@ -203,11 +240,18 @@ class AgentTest extends TestCase
         $cases = [];
         foreach (['agents.store', 'agents.storeExisting'] as $route) {
             $cases[$route.' unauthorized'] = [$route, ['error' => ['code' => 401, 'message' => 'Token is invalid.']], 401, 'Token is invalid.'];
+            $cases[$route.' forbidden'] = [$route, ['error' => ['code' => 403]], 403, 'Token does not have permission to complete this request.'];
+            $cases[$route.' conflict'] = [$route, ['error' => ['code' => 409]], 409, 'That agent symbol is already registered. Choose another symbol, or Import the agent if it is yours.'];
             $cases[$route.' validation'] = [$route, ['error' => ['code' => 422, 'message' => 'Invalid symbol.', 'data' => ['symbol' => ['Already taken.']]]], 422, 'Invalid symbol.'];
+            $cases[$route.' faction validation'] = [$route, ['error' => ['code' => 422, 'message' => 'Faction is not accepting new agents.']], 422, 'Faction is not accepting new agents.'];
+            $cases[$route.' malformed validation'] = [$route, ['error' => ['message' => ['invalid']]], 422, 'SpaceTraders rejected the submitted details. Check the fields and try again.'];
             $cases[$route.' rate limited'] = [$route, ['error' => ['code' => 429, 'message' => 'Rate limit reached.']], 429, $route === 'agents.store' ? SpaceTradersClient::REGISTRATION_UNKNOWN : 'Rate limit reached.'];
             $cases[$route.' non-json'] = [$route, '<html>Unavailable</html>', 503, $route === 'agents.store' ? SpaceTradersClient::REGISTRATION_UNKNOWN : 'SpaceTraders could not complete the request. Please try again later.'];
             $cases[$route.' malformed error'] = [$route, ['error' => ['message' => ['invalid']]], 400, 'SpaceTraders could not complete the request. Please try again later.'];
             $cases[$route.' incomplete success'] = [$route, ['data' => ['symbol' => 'TEST_AGENT']], 200, $route === 'agents.store' ? SpaceTradersClient::REGISTRATION_UNKNOWN : 'SpaceTraders returned incomplete agent details. No agent was saved.'];
+        }
+        foreach ([302, 408, 500] as $status) {
+            $cases['ambiguous registration '.$status] = ['agents.store', [], $status, SpaceTradersClient::REGISTRATION_UNKNOWN];
         }
 
         return $cases;
@@ -215,13 +259,20 @@ class AgentTest extends TestCase
 
     public function test_connection_failure_is_a_form_error_without_retrying_registration(): void
     {
-        Http::fake(fn () => throw new ConnectionException('Connection timed out'));
+        $attempts = 0;
+        Http::fake(['api.spacetraders.io/v2/register' => function () use (&$attempts) {
+            $attempts++;
+            throw new ConnectionException('Connection timed out: account-secret-token');
+        }]);
 
         $this->actingAs(User::factory()->create())->from(route('agents.create'))
             ->post(route('agents.store'), [
                 'account_token' => 'account-secret-token', 'symbol' => 'TEST_AGENT', 'faction' => 'COSMIC',
-            ])->assertSessionHasErrors('api');
+            ])->assertSessionHasErrors(['api' => SpaceTradersClient::REGISTRATION_UNKNOWN]);
 
+        $this->assertSame(1, $attempts);
+        $this->get(route('agents.create'))->assertDontSee('account-secret-token');
+        $this->assertLogsHaveNoSecrets(['account-secret-token']);
         $this->assertDatabaseCount('agents', 0);
         $this->assertSessionHasNoSecrets();
     }
@@ -248,5 +299,14 @@ class AgentTest extends TestCase
         $oldInput = session()->getOldInput();
         $this->assertArrayNotHasKey('account_token', $oldInput);
         $this->assertArrayNotHasKey('token', $oldInput);
+    }
+
+    private function assertLogsHaveNoSecrets(array $secrets): void
+    {
+        foreach (glob(storage_path('logs/*.log')) as $file) {
+            foreach ($secrets as $secret) {
+                $this->assertStringNotContainsString($secret, file_get_contents($file));
+            }
+        }
     }
 }

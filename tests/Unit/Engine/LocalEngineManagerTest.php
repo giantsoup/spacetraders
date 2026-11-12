@@ -106,7 +106,7 @@ class LocalEngineManagerTest extends TestCase
             (new EngineGate)->check($engine->session_id);
             $this->fail('A missing worker must close admission.');
         } catch (GameException $exception) {
-            $this->assertSame('Owned engine processes are not alive.', $exception->getMessage());
+            $this->assertSame('The local engine is not running. Open Automation and choose Start local engine, then create a fresh preview.', $exception->getMessage());
             $this->assertSame('faulted', $engine->fresh()->state);
             $this->assertFalse($engine->fresh()->gate_open);
         }

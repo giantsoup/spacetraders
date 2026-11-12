@@ -339,7 +339,7 @@ class ShipCommandExecutor
             $target = $before['estimate']['target_ship'];
             $expected = MiningPlanner::inventory($target);
             $expected[$symbol] = ($expected[$symbol] ?? 0) + $units;
-            $target['cargo'] = $data['targetCargo'];
+            $target['cargo'] = $this->api->ship($agent, $target['symbol'])['cargo'];
             $target = $this->api->shipData($target);
             $target['cooldown'] = $before['estimate']['target_ship']['cooldown'];
             $observed = MiningPlanner::inventory($target);

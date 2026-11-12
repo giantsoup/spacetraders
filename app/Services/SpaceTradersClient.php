@@ -103,7 +103,7 @@ class SpaceTradersClient
     {
         return $this->agentData('post', '/register', $data, $accountToken, [
             'token' => ['required', 'string'],
-            'agent.accountId' => ['required', 'string', 'max:255'],
+            'agent.accountId' => ['sometimes', 'string', 'max:255'],
             'agent.symbol' => ['required', 'string', 'min:3', 'max:14'],
             'agent.startingFaction' => ['required', 'string', 'max:255'],
         ]);
@@ -112,7 +112,7 @@ class SpaceTradersClient
     public function agent(string $token): array
     {
         return $this->agentData('get', '/my/agent', [], $token, [
-            'accountId' => ['required', 'string', 'max:255'],
+            'accountId' => ['sometimes', 'string', 'max:255'],
             'symbol' => ['required', 'string', 'min:3', 'max:14'],
             'startingFaction' => ['required', 'string', 'max:255'],
         ]);
@@ -129,13 +129,15 @@ class SpaceTradersClient
         }
 
         if (! $response->successful()) {
-            if ($method === 'post' && ($response->serverError() || $response->status() === 429)) {
+            if ($method === 'post' && ($response->serverError() || $response->status() < 400 || in_array($response->status(), [408, 429], true))) {
                 throw ValidationException::withMessages(['api' => self::REGISTRATION_UNKNOWN]);
             }
             throw ValidationException::withMessages([
                 'api' => match ($response->status()) {
                     401 => 'Token is invalid.',
-                    422 => 'Invalid symbol.',
+                    403 => 'Token does not have permission to complete this request.',
+                    409 => 'That agent symbol is already registered. Choose another symbol, or Import the agent if it is yours.',
+                    422 => $this->validationMessage($response, $token),
                     429 => 'Rate limit reached.',
                     default => 'SpaceTraders could not complete the request. Please try again later.',
                 },
@@ -151,5 +153,19 @@ class SpaceTradersClient
         }
 
         return $payload;
+    }
+
+    private function validationMessage(Response $response, string $token): string
+    {
+        $message = $response->json('error.message');
+        if (! is_string($message)) {
+            return 'SpaceTraders rejected the submitted details. Check the fields and try again.';
+        }
+        $message = strip_tags(html_entity_decode(strip_tags($message), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        $message = str_replace($token, '[redacted]', $message);
+        $message = preg_replace('/\bBearer\s+[A-Za-z0-9\-._~+\/]+=*/i', 'Bearer [redacted]', $message);
+        $message = trim(preg_replace('/[\x00-\x1F\x7F]/u', ' ', $message) ?? '');
+
+        return $message === '' ? 'SpaceTraders rejected the submitted details. Check the fields and try again.' : mb_substr($message, 0, 300);
     }
 }

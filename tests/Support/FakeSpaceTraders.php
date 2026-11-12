@@ -20,7 +20,7 @@ final class FakeSpaceTraders
         $part = ['condition' => 1.0, 'integrity' => 1.0, 'quality' => 1, 'requirements' => ['crew' => 1, 'power' => 1]];
 
         return [
-            'symbol' => $symbol, 'registration' => ['role' => 'EXCAVATOR'],
+            'symbol' => $symbol, 'registration' => ['name' => explode('-', $symbol)[0], 'factionSymbol' => 'COSMIC', 'role' => 'EXCAVATOR'],
             'nav' => ['systemSymbol' => 'X1-TEST', 'waypointSymbol' => $waypoint, 'status' => 'DOCKED', 'flightMode' => 'CRUISE', 'route' => ['arrival' => '2020-01-01T00:00:00Z']],
             'fuel' => ['current' => 100, 'capacity' => 100], 'cargo' => ['capacity' => 40, 'units' => 0, 'inventory' => []],
             'cooldown' => ['remainingSeconds' => 0, 'expiration' => '2020-01-01T00:00:00Z'],
@@ -34,7 +34,7 @@ final class FakeSpaceTraders
 
     public static function contract(string $id = 'contract-1'): array
     {
-        return ['id' => $id, 'type' => 'PROCUREMENT', 'accepted' => false, 'fulfilled' => false,
+        return ['id' => $id, 'factionSymbol' => 'COSMIC', 'type' => 'PROCUREMENT', 'accepted' => false, 'fulfilled' => false,
             'expiration' => now()->addHour()->toIso8601String(), 'deadlineToAccept' => now()->addHour()->toIso8601String(),
             'terms' => ['deadline' => now()->addDay()->toIso8601String(), 'payment' => ['onAccepted' => 100, 'onFulfilled' => 1500],
                 'deliver' => [['tradeSymbol' => 'IRON_ORE', 'destinationSymbol' => 'X1-TEST-PORT', 'unitsRequired' => 10, 'unitsFulfilled' => 0]]]];
@@ -77,6 +77,9 @@ final class FakeSpaceTraders
             try {
                 $world = json_decode(stream_get_contents($handle), true, flags: JSON_THROW_ON_ERROR);
                 [$body, $status] = self::respond($world, $request);
+                if ($request->method() !== 'GET' && str_ends_with($request->url(), '/refuel') && ($world['omit_refuel_cargo'] ?? false)) {
+                    unset($body['data']['cargo']);
+                }
                 if ($request->method() !== 'GET' && str_ends_with($request->url(), '/deliver') && ($world['extra_delivery_payment'] ?? false)) {
                     $body['data']['agent'] = ['credits' => 999999999];
                     $body['data']['transaction'] = ['totalPrice' => 123456];
@@ -291,7 +294,7 @@ final class FakeSpaceTraders
             $price = $world['offer']['purchasePrice'];
             $world['credits'] -= $price;
 
-            return [['data' => ['ship' => $ship, 'agent' => ['credits' => $world['credits']], 'transaction' => ['price' => $price]]], 201];
+            return [['data' => ['ship' => $ship, 'agent' => ['credits' => $world['credits']], 'transaction' => ['waypointSymbol' => $args['waypointSymbol'], 'shipSymbol' => $world['purchase_transaction_symbol'] ?? $args['shipType'], 'shipType' => $world['purchase_transaction_type'] ?? $args['shipType'], 'price' => $price, 'agentSymbol' => $world['symbol'], 'timestamp' => now()->toIso8601String()]]], 201];
         }
         if (! preg_match('~^/my/ships/([^/]+)/(.+)$~', $path, $match)) {
             return [['error' => ['code' => 404]], 404];
@@ -340,7 +343,7 @@ final class FakeSpaceTraders
                     if ($world['ships'][$index]['symbol'] === $args['shipSymbol']) {
                         self::cargo($world['ships'][$index], $args['tradeSymbol'], $args['units']);
 
-                        return [['data' => ['cargo' => $ship['cargo'], 'targetCargo' => $world['ships'][$index]['cargo']]], 200];
+                        return [['data' => ['cargo' => $ship['cargo']]], 200];
                     }
                 }
             }
@@ -356,7 +359,7 @@ final class FakeSpaceTraders
                 $ship['nav']['route']['arrival'] = now()->addSeconds($world['travel_seconds'])->toIso8601String();
                 $ship['fuel']['current'] -= $world['fuel_consumption'] ?? 5;
 
-                return [['data' => ['nav' => $ship['nav'], 'fuel' => $ship['fuel']]], 200];
+                return [['data' => ['nav' => $ship['nav'], 'fuel' => $ship['fuel'], 'events' => []]], 200];
             }
             if (in_array($command, ['extract', 'extract/survey'], true)) {
                 if (isset($world['force_survey_error']) && ($command === 'extract/survey' || isset($args['survey']))) {
@@ -375,7 +378,7 @@ final class FakeSpaceTraders
                     return [['data' => ['unexpected' => true]], 200];
                 }
 
-                return [['data' => ['cargo' => $ship['cargo'], 'cooldown' => $ship['cooldown'], 'extraction' => ['yield' => $yield]]], 200];
+                return [['data' => ['cargo' => $ship['cargo'], 'cooldown' => $ship['cooldown'], 'extraction' => ['shipSymbol' => $ship['symbol'], 'yield' => $yield], 'events' => []]], 200];
             }
             $symbol = $args['symbol'] ?? 'FUEL';
             $good = collect($world['market_goods'][$ship['nav']['waypointSymbol']] ?? $world['goods'])->firstWhere('symbol', $symbol);
@@ -393,7 +396,7 @@ final class FakeSpaceTraders
                 self::cargo($ship, $symbol, $command === 'sell' ? -$units : $units);
             }
             $world['credits'] += $command === 'sell' ? $price : -$price;
-            $transaction = ['totalPrice' => $price, 'tradeSymbol' => $symbol, 'units' => $units, 'shipSymbol' => $ship['symbol'], 'timestamp' => now()->toIso8601String()];
+            $transaction = ['waypointSymbol' => $ship['nav']['waypointSymbol'], 'type' => $command === 'sell' ? 'SELL' : 'PURCHASE', 'pricePerUnit' => $command === 'sell' ? $good['sellPrice'] : $good['purchasePrice'], 'totalPrice' => $price, 'tradeSymbol' => $symbol, 'units' => $units, 'shipSymbol' => $ship['symbol'], 'timestamp' => now()->toIso8601String()];
             array_unshift($world['transactions'], $transaction);
 
             return [['data' => ['agent' => ['credits' => $world['credits']], 'transaction' => $transaction, 'cargo' => $ship['cargo'], 'fuel' => $ship['fuel']]], 200];
@@ -460,7 +463,7 @@ final class FakeSpaceTraders
                 $world['credits'] -= $price;
                 $ship['cooldown'] = ['shipSymbol' => $ship['symbol'], 'totalSeconds' => 0, 'remainingSeconds' => 0];
 
-                return [['data' => ['nav' => $ship['nav'], 'cooldown' => $ship['cooldown'], 'agent' => ['credits' => $world['credits']], 'transaction' => ['totalPrice' => $price, 'shipSymbol' => $ship['symbol'], 'timestamp' => now()->toIso8601String()]]], 200];
+                return [['data' => ['nav' => $ship['nav'], 'cooldown' => $ship['cooldown'], 'agent' => ['credits' => $world['credits']], 'transaction' => ['waypointSymbol' => $ship['nav']['waypointSymbol'], 'tradeSymbol' => 'ANTIMATTER', 'type' => 'PURCHASE', 'units' => 1, 'pricePerUnit' => $price, 'totalPrice' => $price, 'shipSymbol' => $ship['symbol'], 'timestamp' => now()->toIso8601String()]]], 200];
             }
             if ($command === 'refuel') {
                 $units = min($args['units'] ?? ($ship['fuel']['capacity'] - $ship['fuel']['current']), $ship['fuel']['capacity'] - $ship['fuel']['current']);
@@ -472,7 +475,7 @@ final class FakeSpaceTraders
                 }
                 $world['credits'] -= $price;
 
-                return [['data' => ['fuel' => $ship['fuel'], 'cargo' => $ship['cargo'], 'agent' => ['credits' => $world['credits']], 'transaction' => ['shipSymbol' => $ship['symbol'], 'waypointSymbol' => $ship['nav']['waypointSymbol'], 'totalPrice' => $price, 'tradeSymbol' => 'FUEL', 'units' => $units, 'timestamp' => now()->toIso8601String()]]], 200];
+                return [['data' => ['fuel' => $ship['fuel'], 'cargo' => $ship['cargo'], 'agent' => ['credits' => $world['credits']], 'transaction' => ['shipSymbol' => $ship['symbol'], 'waypointSymbol' => $ship['nav']['waypointSymbol'], 'type' => 'PURCHASE', 'pricePerUnit' => $cargo ? 0 : 5, 'totalPrice' => $price, 'tradeSymbol' => 'FUEL', 'units' => $units, 'timestamp' => now()->toIso8601String()]]], 200];
             }
             if ($command === 'siphon') {
                 $yield = $world['siphon_yield'] ?? ['symbol' => 'HYDROCARBON', 'units' => 10];
@@ -523,7 +526,7 @@ final class FakeSpaceTraders
                 $price = $world['equipment_price'] ?? 100;
                 $world['credits'] -= $price;
 
-                return [['data' => [$field => $ship[$field], 'cargo' => $ship['cargo'], 'agent' => ['credits' => $world['credits']], 'transaction' => ['shipSymbol' => $ship['symbol'], 'waypointSymbol' => $ship['nav']['waypointSymbol'], 'totalPrice' => $price, 'timestamp' => now()->toIso8601String()]]], 201];
+                return [['data' => [$field => $ship[$field], 'cargo' => $ship['cargo'], 'agent' => ['credits' => $world['credits']], 'transaction' => ['shipSymbol' => $ship['symbol'], 'waypointSymbol' => $ship['nav']['waypointSymbol'], 'tradeSymbol' => $symbol, 'totalPrice' => $price, 'timestamp' => now()->toIso8601String()]]], 201];
             }
             if ($command === 'jettison') {
                 self::cargo($ship, $args['symbol'], -$args['units']);

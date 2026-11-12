@@ -36,7 +36,7 @@ const oldAgentId = cli("echo json_encode(App\\Models\\Agent::where('name','LOCAL
 const output = path.resolve(process.env.QA_ARTIFACT_DIR || path.join(root, 'storage/app/mvp-evidence/agents'));
 await fs.mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE } : {}) });
-const server = spawn(php, ['-S', `127.0.0.1:${port}`, path.join(root, 'vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php')], { cwd: path.join(root, 'public'), env, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(php, ['-S', `127.0.0.1:${port}`, path.join(root, 'vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php')], { cwd: path.join(root, 'public'), env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 let serverLog = '';
 server.stdout.on('data', value => { serverLog += value; });
 server.stderr.on('data', value => { serverLog += value; });
@@ -132,9 +132,20 @@ try {
     await page.goto(`${origin}/agents`);
     await page.getByRole('link', { name: 'Import current token for TOKEN_PILOT', exact: true }).click();
     await page.getByLabel('Agent token', { exact: true }).waitFor();
+    const assertTokenInput = async label => {
+        const input = page.getByLabel(label, { exact: true });
+        for (const [attribute, value] of Object.entries({ type: 'text', autocomplete: 'off', 'data-1p-ignore': '', 'data-lpignore': 'true', 'data-bwignore': '', spellcheck: 'false', autocapitalize: 'off' })) {
+            assert.equal(await input.getAttribute(attribute), value, label + ' ' + attribute);
+        }
+        assert.equal(await input.evaluate(element => getComputedStyle(element).webkitTextSecurity), 'disc');
+        assert.equal(await input.getAttribute('aria-invalid'), 'false');
+    };
+    await assertTokenInput('Agent token');
     assert.equal(await page.getByLabel('Account token', { exact: true }).count(), 0);
     await page.getByRole('button', { name: 'Back to Create New Agent', exact: true }).click();
     await page.getByLabel('Account token', { exact: true }).waitFor();
+    await assertTokenInput('Account token');
+    assert.equal(await page.getByLabel('Email', { exact: true }).inputValue(), '', 'Local operator email must not default into upstream registration');
     await page.getByRole('button', { name: 'Already have an Agent?', exact: true }).click();
     await page.getByLabel('Agent token', { exact: true }).fill('synthetic-offline-only');
     await page.getByRole('button', { name: 'Save Existing Agent', exact: true }).click();
