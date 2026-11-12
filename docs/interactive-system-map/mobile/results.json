@@ -1,0 +1,209 @@
+{
+  "checked_at": "2026-11-02T06:08:32.626703+00:00",
+  "test_context": "Working tree based on c23e60c; exact final UI sources and built assets recorded in source-sha256.json",
+  "browser": "156.0.8078.4",
+  "checks": [
+    {
+      "id": "desktop-entry",
+      "status": "pass",
+      "observed": "Agents \u2192 flight deck \u2192 map; stored selected ship and current built assets verified",
+      "screenshot": "desktop-entry.png"
+    },
+    {
+      "id": "desktop-camera",
+      "status": "pass",
+      "observed": "Native wheel, drag, both zoom buttons, fit and center all changed the expected camera values",
+      "screenshot": "desktop-camera.png"
+    },
+    {
+      "id": "desktop-marker-drag",
+      "status": "pass",
+      "observed": "Dragging from artwork pans; a subsequent click still opens the location",
+      "screenshot": "desktop-marker-drag.png"
+    },
+    {
+      "id": "desktop-all-locations",
+      "status": "pass",
+      "observed": "Every one of 21 stored locations opens and closes, including the unplotted entry",
+      "screenshot": "desktop-all-locations.png"
+    },
+    {
+      "id": "desktop-all-markers-overlaps",
+      "status": "pass",
+      "observed": "19 map markers and both co-located locations individually selectable; Escape restores marker focus",
+      "screenshot": "desktop-all-markers-overlaps.png"
+    },
+    {
+      "id": "location-card-information-order",
+      "status": "pass",
+      "observed": "Prices, shipyard and goods precede terrain/lore; overlap choices expand on demand and retain selection",
+      "screenshot": "location-card-information-order.png"
+    },
+    {
+      "id": "desktop-card-states-scroll",
+      "status": "pass",
+      "observed": "Stored text, empty and unknown states, stale/invalidated zero-valued prices, and native card scrolling verified",
+      "screenshot": "desktop-card-states-scroll.png"
+    },
+    {
+      "id": "desktop-keyboard-dismissal",
+      "status": "pass",
+      "observed": "Keyboard pan/zoom/fit/center, Tab+Enter, Escape focus restore and outside click verified",
+      "screenshot": "desktop-keyboard-dismissal.png"
+    },
+    {
+      "id": "open-card-camera-controls",
+      "status": "pass",
+      "observed": "Zoom, pan, Fit and Center retain the location card and control focus; ship picker works while a card was open",
+      "screenshot": "open-card-camera-controls.png"
+    },
+    {
+      "id": "nearby-keyboard-and-scroll-reset",
+      "status": "pass",
+      "observed": "Nearby keyboard selection retains button focus and replacing a scrolled card resets details to the top",
+      "screenshot": "nearby-keyboard-and-scroll-reset.png"
+    },
+    {
+      "id": "browser-shortcuts-and-global-escape",
+      "status": "pass",
+      "observed": "Browser modifier shortcuts remain available, Escape works from controls, and marker focus has an inset visible ring",
+      "screenshot": "browser-shortcuts-and-global-escape.png"
+    },
+    {
+      "id": "wheel-line-units",
+      "status": "pass",
+      "observed": "Line-mode wheel events normalize consistently with pixel-mode wheel input",
+      "screenshot": "wheel-line-units.png"
+    },
+    {
+      "id": "unplotted-controls-access",
+      "status": "pass",
+      "observed": "Unplotted information opens away from the desktop camera controls",
+      "screenshot": "unplotted-controls-access.png"
+    },
+    {
+      "id": "ship-selection-history",
+      "status": "pass",
+      "observed": "All ships, empty observations/fleet, transit departure, reload, generic link, back/forward and deck round trip verified",
+      "screenshot": "ship-selection-history.png"
+    },
+    {
+      "id": "rate-tracker-navigation",
+      "status": "pass",
+      "observed": "API tracker refresh/Done/Escape and focus containment, Menu Done/Escape and affected navigation verified",
+      "screenshot": "rate-tracker-navigation.png"
+    },
+    {
+      "id": "rate-tracker-states",
+      "status": "pass",
+      "observed": "Browser-mocked tracker snapshots show ready, low capacity, cooldown, unavailable and recovery; two budgets and dark details render without upstream calls",
+      "screenshot": "rate-tracker-states.png"
+    },
+    {
+      "id": "navigation-and-signout",
+      "status": "pass",
+      "observed": "Skip link, same-page System map, Agents link, brand, sign out, authentication redirect and fresh login verified",
+      "screenshot": "navigation-and-signout.png"
+    },
+    {
+      "id": "zoom-limits-directory-toggle",
+      "status": "pass",
+      "observed": "Artwork grows from 40px to 160px; button, keyboard and wheel stop at close-up limit; Fit and directory recover",
+      "screenshot": "zoom-limits-directory-toggle.png"
+    },
+    {
+      "id": "map-read-only-boundary",
+      "status": "pass",
+      "observed": "Gameplay table hashes and fake transport calls/writes unchanged, including API tracker refresh",
+      "screenshot": "map-read-only-boundary.png"
+    },
+    {
+      "id": "phone-layout",
+      "status": "pass",
+      "observed": "Map, tracker, controls and open location card fit 390x844; 331px detail area remains keyboard-scrollable",
+      "screenshot": "phone-layout.png"
+    },
+    {
+      "id": "small-phone-layout",
+      "status": "pass",
+      "observed": "Map, tracker, controls and open location card fit 320x568; 185px detail area remains keyboard-scrollable",
+      "screenshot": "small-phone-layout.png"
+    },
+    {
+      "id": "phone-landscape-layout",
+      "status": "pass",
+      "observed": "Map, tracker, controls and open location card fit 844x390; 170px detail area remains keyboard-scrollable",
+      "screenshot": "phone-landscape-layout.png"
+    },
+    {
+      "id": "reflow-layout",
+      "status": "pass",
+      "observed": "Map, tracker, controls and open location card fit 720x450; 230px detail area remains keyboard-scrollable",
+      "screenshot": "reflow-layout.png"
+    },
+    {
+      "id": "mobile-knowledge-and-map-space",
+      "status": "pass",
+      "observed": "390x844 map uses at least 740px height, touch targets are 44px, knowledge opens/closes and Escape respects overlay priority",
+      "screenshot": "mobile-knowledge-and-map-space.png"
+    },
+    {
+      "id": "two-finger-tap-card",
+      "status": "pass",
+      "observed": "Two-finger gesture without motion retains the selected card",
+      "screenshot": "two-finger-tap-card.png"
+    },
+    {
+      "id": "native-touch",
+      "status": "pass",
+      "observed": "Trusted Chromium touch pinches and pans, selects overlap members, closes cards, stops pinch zoom at close-up limit and recovers with Fit",
+      "screenshot": "native-touch.png"
+    }
+  ],
+  "unexpected_browser_errors": 0,
+  "expected_mocked_tracker_errors": 2,
+  "php_tests": 518,
+  "php_assertions": 3041,
+  "map_js_tests": 7,
+  "mobile_viewport": {
+    "width": 390,
+    "height": 844,
+    "map_height": 743
+  },
+  "real_api": {
+    "get_requests": 14,
+    "http_200": 14,
+    "catalogue_locations": 94,
+    "commands": [
+      {
+        "command": "orbit",
+        "state": "confirmed",
+        "credit_delta": 0
+      },
+      {
+        "command": "dock",
+        "state": "confirmed",
+        "credit_delta": 0
+      }
+    ],
+    "restored_dock_fuel_cargo": true,
+    "map_browsing_request_delta": 0,
+    "map_browsing_gameplay_hashes_unchanged": true,
+    "final_card_selection_gameplay_and_request_delta": 0
+  },
+  "limitations": [
+    "Physical devices, hardware trackpads, Safari, Firefox, screen readers and hardware safe areas untested",
+    "Location card does not automatically pan a selected marker clear of the phone card",
+    "Catalogue coverage and prices are historical stored observations",
+    "No deployment or PR merge"
+  ],
+  "card_hierarchy": [
+    "Stored prices",
+    "Shipyard",
+    "Market goods",
+    "Other observations",
+    "Traits & terrain",
+    "Descriptions & lore when available",
+    "Observation details"
+  ]
+}

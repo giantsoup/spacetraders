@@ -12,6 +12,7 @@ use App\Http\Controllers\OpenAiKeyController;
 use App\Http\Controllers\PlayerGuideController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RateLimitController;
+use App\Http\Controllers\SystemMapController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -56,6 +57,7 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/agents/{agent}/adviser/history', [AdviserController::class, 'history'])->name('game.adviser.history');
     Route::get('/agents/{agent}/history', [AgentDashboardController::class, 'history'])->name('game.history');
+    Route::get('/agents/{agent}/map', SystemMapController::class)->name('agents.map');
     Route::get('/agents/{agent}', [AgentDashboardController::class, 'show'])->name('agents.show');
     Route::middleware('throttle:60,1')->group(function () {
         Route::post('/agents/{agent}/adviser/policies', [AdviserController::class, 'policies'])->name('game.adviser.policies');

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { remaining, shipPresentation, observedNumber, meterPercent } from '../resources/js/shipPresentation.js';
+import { remaining, shipPresentation, flightDeckLocation, observedNumber, meterPercent } from '../resources/js/shipPresentation.js';
 const now = Date.parse('2026-11-01T20:00:00Z');
 assert.equal(remaining('2026-11-01T20:00:01Z', now), '0:01');
 assert.equal(remaining('2026-11-01T20:00:00Z', now), 'Checking');
@@ -14,3 +14,12 @@ assert.equal(state.readiness, 'Checking'); assert.equal(state.status, 'Checking 
 assert.equal(shipPresentation(ship, '2026-11-01T19:00:00Z', 'connected', now).stale, true);
 assert.equal(shipPresentation({}, null, 'disconnected', now).readiness, 'Unknown');
 console.log('PASS absolute deadlines, observation-confirmed readiness, unknowns, zero-capacity meters and freshness');
+
+const locations = [{ symbol: 'X1-TEST-PORT', type: 'PLANET', traits: [{ symbol: 'OCEAN' }], description: 'Ocean world' }];
+assert.deepEqual(flightDeckLocation(ship, locations), locations[0]);
+const routed = { nav: { status: 'IN_TRANSIT', waypointSymbol: 'X1-TEST-ORIGIN', route: { destination: { symbol: 'X1-TEST-MOON', type: 'MOON' }, arrival: '2020-01-01T00:00:00Z' } } };
+assert.deepEqual(flightDeckLocation(routed, locations), { symbol: 'X1-TEST-MOON', type: 'MOON', traits: null, description: null });
+assert.equal(flightDeckLocation({ nav: { ...routed.nav, status: 'DOCKED' } }, locations).symbol, 'X1-TEST-ORIGIN');
+assert.deepEqual(flightDeckLocation(), { symbol: null, type: null, traits: null, description: null });
+assert.equal(flightDeckLocation({ nav: { waypointSymbol: 'X1-TEST-UNSEEN' } }, locations).type, null);
+console.log('PASS saved sprite knowledge, observed route destination, stationary location, route-only and unknown fallback');

@@ -1,0 +1,580 @@
+{
+  "scope": "System map and latest-main API rate tracker integration. Current main f84bd824fe5bc117339d5ece249205ab6c7d54ba is included. Owned synthetic Herd site; no deployment, merge of PR, or live gameplay.",
+  "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+  "ui_required": true,
+  "checks": [
+    {
+      "id": "desktop-entry",
+      "layer": "browser",
+      "scenario": "desktop entry",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Agents \u2192 flight deck \u2192 map; stored selected ship and current built assets verified",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "desktop-entry.png",
+          "inspection": "Dark desktop map has the API tracker visible, separated camera controls, readable plotted labels, and no horizontal clipping. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "desktop-camera",
+      "layer": "browser",
+      "scenario": "desktop camera",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Native wheel, drag, both zoom buttons, fit and center all changed the expected camera values",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "desktop-entry.png",
+          "inspection": "Dark desktop map has the API tracker visible, separated camera controls, readable plotted labels, and no horizontal clipping. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "desktop-marker-drag",
+      "layer": "browser",
+      "scenario": "desktop marker drag",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Dragging from artwork pans; a subsequent click still opens the location",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "desktop-entry.png",
+          "inspection": "Dark desktop map has the API tracker visible, separated camera controls, readable plotted labels, and no horizontal clipping. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "desktop-all-locations",
+      "layer": "browser",
+      "scenario": "desktop all locations",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Every one of 21 stored locations opens and closes, including the unplotted entry",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "nearby-keyboard-and-scroll-reset.png",
+          "inspection": "The Twin card starts at its coordinates, shows confirmed empty traits, and nearby choices remain readable inside the scrolling details. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "desktop-all-markers-overlaps",
+      "layer": "browser",
+      "scenario": "desktop all markers overlaps",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "19 map markers and both co-located locations individually selectable; Escape restores marker focus",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "desktop-entry.png",
+          "inspection": "Dark desktop map has the API tracker visible, separated camera controls, readable plotted labels, and no horizontal clipping. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "desktop-card-states-scroll",
+      "layer": "browser",
+      "scenario": "desktop card states scroll",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Stored text, empty and unknown states, stale/invalidated zero-valued prices, and native card scrolling verified",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "unplotted-controls-access.png",
+          "inspection": "The unplotted Nebula card opens on the right, leaving the desktop camera toolbar accessible. Missing fields remain Unknown. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "desktop-keyboard-dismissal",
+      "layer": "browser",
+      "scenario": "desktop keyboard dismissal",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Keyboard pan/zoom/fit/center, Tab+Enter, Escape focus restore and outside click verified",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "desktop-entry.png",
+          "inspection": "Dark desktop map has the API tracker visible, separated camera controls, readable plotted labels, and no horizontal clipping. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "open-card-camera-controls",
+      "layer": "browser",
+      "scenario": "open card camera controls",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Zoom, pan, Fit and Center retain the location card and control focus; ship picker works while a card was open",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "open-card-camera-controls.png",
+          "inspection": "After exercising camera controls with an open card and changing ships, the transit ship has a dashed departure marker and arrival is explicitly unconfirmed. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "nearby-keyboard-and-scroll-reset",
+      "layer": "browser",
+      "scenario": "nearby keyboard and scroll reset",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Nearby keyboard selection retains button focus and replacing a scrolled card resets details to the top",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "nearby-keyboard-and-scroll-reset.png",
+          "inspection": "The Twin card starts at its coordinates, shows confirmed empty traits, and nearby choices remain readable inside the scrolling details. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "browser-shortcuts-and-global-escape",
+      "layer": "browser",
+      "scenario": "browser shortcuts and global escape",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Browser modifier shortcuts remain available, Escape works from controls, and marker focus has an inset visible ring",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "browser-shortcuts-and-global-escape.png",
+          "inspection": "The keyboard-focused Archive marker has a visible cyan ring inside its SVG hit target. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "wheel-line-units",
+      "layer": "browser",
+      "scenario": "wheel line units",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Line-mode wheel events normalize consistently with pixel-mode wheel input",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "desktop-entry.png",
+          "inspection": "Dark desktop map has the API tracker visible, separated camera controls, readable plotted labels, and no horizontal clipping. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "unplotted-controls-access",
+      "layer": "browser",
+      "scenario": "unplotted controls access",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Unplotted information opens away from the desktop camera controls",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "unplotted-controls-access.png",
+          "inspection": "The unplotted Nebula card opens on the right, leaving the desktop camera toolbar accessible. Missing fields remain Unknown. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "ship-selection-history",
+      "layer": "browser",
+      "scenario": "ship selection history",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "All ships, empty observations/fleet, transit departure, reload, generic link, back/forward and deck round trip verified",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "open-card-camera-controls.png",
+          "inspection": "After exercising camera controls with an open card and changing ships, the transit ship has a dashed departure marker and arrival is explicitly unconfirmed. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "rate-tracker-navigation",
+      "layer": "browser",
+      "scenario": "rate tracker navigation",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "API tracker refresh/Done/Escape and focus containment, Menu Done/Escape and affected navigation verified",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "desktop-entry.png",
+          "inspection": "Dark desktop map has the API tracker visible, separated camera controls, readable plotted labels, and no horizontal clipping. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "rate-tracker-states",
+      "layer": "browser",
+      "scenario": "rate tracker states",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Browser-mocked tracker snapshots show ready, low capacity, cooldown, unavailable and recovery; two budgets and dark details render without upstream calls",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "rate-tracker-states.png",
+          "inspection": "The browser-mocked recovered state displays a green Room available tracker in the header. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "navigation-and-signout",
+      "layer": "browser",
+      "scenario": "navigation and signout",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Skip link, same-page System map, Agents link, brand, sign out, authentication redirect and fresh login verified",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "desktop-entry.png",
+          "inspection": "Dark desktop map has the API tracker visible, separated camera controls, readable plotted labels, and no horizontal clipping. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "zoom-limits-directory-toggle",
+      "layer": "browser",
+      "scenario": "zoom limits directory toggle",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Zoom bounds remain finite, Fit recovers, and directory toggles both ways",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "desktop-entry.png",
+          "inspection": "Dark desktop map has the API tracker visible, separated camera controls, readable plotted labels, and no horizontal clipping. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "map-read-only-boundary",
+      "layer": "browser",
+      "scenario": "map read only boundary",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Gameplay table hashes and fake transport calls/writes unchanged, including API tracker refresh",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "desktop-entry.png",
+          "inspection": "Dark desktop map has the API tracker visible, separated camera controls, readable plotted labels, and no horizontal clipping. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "phone-layout",
+      "layer": "browser",
+      "scenario": "phone layout",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Map, tracker, controls and open location card fit 390x844; 260px detail area remains keyboard-scrollable",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "phone-layout.png",
+          "inspection": "At 390x844 the tracker and Menu fit the header. The bottom card has visible coordinates, ages and terrain text in a scrollable region. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "small-phone-layout",
+      "layer": "browser",
+      "scenario": "small phone layout",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Map, tracker, controls and open location card fit 320x568; 104px detail area remains keyboard-scrollable",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "small-phone-layout.png",
+          "inspection": "At 320x568 the header remains visible. The bottom card and overlap choices stay within the map; the 104px details region can scroll. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "phone-landscape-layout",
+      "layer": "browser",
+      "scenario": "phone landscape layout",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Map, tracker, controls and open location card fit 844x390; 95px detail area remains keyboard-scrollable",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "phone-landscape-layout.png",
+          "inspection": "At 844x390 the full header and footer remain visible. The compact card is bounded within the map, with its choices in the scrolling region. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "reflow-layout",
+      "layer": "browser",
+      "scenario": "reflow layout",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Map, tracker, controls and open location card fit 720x450; 140px detail area remains keyboard-scrollable",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "reflow-layout.png",
+          "inspection": "At 720x450 the header, camera toolbar and card remain on screen. Footer text wraps without horizontal overflow. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "two-finger-tap-card",
+      "layer": "browser",
+      "scenario": "two finger tap card",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Two-finger gesture without motion retains the selected card",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "native-touch.png",
+          "inspection": "The emulated phone remains dark and legible after trusted touch pinch, pan and marker/card interactions. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "native-touch",
+      "layer": "browser",
+      "scenario": "native touch",
+      "expected": "Expected visible state and read-only interaction outcomes asserted by the native browser regression",
+      "status": "pass",
+      "observed": "Trusted Chromium touch input pinches, pans, taps markers, selects overlap members and closes the card",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "MAP_QA_OUTPUT=\"$PWD/storage/app/system-map-90/qa-followup-20261101/verified-browser\" node scripts/verify-system-map-browser.mjs",
+      "evidence": [
+        "browser-results.json",
+        "browser.log"
+      ],
+      "screenshots": [
+        {
+          "path": "native-touch.png",
+          "inspection": "The emulated phone remains dark and legible after trusted touch pinch, pan and marker/card interactions. Representative inspected state; the individual interaction outcomes are recorded in browser-results.json."
+        }
+      ]
+    },
+    {
+      "id": "repository-verification",
+      "layer": "backend",
+      "scenario": "Full repository checks, in-memory PHP suite, formatting and whitespace",
+      "expected": "All required checks pass in the isolated test environment",
+      "status": "pass",
+      "observed": "518 PHP tests / 3041 assertions; runtime checks, production builds, Pint and whitespace checks passed. No live database or gameplay was used.",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "PHP_BIN=\"$PWD/scripts/herd-php\" PNPM_BIN=/Users/Taylor/.npm/_npx/980a2029d347d29f/node_modules/pnpm/bin/pnpm.cjs bash scripts/verify.sh",
+      "evidence": [
+        "checks.txt"
+      ]
+    },
+    {
+      "id": "map-math-sprites-wheel",
+      "layer": "frontend",
+      "scenario": "Map math, clustering, deterministic sprite families and wheel units",
+      "expected": "Focused frontend checks pass",
+      "status": "pass",
+      "observed": "6 map JavaScript tests passed, including line/pixel/page wheel normalization. Existing rate-limit frontend checks also passed through verify.sh.",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "node --test scripts/verify-system-map.mjs",
+      "evidence": [
+        "checks.txt"
+      ]
+    },
+    {
+      "id": "independent-review-reconciliation",
+      "layer": "review",
+      "scenario": "Reconcile independent Claude Sonnet 5.5 review with runtime evidence",
+      "expected": "Confirmed in-scope issues resolved and speculative findings explicitly qualified",
+      "status": "pass",
+      "observed": "Sonnet reviewed merge commit 777db30 statically. Primary reproduced confirmed findings and verified fixes with native browser regressions. This does not claim independent approval of the final code.",
+      "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+      "command": "Read review-reconciliation.md and compare the captured regressions in browser-results.json",
+      "evidence": [
+        "review-reconciliation.md",
+        "browser-results.json",
+        "reproduction-summary.txt"
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "id": "directory-focus",
+      "summary": "Closing a directory-selected card returned focus to hidden content",
+      "in_scope": true,
+      "status": "fixed",
+      "evidence": "Visible directory summary is now the opener; all 21 locations and focus return pass."
+    },
+    {
+      "id": "short-layout",
+      "summary": "Card choices consumed the detail region and minimum shell height clipped short viewports",
+      "in_scope": true,
+      "status": "fixed",
+      "evidence": "Nearby choices scroll with details; shell follows viewport height. Before screenshots and 320x568 / 844x390 regressions retained."
+    },
+    {
+      "id": "card-camera",
+      "summary": "Pan/zoom dismissed the card and stole control focus",
+      "in_scope": true,
+      "status": "fixed",
+      "evidence": "Open-card native pan, zoom, Fit and Center now retain the card and expected control focus."
+    },
+    {
+      "id": "nearby-selection",
+      "summary": "Nearby keyboard selection lost focus and changing location retained old scroll",
+      "in_scope": true,
+      "status": "fixed",
+      "evidence": "Nearby buttons retain focus; details reset on location change. The directory renders above an existing card so another location can be chosen."
+    },
+    {
+      "id": "shortcuts-escape",
+      "summary": "Browser shortcuts were intercepted and Escape missed header/control focus",
+      "in_scope": true,
+      "status": "fixed",
+      "evidence": "Modifier keys pass through; Escape respects the topmost native modal and otherwise closes the card from map/header focus."
+    },
+    {
+      "id": "unplotted-controls",
+      "summary": "Unplotted card covered the normal desktop camera controls",
+      "in_scope": true,
+      "status": "fixed",
+      "evidence": "Unplotted cards open on the right, verified with actual hit-target bounds."
+    }
+  ],
+  "limitations": [
+    "Chromium 156.0.8078.4 with fresh isolated Playwright processes/contexts. Physical phones, trackpads, Safari and Firefox were not tested.",
+    "Trusted browser wheel, mouse and emulated CDP touch were exercised. Line-mode wheel input and rate-tracker status/failure variants were simulated; the normal tracker and map use actual local handlers.",
+    "No screen reader was used. The focus ring and live-region/countdown structure were verified, but this is not a full accessibility certification.",
+    "A deliberately mocked HTTP 503 produces expected browser console/response entries in the recovery test. There were no unexpected browser errors.",
+    "This is scoped map/navigation QA, not gameplay-command QA, a security audit, deployment or production validation.",
+    "The independent reviewer examined the integration source at 777db30; the primary agent validated the later fixes. No independent final-code approval is claimed."
+  ]
+}

@@ -1,0 +1,132 @@
+{
+  "revision": "56d4ea2fdb5ff1eb5bba69cfcfca71081fd8c075",
+  "scope": "System map and affected read-only navigation; gameplay execution excluded",
+  "scenarios": [
+    {
+      "id": "entry",
+      "scenario": "Flight deck entry, selected ship and app navigation",
+      "role": "Synthetic owned pilot",
+      "starting_data": "Owned MAP01 fixture, stored observations, fake upstream, disabled automation",
+      "expected_persistence": "Read only; gameplay tables and upstream calls unchanged",
+      "status": "pass",
+      "evidence": "browser-results.json and qa.json enumerate exact checks and limitations"
+    },
+    {
+      "id": "camera",
+      "scenario": "Both zoom buttons, wheel, pinch, fit and center",
+      "role": "Synthetic owned pilot",
+      "starting_data": "Owned MAP01 fixture, stored observations, fake upstream, disabled automation",
+      "expected_persistence": "Read only; gameplay tables and upstream calls unchanged",
+      "status": "pass",
+      "evidence": "browser-results.json and qa.json enumerate exact checks and limitations"
+    },
+    {
+      "id": "pan",
+      "scenario": "Drag on background and on marker, cancel, repeated pan",
+      "role": "Synthetic owned pilot",
+      "starting_data": "Owned MAP01 fixture, stored observations, fake upstream, disabled automation",
+      "expected_persistence": "Read only; gameplay tables and upstream calls unchanged",
+      "status": "pass",
+      "evidence": "browser-results.json and qa.json enumerate exact checks and limitations"
+    },
+    {
+      "id": "locations",
+      "scenario": "Every plotted and unplotted directory entry",
+      "role": "Synthetic owned pilot",
+      "starting_data": "Owned MAP01 fixture, stored observations, fake upstream, disabled automation",
+      "expected_persistence": "Read only; gameplay tables and upstream calls unchanged",
+      "status": "pass",
+      "evidence": "browser-results.json and qa.json enumerate exact checks and limitations"
+    },
+    {
+      "id": "markers",
+      "scenario": "Every marker and each co-located member",
+      "role": "Synthetic owned pilot",
+      "starting_data": "Owned MAP01 fixture, stored observations, fake upstream, disabled automation",
+      "expected_persistence": "Read only; gameplay tables and upstream calls unchanged",
+      "status": "pass",
+      "evidence": "browser-results.json and qa.json enumerate exact checks and limitations"
+    },
+    {
+      "id": "card",
+      "scenario": "Close button, outside click, Escape and focus restoration",
+      "role": "Synthetic owned pilot",
+      "starting_data": "Owned MAP01 fixture, stored observations, fake upstream, disabled automation",
+      "expected_persistence": "Read only; gameplay tables and upstream calls unchanged",
+      "status": "pass",
+      "evidence": "browser-results.json and qa.json enumerate exact checks and limitations"
+    },
+    {
+      "id": "details",
+      "scenario": "Mouse, touch and keyboard card scrolling",
+      "role": "Synthetic owned pilot",
+      "starting_data": "Owned MAP01 fixture, stored observations, fake upstream, disabled automation",
+      "expected_persistence": "Read only; gameplay tables and upstream calls unchanged",
+      "status": "pass",
+      "evidence": "browser-results.json and qa.json enumerate exact checks and limitations"
+    },
+    {
+      "id": "keyboard",
+      "scenario": "Tab, Enter, arrows, +, -, F, C and Escape",
+      "role": "Synthetic owned pilot",
+      "starting_data": "Owned MAP01 fixture, stored observations, fake upstream, disabled automation",
+      "expected_persistence": "Read only; gameplay tables and upstream calls unchanged",
+      "status": "pass",
+      "evidence": "browser-results.json and qa.json enumerate exact checks and limitations"
+    },
+    {
+      "id": "selection",
+      "scenario": "All ships, reload, back/forward and flight deck round trip",
+      "role": "Synthetic owned pilot",
+      "starting_data": "Owned MAP01 fixture, stored observations, fake upstream, disabled automation",
+      "expected_persistence": "Read only; gameplay tables and upstream calls unchanged",
+      "status": "pass",
+      "evidence": "browser-results.json and qa.json enumerate exact checks and limitations"
+    },
+    {
+      "id": "states",
+      "scenario": "Unknown, empty, stale, invalidated prices, partial coverage, no observations and empty fleet",
+      "role": "Synthetic owned pilot",
+      "starting_data": "Owned MAP01 fixture, stored observations, fake upstream, disabled automation",
+      "expected_persistence": "Read only; gameplay tables and upstream calls unchanged",
+      "status": "pass",
+      "evidence": "browser-results.json and qa.json enumerate exact checks and limitations"
+    },
+    {
+      "id": "responsive",
+      "scenario": "1440x900, 390x844, 320x568, 844x390 and 200 percent reflow",
+      "role": "Synthetic owned pilot",
+      "starting_data": "Owned MAP01 fixture, stored observations, fake upstream, disabled automation",
+      "expected_persistence": "Read only; gameplay tables and upstream calls unchanged",
+      "status": "pass",
+      "evidence": "browser-results.json and qa.json enumerate exact checks and limitations"
+    },
+    {
+      "id": "theme",
+      "scenario": "Dark map/card with light browser appearance",
+      "role": "Synthetic owned pilot",
+      "starting_data": "Owned MAP01 fixture, stored observations, fake upstream, disabled automation",
+      "expected_persistence": "Read only; gameplay tables and upstream calls unchanged",
+      "status": "pass",
+      "evidence": "browser-results.json and qa.json enumerate exact checks and limitations"
+    },
+    {
+      "id": "boundary",
+      "scenario": "No upstream calls or gameplay writes",
+      "role": "Synthetic owned pilot",
+      "starting_data": "Owned MAP01 fixture, stored observations, fake upstream, disabled automation",
+      "expected_persistence": "Read only; gameplay tables and upstream calls unchanged",
+      "status": "pass",
+      "evidence": "browser-results.json and qa.json enumerate exact checks and limitations"
+    },
+    {
+      "id": "errors",
+      "scenario": "Console and failed request review",
+      "role": "Synthetic owned pilot",
+      "starting_data": "Owned MAP01 fixture, stored observations, fake upstream, disabled automation",
+      "expected_persistence": "Read only; gameplay tables and upstream calls unchanged",
+      "status": "pass",
+      "evidence": "browser-results.json and qa.json enumerate exact checks and limitations"
+    }
+  ]
+}

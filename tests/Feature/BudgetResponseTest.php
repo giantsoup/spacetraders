@@ -166,14 +166,11 @@ class BudgetResponseTest extends TestCase
         $contend = function (callable $work) use ($milliseconds) {
             $directory = config('gameplay.request_budget_path');
             $ready = $directory.'/holder-ready';
-            $code = '$h=fopen($argv[1],"c"); flock($h, LOCK_EX); file_put_contents($argv[2],"ready"); usleep((int)$argv[3]*1000); flock($h, LOCK_UN); fclose($h);';
-            $holder = new Process([PHP_BINARY, '-r', $code, $directory.'/budget.lock', $ready, (string) $milliseconds]);
+            $code = '$h=fopen($argv[1],"c"); flock($h, LOCK_EX); file_put_contents($argv[2],"ready"); echo "ready\n"; fflush(STDOUT); usleep((int)$argv[3]*1000); flock($h, LOCK_UN); fclose($h);';
+            $holder = new Process([PHP_BINARY, '-r', $code, $directory.'/budget.lock', $ready, (string) $milliseconds], timeout: 10);
             $holder->start();
-            $deadline = microtime(true) + 2;
-            while (! is_file($ready) && microtime(true) < $deadline && $holder->isRunning()) {
-                usleep(1000);
-            }
             try {
+                $this->assertTrue($holder->waitUntil(fn ($type, $output) => $type === Process::OUT && str_contains($output, "ready\n")), 'Competing process must signal that it holds the budget lock.');
                 $this->assertFileExists($ready, 'Real competing process must hold the budget lock.');
 
                 return $work();

@@ -71,7 +71,7 @@ onBeforeUnmount(() => {
         </button>
         <FocusSheet :open="open" title="API rate limit" @close="open = false">
             <section class="rate-details" aria-label="Current API request budget">
-                <p class="rate-verdict" role="status">{{ summary.label }}<span v-if="summary.cooldown"> · {{ cooldown ? `${cooldown}s remaining` : 'Checking budget' }}</span></p>
+                <p class="rate-verdict"><span role="status">{{ summary.label }}</span><span v-if="summary.cooldown" class="rate-countdown"> · {{ cooldown ? `${cooldown}s remaining` : 'Checking budget' }}</span></p>
                 <p>{{ summary.message }}</p>
                 <p class="rate-note">Updates every 5 seconds while this tab is visible. Checking this panel makes no SpaceTraders API requests.</p>
                 <button type="button" class="app-button app-button-secondary" @click="refresh">Refresh status</button>

@@ -1,0 +1,3326 @@
+{
+  "revision": "8c24fed5e88d99b21512efd0a043d2757eeeed80",
+  "origin": "http://spacetraders-map-90.test",
+  "checks": [
+    {
+      "id": "read-intent-and-unknown-traits",
+      "status": "pass",
+      "observed": "Options are stored-only; explicit detail GET preserves hidden traits, saves observation and restores focus on Escape.",
+      "screenshot": "read-intent-and-unknown-traits.png"
+    },
+    {
+      "id": "read-error-recovery",
+      "status": "pass",
+      "observed": "Real local read handler reports fake upstream failure, retains the map and succeeds on explicit retry.",
+      "screenshot": "read-error-recovery.png"
+    },
+    {
+      "id": "market-and-shipyard-reads",
+      "status": "pass",
+      "observed": "Separate explicit market and shipyard reads update rendered stored data without gameplay writes.",
+      "screenshot": "market-and-shipyard-reads.png"
+    },
+    {
+      "id": "travel-orbit-preview-cancel-stop",
+      "status": "pass",
+      "observed": "Map handoff preselects ship and target; docked travel explains orbit. Preview, cancel and Stop perform no gameplay writes.",
+      "screenshot": "travel-orbit-preview-cancel-stop.png"
+    },
+    {
+      "id": "travel-approval-queue-transit-arrival",
+      "status": "pass",
+      "observed": "Separate orbit and travel approvals execute through the real fixture queue. Destination/reserve survive; returned transit stays unconfirmed until explicit upstream refresh.",
+      "screenshot": "travel-approval-queue-transit-arrival.png"
+    },
+    {
+      "id": "travel-fuel-rejection",
+      "status": "pass",
+      "observed": "Server rejects unsafe fuel continuation before approval with a visible error and zero gameplay writes.",
+      "screenshot": "travel-fuel-rejection.png"
+    },
+    {
+      "id": "expired-preview",
+      "status": "pass",
+      "observed": "Expired approval reports server rejection without a write.",
+      "screenshot": "expired-preview.png"
+    },
+    {
+      "id": "pending-stop-and-uncertain-reconciliation",
+      "status": "pass",
+      "observed": "Stop prevents queued transport; a lost write response shows uncertainty and blocks new commands. Explicit reconciliation performs reads without replay.",
+      "screenshot": "pending-stop-and-uncertain-reconciliation.png"
+    },
+    {
+      "id": "explicit-travel-limits",
+      "status": "pass",
+      "observed": "Explicit fuel/time thresholds require acknowledgement, appear in existing server preview and remain separate from approval.",
+      "screenshot": "explicit-travel-limits.png"
+    },
+    {
+      "id": "discovery-capabilities-and-cooldown",
+      "status": "pass",
+      "observed": "No-sensor, wrong-location charting and cooldown states explain unavailable actions.",
+      "screenshot": "discovery-capabilities-and-cooldown.png"
+    },
+    {
+      "id": "discovery-scan-and-map-observations",
+      "status": "pass",
+      "observed": "Guarded exploration preview/approval/queue performs one scan, applies cooldown and displays normalized revealed traits on the original map location.",
+      "screenshot": "discovery-scan-and-map-observations.png"
+    },
+    {
+      "id": "discovery-missing-target",
+      "status": "pass",
+      "observed": "A scan that returns no target leaves traits unknown and stops after one write.",
+      "screenshot": "discovery-missing-target.png"
+    },
+    {
+      "id": "discovery-chart-current-location",
+      "status": "pass",
+      "observed": "Current uncharted location is charted through separate approval and queue execution; the map displays the returned traits.",
+      "screenshot": "discovery-chart-current-location.png"
+    },
+    {
+      "id": "map-task-normal-command-return-and-history",
+      "status": "pass",
+      "observed": "Map context does not take over unrelated command cancellation or reopen on browser Back to ship.",
+      "screenshot": "map-task-normal-command-return-and-history.png"
+    },
+    {
+      "id": "blank-reserve-and-phone-back-selection",
+      "status": "pass",
+      "observed": "Browser Back restores the selected map card, and blank reserve retains the configured floor rather than silently becoming zero.",
+      "screenshot": "blank-reserve-and-phone-back-selection.png"
+    },
+    {
+      "id": "short-phone-action-layout",
+      "status": "pass",
+      "observed": "360px phone uses scrollable modal, readable controls and no horizontal page overflow.",
+      "screenshot": "short-phone-action-layout.png"
+    }
+  ],
+  "errors": [],
+  "requests": [
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/login"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/Login-CnRfPJNB.js"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/GuestLayout-BNuiSoIU.js"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/TextInput-TdXzdi8Y.js"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "login",
+      "method": "POST",
+      "path": "/login"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/agents"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/Agents-BtiagJWT.js"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "login",
+      "method": "GET",
+      "path": "/build/assets/Agents-UQeWFSxe.css"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "POST",
+      "path": "/agents/1/reads"
+    },
+    {
+      "check": "read-intent-and-unknown-traits",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "POST",
+      "path": "/agents/1/reads"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "POST",
+      "path": "/agents/1/reads"
+    },
+    {
+      "check": "read-error-recovery",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "POST",
+      "path": "/agents/1/reads"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "POST",
+      "path": "/agents/1/reads"
+    },
+    {
+      "check": "market-and-shipyard-reads",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "POST",
+      "path": "/agents/1/commands/preview"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "POST",
+      "path": "/agents/1/commands/preview"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-orbit-preview-cancel-stop",
+      "method": "POST",
+      "path": "/agents/1/commands/72/stop"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "POST",
+      "path": "/agents/1/commands/preview"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "POST",
+      "path": "/agents/1/commands/73/approve"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "POST",
+      "path": "/agents/1/sync"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "POST",
+      "path": "/agents/1/commands/preview"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "POST",
+      "path": "/agents/1/commands/74/approve"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "POST",
+      "path": "/agents/1/sync"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "POST",
+      "path": "/agents/1/sync"
+    },
+    {
+      "check": "travel-approval-queue-transit-arrival",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "POST",
+      "path": "/agents/1/commands/preview"
+    },
+    {
+      "check": "travel-fuel-rejection",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "expired-preview",
+      "method": "POST",
+      "path": "/agents/1/commands/preview"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "expired-preview",
+      "method": "POST",
+      "path": "/agents/1/commands/75/approve"
+    },
+    {
+      "check": "expired-preview",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "POST",
+      "path": "/agents/1/commands/preview"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "POST",
+      "path": "/agents/1/commands/76/approve"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "POST",
+      "path": "/agents/1/commands/76/stop"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "POST",
+      "path": "/agents/1/sync"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "POST",
+      "path": "/agents/1/commands/preview"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "POST",
+      "path": "/agents/1/commands/77/approve"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "POST",
+      "path": "/agents/1/sync"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "POST",
+      "path": "/agents/1/commands/77/reconcile"
+    },
+    {
+      "check": "pending-stop-and-uncertain-reconciliation",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "POST",
+      "path": "/agents/1/commands/preview"
+    },
+    {
+      "check": "explicit-travel-limits",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "discovery-capabilities-and-cooldown",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "POST",
+      "path": "/agents/1/commands/preview"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "POST",
+      "path": "/agents/1/commands/79/approve"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "POST",
+      "path": "/agents/1/sync"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "discovery-scan-and-map-observations",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "POST",
+      "path": "/agents/1/commands/preview"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "POST",
+      "path": "/agents/1/commands/80/approve"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "POST",
+      "path": "/agents/1/sync"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "discovery-missing-target",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "POST",
+      "path": "/agents/1/commands/preview"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "POST",
+      "path": "/agents/1/commands/81/approve"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "POST",
+      "path": "/agents/1/sync"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "discovery-chart-current-location",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "POST",
+      "path": "/agents/1/commands/preview"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "map-task-normal-command-return-and-history",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "POST",
+      "path": "/agents/1/commands/preview"
+    },
+    {
+      "check": "blank-reserve-and-phone-back-selection",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/agents/1/map"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/app-D6bvJ2S7.css"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-D4kzj-k6.css"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-BybiVT3a.css"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/app-CgbgrsKs.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/SystemMap-Daimx_lC.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/AppShell-aP9Hi_aI.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/SecondaryButton-C3uBf2oD.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/_plugin-vue_export-helper-BDNMzG2s.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/PrimaryButton-BBktjTVV.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/dataPresentation-C5Nwg1vL.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/shipSelection-tJz1PLrq.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/herd-studio/loader.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/herd-studio/herd-ai.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/rate-limit"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/herd-studio/main-C8_rXDXh.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/agents/1"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-DgeSgRSS.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/DangerButton-CK5Ljz8x.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/Checkbox-D0s8zJCF.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-C0iGRWvT.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/TutorialCourse-DQR4gQuP.css"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-BNYPDwmK.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/GuidedFlight-CPCUKnB1.css"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-DMAUvEs0.js"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/GameConnection-05q_TOSW.css"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/build/assets/Dashboard-CQjOUjG4.css"
+    },
+    {
+      "check": "short-phone-action-layout",
+      "method": "GET",
+      "path": "/rate-limit"
+    }
+  ],
+  "browser": "156.0.8078.4"
+}
