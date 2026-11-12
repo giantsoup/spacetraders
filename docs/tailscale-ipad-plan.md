@@ -1,6 +1,6 @@
 # Plan: view SpaceTraders on the iPad over Tailscale
 
-Status: implemented 2026-11-12. The machine is `spacetraders` on tailnet `taile5cff3.ts.net`. See "Implementation notes" for where the build departs from the draft.
+Status: implemented 2026-11-12. Live at `https://spacetraders.chimp-hamal.ts.net` (machine `spacetraders`, tailnet `chimp-hamal.ts.net`). See "Implementation notes" for where the build departs from the draft.
 
 ## Goal
 
@@ -163,6 +163,16 @@ From the PC browser over the tailnet first, then on the iPad **(you)**:
 - **Existing test coverage.** `test_engine_endpoint_denies_a_wrong_host_or_non_loopback_client_even_for_operator`
   already covers a loopback request with a non-`spacetraders.test` host getting 403, so
   no new test was added.
+
+- **Herd's automatic dev processes.** During the deploy, `herd-devtools-helper` started
+  `php artisan dev` in the Herd checkout. That ran `artisan serve` on :8000,
+  `queue:listen` and a Vite dev server. Vite wrote `public/hot`, which pointed every page's
+  scripts at `http://[::1]:5173`, a dead address on the iPad. The fix was to stop that
+  process tree and delete `public/hot`. Keep Herd's dev processes switched off for this
+  site, and check that `public/hot` is absent after any deploy.
+- **Verified from the PC over the tailnet.** The certificate is valid. Tailscale passes
+  the original host through (links and Ziggy use the `ts.net` address, and nothing refers
+  to `spacetraders.test`). Session and XSRF cookies are `secure`, and built assets load.
 
 ## Rollback
 
