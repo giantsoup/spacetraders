@@ -9,6 +9,7 @@ use App\Gameplay\Engine\HostResult;
 use App\Gameplay\Engine\OwnedChild;
 use App\Gameplay\GameException;
 use App\Models\LocalEngine;
+use Illuminate\Support\Facades\Log;
 
 final class WindowsEngineHost implements EngineHost
 {
@@ -269,8 +270,11 @@ POWERSHELL, ['SPACETRADERS_ENGINE_PIDS' => json_encode(array_values($pids), JSON
     {
         clearstatcache(true, $path);
         if (is_file($path) && filesize($path) > 10 * 1024 * 1024) {
-            if ((is_file($path.'.1') && ! unlink($path.'.1')) || ! rename($path, $path.'.1')) {
-                throw new GameException('Could not rotate an engine log.');
+            if ((file_exists($path.'.1') && ! @unlink($path.'.1')) || ! @rename($path, $path.'.1')) {
+                try {
+                    Log::channel('engine')->warning('Could not rotate an engine log; continuing with the existing log.', ['path' => $path]);
+                } catch (\Throwable) {
+                }
             }
         }
     }

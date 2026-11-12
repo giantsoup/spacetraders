@@ -8,6 +8,7 @@ use App\Gameplay\Engine\HostResult;
 use App\Gameplay\Engine\Windows\WindowsEngineHost;
 use App\Gameplay\GameException;
 use App\Models\LocalEngine;
+use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\TestWith;
 use Tests\TestCase;
 
@@ -134,6 +135,43 @@ class WindowsEngineHostTest extends TestCase
         ]);
         $this->assertNotSame(0, $result->exit);
         $this->assertStringContainsString('private service.json', $result->out.$result->err);
+        $this->assertStringContainsString('private service.json', file_get_contents($this->directory().'/supervisor.log'));
+    }
+
+    public function test_launcher_records_preboot_errors_without_dumping_service_secrets(): void
+    {
+        mkdir($this->directory(), 0700, true);
+        $path = $this->directory().'/service.json';
+        file_put_contents($path, json_encode(['APP_KEY' => 'synthetic-private-key', 'INVALID' => []]));
+        $result = (new HostCommands)->run([PHP_BINARY, base_path('scripts/engine-launch.php'), $path], 10, ['SPACETRADERS_LOCK_PATH' => config('gameplay.lock_path')]);
+        $this->assertSame(1, $result->exit);
+        $log = file_get_contents($this->directory().'/supervisor.log');
+        $this->assertMatchesRegularExpression('/\[\d{4}-\d{2}-\d{2}T.*\] RuntimeException: Invalid engine service environment entry\./', $log);
+        $this->assertStringNotContainsString('synthetic-private-key', $log.$result->out.$result->err);
+    }
+
+    #[TestWith([false])]
+    #[TestWith([true])]
+    public function test_launcher_rotates_supervisor_log_best_effort_before_boot(bool $blocked): void
+    {
+        mkdir($this->directory(), 0700, true);
+        $log = $this->directory().'/supervisor.log';
+        $handle = fopen($log, 'w');
+        ftruncate($handle, 10 * 1024 * 1024 + 1);
+        fclose($handle);
+        if ($blocked) {
+            mkdir($log.'.1');
+        }
+        $path = $this->directory().'/service.json';
+        file_put_contents($path, json_encode(['INVALID' => []]));
+        $result = (new HostCommands)->run([PHP_BINARY, base_path('scripts/engine-launch.php'), $path], 10, ['SPACETRADERS_LOCK_PATH' => config('gameplay.lock_path')]);
+        $this->assertSame(1, $result->exit);
+        $this->assertStringContainsString('Invalid engine service environment entry.', file_get_contents($log));
+        if ($blocked) {
+            $this->assertStringContainsString('Could not rotate supervisor.log', file_get_contents($log));
+        } else {
+            $this->assertSame(10 * 1024 * 1024 + 1, filesize($log.'.1'));
+        }
     }
 
     public function test_launcher_populates_every_environment_surface_and_artisan_argv(): void
@@ -266,6 +304,22 @@ class WindowsEngineHostTest extends TestCase
         $this->host->install($this->php(), []);
         $this->assertFileDoesNotExist($log);
         $this->assertSame(10 * 1024 * 1024 + 1, filesize($log.'.1'));
+    }
+
+    public function test_rotation_failure_warns_but_does_not_block_installation(): void
+    {
+        mkdir($this->directory(), 0700, true);
+        $log = $this->directory().'/worker.log';
+        $handle = fopen($log, 'w');
+        ftruncate($handle, 10 * 1024 * 1024 + 1);
+        fclose($handle);
+        mkdir($log.'.1');
+        Log::partialMock();
+        Log::shouldReceive('channel')->with('engine')->andReturnSelf();
+        Log::shouldReceive('warning')->once()->with('Could not rotate an engine log; continuing with the existing log.', ['path' => $log]);
+        $this->host->install($this->php(), []);
+        $this->assertTrue($this->host->hasServiceMarker());
+        $this->assertFileExists($log);
     }
 
     public function test_alive_uses_a_lease_not_the_recorded_pid(): void
