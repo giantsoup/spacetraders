@@ -119,6 +119,8 @@ The default local configuration uses SQLite, file sessions and cache, database q
 
 ### Windows
 
+Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\secure.ps1` to secure and verify `.env`, `database\` and `storage\` ACLs on an existing checkout (also done by setup; use `-DryRun` to preview).
+
 The app also runs on Windows 11 with Laravel Herd for Windows, using the same PHP, Node and pnpm pins. Herd's PHP has no `pcntl` or `posix` extension. On Windows, the local engine runs as an on-demand, per-user Scheduled Task instead of a launchd agent. Run the PowerShell entry points from the checkout root. If script execution is already allowed, `.\scripts\windows\setup.ps1` works without the `powershell -File` prefix.
 
 ```powershell
