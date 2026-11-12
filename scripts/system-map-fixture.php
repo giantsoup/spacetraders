@@ -11,9 +11,9 @@ require __DIR__.'/../vendor/autoload.php';
 $app = require __DIR__.'/../bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
 $fixture = config('gameplay.fixture_path');
-$owned = realpath(storage_path('app/system-map-90'));
-if (! $owned || ! $fixture || ! str_starts_with(realpath($fixture) ?: '', $owned.'/')
-    || ! str_starts_with(realpath(config('database.connections.sqlite.database')) ?: '', $owned.'/')) {
+$owned = str_replace('\\', '/', realpath(storage_path('app/system-map-90')) ?: '');
+if (! $owned || ! $fixture || ! str_starts_with(str_replace('\\', '/', realpath($fixture) ?: ''), $owned.'/')
+    || ! str_starts_with(str_replace('\\', '/', realpath(config('database.connections.sqlite.database')) ?: ''), $owned.'/')) {
     throw new RuntimeException('System map fixtures require the owned system-map-90 database and fake transport.');
 }
 if (in_array('--audit', $argv, true)) {

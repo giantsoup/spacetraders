@@ -15,10 +15,10 @@ use Tests\Support\FakeSpaceTraders;
 require __DIR__.'/../vendor/autoload.php';
 $app = require __DIR__.'/../bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
-$owned = realpath(storage_path('app/system-map-90'));
+$owned = str_replace('\\', '/', realpath(storage_path('app/system-map-90')) ?: '');
 $file = config('gameplay.fixture_path');
-if (! $owned || ! str_starts_with(realpath($file ?: '') ?: '', $owned.'/')
-    || ! str_starts_with(realpath(config('database.connections.sqlite.database')) ?: '', $owned.'/')
+if (! $owned || ! str_starts_with(str_replace('\\', '/', realpath($file ?: '') ?: ''), $owned.'/')
+    || ! str_starts_with(str_replace('\\', '/', realpath(config('database.connections.sqlite.database')) ?: ''), $owned.'/')
     || config('gameplay.local_engine_enabled') || config('gameplay.enabled')) {
     throw new RuntimeException('Only the owned offline map fixture with both engines disabled is allowed.');
 }

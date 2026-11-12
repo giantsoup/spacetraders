@@ -4,14 +4,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { systemMapEnvironment } from './system-map-browser-environment.mjs';
 
 const root=fileURLToPath(new URL('..',import.meta.url)), origin='http://spacetraders-map-90.test';
-const php=path.join(root,'scripts/herd-php'), fixtureScript=path.join(root,'scripts/system-map-action-fixture.php');
-assert.equal(await fs.realpath(path.join(process.env.HOME,'Library/Application Support/Herd/config/valet/Sites/spacetraders-map-90')),await fs.realpath(root));
-const env=await fs.readFile(path.join(root,'.env'),'utf8'), file=env.match(/^SPACETRADERS_FIXTURE_PATH=(.+)$/m)?.[1];
-assert.ok(file?.startsWith(path.join(root,'storage/app/system-map-90/')));
-assert.match(env,/^SPACETRADERS_AUTOMATION_ENABLED=false$/m);assert.match(env,/^SPACETRADERS_LOCAL_ENGINE_ENABLED=false$/m);
-const auth=JSON.parse(await fs.readFile(path.join(path.dirname(file),'browser.json'),'utf8'));
+const { php, file, auth } = await systemMapEnvironment(root);
+const fixtureScript=path.join(root,'scripts/system-map-action-fixture.php');
 const output=path.resolve(process.env.MAP_QA_OUTPUT || path.join(root,'storage/app/system-map-90/qa-travel/actions'));
 await fs.mkdir(output,{recursive:true,mode:0o700});
 const results={revision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8',cwd:root}).trim(),origin,checks:[],errors:[],requests:[],browser:null};

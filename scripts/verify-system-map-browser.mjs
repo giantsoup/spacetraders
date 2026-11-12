@@ -4,19 +4,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { systemMapEnvironment } from './system-map-browser-environment.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const output = path.resolve(process.env.MAP_QA_OUTPUT || path.join(root, 'storage/app/system-map-90/qa-followup-20261101/browser'));
 const origin = 'http://spacetraders-map-90.test';
-const php = path.join(root, 'scripts/herd-php');
-const link = path.join(process.env.HOME, 'Library/Application Support/Herd/config/valet/Sites/spacetraders-map-90');
-assert.equal(await fs.realpath(link), await fs.realpath(root), 'Herd must serve this checkout');
-const envText = await fs.readFile(path.join(root, '.env'), 'utf8');
-const fixturePath = envText.match(/^SPACETRADERS_FIXTURE_PATH=(.+)$/m)?.[1];
-assert.ok(fixturePath?.startsWith(path.join(root, 'storage/app/system-map-90/')));
-assert.match(envText, /^SPACETRADERS_AUTOMATION_ENABLED=false$/m);
-assert.match(envText, /^SPACETRADERS_LOCAL_ENGINE_ENABLED=false$/m);
-const auth = JSON.parse(await fs.readFile(path.join(path.dirname(fixturePath), 'browser.json'), 'utf8'));
+const { php, auth } = await systemMapEnvironment(root);
 const audit = () => JSON.parse(execFileSync(php, ['scripts/system-map-fixture.php', '--audit'], {cwd:root, encoding:'utf8'}));
 const revision = execFileSync('git', ['rev-parse','HEAD'], {cwd:root,encoding:'utf8'}).trim();
 await fs.mkdir(output, {recursive:true, mode:0o700});
@@ -197,7 +190,7 @@ try {
         return 'All ships, empty observations/fleet, transit departure, reload, generic link, back/forward and deck round trip verified';
     });
     await check('rate-tracker-navigation',async()=>{
-        await map();await page.locator('.rate-trigger').click();const dialog=page.getByRole('dialog',{name:'API rate limit',exact:true});await dialog.waitFor();await dialog.getByRole('button',{name:'Refresh status',exact:true}).click();assert.match(await dialog.innerText(),/Practice/);await page.keyboard.press('Escape');assert.ok(await dialog.isHidden());assert.equal(await page.locator(':focus').getAttribute('class'),'rate-trigger');
+        await map();await page.locator('.rate-trigger').click();const dialog=page.getByRole('dialog',{name:'API rate limit',exact:true});await dialog.waitFor();await dialog.getByRole('button',{name:'Refresh status',exact:true}).click();await dialog.getByRole('status').filter({hasText:/^Practice$/}).waitFor();assert.match(await dialog.innerText(),/Practice/);await page.keyboard.press('Escape');assert.ok(await dialog.isHidden());assert.equal(await page.locator(':focus').getAttribute('class'),'rate-trigger');
         await page.getByRole('button',{name:'Menu',exact:true}).click();await page.getByRole('dialog',{name:'Navigation',exact:true}).waitFor();await page.keyboard.press('Escape');assert.equal(await page.locator(':focus').innerText(),'Menu');
         await page.getByRole('button',{name:'Menu',exact:true}).click();await page.getByRole('dialog',{name:'Navigation',exact:true}).getByRole('button',{name:'Done',exact:true}).click();
         for(const [name,pathname] of [['Profile','/profile'],['Player guide','/guide'],['Flight deck',`/agents/${auth.agent_id}`]]){await map();await button('Menu').click();await page.getByRole('dialog',{name:'Navigation',exact:true}).getByRole('link',{name,exact:true}).click();await page.waitForURL(url=>url.pathname===pathname);assert.equal(await page.locator('dialog[open]').count(),0);}
