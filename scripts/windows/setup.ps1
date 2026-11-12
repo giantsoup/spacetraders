@@ -20,6 +20,7 @@ try {
     Test-RuntimePins
     $environmentFile = Join-Path $root '.env'
     $fresh = -not (Test-Path -LiteralPath $environmentFile)
+    Protect-CheckoutSecrets -Path $root -DryRun:$DryRun
     if ($DryRun) {
         Write-Host 'DRY RUN: composer install --no-interaction; pnpm install --frozen-lockfile --strict-peer-dependencies; pnpm build'
         if ($fresh) {
@@ -53,6 +54,7 @@ try {
         try { $bytes = (New-Object Text.UTF8Encoding($false)).GetBytes($contents); $stream.Write($bytes, 0, $bytes.Length) }
         finally { $stream.Dispose() }
         Assert-PlainPath $database
+        Protect-CheckoutSecrets -Path $root
         if (-not (Test-Path -LiteralPath $database)) {
             $stream = [IO.File]::Open($database, [IO.FileMode]::CreateNew); $stream.Dispose()
         }

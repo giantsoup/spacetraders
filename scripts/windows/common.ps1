@@ -143,6 +143,74 @@ function New-PrivateDirectory {
     Invoke-Checked 'icacls.exe' @($Path, '/inheritance:r', '/grant:r', ('*' + $currentUser + ':(OI)(CI)F'), '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
 }
 
+function Protect-CheckoutSecrets {
+    param([string]$Path = (Get-RepositoryRoot), [switch]$DryRun)
+    $root = [IO.Path]::GetFullPath($Path)
+    Assert-PlainPath $root
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw "Checkout directory not found: $root" }
+    $identities = @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18', 'S-1-5-32-544') | Select-Object -Unique
+    $targets = @('.env', 'database', 'storage')
+    $items = @()
+    foreach ($relative in $targets) {
+        $target = Join-Path $root $relative
+        Assert-PlainPath $target
+        if ($DryRun) {
+            Write-Host "DRY RUN: secure $target (including existing children); allow FullControl only to $($identities -join ', '); verify every ACL."
+        }
+        if (-not (Test-Path -LiteralPath $target)) {
+            if (-not $DryRun) { Write-Host "Skipping missing secret path: $target" }
+            continue
+        }
+        $item = Get-Item -LiteralPath $target -Force
+        if (($relative -eq '.env') -eq $item.PSIsContainer) { throw "Unexpected secret path type: $target" }
+        $items += $item
+        if ($item.PSIsContainer) { $items += @(Get-ChildItem -LiteralPath $target -Recurse -Force) }
+    }
+    foreach ($item in $items) { Assert-PlainPath $item.FullName }
+    if ($DryRun) { return }
+    foreach ($item in $items) {
+        if ($item.PSIsContainer) { $acl = New-Object Security.AccessControl.DirectorySecurity }
+        else { $acl = New-Object Security.AccessControl.FileSecurity }
+        $acl.SetAccessRuleProtection($true, $false)
+        foreach ($identity in $identities) {
+            $sid = New-Object Security.Principal.SecurityIdentifier($identity)
+            if ($item.PSIsContainer) {
+                $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+            } else { $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', 'Allow') }
+            $acl.AddAccessRule($rule)
+        }
+        $item.SetAccessControl($acl)
+    }
+    $verified = 0
+    foreach ($relative in $targets) {
+        $target = Join-Path $root $relative
+        if (-not (Test-Path -LiteralPath $target)) { continue }
+        $rootItem = Get-Item -LiteralPath $target -Force
+        $securedItems = @($rootItem)
+        if ($rootItem.PSIsContainer) { $securedItems += @(Get-ChildItem -LiteralPath $target -Recurse -Force) }
+        foreach ($item in $securedItems) {
+            Assert-PlainPath $item.FullName
+            $acl = Get-Acl -LiteralPath $item.FullName
+            $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+            if ($item.FullName -eq $target -and -not $acl.AreAccessRulesProtected) { throw "Secret ACL still inherits: $target" }
+            foreach ($rule in $rules) {
+                if ($rule.AccessControlType -ne 'Allow' -or $rule.IdentityReference.Value -notin $identities -or $rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl) {
+                    throw "Unexpected secret ACL on $($item.FullName): $rule"
+                }
+                if ($item.PSIsContainer -and $rule.InheritanceFlags -ne ([Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit)) {
+                    throw "Secret directory ACL does not protect future children: $($item.FullName)"
+                }
+            }
+            foreach ($identity in $identities) {
+                if ($identity -notin @($rules | ForEach-Object { $_.IdentityReference.Value })) { throw "Missing secret ACL principal $identity on $($item.FullName)" }
+            }
+            $verified++
+        }
+        Write-Host "Secured and verified: $target"
+    }
+    Write-Host "Verified $verified secret files/directories; FullControl only for $($identities -join ', ')."
+}
+
 function Get-ApplicationInfo {
     param([string]$Php)
     $result = Invoke-NativeResult $Php @((Join-Path $script:WindowsScriptsRoot 'application.php'), 'info')
