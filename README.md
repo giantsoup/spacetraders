@@ -121,7 +121,15 @@ The default local configuration uses SQLite, file sessions and cache, database q
 
 Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\secure.ps1` to secure and verify `.env`, `database\` and `storage\` ACLs on an existing checkout (also done by setup; use `-DryRun` to preview).
 
-The app also runs on Windows 11 with Laravel Herd for Windows, using the same PHP, Node and pnpm pins. Herd's PHP has no `pcntl` or `posix` extension. On Windows, the local engine runs as an on-demand, per-user Scheduled Task instead of a launchd agent. Run the PowerShell entry points from the checkout root. If script execution is already allowed, `.\scripts\windows\setup.ps1` works without the `powershell -File` prefix.
+The app also runs on Windows 11 with Laravel Herd for Windows, using the same PHP, Node and pnpm pins. Herd's PHP has no `pcntl` or `posix` extension. On Windows, the local engine runs as an on-demand, per-user Scheduled Task instead of a launchd agent. Run the PowerShell entry points from the checkout root.
+
+Windows blocks `.ps1` scripts by default. Running `.\scripts\windows\php.ps1` directly fails with "running scripts is disabled on this system". Use one of these:
+
+- Prefix each command with `powershell -NoProfile -ExecutionPolicy Bypass -File`, as the examples below do.
+- Allow scripts for the current PowerShell window only: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`.
+- Allow local scripts for your user permanently: `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`.
+
+After either `Set-ExecutionPolicy` option, `.\scripts\windows\setup.ps1` and the other scripts run without the prefix.
 
 ```powershell
 # Dependencies, build, and a new .env/database only when none exists. Never overwrites .env, APP_KEY or the database.

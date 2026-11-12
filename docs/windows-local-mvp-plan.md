@@ -164,6 +164,8 @@ Linode and hosting, the mobile API and iPhone app, adviser model calls and Disco
 
 ## Token day runbook
 
+Before and after registering, run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\backup.ps1` from `C:\Users\taylo\Herd\spacetraders`. Windows blocks a bare `.\scripts\windows\backup.ps1` unless script execution is allowed; the README's Windows section explains how.
+
 1. Open `http://spacetraders.test`, sign in as the operator, and choose **Create agent**.
 2. Paste the **account token** from the SpaceTraders dashboard, pick a symbol (3–14 characters) and a faction, and submit. Only the returned agent token is stored, encrypted.
    - If registration is ambiguous, check the official dashboard and use **Import** with the agent token instead of retrying.
