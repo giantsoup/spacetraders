@@ -8,6 +8,7 @@ use App\Http\Controllers\AgentReadController;
 use App\Http\Controllers\AutomationRunController;
 use App\Http\Controllers\ForwarderController;
 use App\Http\Controllers\LocalAutomationController;
+use App\Http\Controllers\OpenAiKeyController;
 use App\Http\Controllers\PlayerGuideController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RateLimitController;
@@ -47,6 +48,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+    Route::put('/profile/openai-key', [OpenAiKeyController::class, 'update'])->name('profile.openai-key.update');
+    Route::delete('/profile/openai-key', [OpenAiKeyController::class, 'destroy'])->name('profile.openai-key.destroy');
 
     Route::post('/agents/storeExisting', [AgentController::class, 'storeExisting'])->name('agents.storeExisting');
     Route::resource('/agents', AgentController::class)->only(['index', 'create', 'store']);
