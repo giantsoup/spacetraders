@@ -113,6 +113,7 @@ A Scheduled Task gives a parent that does not depend on Herd (the Task Scheduler
    - **No triggers**, the equivalent of `RunAtLoad=false`.
    - `MultipleInstancesPolicy=IgnoreNew`, the equivalent of kickstart without `-k`.
    - `ExecutionTimeLimit=PT0S`. The default 72 h would kill a session.
+   - `Priority=5` keeps the task at normal process priority.
    - `DisallowStartIfOnBatteries=false` and `StopIfGoingOnBatteries=false`. The defaults are true and would kill the engine on an unplugged laptop.
    - `StopOnIdleEnd=false` and `AllowHardTerminate=true`.
    - Action: `php-win.exe "<base>\scripts\engine-launch.php" "<engine>\service.json"`, with working directory `<base>`.
@@ -146,6 +147,8 @@ The supervisor is therefore php-win itself: a real PID and no console window.
 
 - Logs go to `{lock_path}\engine\supervisor.log`, `worker.log` and `scheduler.log`.
 - Each file rotates to `.1` above 10 MB when the supervisor starts.
+- The launcher rotates `supervisor.log` before Laravel boots. Child logs rotate before spawn. Rotation failures warn without blocking startup.
+- Pre-Laravel launcher failures append a timestamp, exception class, and message to `supervisor.log`. Supervisor exceptions use the engine log channel without dumping the service environment.
 
 ## Protocol on Windows
 
@@ -156,10 +159,13 @@ The supervisor is therefore php-win itself: a real PID and no console window.
 - `alive()` opens the lease and tries `LOCK_EX|LOCK_NB`. Failure means alive. Success means dead: release the lock and return false.
 - This takes microseconds, is safe inside transactions, and is immune to PID reuse (the same technique as `DeploymentGate.php:215-228`).
 - The lease holds no data.
+- Acquisition retries for up to 200 ms so a brief liveness probe cannot prevent a child from claiming its lease.
+- Supervisor startup removes unheld lease and job-marker files from older sessions, preserving the current session and live owners.
 
 ### Heartbeat and sleep
 
 - The heartbeat is unchanged: written every 200 ms and stale after 15 s.
+- Startup also refreshes the session-guarded heartbeat between child-readiness checks and before and after process identification.
 - The sleep-gap check uses `max(microtime delta, hrtime delta)`.
 - The real guard stays the `heartbeat_at >= now-15s` check in the reservation transaction (`EngineGate.php:42`).
 
@@ -185,7 +191,11 @@ Use the DB signal, never `queue:restart`: it is a global cache key and stops unr
 
 ### Job watchdog (replaces the missing `--timeout=120`)
 
-- `JobProcessing` and `JobProcessed` listeners write `engine/{session}-worker.job` containing `{started_at}`. The write uses a temp file plus rename, and the file is never locked.
+- `JobProcessing` publishes `engine/{session}-worker.job` containing `{attempt, started_at, finished_at:null}`. Replacement retries for up to 250 ms.
+- Each attempt holds a separate empty lease at `{marker}.{attempt}.lease`. The marker itself stays readable and unlocked.
+- Processed, failed, and exception events publish `{attempt, started_at:null, finished_at}` and release the attempt lease, even if publication fails.
+- The watchdog ignores idle content and attempts whose lease is free. A stale start marker therefore cannot time out a completed job.
+- Marker failures warn on the engine channel and never fail the job. If a start marker cannot be published, the watchdog has no data for that attempt.
 - The supervisor kills the worker if a job has run for more than 150 s. The engine then faults on "owned child exited".
 - Upstream HTTP is already bounded (30 s, 10 s connect; `SpaceTradersClient.php:58-65`), and SQLite `busy_timeout` is 5000.
 - `retry_after=180` is longer than the 150 s watchdog.
@@ -197,7 +207,14 @@ Use the DB signal, never `queue:restart`: it is a global cache key and stops unr
 3. A process is killed only if its creation time matches exactly **and** its command-line SHA-256 matches. Kill children first, then the supervisor, with `taskkill /PID n /T /F`.
 4. `schtasks /End`, then `/Delete /F`.
 5. Re-query. If a match remains, throw "Could not confirm…".
-6. Never kill a mismatched or unknown process. Tell the operator to inspect it instead.
+6. A different creation time means the recorded process exited and its PID was reused. Skip it, even if its command line is unreadable.
+7. When creation time matches, a missing or different command hash refuses force stop before any kills. Exit confirmation also refuses a surviving matching creation time.
+
+### Windows wrappers and offline practice
+
+- `php.ps1` and `composer.ps1` inherit console input and output so prompts appear before exit. Inspection scripts retain buffered native-command capture.
+- Windows fixtures set explicit deployment, cache, lock, request-budget, storage, and application-cache paths inside their owned directory.
+- The practice runner checks effective configuration after boot, including path boundaries and resolved ancestors. It refuses commands when mutable paths escape the practice directory.
 
 ## Operator configuration (Herd checkout)
 
