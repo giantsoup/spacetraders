@@ -5,8 +5,9 @@ Update the production checkout (Herd, spacetraders.test and the tailnet site) to
 Run from the production checkout only. Without -Yes it previews the incoming commits and
 migrations and changes nothing. With -Yes it backs up, fast-forwards to origin/main,
 installs dependencies, migrates, builds, restarts the loopback web server and checks both
-addresses. It refuses to run while the local engine is on, on any branch but main, with
-uncommitted changes, or outside the spacetraders.test checkout.
+addresses. It gracefully ends and restarts a running local engine. It refuses to run while
+the engine is faulted or stopping, on any branch but main, with uncommitted changes, or
+outside the spacetraders.test checkout.
 .EXAMPLE
 .\scripts\windows\deploy.ps1
 .EXAMPLE
@@ -73,6 +74,7 @@ function Assert-NoDevProcesses {
     }
 }
 
+$engineEnded = $false
 try {
     . "$PSScriptRoot/common.ps1"
     $root = Get-RepositoryRoot
@@ -107,13 +109,21 @@ try {
     }
 
     $engine = Invoke-Script 'engine.ps1' @('Status')
-    if ($engine -notmatch 'Engine state: off') { throw 'The local engine is not off. End the engine session from the flight deck on spacetraders.test, then deploy again.' }
+    if ($engine -notmatch '(?m)^Engine state: (off|running|starting|faulted|stopping)\r?$') { throw 'Could not read the local engine state; deployment refused.' }
+    $engineState = $Matches[1]
+    if ($engineState -in @('faulted', 'stopping')) { throw "The local engine is $engineState. Review it on spacetraders.test before deploying." }
+    $restartEngine = $engineState -in @('running', 'starting')
 
     if (-not $Yes) {
+        if ($restartEngine) { Write-Host "Engine is $engineState; the deploy will end it gracefully and start it again afterwards. Running automation stops and needs re-approval." }
         Write-Host 'Preview only; nothing changed. Run again with -Yes to deploy.'
         exit 0
     }
 
+    if ($restartEngine) {
+        Invoke-Script 'engine.ps1' @('End') | Out-Null
+        $engineEnded = $true
+    }
     Invoke-Script 'backup.ps1' | Out-Null
     Invoke-Git @('checkout', '--', 'public/build') | Out-Null
     Invoke-Git @('clean', '-fq', '--', 'public/build') | Out-Null
@@ -135,5 +145,14 @@ try {
         if ($hosts.Count -eq 0) { Write-Warning 'tailscale serve publishes nothing that proxies to 127.0.0.1:8081; the tailnet site was not checked.' }
         foreach ($name in $hosts) { Test-Page "https://$name/login" }
     }
+    if ($restartEngine) {
+        Invoke-Script 'engine.ps1' @('Start') | Out-Null
+        $engineEnded = $false
+        Write-Host 'Engine restarted.'
+    }
     Write-Host "Deployed $((Invoke-Git @('rev-parse', '--short', 'HEAD'))) to production."
-} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
+} catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    if ($engineEnded) { [Console]::Error.WriteLine('The engine was ended for this deploy and was not restarted; start it from spacetraders.test or run engine.ps1 Start.') }
+    exit 1
+}
