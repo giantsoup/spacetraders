@@ -1,6 +1,27 @@
 # Windows local MVP plan
 
-Status: in progress on local branch `feature/windows-local-mvp` (started 2026-11-11 from `main` at `f84bd82`). Not pushed. No hosting, mobile, or adviser work is in scope.
+Status: implemented on local branch `feature/windows-local-mvp` (started 2026-11-11 from `main` at `f84bd82`). Not pushed. No hosting, mobile, or adviser work is in scope.
+
+## Completion record (2026-11-11)
+
+| MVP criterion | Result |
+|---|---|
+| 1. Suite on Windows | 687 PHPUnit tests and 3,644 assertions pass with no skips. Pint is clean, `pnpm build` passes, and `scripts/windows/verify.ps1` reports 39 PASS, 5 SKIP and 0 FAIL. The skips are POSIX-only checks, each named in the output. macOS behavior was checked by pinned-argv tests and line-by-line review, not run on a Mac. |
+| 2. Herd site with an engine | `http://spacetraders.test` serves this branch from `C:\Users\taylo\Herd\spacetraders`. The operator is configured, the engine and automation are enabled, and the `SpaceTraders-Engine-fa35…` task is installed. A CLI start reached `running` with the gate open, and End returned it to `off` with all processes exited. |
+| 3. Automation through the engine | In offline practice, the browser drove Start local engine, mining Investigate → Stage → Preview → Approve and a run that completed: orbit, mine, dock and two sells, all confirmed. End session then shut the engine down cleanly. `scripts/verify-windows-engine.php` passes all 25 real Task Scheduler lifecycle checks ([evidence](evidence/windows-local-mvp/)). |
+| 4. One-command offline practice | `scripts/windows/practice.ps1 Start -Engine` (or plain `Start` for worker mode). |
+| 5. Windows verification entry point | `scripts/windows/verify.ps1`. |
+| 6. Token-day runbook | Below, plus the README's Windows section. |
+
+Two independent Claude reviews found no critical defects. Every medium and low finding was fixed. One watchdog limitation is documented in the [engine design](windows-engine-design.md): it fails open when a job's start marker cannot be written.
+
+**Still unverified:**
+- Real Modern Standby and sleep behavior on this PC (E7).
+- Sign-out and screen-lock behavior (E9).
+- Herd's job object killing processes that a request spawns (E1). This is the reason the design uses a Scheduled Task.
+- All live SpaceTraders behavior. It needs a token.
+
+The full 59-operation live acceptance ledger remains the longer-term gate.
 
 ## Goal
 
