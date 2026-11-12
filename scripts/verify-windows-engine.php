@@ -29,9 +29,12 @@ $env = array_merge(Dotenv\Dotenv::parse(file_get_contents($directory.'/.env')), 
     'APP_CONFIG_CACHE' => $directory.'/no-config.php', 'LARAVEL_STORAGE_PATH' => $directory.'/storage', 'CACHE_STORE' => 'file',
     'CACHE_PATH' => $directory.'/cache', 'SPACETRADERS_DEPLOYMENT_PATH' => $directory.'/deployment',
     'SPACETRADERS_REQUEST_BUDGET_PATH' => $directory.'/budget',
+    'SPACETRADERS_LOCAL_HOST' => parse_url(Dotenv\Dotenv::parse(file_get_contents($directory.'/.env'))['APP_URL'] ?? 'http://127.0.0.1', PHP_URL_HOST),
 ]);
 foreach (['framework/sessions', 'framework/views', 'framework/cache/data', 'logs'] as $child) {
-    mkdir($directory.'/storage/'.$child, 0700, true);
+    if (! is_dir($directory.'/storage/'.$child)) {
+        mkdir($directory.'/storage/'.$child, 0700, true);
+    }
 }
 foreach ($env as $key => $value) {
     putenv($key.'='.$value);
@@ -147,12 +150,16 @@ try {
     $query = app(HostCommands::class)->run([$system.'schtasks.exe', '/Query', '/TN', $host->serviceName(), '/XML']);
     verifyWindows($query->exit === 0, 'Temporary on-demand task is registered');
     $document = new DOMDocument;
-    verifyWindows($document->loadXML($query->out), 'Task XML parses successfully');
+    // schtasks writes the XML through the console code page while still declaring UTF-16.
+    $taskXml = preg_replace('/(<\?xml[^>]*?)\s+encoding="UTF-16"/i', '$1', $query->out, 1);
+    verifyWindows($document->loadXML(mb_check_encoding($taskXml, 'UTF-8') ? $taskXml : mb_convert_encoding($taskXml, 'UTF-8', 'Windows-1252')), 'Task XML parses successfully');
     $xml = new DOMXPath($document);
     verifyWindows($xml->query('//*[local-name()="Triggers"]/*')->length === 0, 'Task XML has no login or timer triggers');
     foreach (['MultipleInstancesPolicy' => 'IgnoreNew', 'ExecutionTimeLimit' => 'PT0S', 'DisallowStartIfOnBatteries' => 'false', 'StopIfGoingOnBatteries' => 'false', 'LogonType' => 'InteractiveToken', 'RunLevel' => 'LeastPrivilege'] as $element => $expected) {
         $nodes = $xml->query('//*[local-name()="'.$element.'"]');
-        verifyWindows($nodes->length === 1 && $nodes->item(0)->textContent === $expected, 'Task '.$element.' is '.$expected);
+        // Task Scheduler omits RunLevel from exported XML when it is the LeastPrivilege default.
+        $omittedDefault = $element === 'RunLevel' && $nodes->length === 0;
+        verifyWindows($omittedDefault || ($nodes->length === 1 && $nodes->item(0)->textContent === $expected), 'Task '.$element.' is '.$expected);
     }
     $sentinel = new Process([PHP_BINARY, '-r', 'sleep(300);']);
     $sentinel->setTimeout(null)->disableOutput()->start();
