@@ -65,6 +65,7 @@ class GameplayTest extends TestCase
 
     public function test_map_command_handoff_keeps_owned_ship_and_reset_scoped_target_without_upstream_calls(): void
     {
+        $this->withoutVite();
         $before = json_decode(file_get_contents($this->worldFile), true)['calls'];
         $this->get('/agents/'.$this->agent->id.'?ship=LOCAL-1&map_action=travel&map_waypoint=X1-TEST-PORT')
             ->assertOk()->assertInertia(fn (Assert $page) => $page->where('mapTask.ship_symbol', 'LOCAL-1')

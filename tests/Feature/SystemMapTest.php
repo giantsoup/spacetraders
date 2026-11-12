@@ -18,6 +18,12 @@ class SystemMapTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withoutVite();
+    }
+
     private function agent(?User $user = null): Agent
     {
         return ($user ?? User::factory()->create())->agents()->create(['name' => 'MAP', 'account_id' => 'synthetic', 'faction' => 'COSMIC', 'token' => 'synthetic-only', 'reset_id' => 'map-reset', 'connection_state' => 'connected']);
