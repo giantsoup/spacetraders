@@ -5,10 +5,12 @@ namespace Tests\Unit\Engine;
 use App\Gameplay\Engine\EngineLease;
 use App\Gameplay\Engine\HostCommands;
 use App\Gameplay\Engine\HostResult;
+use App\Gameplay\Engine\Windows\WindowsChild;
 use App\Gameplay\Engine\Windows\WindowsEngineHost;
 use App\Gameplay\GameException;
 use App\Models\LocalEngine;
 use Illuminate\Support\Facades\Log;
+use PHPUnit\Framework\Attributes\RequiresOperatingSystemFamily;
 use PHPUnit\Framework\Attributes\TestWith;
 use Tests\TestCase;
 
@@ -227,7 +229,47 @@ class WindowsEngineHostTest extends TestCase
         $this->host->forceStop(new LocalEngine(['processes' => ['worker' => 1002, 'scheduler' => 1003, 'identity' => $stored]]));
         $kills = array_values(array_filter(array_column($this->commands->calls, 'argv'), fn ($arguments) => in_array('/PID', $arguments, true)));
         $this->assertCount(1, $kills);
-        $this->assertSame(['/PID', '1003', '/T', '/F'], array_slice($kills[0], 1));
+        $this->assertSame(['/PID', '1003', '/F'], array_slice($kills[0], 1));
+    }
+
+    #[TestWith([false])]
+    #[TestWith([true])]
+    public function test_force_stop_skips_an_unverifiable_pid_only_when_its_session_lease_is_released(bool $unreadable): void
+    {
+        $session = '11111111-2222-3333-4444-555555555555';
+        $identity = $this->identity(4321);
+        if ($unreadable) {
+            $identity['command_hash'] = null;
+        }
+        $this->commands->identities = [[$identity], [$identity]];
+        Log::partialMock();
+        Log::shouldReceive('channel')->with('engine')->andReturnSelf();
+        Log::shouldReceive('warning')->once()->with('Skipping unverifiable engine PID because its session lease is released.', [
+            'session' => $session, 'role' => 'supervisor', 'pid' => 4321,
+        ]);
+        $this->host->forceStop(new LocalEngine(['session_id' => $session, 'processes' => ['supervisor' => 4321]]));
+        foreach (array_column($this->commands->calls, 'argv') as $arguments) {
+            $this->assertNotContains('/PID', $arguments);
+        }
+    }
+
+    public function test_force_stop_refuses_a_missing_identity_while_its_session_lease_is_held(): void
+    {
+        $session = '11111111-2222-3333-4444-555555555555';
+        $path = EngineLease::path($session, 'supervisor');
+        mkdir(dirname($path), 0700, true);
+        $lease = fopen($path, 'c+b');
+        flock($lease, LOCK_EX);
+        $this->commands->identities = [[$this->identity(4321)]];
+        try {
+            $this->host->forceStop(new LocalEngine(['session_id' => $session, 'processes' => ['supervisor' => 4321]]));
+            $this->fail('A live lease without an identity must not be force stopped.');
+        } catch (GameException $exception) {
+            $this->assertStringContainsString('Could not confirm ownership', $exception->getMessage());
+            $this->assertCount(1, $this->commands->calls);
+        } finally {
+            fclose($lease);
+        }
     }
 
     public function test_force_stop_verifies_every_remaining_process_before_killing_any(): void
@@ -251,9 +293,9 @@ class WindowsEngineHostTest extends TestCase
         $engine = new LocalEngine(['processes' => ['supervisor' => 1001, 'worker' => 1002, 'scheduler' => 1003, 'identity' => $identities]]);
         $this->host->forceStop($engine);
         $calls = array_column($this->commands->calls, 'argv');
-        $this->assertSame(['/PID', '1002', '/T', '/F'], array_slice($calls[1], 1));
-        $this->assertSame(['/PID', '1003', '/T', '/F'], array_slice($calls[2], 1));
-        $this->assertSame(['/PID', '1001', '/T', '/F'], array_slice($calls[3], 1));
+        $this->assertSame(['/PID', '1002', '/F'], array_slice($calls[1], 1));
+        $this->assertSame(['/PID', '1003', '/F'], array_slice($calls[2], 1));
+        $this->assertSame(['/PID', '1001', '/F'], array_slice($calls[3], 1));
         $this->assertSame('/End', $calls[4][1]);
         $this->assertSame('/Delete', $calls[5][1]);
         $this->assertContains('/F', $calls[5]);
@@ -335,6 +377,33 @@ class WindowsEngineHostTest extends TestCase
         $this->assertFalse($this->host->alive($engine, 'worker'));
         $this->assertSame([], $this->commands->calls);
         $this->assertStringEndsWith($session.'-worker.lease', EngineLease::path($session, 'worker'));
+    }
+
+    #[RequiresOperatingSystemFamily('Windows')]
+    public function test_windows_child_stop_is_cooperative_and_kill_targets_only_the_owned_pid(): void
+    {
+        $directory = config('gameplay.lock_path');
+        mkdir($directory, 0700, true);
+        $commands = \Mockery::mock(HostCommands::class);
+        $child = new WindowsChild([PHP_BINARY, '-r', 'sleep(30);'], base_path(), [], $directory.'/child.log', $directory.'/child.lease', $commands);
+        try {
+            $child->requestStop();
+            $this->assertTrue($child->isRunning());
+            $commands->shouldReceive('run')->once()->withArgs(function (array $arguments) use ($child) {
+                return basename(str_replace('\\', '/', $arguments[0])) === 'taskkill.exe'
+                    && array_slice($arguments, 1) === ['/PID', (string) $child->pid(), '/F'];
+            })->andReturnUsing(fn (array $arguments) => (new HostCommands)->run($arguments));
+            $child->kill();
+            $deadline = hrtime(true) + 5_000_000_000;
+            while ($child->isRunning() && hrtime(true) < $deadline) {
+                usleep(20000);
+            }
+            $this->assertFalse($child->isRunning());
+        } finally {
+            if ($child->isRunning()) {
+                (new HostCommands)->run([getenv('SystemRoot').'/System32/taskkill.exe', '/PID', (string) $child->pid(), '/F']);
+            }
+        }
     }
 
     private function identity(int $pid): array

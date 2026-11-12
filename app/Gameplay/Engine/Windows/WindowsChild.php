@@ -54,7 +54,7 @@ final class WindowsChild implements OwnedChild
     public function kill(): void
     {
         if ($this->isRunning()) {
-            $this->commands->run([PowerShell::executable('taskkill.exe'), '/PID', (string) $this->processId, '/T', '/F']);
+            $this->commands->run([PowerShell::executable('taskkill.exe'), '/PID', (string) $this->processId, '/F']);
         }
     }
 

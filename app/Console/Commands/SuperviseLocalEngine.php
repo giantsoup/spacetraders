@@ -31,8 +31,10 @@ class SuperviseLocalEngine extends Command
             $children = [];
             try {
                 $host->claim($engine->session_id, 'supervisor');
+                $processes = ['supervisor' => getmypid()];
+                $processes['identity'] = $host->identify($processes);
+                $engine->update(['processes' => $processes, 'heartbeat_at' => now()]);
                 EngineLease::cleanup($engine->session_id);
-                $engine->update(['processes' => ['supervisor' => getmypid()]]);
                 $host->onStopSignal(fn () => $gate->close());
                 foreach ([
                     'worker' => ['queue:work', 'database', '--queue=spacetraders', '--sleep=1', '--tries=1', '--timeout=120'],

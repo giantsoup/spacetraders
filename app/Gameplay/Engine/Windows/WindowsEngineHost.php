@@ -127,6 +127,14 @@ POWERSHELL, ['SPACETRADERS_ENGINE_DIRECTORY' => $directory]);
         $identities = $processes['identity'] ?? [];
         $current = $this->identify($pids);
         foreach ($current as $role => $identity) {
+            if (! isset($identities[$role]) && $engine->session_id !== null && ! $this->alive($engine, $role)) {
+                Log::channel('engine')->warning('Skipping unverifiable engine PID because its session lease is released.', [
+                    'session' => $engine->session_id, 'role' => $role, 'pid' => $identity['pid'],
+                ]);
+                unset($current[$role]);
+
+                continue;
+            }
             if (isset($identities[$role]['created_at']) && $identities[$role]['created_at'] !== $identity['created_at']) {
                 unset($current[$role]);
 
@@ -138,7 +146,7 @@ POWERSHELL, ['SPACETRADERS_ENGINE_DIRECTORY' => $directory]);
         }
         foreach ($pids as $role => $pid) {
             if (isset($current[$role])) {
-                $this->commands->run([PowerShell::executable('taskkill.exe'), '/PID', (string) $pid, '/T', '/F']);
+                $this->commands->run([PowerShell::executable('taskkill.exe'), '/PID', (string) $pid, '/F']);
             }
         }
         $this->task('/End');

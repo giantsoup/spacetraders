@@ -34,6 +34,13 @@ class SuperviseLocalEngineTest extends TestCase
 
     private function supervise(?\Closure $watch = null, ?\Closure $clock = null, ?\Closure $wait = null): int
     {
+        $wait ??= function () {
+            if (LocalEngine::find(1)?->stop_requested_at !== null) {
+                foreach ($this->host->children as $child) {
+                    $child->running = false;
+                }
+            }
+        };
         $command = new class($watch, $clock, $wait) extends SuperviseLocalEngine
         {
             public function __construct(private ?\Closure $watch, private ?\Closure $clock, private ?\Closure $wait)
@@ -143,6 +150,27 @@ class SuperviseLocalEngineTest extends TestCase
         }
     }
 
+    public function test_supervisor_identity_is_persisted_before_child_readiness(): void
+    {
+        $this->host->identities = ['supervisor' => ['created' => 'synthetic-identity']];
+        $this->host->children['worker']->onReady = function () {
+            $this->assertSame([
+                'supervisor' => getmypid(), 'identity' => $this->host->identities,
+            ], LocalEngine::find(1)->processes);
+            $this->assertSame(['identify', ['supervisor' => getmypid()]], $this->host->calls[1]);
+            app(EngineGate::class)->close();
+        };
+        $this->assertSame(0, $this->supervise());
+    }
+
+    public function test_fake_windows_children_keep_running_after_a_stop_request(): void
+    {
+        foreach ($this->host->children as $child) {
+            $child->requestStop();
+            $this->assertTrue($child->isRunning());
+        }
+    }
+
     public function test_running_session_records_identities_and_exact_child_arguments(): void
     {
         $this->host->identities = ['supervisor' => ['created' => 'synthetic-identity']];
@@ -201,9 +229,6 @@ class SuperviseLocalEngineTest extends TestCase
 
     public function test_end_with_uncooperative_children_faults_after_the_allowance_and_enables_force_stop(): void
     {
-        foreach ($this->host->children as $child) {
-            $child->stopOnRequest = false;
-        }
         $this->host->children['scheduler']->onReady = fn () => app(EngineGate::class)->close();
         $seconds = 0.0;
         $observed = false;
@@ -240,9 +265,6 @@ class SuperviseLocalEngineTest extends TestCase
 
     public function test_watchdog_kills_an_uncooperative_worker_but_waits_for_scheduler_exit(): void
     {
-        foreach ($this->host->children as $child) {
-            $child->stopOnRequest = false;
-        }
         $ticks = 0;
         $this->assertSame(0, $this->supervise(fn () => microtime(true) - 151, null, function () use (&$ticks) {
             $this->assertSame(0, $ticks++);
@@ -283,7 +305,7 @@ class SuperviseLocalEngineTest extends TestCase
             return microtime(true) - 149;
         }));
         $this->assertSame('off', LocalEngine::find(1)->state);
-        $this->assertContains(['requestStop'], $this->host->children['worker']->calls);
+        $this->assertFalse($this->host->children['worker']->isRunning());
         $this->assertNotContains(['kill'], $this->host->children['worker']->calls);
     }
 

@@ -123,7 +123,7 @@ class FakeOwnedChild implements OwnedChild
 
     public bool $isReady = true;
 
-    public bool $stopOnRequest = true;
+    public bool $stopOnRequest = false;
 
     public ?\Closure $onReady = null;
 
