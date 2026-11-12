@@ -260,10 +260,16 @@ class WindowsEngineHostTest extends TestCase
         $this->assertSame('/Query', $calls[7][1]);
     }
 
-    public function test_force_stop_reports_a_surviving_owned_process(): void
+    #[TestWith([false])]
+    #[TestWith([true])]
+    public function test_force_stop_reports_a_surviving_owned_process_even_if_its_command_line_becomes_unreadable(bool $unreadable): void
     {
         $identity = $this->identity(4321);
-        $this->commands->identities = [[$identity], [$identity]];
+        $remaining = $identity;
+        if ($unreadable) {
+            $remaining['command_hash'] = null;
+        }
+        $this->commands->identities = [[$identity], [$remaining]];
         $this->expectException(GameException::class);
         $this->expectExceptionMessage('Could not confirm all owned engine processes exited');
         $this->host->forceStop(new LocalEngine(['processes' => ['worker' => 4321, 'identity' => ['worker' => $identity]]]));

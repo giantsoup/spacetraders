@@ -145,7 +145,7 @@ POWERSHELL, ['SPACETRADERS_ENGINE_DIRECTORY' => $directory]);
         $this->task('/Delete', ['/F']);
         $remaining = $this->identify($pids);
         foreach ($remaining as $role => $identity) {
-            if ($this->matches($identities[$role] ?? null, $identity)) {
+            if (($identities[$role]['created_at'] ?? null) === $identity['created_at']) {
                 throw new GameException('Could not confirm all owned engine processes exited. Inspect the engine logs.');
             }
         }
