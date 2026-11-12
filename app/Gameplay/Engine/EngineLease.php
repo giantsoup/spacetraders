@@ -37,9 +37,13 @@ final class EngineLease
         if ($handle === false) {
             throw new \RuntimeException('Cannot open engine lease.');
         }
-        if (! flock($handle, LOCK_EX | LOCK_NB)) {
-            fclose($handle);
-            throw new \RuntimeException('Engine lease is already held.');
+        $deadline = hrtime(true) + 200_000_000;
+        while (! flock($handle, LOCK_EX | LOCK_NB)) {
+            if (hrtime(true) >= $deadline) {
+                fclose($handle);
+                throw new \RuntimeException('Engine lease is already held.');
+            }
+            usleep(2000);
         }
         self::$handles[$key] = $handle;
     }
