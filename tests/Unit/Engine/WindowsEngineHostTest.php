@@ -138,6 +138,9 @@ class WindowsEngineHostTest extends TestCase
         $this->assertNotSame(0, $result->exit);
         $this->assertStringContainsString('private service.json', $result->out.$result->err);
         $this->assertStringContainsString('private service.json', file_get_contents($this->directory().'/supervisor.log'));
+        $rejected = '[service.json path: '.json_encode($path, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE).']';
+        $this->assertStringContainsString($rejected, $result->err);
+        $this->assertStringContainsString($rejected, file_get_contents($this->directory().'/supervisor.log'));
     }
 
     public function test_launcher_records_preboot_errors_without_dumping_service_secrets(): void

@@ -3,6 +3,7 @@
 $base = dirname(__DIR__);
 $storage = getenv('LARAVEL_STORAGE_PATH') ?: $base.'/storage';
 $directory = (getenv('SPACETRADERS_LOCK_PATH') ?: $storage.'/framework/game-locks').'/engine';
+$servicePath = $argv[1] ?? '(missing)';
 
 function engineLauncherLog(string $directory, string $message): void
 {
@@ -47,7 +48,8 @@ try {
     $_SERVER['argc'] = $argc = count($argv);
     require $base.'/artisan';
 } catch (Throwable $error) {
-    engineLauncherLog($directory, $error::class.': '.$error->getMessage());
-    @file_put_contents('php://stderr', $error::class.': '.$error->getMessage().PHP_EOL);
+    $message = $error::class.': '.$error->getMessage().' [service.json path: '.json_encode($servicePath, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE).']';
+    engineLauncherLog($directory, $message);
+    @file_put_contents('php://stderr', $message.PHP_EOL);
     exit(1);
 }
