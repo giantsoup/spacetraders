@@ -126,6 +126,11 @@ POWERSHELL, ['SPACETRADERS_ENGINE_DIRECTORY' => $directory]);
         $identities = $processes['identity'] ?? [];
         $current = $this->identify($pids);
         foreach ($current as $role => $identity) {
+            if (isset($identities[$role]['created_at']) && $identities[$role]['created_at'] !== $identity['created_at']) {
+                unset($current[$role]);
+
+                continue;
+            }
             if (! $this->matches($identities[$role] ?? null, $identity)) {
                 throw new GameException('Could not confirm ownership of an engine process. Inspect it before force stopping.');
             }
@@ -195,9 +200,13 @@ try {
     $records = @(Get-CimInstance Win32_Process -Filter $filter | ForEach-Object {
         $process = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue
         if ($null -eq $process -or $process.HasExited) { return }
-        if ($null -eq $_.CreationDate -or $null -eq $_.CommandLine) { throw 'Process identity unavailable' }
-        $digest = $hash.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($_.CommandLine))
-        @{ pid = [int]$_.ProcessId; created_at = $_.CreationDate.ToUniversalTime().ToString('o'); command_hash = ([System.BitConverter]::ToString($digest)).Replace('-', '').ToLowerInvariant() }
+        if ($null -eq $_.CreationDate) { throw 'Process identity unavailable' }
+        $commandHash = $null
+        if ($null -ne $_.CommandLine) {
+            $digest = $hash.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($_.CommandLine))
+            $commandHash = ([System.BitConverter]::ToString($digest)).Replace('-', '').ToLowerInvariant()
+        }
+        @{ pid = [int]$_.ProcessId; created_at = $_.CreationDate.ToUniversalTime().ToString('o'); command_hash = $commandHash }
     })
     ConvertTo-Json -InputObject $records -Compress
 } finally { $hash.Dispose() }
@@ -209,7 +218,8 @@ POWERSHELL, ['SPACETRADERS_ENGINE_PIDS' => json_encode(array_values($pids), JSON
         $identities = [];
         foreach ($records as $record) {
             if (! is_array($record) || ! is_int($record['pid'] ?? null) || ! is_string($record['created_at'] ?? null)
-                || ! preg_match('/\A[0-9a-f]{64}\z/', $record['command_hash'] ?? '')) {
+                || ! array_key_exists('command_hash', $record)
+                || ($record['command_hash'] !== null && (! is_string($record['command_hash']) || ! preg_match('/\A[0-9a-f]{64}\z/', $record['command_hash'])))) {
                 throw new GameException('Could not confirm Windows engine process identities.');
             }
             foreach ($pids as $role => $pid) {
@@ -231,6 +241,7 @@ POWERSHELL, ['SPACETRADERS_ENGINE_PIDS' => json_encode(array_values($pids), JSON
     {
         return is_array($stored) && ($stored['pid'] ?? null) === $current['pid']
             && ($stored['created_at'] ?? null) === $current['created_at']
+            && is_string($current['command_hash'])
             && ($stored['command_hash'] ?? null) === $current['command_hash'];
     }
 

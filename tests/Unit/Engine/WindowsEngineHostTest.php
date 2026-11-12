@@ -154,14 +154,17 @@ class WindowsEngineHostTest extends TestCase
         $this->assertSame(['injected-value', 'injected-value', 'injected-value', [base_path().'/artisan', 'spacetraders:engine-supervise']], json_decode($result->out, true), $result->err);
     }
 
-    #[TestWith(['created_at'])]
     #[TestWith(['command_hash'])]
     #[TestWith(['missing'])]
+    #[TestWith(['unreadable'])]
     public function test_force_stop_does_not_kill_an_unverified_identity(string $mismatch): void
     {
         $identity = $this->identity(4321);
         $stored = $identity;
         $stored[$mismatch] = 'different';
+        if ($mismatch === 'unreadable') {
+            $identity['command_hash'] = null;
+        }
         $this->commands->identities = [[$identity]];
         $engine = new LocalEngine(['processes' => ['worker' => 4321, 'identity' => $mismatch === 'missing' ? [] : ['worker' => $stored]]]);
         try {
@@ -172,6 +175,35 @@ class WindowsEngineHostTest extends TestCase
         }
         $this->assertCount(1, $this->commands->calls);
         $this->assertContains('-EncodedCommand', $this->commands->calls[0]['argv']);
+    }
+
+    #[TestWith([false])]
+    #[TestWith([true])]
+    public function test_force_stop_skips_reused_pids_even_when_the_command_line_is_unreadable(bool $unreadable): void
+    {
+        $stored = ['worker' => $this->identity(1002), 'scheduler' => $this->identity(1003)];
+        $reused = $stored['worker'];
+        $reused['created_at'] = '2026-11-11T13:00:00.0000000Z';
+        $reused['command_hash'] = $unreadable ? null : str_repeat('b', 64);
+        $this->commands->identities = [[$reused, $stored['scheduler']], [$reused]];
+        $this->host->forceStop(new LocalEngine(['processes' => ['worker' => 1002, 'scheduler' => 1003, 'identity' => $stored]]));
+        $kills = array_values(array_filter(array_column($this->commands->calls, 'argv'), fn ($arguments) => in_array('/PID', $arguments, true)));
+        $this->assertCount(1, $kills);
+        $this->assertSame(['/PID', '1003', '/T', '/F'], array_slice($kills[0], 1));
+    }
+
+    public function test_force_stop_verifies_every_remaining_process_before_killing_any(): void
+    {
+        $stored = ['worker' => $this->identity(1002), 'scheduler' => $this->identity(1003)];
+        $current = $stored;
+        $current['scheduler']['command_hash'] = str_repeat('b', 64);
+        $this->commands->identities = [array_values($current)];
+        try {
+            $this->host->forceStop(new LocalEngine(['processes' => ['worker' => 1002, 'scheduler' => 1003, 'identity' => $stored]]));
+            $this->fail('Every identity must be verified before killing any child.');
+        } catch (GameException) {
+            $this->assertCount(1, $this->commands->calls);
+        }
     }
 
     public function test_force_stop_kills_children_before_supervisor_then_removes_task(): void
