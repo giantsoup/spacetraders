@@ -14,6 +14,7 @@ use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\Events\Looping;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\TestWith;
 use Tests\TestCase;
 
@@ -104,7 +105,7 @@ class EngineChildWatchTest extends TestCase
     #[TestWith([JobProcessed::class])]
     #[TestWith([JobFailed::class])]
     #[TestWith([JobExceptionOccurred::class])]
-    public function test_job_markers_are_published_and_removed_on_each_terminal_event(string $event): void
+    public function test_job_markers_publish_an_idle_content_record_on_each_terminal_event(string $event): void
     {
         EngineChildWatch::listen();
         $this->assertNull(EngineChildWatch::jobStartedAt($this->session));
@@ -118,6 +119,84 @@ class EngineChildWatchTest extends TestCase
         $this->assertLessThanOrEqual(microtime(true), $started);
         $this->assertSame([], glob(config('gameplay.lock_path').'/engine/*.tmp'));
         Event::dispatch(new $event('database', $job, new \RuntimeException('test')));
+        $this->assertNull(EngineChildWatch::jobStartedAt($this->session));
+        $marker = json_decode(file_get_contents($this->markerPath()), true);
+        $this->assertNull($marker['started_at']);
+        $this->assertIsFloat($marker['finished_at']);
+        $this->assertSame([], glob($this->markerPath().'.*.lease'));
+    }
+
+    private function markerPath(): string
+    {
+        return config('gameplay.lock_path').'/engine/'.$this->session.'-worker.job';
+    }
+
+    public function test_failed_start_publication_logs_without_failing_the_job(): void
+    {
+        EngineChildWatch::listen();
+        mkdir($this->markerPath());
+        Log::partialMock();
+        Log::shouldReceive('channel')->with('engine')->andReturnSelf();
+        Log::shouldReceive('warning')->once()->with('Cannot publish engine job watchdog marker.', \Mockery::type('array'));
+        Event::dispatch(new JobProcessing('database', $this->createStub(Job::class)));
+        $this->assertNull(EngineChildWatch::jobStartedAt($this->session));
+        $this->assertSame([], glob($this->markerPath().'.*.lease'));
+        $this->assertSame([], glob($this->markerPath().'.*.tmp'));
+    }
+
+    #[TestWith([JobProcessed::class])]
+    #[TestWith([JobFailed::class])]
+    #[TestWith([JobExceptionOccurred::class])]
+    public function test_a_stale_start_marker_cannot_time_out_a_finished_attempt_even_if_finish_publication_fails(string $event): void
+    {
+        EngineChildWatch::listen();
+        $job = $this->createStub(Job::class);
+        $job->method('payload')->willReturn([]);
+        Event::dispatch(new JobProcessing('database', $job));
+        $stale = file_get_contents($this->markerPath());
+        unlink($this->markerPath());
+        mkdir($this->markerPath());
+        Log::partialMock();
+        Log::shouldReceive('channel')->with('engine')->andReturnSelf();
+        Log::shouldReceive('warning')->once()->with('Cannot finish engine job watchdog marker.', \Mockery::type('array'));
+        Event::dispatch(new $event('database', $job, new \RuntimeException('test')));
+        rmdir($this->markerPath());
+        file_put_contents($this->markerPath(), $stale);
+        $this->assertNull(EngineChildWatch::jobStartedAt($this->session));
+        $this->assertSame([], glob($this->markerPath().'.*.lease'));
+    }
+
+    public function test_marker_publication_retries_a_transient_replace_failure(): void
+    {
+        EngineChildWatch::listen();
+        mkdir($this->markerPath());
+        $process = proc_open([PHP_BINARY, '-r', 'echo "ready\n"; fflush(STDOUT); fgets(STDIN); usleep(50000); rmdir($argv[1]);', $this->markerPath()], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        $this->assertIsResource($process);
+        try {
+            stream_set_timeout($pipes[1], 10);
+            $this->assertSame("ready\n", fgets($pipes[1]));
+            fwrite($pipes[0], "go\n");
+            $job = $this->createStub(Job::class);
+            Event::dispatch(new JobProcessing('database', $job));
+            $this->assertNotNull(EngineChildWatch::jobStartedAt($this->session));
+            Event::dispatch(new JobProcessed('database', $job));
+        } finally {
+            fclose($pipes[0]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            proc_close($process);
+        }
+    }
+
+    public function test_marker_listeners_do_not_throw_even_when_warning_logging_fails(): void
+    {
+        EngineChildWatch::listen();
+        mkdir($this->markerPath());
+        Log::partialMock();
+        Log::shouldReceive('channel')->with('engine')->andThrow(new \RuntimeException('logging unavailable'));
+        $job = $this->createStub(Job::class);
+        Event::dispatch(new JobProcessing('database', $job));
+        Event::dispatch(new JobProcessed('database', $job));
         $this->assertNull(EngineChildWatch::jobStartedAt($this->session));
     }
 

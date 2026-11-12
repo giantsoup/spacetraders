@@ -9,6 +9,7 @@ use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\Events\Looping;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Cooperative stop for owned engine children on platforms without signals.
@@ -17,6 +18,10 @@ use Illuminate\Support\Facades\Event;
  */
 class EngineChildWatch
 {
+    private $jobLease = null;
+
+    private ?string $jobAttempt = null;
+
     private ?int $checkedAt = null;
 
     private bool $stopped = false;
@@ -57,7 +62,13 @@ class EngineChildWatch
         $watch = new self;
         $path = self::jobPath($session);
         Event::listen(Looping::class, function () use ($watch) {
-            if ($watch->shouldStop()) {
+            try {
+                $stop = $watch->shouldStop();
+            } catch (\Throwable $error) {
+                self::warn('Cannot inspect engine worker stop state.', $error);
+                $stop = true;
+            }
+            if ($stop) {
                 app('queue.worker')->shouldQuit = true;
 
                 return false;
@@ -65,23 +76,27 @@ class EngineChildWatch
 
             return null;
         });
-        Event::listen(JobProcessing::class, function () use ($path) {
-            $temporary = $path.'.'.bin2hex(random_bytes(8)).'.tmp';
+        Event::listen(JobProcessing::class, function () use ($watch, $path) {
             try {
-                if (file_put_contents($temporary, json_encode(['started_at' => microtime(true)], JSON_THROW_ON_ERROR)) === false
-                    || ! rename($temporary, $path)) {
-                    throw new \RuntimeException('Cannot publish engine job watchdog marker.');
+                $watch->jobAttempt = bin2hex(random_bytes(16));
+                $watch->jobLease = @fopen($path.'.'.$watch->jobAttempt.'.lease', 'x+b');
+                if ($watch->jobLease === false || ! flock($watch->jobLease, LOCK_EX | LOCK_NB)) {
+                    throw new \RuntimeException('Cannot acquire job attempt lease.');
                 }
-            } finally {
-                if (is_file($temporary)) {
-                    unlink($temporary);
-                }
+                self::publish($path, ['attempt' => $watch->jobAttempt, 'started_at' => microtime(true), 'finished_at' => null]);
+            } catch (\Throwable $error) {
+                $watch->releaseJob($path);
+                self::warn('Cannot publish engine job watchdog marker.', $error);
             }
         });
         foreach ([JobProcessed::class, JobFailed::class, JobExceptionOccurred::class] as $event) {
-            Event::listen($event, function () use ($path) {
-                if (is_file($path) && ! unlink($path)) {
-                    throw new \RuntimeException('Cannot clear engine job watchdog marker.');
+            Event::listen($event, function () use ($watch, $path) {
+                try {
+                    self::publish($path, ['attempt' => $watch->jobAttempt, 'started_at' => null, 'finished_at' => microtime(true)]);
+                } catch (\Throwable $error) {
+                    self::warn('Cannot finish engine job watchdog marker.', $error);
+                } finally {
+                    $watch->releaseJob($path);
                 }
             });
         }
@@ -96,8 +111,62 @@ class EngineChildWatch
         $contents = @file_get_contents($path);
         $marker = $contents === false ? null : json_decode($contents, true);
         $started = is_array($marker) ? ($marker['started_at'] ?? null) : null;
+        $attempt = is_array($marker) ? ($marker['attempt'] ?? null) : null;
+        if (! is_string($attempt) || ! preg_match('/\A[0-9a-f]{32}\z/', $attempt) || $started === null) {
+            return null;
+        }
+        try {
+            if (! EngineLease::held($path.'.'.$attempt.'.lease')) {
+                return null;
+            }
+        } catch (\Throwable $error) {
+            self::warn('Cannot inspect engine job attempt lease.', $error);
+
+            return null;
+        }
 
         return is_numeric($started) && is_finite((float) $started) && $started > 0 ? (float) $started : null;
+    }
+
+    private function releaseJob(string $path): void
+    {
+        if (is_resource($this->jobLease)) {
+            fclose($this->jobLease);
+        }
+        if ($this->jobAttempt !== null) {
+            @unlink($path.'.'.$this->jobAttempt.'.lease');
+        }
+        $this->jobLease = null;
+        $this->jobAttempt = null;
+    }
+
+    private static function publish(string $path, array $marker): void
+    {
+        $temporary = $path.'.'.bin2hex(random_bytes(8)).'.tmp';
+        try {
+            if (@file_put_contents($temporary, json_encode($marker, JSON_THROW_ON_ERROR)) === false) {
+                throw new \RuntimeException('Cannot write job marker.');
+            }
+            $deadline = hrtime(true) + 250_000_000;
+            while (! @rename($temporary, $path)) {
+                if (hrtime(true) >= $deadline) {
+                    throw new \RuntimeException('Cannot replace job marker.');
+                }
+                usleep(2000);
+            }
+        } finally {
+            if (is_file($temporary)) {
+                @unlink($temporary);
+            }
+        }
+    }
+
+    private static function warn(string $message, \Throwable $error): void
+    {
+        try {
+            Log::channel('engine')->warning($message, ['exception' => $error::class]);
+        } catch (\Throwable) {
+        }
     }
 
     private static function jobPath(string $session): string
