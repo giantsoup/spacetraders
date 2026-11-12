@@ -62,7 +62,7 @@ await withBrowserVerification({ root, php, output, persistentCache: true }, asyn
     await post(`/commands/${scan.id}/approve`, {}, 503);
     await post(`/adviser/policies/${policy.id}/pause`, {}, 503);
     await post('/economics/investment', {}, 503);
-    execute(['artisan', 'queue:work', 'database', '--once', '--sleep=0'], env);
+    execute(['artisan', 'queue:work', 'database', '--queue=spacetraders', '--once', '--sleep=0'], env);
     assert.deepEqual(state(), before);
     assert.equal((await page.goto(deck)).status(), 503);
     assert.equal(await page.locator('html').evaluate(el => getComputedStyle(el).colorScheme), 'dark');
@@ -75,7 +75,7 @@ await withBrowserVerification({ root, php, output, persistentCache: true }, asyn
     await post(`/commands/${scan.id}/approve`);
     const decision = await post('/adviser/assess', { policy_id: policy.id, investigation_id: null });
     assert.ok(decision.candidates.filter(c => !['wait', 'read', 'contracts'].includes(c.activity)).every(c => c.classification !== 'feasible'));
-    const worker = () => execute(['artisan', 'queue:work', 'database', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], env);
+    const worker = () => execute(['artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], env);
     worker(); worker();
     assert.equal(state().actions.find(a => a.id === scan.id).state, 'confirmed');
     assert.equal((await world()).writes.length, 1);

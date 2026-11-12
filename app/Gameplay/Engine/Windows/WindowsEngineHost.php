@@ -186,6 +186,11 @@ POWERSHELL, ['SPACETRADERS_ENGINE_DIRECTORY' => $directory]);
             'SPACETRADERS_ENGINE_LEASE' => $lease, 'SPACETRADERS_ENGINE_LOG' => $log,
         ]);
 
+        unset($env['SPACETRADERS_ENGINE_WORKER_SESSION']);
+        if ($role === 'worker') {
+            $env['SPACETRADERS_ENGINE_WORKER_SESSION'] = $session;
+        }
+
         return new WindowsChild([$this->windowlessPhp(config('gameplay.php_binary')), base_path('artisan'), ...$artisanArguments], base_path(), $env, $log, $lease, $this->commands);
     }
 

@@ -133,7 +133,7 @@ try {
     assert.equal(await button('Assess saved evidence').isEnabled(), false);
     await click('Stop current activity', `/runs/${run.id}/stop`);
     assert.ok(state().runs[0].stop_requested_at);
-    execFileSync(php, ['artisan', 'queue:work', 'database', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' });
+    execFileSync(php, ['artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' });
     assert.equal(state().runs[0].state, 'stopped');
     assert.equal(state().runs[0].active_agent_id, null);
     assert.equal(JSON.parse(await fs.readFile(parsed.SPACETRADERS_FIXTURE_PATH, 'utf8')).writes.length, 0);
@@ -142,7 +142,7 @@ try {
     await openAdviser();
     await screenshot(390, 'paused');
     const manual = cli(`$a=App\\Models\\Agent::find(${auth.agent_id}); $e=app(App\\Gameplay\\ShipCommandExecutor::class); $c=$e->preview($a,'LOCAL-1','orbit',[],(string)Illuminate\\Support\\Str::uuid()); $e->approve($a,$c); echo $c->fresh()->toJson();`);
-    execFileSync(php, ['artisan', 'queue:work', 'database', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' });
+    execFileSync(php, ['artisan', 'queue:work', 'database', '--queue=spacetraders', '--stop-when-empty', '--sleep=0', '--tries=1', '--timeout=120'], { cwd: root, env, stdio: 'pipe' });
     assert.equal(state().actions.find(a => a.id === manual.id).state, 'confirmed');
     assert.equal(JSON.parse(await fs.readFile(parsed.SPACETRADERS_FIXTURE_PATH, 'utf8')).writes.length, 1);
     assert.equal(state().decisions.length, 2);

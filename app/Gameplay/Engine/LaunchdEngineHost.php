@@ -121,7 +121,9 @@ class LaunchdEngineHost implements EngineHost
 
     public function spawn(string $session, string $role, array $artisanArguments): OwnedChild
     {
-        $process = new Process(array_merge([config('gameplay.php_binary'), base_path('artisan')], $artisanArguments), base_path());
+        $process = new Process(array_merge([config('gameplay.php_binary'), base_path('artisan')], $artisanArguments), base_path(), [
+            'SPACETRADERS_ENGINE_WORKER_SESSION' => $role === 'worker' ? $session : false,
+        ]);
         $process->setTimeout(null)->disableOutput()->start();
 
         return new PosixChild($process);

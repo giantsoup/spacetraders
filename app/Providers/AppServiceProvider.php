@@ -46,7 +46,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Event::listen(JobPopping::class, function (JobPopping $event) {
-            if ($event->connectionName === 'database' && in_array('spacetraders', explode(',', $event->queue ?? 'spacetraders'), true)) {
+            if ($event->connectionName === 'database' && in_array('spacetraders', explode(',', $event->queue ?? config('queue.connections.database.queue')), true)) {
                 app(DeploymentGate::class)->workerPolling();
             }
         });
