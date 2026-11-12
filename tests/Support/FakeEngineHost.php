@@ -24,6 +24,8 @@ class FakeEngineHost implements EngineHost
 
     public ?\Closure $stop = null;
 
+    public ?\Closure $onIdentify = null;
+
     public function supported(): bool
     {
         return $this->isSupported;
@@ -100,6 +102,9 @@ class FakeEngineHost implements EngineHost
     public function identify(array $pids): array
     {
         $this->calls[] = ['identify', $pids];
+        if ($this->onIdentify) {
+            ($this->onIdentify)();
+        }
 
         return $this->identities;
     }
@@ -117,6 +122,8 @@ class FakeOwnedChild implements OwnedChild
     public bool $running = true;
 
     public bool $isReady = true;
+
+    public bool $stopOnRequest = true;
 
     public ?\Closure $onReady = null;
 
@@ -145,7 +152,9 @@ class FakeOwnedChild implements OwnedChild
     public function requestStop(): void
     {
         $this->calls[] = ['requestStop'];
-        $this->running = false;
+        if ($this->stopOnRequest) {
+            $this->running = false;
+        }
     }
 
     public function kill(): void

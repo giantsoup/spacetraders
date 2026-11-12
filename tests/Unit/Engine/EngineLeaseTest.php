@@ -71,6 +71,43 @@ class EngineLeaseTest extends TestCase
         }
     }
 
+    public function test_cleanup_removes_only_unheld_artifacts_from_other_sessions(): void
+    {
+        $current = '11111111-2222-3333-4444-555555555555';
+        $stale = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+        $live = 'ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee';
+        $directory = dirname(dirname(EngineLease::path($current, 'supervisor')));
+        mkdir($directory.'/leases', 0700, true);
+        foreach ([$current, $stale, $live] as $session) {
+            foreach (['supervisor', 'worker', 'scheduler'] as $role) {
+                touch(EngineLease::path($session, $role));
+            }
+            file_put_contents($directory.'/'.$session.'-worker.job', '{}');
+            touch($directory.'/'.$session.'-worker.job.'.str_repeat('a', 32).'.lease');
+            touch($directory.'/'.$session.'-worker.job.'.str_repeat('a', 16).'.tmp');
+        }
+        $handle = fopen(EngineLease::path($live, 'worker'), 'r+b');
+        flock($handle, LOCK_EX);
+        try {
+            EngineLease::cleanup($current);
+            foreach ([$current, $live] as $session) {
+                $this->assertFileExists(EngineLease::path($session, 'worker'));
+                $this->assertFileExists($directory.'/'.$session.'-worker.job');
+            }
+            $this->assertSame([], glob($directory.'/leases/'.$stale.'*'));
+            $this->assertSame([], glob($directory.'/'.$stale.'*'));
+            fclose($handle);
+            $handle = null;
+            EngineLease::cleanup($current);
+            $this->assertSame([], glob($directory.'/leases/'.$live.'*'));
+            $this->assertSame([], glob($directory.'/'.$live.'*'));
+        } finally {
+            if (is_resource($handle)) {
+                fclose($handle);
+            }
+        }
+    }
+
     public function test_a_real_child_holds_a_lease_until_it_is_killed(): void
     {
         $path = EngineLease::path('11111111-2222-3333-4444-555555555555', 'worker');

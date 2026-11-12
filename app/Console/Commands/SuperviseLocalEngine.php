@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Gameplay\AutomationRunner;
 use App\Gameplay\Engine\EngineChildWatch;
 use App\Gameplay\Engine\EngineHost;
+use App\Gameplay\Engine\EngineLease;
 use App\Gameplay\EngineGate;
 use App\Gameplay\HostLock;
 use App\Models\AutomationRun;
@@ -30,6 +31,7 @@ class SuperviseLocalEngine extends Command
             $children = [];
             try {
                 $host->claim($engine->session_id, 'supervisor');
+                EngineLease::cleanup($engine->session_id);
                 $engine->update(['processes' => ['supervisor' => getmypid()]]);
                 $host->onStopSignal(fn () => $gate->close());
                 foreach ([
@@ -39,20 +41,23 @@ class SuperviseLocalEngine extends Command
                     $children[$name] = $host->spawn($engine->session_id, $name, $arguments);
                 }
                 $workerReady = $children['worker']->ready(10);
+                $this->heartbeat($engine->session_id);
                 $schedulerReady = $children['scheduler']->ready(10);
+                $this->heartbeat($engine->session_id);
                 if (! $workerReady || ! $schedulerReady) {
                     throw new \RuntimeException('Owned child failed to start.');
                 }
                 $processes = ['supervisor' => getmypid(), 'worker' => $children['worker']->pid(), 'scheduler' => $children['scheduler']->pid()];
                 $processes['identity'] = $host->identify($processes);
+                $this->heartbeat($engine->session_id);
                 $engine->update(['processes' => $processes]);
                 LocalEngine::whereKey(1)->where('session_id', $engine->session_id)->whereNull('stop_requested_at')->update(['state' => 'running', 'gate_open' => true, 'heartbeat_at' => now(), 'processes' => json_encode($processes), 'message' => 'Worker and scheduler alive. Awaiting new approvals.']);
-                $last = microtime(true);
+                $last = $this->wallTime();
                 $lastMonotonic = hrtime(true);
                 $shutdown = null;
                 $signalled = false;
                 while (true) {
-                    $wall = microtime(true);
+                    $wall = $this->wallTime();
                     $monotonic = hrtime(true);
                     $gap = max($wall - $last, ($monotonic - $lastMonotonic) / 1e9);
                     $last = $wall;
@@ -63,7 +68,7 @@ class SuperviseLocalEngine extends Command
                         $engine->refresh();
                     }
                     $jobStartedAt = $this->jobStartedAt($engine->session_id);
-                    $jobTimedOut = $children['worker']->isRunning() && $jobStartedAt !== null && microtime(true) - $jobStartedAt > 150;
+                    $jobTimedOut = $children['worker']->isRunning() && $jobStartedAt !== null && $this->wallTime() - $jobStartedAt > 150;
                     if ($jobTimedOut) {
                         Log::error('Owned worker job exceeded 150 seconds. Terminating worker.', ['session' => $engine->session_id]);
                         $children['worker']->kill();
@@ -72,9 +77,9 @@ class SuperviseLocalEngine extends Command
                         $gate->close('faulted', 'An owned child exited. New approvals are closed.');
                         $engine->refresh();
                     }
-                    LocalEngine::whereKey(1)->where('session_id', $engine->session_id)->update(['heartbeat_at' => now()]);
+                    $this->heartbeat($engine->session_id);
                     if ($engine->stop_requested_at) {
-                        $shutdown ??= microtime(true);
+                        $shutdown ??= $this->wallTime();
                         if (! $signalled) {
                             foreach ($children as $child) {
                                 if ($child->isRunning()) {
@@ -92,15 +97,19 @@ class SuperviseLocalEngine extends Command
                             $engine->update(['state' => $engine->state === 'faulted' ? 'faulted' : 'off', 'gate_open' => false, 'message' => 'Owned processes exited. Any uncertain action still requires reconciliation.']);
                             break;
                         }
-                        if (microtime(true) - $shutdown > 40) {
+                        if ($this->wallTime() - $shutdown > 40) {
                             $engine->update(['state' => 'faulted', 'gate_open' => false, 'message' => 'Graceful shutdown exceeded 40 seconds. Force stop may interrupt an upstream request.']);
                         }
                     }
-                    usleep(200000);
+                    $this->waitForNextTick();
                 }
 
                 return self::SUCCESS;
-            } catch (\Throwable) {
+            } catch (\Throwable $error) {
+                try {
+                    Log::channel('engine')->error('Engine supervisor failed.', ['exception' => $error::class, 'message' => $error->getMessage()]);
+                } catch (\Throwable) {
+                }
                 $gate->close('faulted', 'Supervisor failed. Reconcile any reserved action before a fresh preview.');
                 foreach ($children as $child) {
                     if ($child->isRunning()) {
@@ -116,5 +125,20 @@ class SuperviseLocalEngine extends Command
     protected function jobStartedAt(string $session): ?float
     {
         return EngineChildWatch::jobStartedAt($session);
+    }
+
+    private function heartbeat(string $session): void
+    {
+        LocalEngine::whereKey(1)->where('session_id', $session)->update(['heartbeat_at' => now()]);
+    }
+
+    protected function wallTime(): float
+    {
+        return microtime(true);
+    }
+
+    protected function waitForNextTick(): void
+    {
+        usleep(200000);
     }
 }

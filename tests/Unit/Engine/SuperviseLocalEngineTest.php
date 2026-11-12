@@ -7,6 +7,7 @@ use App\Gameplay\Engine\EngineChildWatch;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\EngineGate;
 use App\Gameplay\HostLock;
+use App\Gameplay\LocalEngineManager;
 use App\Models\LocalEngine;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
@@ -31,11 +32,11 @@ class SuperviseLocalEngineTest extends TestCase
         config(['gameplay.local_engine_enabled' => true]);
     }
 
-    private function supervise(?\Closure $watch = null): int
+    private function supervise(?\Closure $watch = null, ?\Closure $clock = null, ?\Closure $wait = null): int
     {
-        $command = new class($watch) extends SuperviseLocalEngine
+        $command = new class($watch, $clock, $wait) extends SuperviseLocalEngine
         {
-            public function __construct(private ?\Closure $watch)
+            public function __construct(private ?\Closure $watch, private ?\Closure $clock, private ?\Closure $wait)
             {
                 parent::__construct();
             }
@@ -43,6 +44,20 @@ class SuperviseLocalEngineTest extends TestCase
             protected function jobStartedAt(string $session): ?float
             {
                 return $this->watch ? ($this->watch)($session) : null;
+            }
+
+            protected function wallTime(): float
+            {
+                return $this->clock ? ($this->clock)() : parent::wallTime();
+            }
+
+            protected function waitForNextTick(): void
+            {
+                if ($this->wait) {
+                    ($this->wait)();
+                } else {
+                    parent::waitForNextTick();
+                }
             }
         };
 
@@ -100,6 +115,9 @@ class SuperviseLocalEngineTest extends TestCase
 
     public function test_child_readiness_failure_faults_and_kills_owned_children(): void
     {
+        Log::partialMock();
+        Log::shouldReceive('channel')->with('engine')->andReturnSelf();
+        Log::shouldReceive('error')->once()->with('Engine supervisor failed.', ['exception' => \RuntimeException::class, 'message' => 'Owned child failed to start.']);
         $this->host->children['worker']->isReady = false;
         $this->assertSame(1, $this->supervise());
         $this->assertSame('faulted', LocalEngine::find(1)->state);
@@ -160,6 +178,81 @@ class SuperviseLocalEngineTest extends TestCase
         $this->assertSame('faulted', LocalEngine::find(1)->state);
         $this->assertFalse(LocalEngine::find(1)->gate_open);
         $this->assertContains(['requestStop'], $this->host->children['scheduler']->calls);
+        $this->assertNotContains(['kill'], $this->host->children['scheduler']->calls);
+    }
+
+    public function test_startup_refreshes_heartbeat_between_each_slow_host_step(): void
+    {
+        $this->freezeTime();
+        $step = function () {
+            $this->assertSame(now()->getTimestamp(), LocalEngine::find(1)->heartbeat_at->getTimestamp());
+            $this->travel(9)->seconds();
+        };
+        $this->host->children['worker']->onReady = $step;
+        $this->host->children['scheduler']->onReady = $step;
+        $this->host->onIdentify = $step;
+        $this->assertSame(0, $this->supervise(function () {
+            $this->assertSame(now()->getTimestamp(), LocalEngine::find(1)->heartbeat_at->getTimestamp());
+            app(EngineGate::class)->close();
+
+            return null;
+        }));
+    }
+
+    public function test_end_with_uncooperative_children_faults_after_the_allowance_and_enables_force_stop(): void
+    {
+        foreach ($this->host->children as $child) {
+            $child->stopOnRequest = false;
+        }
+        $this->host->children['scheduler']->onReady = fn () => app(EngineGate::class)->close();
+        $seconds = 0.0;
+        $observed = false;
+        $this->assertSame(0, $this->supervise(function () use (&$seconds, &$observed) {
+            $this->assertLessThan(45, $seconds, 'The supervisor must expose force stop without waiting in real time.');
+            $engine = LocalEngine::find(1);
+            if ($engine->state === 'faulted') {
+                $observed = true;
+                $this->assertStringContainsString('Force stop may interrupt', $engine->message);
+                $this->assertGreaterThan(40, $seconds);
+                foreach ($this->host->children as $child) {
+                    $this->assertTrue($child->running);
+                }
+                app(LocalEngineManager::class)->forceStop();
+                $this->assertContains(['forceStop', $engine->session_id], $this->host->calls);
+                foreach ($this->host->children as $child) {
+                    $child->running = false;
+                }
+            }
+
+            return null;
+        }, function () use (&$seconds) {
+            return $seconds;
+        }, function () use (&$seconds) {
+            $seconds++;
+            $this->travel(1)->seconds();
+        }));
+        $this->assertTrue($observed);
+        foreach ($this->host->children as $child) {
+            $this->assertContains(['requestStop'], $child->calls);
+            $this->assertNotContains(['kill'], $child->calls);
+        }
+    }
+
+    public function test_watchdog_kills_an_uncooperative_worker_but_waits_for_scheduler_exit(): void
+    {
+        foreach ($this->host->children as $child) {
+            $child->stopOnRequest = false;
+        }
+        $ticks = 0;
+        $this->assertSame(0, $this->supervise(fn () => microtime(true) - 151, null, function () use (&$ticks) {
+            $this->assertSame(0, $ticks++);
+            $this->assertFalse($this->host->children['worker']->running);
+            $this->assertTrue($this->host->children['scheduler']->running);
+            $this->assertSame('faulted', LocalEngine::find(1)->state);
+            $this->host->children['scheduler']->running = false;
+        }));
+        $this->assertSame(1, $ticks);
+        $this->assertContains(['kill'], $this->host->children['worker']->calls);
         $this->assertNotContains(['kill'], $this->host->children['scheduler']->calls);
     }
 

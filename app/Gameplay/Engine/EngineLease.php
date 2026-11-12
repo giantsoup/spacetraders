@@ -67,4 +67,26 @@ final class EngineLease
 
         return ! $locked;
     }
+
+    public static function cleanup(string $session): void
+    {
+        $directory = dirname(dirname(self::path($session, 'supervisor')));
+        foreach (array_merge(glob($directory.'/leases/*.lease') ?: [], glob($directory.'/*-worker.job*') ?: []) as $path) {
+            if (! preg_match('/\A([0-9a-f-]{36})-(?:supervisor|worker|scheduler)\.(?:lease|job(?:\.[0-9a-f]+\.(?:lease|tmp))?)\z/i', basename($path), $match) || $match[1] === $session) {
+                continue;
+            }
+            try {
+                foreach (['supervisor', 'worker', 'scheduler'] as $role) {
+                    if (self::held(self::path($match[1], $role))) {
+                        continue 2;
+                    }
+                }
+                if (str_ends_with($path, '.lease') && self::held($path)) {
+                    continue;
+                }
+                @unlink($path);
+            } catch (\Throwable) {
+            }
+        }
+    }
 }
