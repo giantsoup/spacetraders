@@ -21,6 +21,11 @@ abstract class TestCase extends BaseTestCase
 
     protected function tearDown(): void
     {
+        $this->beforeApplicationDestroyed(function () {
+            foreach ($this->app['log']->getChannels() as $channel) {
+                $channel->getLogger()->close();
+            }
+        });
         parent::tearDown();
         if ($this->isolatedTestStorage && is_dir($this->isolatedTestStorage)) {
             $this->deleteTestDirectory($this->isolatedTestStorage);

@@ -27,6 +27,12 @@ class DeploymentGateTest extends TestCase
         $this->gate = app(DeploymentGate::class);
     }
 
+    protected function tearDown(): void
+    {
+        unset($this->gate);
+        parent::tearDown();
+    }
+
     public function test_close_requires_actual_generation_acknowledgements_and_preserves_pending_jobs(): void
     {
         $web = $this->gate->begin('web');
