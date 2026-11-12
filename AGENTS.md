@@ -28,6 +28,8 @@ or "prod", or to deploy), do these steps in order:
    to **End session** on spacetraders.test and stop there.
 3. **Report** the deployed commit and the script's `OK:` lines.
 
-Herd's automatic dev processes must stay off for the production site. They start Vite,
-which writes `public/hot` and breaks assets on the tailnet. `deploy.ps1` removes
+Keep Herd Settings → AI → **Enable Herd Developer Tools** off. When it's on, Herd injects
+a widget into every `.test` page, and the widget starts `php artisan dev` (Vite,
+`artisan serve`, `queue:listen`) for any site viewed in a browser, production included.
+Vite writes `public/hot`, which breaks assets on the tailnet. `deploy.ps1` removes
 `public/hot` and fails if a Vite server is running from production.
