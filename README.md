@@ -173,6 +173,20 @@ The script prints the location of the generated practice login file. Without `-E
 
 In engine practice, `Reset -Force` performs a verified force stop if graceful End times out, before removing the practice world and its task.
 
+**Viewing on an iPad or phone over Tailscale.** `web.ps1` runs a second server for this checkout on `127.0.0.1:8081` only. It's PHP's built-in server, started at logon by a per-user Scheduled Task, with no console window. It uses the same `.env`, database and sessions as `spacetraders.test`. `tailscale serve` publishes that server to your tailnet with HTTPS:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\web.ps1 Install   # also: Status, Uninstall; -Port to change 8081
+& "C:\Program Files\Tailscale\tailscale.exe" serve --bg 8081                            # tailnet only; never use `tailscale funnel`
+```
+
+- **Access:** open `https://<machine>.<tailnet>.ts.net` from any device signed into the tailnet. The server listens only on loopback, so no firewall rule is needed.
+- **Engine controls:** install, start and stop answer 403 from this address, because they require the `spacetraders.test` host and a loopback client. Never proxy with a `Host: spacetraders.test` rewrite.
+- **One request at a time:** PHP's built-in server can't run several workers on Windows. Use Herd at `spacetraders.test` for heavy work on the PC.
+- **Removal:** run `tailscale serve reset`, then `web.ps1 Uninstall`.
+
+See the [Tailscale iPad plan](docs/tailscale-ipad-plan.md).
+
 The [Windows local MVP plan](docs/windows-local-mvp-plan.md) and [Windows engine design](docs/windows-engine-design.md) describe the port, its safety protocol, and its verification evidence.
 
 ### Local engine and offline practice
