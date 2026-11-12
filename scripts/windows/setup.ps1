@@ -39,12 +39,12 @@ try {
         }
         $values = @{
             DB_DATABASE = $database
-            SPACETRADERS_REQUEST_BUDGET_PATH = (Join-Path $env:LOCALAPPDATA 'SpaceTraders/request-budget').Replace('\', '/')
+            SPACETRADERS_REQUEST_BUDGET_PATH = $env:LOCALAPPDATA.TrimEnd('\', '/') + '/SpaceTraders/request-budget'
             SPACETRADERS_PHP_BINARY = $php.Replace('\', '/')
         }
         $contents = Get-Content -LiteralPath (Join-Path $root '.env.example') -Raw
         foreach ($name in $values.Keys) {
-            $line = $name + '="' + $values[$name] + '"'
+            $line = $name + '="' + $values[$name].Replace('\', '\\').Replace('"', '\"').Replace('$', '\$') + '"'
             $pattern = '(?m)^' + [regex]::Escape($name) + '=.*$'
             if ([regex]::IsMatch($contents, $pattern)) { $contents = [regex]::Replace($contents, $pattern, [Text.RegularExpressions.MatchEvaluator]{ param($match) $line }) }
             else { $contents += [Environment]::NewLine + $line + [Environment]::NewLine }
