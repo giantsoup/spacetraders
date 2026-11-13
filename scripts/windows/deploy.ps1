@@ -4,7 +4,7 @@ Update the production checkout (Herd, spacetraders.test and the tailnet site) to
 .DESCRIPTION
 Run from the production checkout only. Without -Yes it previews the incoming commits and
 migrations and changes nothing. With -Yes it backs up, fast-forwards to origin/main,
-installs dependencies, migrates, builds, restarts the loopback web server and checks both
+installs dependencies, migrates, builds, refreshes the Herd nginx site for the tailnet and checks all
 addresses. It gracefully ends and restarts a running local engine. It refuses to run while
 the engine is faulted or stopping, on any branch but main, with uncommitted changes, or
 outside the spacetraders.test checkout.
@@ -39,26 +39,6 @@ function Test-Page {
     if ($response.Content -match ':5173/') { throw "$Url loads scripts from a Vite dev server; public/hot or a dev process is back." }
     if ($response.Content -notmatch '/build/assets/') { throw "$Url does not reference the built assets." }
     Write-Host "OK: $Url (HTTP 200, built assets)"
-}
-
-function Get-TailnetHosts {
-    # The published name may be this machine's or a Tailscale Service's, so read what serve actually proxies.
-    param([string]$Tailscale, [int]$Port)
-    $config = (& $Tailscale serve status --json) -join "`n" | ConvertFrom-Json
-    if (-not $config) { return @() }
-    $webs = @()
-    if ($config.PSObject.Properties.Name -contains 'Web') { $webs += $config.Web }
-    if ($config.PSObject.Properties.Name -contains 'Services') {
-        foreach ($service in $config.Services.PSObject.Properties.Value) {
-            if ($service.PSObject.Properties.Name -contains 'Web') { $webs += $service.Web }
-        }
-    }
-    foreach ($web in $webs) {
-        foreach ($site in $web.PSObject.Properties) {
-            $proxies = @($site.Value.Handlers.PSObject.Properties.Value | ForEach-Object { $_.Proxy })
-            if ($proxies -match "^http://(127\.0\.0\.1|localhost):$Port/?$") { $site.Name -replace ':443$', '' }
-        }
-    }
 }
 
 function Assert-NoDevProcesses {

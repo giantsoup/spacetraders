@@ -187,3 +187,15 @@ From the PC browser over the tailnet first, then on the iPad **(you)**:
 - Engine controls from the iPad. That would be a deliberate security change, needing its
   own plan.
 - Changes to the Herd site, `APP_URL`, or engine `.env` values.
+
+## Follow-up: Herd nginx instead of the built-in server (2026-11-12)
+
+The first fleet synchronization took about 38 seconds. On PHP's single-process built-in server, every
+other request from the iPad queued behind it, so the page looked frozen and could fail. `web.ps1` now
+writes `spacetraders-web-<checkout hash>.conf` into Herd's `valet\Nginx` folder instead: a server
+block on `127.0.0.1:8081` that hands PHP to Herd's PHP 8.5 FastCGI pool (several `php-cgi` workers),
+with `fastcgi_read_timeout 120s`. It accepts only the names `tailscale serve` publishes for the port,
+plus loopback, and answers 421 to anything else, so a `Host: spacetraders.test` request never reaches
+PHP through it. Install runs `nginx -t`, reloads in place (PHP and the engine keep running), restores
+the previous file if either step fails, and removes the old built-in server task. The `tailscale serve`
+configuration is unchanged.

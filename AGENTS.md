@@ -4,7 +4,8 @@
 
 - **Production**: `C:\Users\taylo\Herd\spacetraders`, always on `main`. It serves
   http://spacetraders.test on the PC and https://spacetraders.chimp-hamal.ts.net on the
-  Tailscale tailnet (`scripts\windows\web.ps1` plus `tailscale serve`). It holds the live
+  Tailscale tailnet (a Herd nginx site on 127.0.0.1:8081 that `scripts\windows\web.ps1`
+  writes, plus `tailscale serve`). It holds the live
   `.env`, SQLite database, operator account and engine task. It changes only through
   `deploy.ps1`.
 - **Development**: `C:\Users\taylo\Projects\spacetraders` and its worktrees. Herd serves this

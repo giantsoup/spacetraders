@@ -174,16 +174,16 @@ The script prints the location of the generated practice login file. Without `-E
 
 In engine practice, `Reset -Force` performs a verified force stop if graceful End times out, before removing the practice world and its task.
 
-**Viewing on an iPad or phone over Tailscale.** `web.ps1` runs a second server for this checkout on `127.0.0.1:8081` only. It's PHP's built-in server, started at logon by a per-user Scheduled Task, with no console window. It uses the same `.env`, database and sessions as `spacetraders.test`. `tailscale serve` publishes that server to your tailnet with HTTPS:
+**Viewing on an iPad or phone over Tailscale.** `web.ps1` adds a second Herd nginx site for this checkout on `127.0.0.1:8081` only. It runs on Herd's PHP pool, so it handles several requests at once, and it uses the same `.env`, database and sessions as `spacetraders.test`. The site accepts only the names `tailscale serve` publishes for that port, plus `127.0.0.1` and `localhost`; any other name gets HTTP 421. `tailscale serve` publishes it to your tailnet with HTTPS:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\web.ps1 Install   # also: Status, Uninstall; -Port to change 8081
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\web.ps1 Install   # also: Status, Uninstall; -Port to change 8081; run it again after changing tailscale serve
 & "C:\Program Files\Tailscale\tailscale.exe" serve --service=svc:spacetraders --https=443 http://127.0.0.1:8081   # tailnet only; never use `tailscale funnel`
 ```
 
 - **Access:** open `https://spacetraders.chimp-hamal.ts.net` from any device signed into the tailnet. It is a [Tailscale Service](https://tailscale.com/kb/1552/tailscale-services) (`svc:spacetraders`), so the address doesn't depend on the machine name: the PC is `taylor-pc`, tagged `tag:server`, and the tailnet policy auto-approves it as the host. The server listens only on loopback, so no firewall rule is needed.
 - **Engine controls:** install, start and stop answer 403 from this address, because they require the `spacetraders.test` host and a loopback client. Never proxy with a `Host: spacetraders.test` rewrite.
-- **One request at a time:** PHP's built-in server can't run several workers on Windows. Use Herd at `spacetraders.test` for heavy work on the PC.
+- **Herd must be running:** the site is `spacetraders-web-<checkout hash>.conf` in Herd's `valet\Nginx` folder. Install tests the configuration and reloads nginx without restarting PHP or the engine. It also removes the PHP built-in server task that earlier versions used.
 - **Removal:** run `tailscale serve drain svc:spacetraders`, then `tailscale serve clear svc:spacetraders`, then `web.ps1 Uninstall`.
 
 See the [Tailscale iPad plan](docs/tailscale-ipad-plan.md).
