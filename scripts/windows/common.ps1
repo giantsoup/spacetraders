@@ -217,3 +217,23 @@ function Get-ApplicationInfo {
     if ($result.ExitCode -ne 0) { throw 'Cannot inspect effective application configuration. Check dependencies, environment and migrations.' }
     return $result.Output | ConvertFrom-Json
 }
+
+function Get-TailnetHosts {
+    # The published name may be this machine's or a Tailscale Service's, so read what serve actually proxies.
+    param([string]$Tailscale, [int]$Port)
+    $config = (& $Tailscale serve status --json) -join "`n" | ConvertFrom-Json
+    if (-not $config) { return @() }
+    $webs = @()
+    if ($config.PSObject.Properties.Name -contains 'Web') { $webs += $config.Web }
+    if ($config.PSObject.Properties.Name -contains 'Services') {
+        foreach ($service in $config.Services.PSObject.Properties.Value) {
+            if ($service.PSObject.Properties.Name -contains 'Web') { $webs += $service.Web }
+        }
+    }
+    foreach ($web in $webs) {
+        foreach ($site in $web.PSObject.Properties) {
+            $proxies = @($site.Value.Handlers.PSObject.Properties.Value | ForEach-Object { $_.Proxy })
+            if ($proxies -match "^http://(127\.0\.0\.1|localhost):$Port/?$") { $site.Name -replace ':443$', '' }
+        }
+    }
+}
