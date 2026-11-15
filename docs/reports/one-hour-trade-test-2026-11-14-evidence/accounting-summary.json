@@ -1,0 +1,813 @@
+{
+  "at": "2026-11-15T03:04:38.516031+00:00",
+  "starting_cash": 175000,
+  "cash": 845384,
+  "receipt_credit_delta": 670384,
+  "credit_delta_by_command": {
+    "orbit": 0,
+    "buy": -753845,
+    "dock": 0,
+    "navigate": 0,
+    "sell": 1425093,
+    "refuel": -864
+  },
+  "confirmed_action_count": {
+    "orbit": 16,
+    "buy": 14,
+    "dock": 16,
+    "navigate": 17,
+    "sell": 33,
+    "refuel": 6
+  },
+  "runs": [
+    {
+      "id": 1,
+      "state": "completed",
+      "symbol": "SHIP_PARTS",
+      "totals": {
+        "purchased": {
+          "SHIP_PARTS": 2
+        },
+        "sold": {
+          "SHIP_PARTS": 2
+        },
+        "purchase_cost": 7400,
+        "sale_proceeds": 16902,
+        "fuel_cost": 144,
+        "credit_delta": 9358,
+        "elapsed_seconds": 219
+      }
+    },
+    {
+      "id": 2,
+      "state": "stopped",
+      "symbol": "SHIP_PARTS",
+      "totals": {
+        "purchased": [],
+        "sold": [],
+        "purchase_cost": 0,
+        "sale_proceeds": 0,
+        "fuel_cost": 0,
+        "credit_delta": 0,
+        "elapsed_seconds": null
+      }
+    },
+    {
+      "id": 3,
+      "state": "completed",
+      "symbol": "SHIP_PARTS",
+      "totals": {
+        "purchased": {
+          "SHIP_PARTS": 30
+        },
+        "sold": {
+          "SHIP_PARTS": 30
+        },
+        "purchase_cost": 112005,
+        "sale_proceeds": 247758,
+        "fuel_cost": 72,
+        "credit_delta": 135681,
+        "elapsed_seconds": 299
+      }
+    },
+    {
+      "id": 4,
+      "state": "stopped",
+      "symbol": "SHIP_PARTS",
+      "totals": {
+        "purchased": {
+          "SHIP_PARTS": 40
+        },
+        "sold": {
+          "SHIP_PARTS": 36
+        },
+        "purchase_cost": 159085,
+        "sale_proceeds": 241758,
+        "fuel_cost": 0,
+        "credit_delta": 82673,
+        "elapsed_seconds": 317
+      }
+    },
+    {
+      "id": 5,
+      "state": "completed",
+      "symbol": "SHIP_PLATING",
+      "totals": {
+        "purchased": {
+          "SHIP_PLATING": 40
+        },
+        "sold": {
+          "SHIP_PLATING": 40
+        },
+        "purchase_cost": 154730,
+        "sale_proceeds": 307122,
+        "fuel_cost": 144,
+        "credit_delta": 152248,
+        "elapsed_seconds": 360
+      }
+    },
+    {
+      "id": 6,
+      "state": "completed",
+      "symbol": null,
+      "totals": {
+        "purchased": [],
+        "sold": [],
+        "purchase_cost": 0,
+        "sale_proceeds": 0,
+        "fuel_cost": 144,
+        "credit_delta": -144,
+        "elapsed_seconds": 236
+      }
+    },
+    {
+      "id": 7,
+      "state": "stopped",
+      "symbol": "SHIP_PLATING",
+      "totals": {
+        "purchased": {
+          "SHIP_PLATING": 30
+        },
+        "sold": {
+          "SHIP_PLATING": 30
+        },
+        "purchase_cost": 121770,
+        "sale_proceeds": 231846,
+        "fuel_cost": 0,
+        "credit_delta": 110076,
+        "elapsed_seconds": 234
+      }
+    },
+    {
+      "id": 8,
+      "state": "stopped",
+      "symbol": "SHIP_PARTS",
+      "totals": {
+        "purchased": {
+          "SHIP_PARTS": 15
+        },
+        "sold": [],
+        "purchase_cost": 63120,
+        "sale_proceeds": 0,
+        "fuel_cost": 0,
+        "credit_delta": -63120,
+        "elapsed_seconds": 85
+      }
+    },
+    {
+      "id": 9,
+      "state": "stopped",
+      "symbol": "SHIP_PARTS",
+      "totals": {
+        "purchased": {
+          "SHIP_PARTS": 30
+        },
+        "sold": [],
+        "purchase_cost": 135735,
+        "sale_proceeds": 0,
+        "fuel_cost": 0,
+        "credit_delta": -135735,
+        "elapsed_seconds": 75
+      }
+    }
+  ],
+  "transactions": [
+    {
+      "id": 4,
+      "command": "buy",
+      "waypointSymbol": "X1-PZ83-D39",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "PURCHASE",
+      "units": 2,
+      "pricePerUnit": 3700,
+      "totalPrice": 7400,
+      "timestamp": "2026-11-15T02:10:36.522Z"
+    },
+    {
+      "id": 8,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 2,
+      "pricePerUnit": 8451,
+      "totalPrice": 16902,
+      "timestamp": "2026-11-15T02:12:09.672Z"
+    },
+    {
+      "id": 12,
+      "command": "refuel",
+      "waypointSymbol": "X1-PZ83-D39",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "FUEL",
+      "type": "PURCHASE",
+      "units": 2,
+      "pricePerUnit": 72,
+      "totalPrice": 144,
+      "timestamp": "2026-11-15T02:13:52.991Z"
+    },
+    {
+      "id": 13,
+      "command": "buy",
+      "waypointSymbol": "X1-PZ83-D39",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "PURCHASE",
+      "units": 15,
+      "pricePerUnit": 3695,
+      "totalPrice": 55425,
+      "timestamp": "2026-11-15T02:15:41.355Z"
+    },
+    {
+      "id": 14,
+      "command": "buy",
+      "waypointSymbol": "X1-PZ83-D39",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "PURCHASE",
+      "units": 15,
+      "pricePerUnit": 3772,
+      "totalPrice": 56580,
+      "timestamp": "2026-11-15T02:15:57.574Z"
+    },
+    {
+      "id": 18,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 8517,
+      "totalPrice": 51102,
+      "timestamp": "2026-11-15T02:17:32.844Z"
+    },
+    {
+      "id": 19,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 8414,
+      "totalPrice": 50484,
+      "timestamp": "2026-11-15T02:17:47.532Z"
+    },
+    {
+      "id": 20,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 8288,
+      "totalPrice": 49728,
+      "timestamp": "2026-11-15T02:18:03.132Z"
+    },
+    {
+      "id": 21,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 8133,
+      "totalPrice": 48798,
+      "timestamp": "2026-11-15T02:18:18.704Z"
+    },
+    {
+      "id": 22,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7941,
+      "totalPrice": 47646,
+      "timestamp": "2026-11-15T02:18:33.591Z"
+    },
+    {
+      "id": 26,
+      "command": "refuel",
+      "waypointSymbol": "X1-PZ83-D39",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "FUEL",
+      "type": "PURCHASE",
+      "units": 1,
+      "pricePerUnit": 72,
+      "totalPrice": 72,
+      "timestamp": "2026-11-15T02:20:17.032Z"
+    },
+    {
+      "id": 27,
+      "command": "buy",
+      "waypointSymbol": "X1-PZ83-D39",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "PURCHASE",
+      "units": 15,
+      "pricePerUnit": 3868,
+      "totalPrice": 58020,
+      "timestamp": "2026-11-15T02:21:27.278Z"
+    },
+    {
+      "id": 28,
+      "command": "buy",
+      "waypointSymbol": "X1-PZ83-D39",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "PURCHASE",
+      "units": 15,
+      "pricePerUnit": 3985,
+      "totalPrice": 59775,
+      "timestamp": "2026-11-15T02:21:41.088Z"
+    },
+    {
+      "id": 29,
+      "command": "buy",
+      "waypointSymbol": "X1-PZ83-D39",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "PURCHASE",
+      "units": 10,
+      "pricePerUnit": 4129,
+      "totalPrice": 41290,
+      "timestamp": "2026-11-15T02:21:55.923Z"
+    },
+    {
+      "id": 33,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7706,
+      "totalPrice": 46236,
+      "timestamp": "2026-11-15T02:23:36.903Z"
+    },
+    {
+      "id": 34,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7416,
+      "totalPrice": 44496,
+      "timestamp": "2026-11-15T02:23:52.379Z"
+    },
+    {
+      "id": 35,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7059,
+      "totalPrice": 42354,
+      "timestamp": "2026-11-15T02:24:07.841Z"
+    },
+    {
+      "id": 36,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 6620,
+      "totalPrice": 39720,
+      "timestamp": "2026-11-15T02:24:21.438Z"
+    },
+    {
+      "id": 37,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 6079,
+      "totalPrice": 36474,
+      "timestamp": "2026-11-15T02:24:33.099Z"
+    },
+    {
+      "id": 38,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 5413,
+      "totalPrice": 32478,
+      "timestamp": "2026-11-15T02:24:48.506Z"
+    },
+    {
+      "id": 39,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 4,
+      "pricePerUnit": 4593,
+      "totalPrice": 18372,
+      "timestamp": "2026-11-15T02:26:53.590Z"
+    },
+    {
+      "id": 43,
+      "command": "buy",
+      "waypointSymbol": "X1-PZ83-D40",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "PURCHASE",
+      "units": 15,
+      "pricePerUnit": 3805,
+      "totalPrice": 57075,
+      "timestamp": "2026-11-15T02:29:43.571Z"
+    },
+    {
+      "id": 44,
+      "command": "buy",
+      "waypointSymbol": "X1-PZ83-D40",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "PURCHASE",
+      "units": 15,
+      "pricePerUnit": 3873,
+      "totalPrice": 58095,
+      "timestamp": "2026-11-15T02:29:58.335Z"
+    },
+    {
+      "id": 45,
+      "command": "buy",
+      "waypointSymbol": "X1-PZ83-D40",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "PURCHASE",
+      "units": 10,
+      "pricePerUnit": 3956,
+      "totalPrice": 39560,
+      "timestamp": "2026-11-15T02:30:14.298Z"
+    },
+    {
+      "id": 49,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 8149,
+      "totalPrice": 48894,
+      "timestamp": "2026-11-15T02:31:49.265Z"
+    },
+    {
+      "id": 50,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 8035,
+      "totalPrice": 48210,
+      "timestamp": "2026-11-15T02:32:04.604Z"
+    },
+    {
+      "id": 51,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7896,
+      "totalPrice": 47376,
+      "timestamp": "2026-11-15T02:32:19.926Z"
+    },
+    {
+      "id": 52,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7724,
+      "totalPrice": 46344,
+      "timestamp": "2026-11-15T02:32:36.570Z"
+    },
+    {
+      "id": 53,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7512,
+      "totalPrice": 45072,
+      "timestamp": "2026-11-15T02:32:50.144Z"
+    },
+    {
+      "id": 54,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7251,
+      "totalPrice": 43506,
+      "timestamp": "2026-11-15T02:33:05.415Z"
+    },
+    {
+      "id": 55,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-H47",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "SELL",
+      "units": 4,
+      "pricePerUnit": 6930,
+      "totalPrice": 27720,
+      "timestamp": "2026-11-15T02:33:20.738Z"
+    },
+    {
+      "id": 59,
+      "command": "refuel",
+      "waypointSymbol": "X1-PZ83-D40",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "FUEL",
+      "type": "PURCHASE",
+      "units": 2,
+      "pricePerUnit": 72,
+      "totalPrice": 144,
+      "timestamp": "2026-11-15T02:35:04.438Z"
+    },
+    {
+      "id": 64,
+      "command": "refuel",
+      "waypointSymbol": "X1-PZ83-D40",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "FUEL",
+      "type": "PURCHASE",
+      "units": 2,
+      "pricePerUnit": 72,
+      "totalPrice": 144,
+      "timestamp": "2026-11-15T02:40:11.747Z"
+    },
+    {
+      "id": 65,
+      "command": "buy",
+      "waypointSymbol": "X1-PZ83-D40",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "PURCHASE",
+      "units": 15,
+      "pricePerUnit": 4002,
+      "totalPrice": 60030,
+      "timestamp": "2026-11-15T02:40:59.318Z"
+    },
+    {
+      "id": 66,
+      "command": "buy",
+      "waypointSymbol": "X1-PZ83-D40",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "PURCHASE",
+      "units": 15,
+      "pricePerUnit": 4116,
+      "totalPrice": 61740,
+      "timestamp": "2026-11-15T02:41:12.696Z"
+    },
+    {
+      "id": 70,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-A2",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7964,
+      "totalPrice": 47784,
+      "timestamp": "2026-11-15T02:43:21.951Z"
+    },
+    {
+      "id": 71,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-A2",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7871,
+      "totalPrice": 47226,
+      "timestamp": "2026-11-15T02:43:36.442Z"
+    },
+    {
+      "id": 72,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-A2",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7755,
+      "totalPrice": 46530,
+      "timestamp": "2026-11-15T02:43:51.684Z"
+    },
+    {
+      "id": 73,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-A2",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7613,
+      "totalPrice": 45678,
+      "timestamp": "2026-11-15T02:44:07.940Z"
+    },
+    {
+      "id": 74,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-A2",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PLATING",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7438,
+      "totalPrice": 44628,
+      "timestamp": "2026-11-15T02:44:22.386Z"
+    },
+    {
+      "id": 79,
+      "command": "buy",
+      "waypointSymbol": "X1-PZ83-D39",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "PURCHASE",
+      "units": 15,
+      "pricePerUnit": 4208,
+      "totalPrice": 63120,
+      "timestamp": "2026-11-15T02:47:52.769Z"
+    },
+    {
+      "id": 84,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-A2",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 8532,
+      "totalPrice": 51192,
+      "timestamp": "2026-11-15T02:51:47.912Z"
+    },
+    {
+      "id": 85,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-A2",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 8433,
+      "totalPrice": 50598,
+      "timestamp": "2026-11-15T02:52:09.523Z"
+    },
+    {
+      "id": 86,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-A2",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 3,
+      "pricePerUnit": 8311,
+      "totalPrice": 24933,
+      "timestamp": "2026-11-15T02:52:30.394Z"
+    },
+    {
+      "id": 87,
+      "command": "refuel",
+      "waypointSymbol": "X1-PZ83-A2",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "FUEL",
+      "type": "PURCHASE",
+      "units": 3,
+      "pricePerUnit": 72,
+      "totalPrice": 216,
+      "timestamp": "2026-11-15T02:53:18.558Z"
+    },
+    {
+      "id": 91,
+      "command": "buy",
+      "waypointSymbol": "X1-PZ83-D39",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "PURCHASE",
+      "units": 15,
+      "pricePerUnit": 4404,
+      "totalPrice": 66060,
+      "timestamp": "2026-11-15T02:56:09.343Z"
+    },
+    {
+      "id": 92,
+      "command": "buy",
+      "waypointSymbol": "X1-PZ83-D39",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "PURCHASE",
+      "units": 15,
+      "pricePerUnit": 4645,
+      "totalPrice": 69675,
+      "timestamp": "2026-11-15T02:56:24.760Z"
+    },
+    {
+      "id": 97,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-A2",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 8240,
+      "totalPrice": 49440,
+      "timestamp": "2026-11-15T02:59:59.798Z"
+    },
+    {
+      "id": 98,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-A2",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 8073,
+      "totalPrice": 48438,
+      "timestamp": "2026-11-15T03:00:21.475Z"
+    },
+    {
+      "id": 99,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-A2",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7868,
+      "totalPrice": 47208,
+      "timestamp": "2026-11-15T03:01:01.887Z"
+    },
+    {
+      "id": 100,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-A2",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7616,
+      "totalPrice": 45696,
+      "timestamp": "2026-11-15T03:01:22.458Z"
+    },
+    {
+      "id": 101,
+      "command": "sell",
+      "waypointSymbol": "X1-PZ83-A2",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "SHIP_PARTS",
+      "type": "SELL",
+      "units": 6,
+      "pricePerUnit": 7305,
+      "totalPrice": 43830,
+      "timestamp": "2026-11-15T03:01:44.361Z"
+    },
+    {
+      "id": 105,
+      "command": "refuel",
+      "waypointSymbol": "X1-PZ83-A1",
+      "shipSymbol": "GIANTSOUP-1",
+      "tradeSymbol": "FUEL",
+      "type": "PURCHASE",
+      "units": 2,
+      "pricePerUnit": 72,
+      "totalPrice": 144,
+      "timestamp": "2026-11-15T03:04:04.584Z"
+    }
+  ],
+  "unexplained_cash_difference": 0
+}

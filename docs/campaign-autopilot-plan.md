@@ -37,34 +37,65 @@ accounting. Limits apply per episode.
 
 ### File contents (v1 schema)
 
+Revised 2026-11-15 from the [one-hour trade test](reports/one-hour-trade-test-2026-11-14.md).
+
 ```yaml
 name: weekly-default
 version: 1
-agent: { symbol: GIANTSOUP, faction: COSMIC }   # used for re-registration
+agent: { symbol: GIANTSOUP, faction: VOID }     # used for re-registration; email reused from DB
 limits:
-  reserve_credits: 20000
-  episode_loss_cap: 25000          # stop the plan when credits < start_credits - cap
-  trade_exposure_credits: 5000     # max unrealized cargo value per trade run
-  run_max_minutes: 60
-  run_max_cycles: 10
+  reserve_credits: 20000           # prospective: a buy must leave cash >= reserve
+  episode_loss_cap: 25000          # equity (cash + cargo at cost) < start - cap -> sell aboard, pause
+  run_max_minutes: 15              # one load per trade run
+trade:
+  proof: { max_units_batches: 1, max_credits: 10000, min_realized_ratio: 0.8 }
+  lot:
+    max_buyer_batches: 5           # units <= 5 x buyer tradeVolume, and <= hold
+    adverse_drop: 0.3              # exposure <= loss headroom / adverse_drop
+    default_batch_decay: 0.04      # predicted bid drop per buyer batch until learned
+  switch: { bid_below_first_seen: 0.9, better_pair_ratio: 1.1 }
+  quote_max_age_seconds: 180       # unchanged; buy only if quotes outlive planned loading
 phases:
   - id: discover
-    exit: { any: [ { minutes_elapsed_gte: 30 }, { markets_observed_gte: 6 } ] }
+    exit: { any: [ { minutes_elapsed_gte: 15 }, { markets_observed_gte: 3 } ] }
     activities: [ { role: probe, strategy: scout } ]
   - id: earn
-    exit: { hours_to_reset_lte: 12 }
+    exit: { hours_to_reset_lte: 1 }
     activities:
-      - { role: command, strategy: trade, when: { conservative_margin_gte: 1 } }
-      - { role: command, strategy: mining }
-  - id: wind_down              # no new trade buys; mining and selling only
-    activities: [ { role: command, strategy: mining } ]
-predictions:
-  - { metric: credits, at_hours: 24, gte: 0 }       # filled in per version by the planning session
+      - { role: command, strategy: trade }
+      - { role: command, strategy: mining, when: { minutes_without_trade_gte: 15 } }
+  - id: wind_down                  # sell cargo aboard only; no buys, no mining
+    activities: [ { role: command, strategy: sell_aboard } ]
+predictions:                       # learning metrics, scored by campaign:report
+  - { metric: proof_realized_ratio, gte: 0.8 }
+  - { metric: minutes_to_first_profit, lte: 45 }
+  - { metric: freshness_holds, lte: 2 }
 ```
 
 Gate metrics in v1: `minutes_elapsed_gte`, `hours_to_reset_lte`, `credits_gte`, `markets_observed_gte`,
-`cycles_completed_gte`. Activities are tried in order; the first feasible one is started. Unknown
-keys fail validation. Keep the vocabulary this small.
+`cycles_completed_gte`, `minutes_without_trade_gte`. Activities are tried in order; the first feasible
+one is started. Unknown keys fail validation. Keep the vocabulary this small.
+
+### Trade selection (deterministic)
+
+Each time the command ship is free, rank every observed source→buyer pair for one good:
+
+- **Units** = min(hold, `max_buyer_batches` × buyer tradeVolume, affordable above reserve,
+  exposure cap ÷ ask), where exposure cap = remaining loss headroom ÷ `adverse_drop`. The first
+  trade of an episode (and the first on any new good+buyer pair) is a **proof** limited by `trade.proof`.
+- **Predicted revenue** prices buyer batch *n* at bid × (1 − decay)^(n−1). Decay comes from our own
+  realized sales for that good at that buyer this episode, else `default_batch_decay`. Purchase
+  cost rises the same way using source batches.
+- **Score** = (predicted revenue − cost − fuel) ÷ (travel + trade minutes). Positive estimated margin
+  is required. Do not use the existing `conservative_cash_margin`: it assumes cargo is never sold
+  and is always negative.
+- **Scale** past the proof only if the proof realized ≥ `min_realized_ratio` of its predicted margin.
+- **Switch** good or buyer when the current buyer's bid is ≤ `bid_below_first_seen` × its first-seen
+  bid this episode, or another pair scores ≥ `better_pair_ratio` × the current one.
+- **Freshness:** a buy batch proceeds only if both quotes will still be within `quote_max_age_seconds`
+  when it executes. Refresh quotes immediately before starting. Park the probe at the chosen buyer
+  (one-way move, not the round-trip scout) so the buyer quote stays fresh while the ship loads.
+- **Sale floor** for a run is the lot's average unit cost (break-even), not a fixed price.
 
 ## The director
 
@@ -77,11 +108,17 @@ keys fail validation. Keep the vocabulary this small.
    agent with the saved token and the file's symbol/faction, sync, open a new episode. If the public
    reset schedule is unknown or the reset is overdue and unconfirmed, wait; never assume.
 4. Safety checks, any failure **pauses** the campaign with a reason (manual `campaign:resume` needed):
-   any `uncertain` ship action; an unexplained credit change (`CreditAccounting`); credits below
-   reserve; credits below `start_credits - episode_loss_cap`.
-5. An active run exists → nothing (runs advance through the existing jobs).
-6. Leftover cargo on the role ship from a stopped run → start a sell-only recovery step (or pause if
-   no buyer is known).
+   any `uncertain` ship action; an unexplained credit change (`CreditAccounting`); equity (cash +
+   cargo at cost) below `start_credits - episode_loss_cap`. Checks run between transactions, never
+   mid-batch. A loss-cap or reserve breach first stops buying and sells what is aboard, then pauses.
+   The reserve is prospective: a buy that would leave cash below it is not made.
+5. An active run that is **blocked or waiting on a freshness hold** with cargo aboard → stop it and
+   go to step 6. Otherwise an active run → nothing (runs advance through the existing jobs). This
+   check comes before the early return; the test showed a blocked run otherwise waits forever.
+6. Cargo aboard the role ship and no active run → start a sell-only recovery (`sell_aboard`): go to
+   the best known buyer, refresh its quote on arrival, sell at or above the lot's average cost. If
+   no buyer clears the floor for 10 minutes, sell at the best bid anyway (the loss cap still
+   applies). Pause only if no buyer for the good is known.
 7. Evaluate the phase exits, advance phase, journal the transition.
 8. Pick the first feasible activity, create its run through the **existing** preview/start code with
    limits from the grant, and start it. The grant replaces only the human approval; every existing
@@ -90,6 +127,17 @@ keys fail validation. Keep the vocabulary this small.
 9. Journal every decision: inputs (credits, phase, candidates considered and why rejected), choice.
 
 One active run per agent stays as today. Probe and command ship take turns; that is acceptable for v1.
+The probe's one-way move to the chosen buyer is a short run between trade runs.
+
+Known code issue to fix: `OperationPlanner.php:96` reads source and buyer quotes before line 101
+checks whether all units are already bought, so a fully loaded ship can be blocked from departing
+by a stale source quote.
+
+### Engine liveness
+
+The engine was faulted for about 43 hours before the test, and nobody noticed. The director cannot
+report its own absence. `campaign:status` exits non-zero when the engine heartbeat is older than 5
+minutes or the campaign is paused, so an outside check can alert on it.
 
 ## Measurement
 
@@ -118,9 +166,13 @@ multi-stop routes, notifications.
 
 - Feature tests with a faked SpaceTraders client: import/validation errors; approve/supersede/revoke;
   reset → registration → episode; engine closed → waits, reopened → resumes from fresh state without
-  replay; uncertain action, unexplained balance, reserve and loss cap each pause; phase gates advance;
-  trade skipped when margin/exposure fails and mining chosen; wind-down blocks new trade buys;
-  leftover-cargo recovery; report output.
+  replay; uncertain action, unexplained balance and loss cap each pause (loss cap after selling aboard);
+  buying cargo is not counted as a loss; proof trade sized by `trade.proof`, scaling only after a
+  passing proof; units limited by buyer batches and loss headroom; decay-adjusted prediction;
+  switch on bid ≤ 90% first-seen and on a better pair; buy skipped when the quote would expire
+  during loading; freshness-held run with cargo → stopped → cargo delivered; fully loaded ship departs
+  despite a stale source quote; mining only after 15 minutes without a trade; wind-down only sells;
+  `campaign:status` non-zero on stale heartbeat or pause; report output with learning predictions.
 - Full existing suite passes.
 - A dry run against the dev checkout's database (engine off) shows `campaign:status` and a
   `campaign:report` for a faked episode.
