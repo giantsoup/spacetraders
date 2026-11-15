@@ -6,6 +6,8 @@ use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignPlaybook;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
+use App\Models\GameObservation;
+use App\Models\Ship;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -84,6 +86,48 @@ class CampaignStatusTest extends TestCase
         $this->assertTrue($grant->fresh()->available());
         $this->assertNull($grant->fresh()->last_directed_at);
         $this->assertDatabaseHas('campaign_events', ['kind' => 'resume', 'campaign_grant_id' => $grant->id]);
+    }
+
+    public function test_ship_scenes_use_saved_navigation_and_waypoint_knowledge_only(): void
+    {
+        ['agent' => $agent, 'ship' => $ship] = CampaignStatusFixture::seed($this->operator);
+        $snapshot = $ship->snapshot;
+        $snapshot['nav']['systemSymbol'] = 'X1-DEMO';
+        $ship->update(['snapshot' => $snapshot]);
+        foreach (['SOURCE' => 'PLANET', 'BUYER' => 'ORBITAL_STATION'] as $suffix => $type) {
+            GameObservation::create(['agent_id' => $agent->id, 'reset_id' => $agent->reset_id, 'kind' => 'waypoint',
+                'symbol' => 'X1-DEMO-'.$suffix, 'observed_at' => now(),
+                'data' => ['symbol' => 'X1-DEMO-'.$suffix, 'systemSymbol' => 'X1-DEMO', 'type' => $type,
+                    'traits' => [['symbol' => 'MARKETPLACE']], 'description' => 'Saved local waypoint']]);
+        }
+        $departure = now()->subMinute()->toIso8601String();
+        $arrival = now()->addMinute()->toIso8601String();
+        $transit = $snapshot;
+        $transit['registration']['role'] = 'SATELLITE';
+        $transit['nav']['status'] = 'IN_TRANSIT';
+        $transit['nav']['route'] = ['departureTime' => $departure, 'arrival' => $arrival,
+            'destination' => ['symbol' => 'X1-DEMO-BUYER', 'type' => 'ORBITAL_STATION', 'secret' => 'not-public']];
+        Ship::create(['agent_id' => $agent->id, 'symbol' => 'OFFLINE-2', 'observed_at' => now(), 'snapshot' => $transit]);
+        $unknown = $snapshot;
+        $unknown['nav']['waypointSymbol'] = 'X1-DEMO-UNSAVED';
+        unset($unknown['nav']['status']);
+        Ship::create(['agent_id' => $agent->id, 'symbol' => 'OFFLINE-3', 'observed_at' => now(), 'snapshot' => $unknown]);
+        $this->actingAs($this->operator)->get('/campaign')->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->has('ships', 3)->where('ships.0.symbol', 'OFFLINE-1')->where('ships.0.role', 'command')
+            ->where('ships.0.waypoint', 'X1-DEMO-SOURCE')->where('ships.0.nav_status', 'DOCKED')
+            ->where('ships.0.nav.status', 'DOCKED')->where('ships.0.nav.waypointSymbol', 'X1-DEMO-SOURCE')
+            ->where('ships.0.nav.route.departureTime', null)->where('ships.0.nav.route.arrival', null)
+            ->where('ships.0.nav.route.destination', ['symbol' => null, 'type' => null])
+            ->where('ships.0.locations.0.symbol', 'X1-DEMO-SOURCE')->where('ships.0.locations.0.type', 'PLANET')
+            ->where('ships.0.locations.0.traits', [['symbol' => 'MARKETPLACE']])
+            ->where('ships.0.fuel.current', 90)->where('ships.0.cargo.units', 20)
+            ->where('ships.1.nav_status', 'IN_TRANSIT')->where('ships.1.waypoint', 'X1-DEMO-SOURCE')
+            ->where('ships.1.nav.route.departureTime', $departure)->where('ships.1.nav.route.arrival', $arrival)
+            ->where('ships.1.nav.route.destination', ['symbol' => 'X1-DEMO-BUYER', 'type' => 'ORBITAL_STATION'])
+            ->has('ships.1.locations', 2)->where('ships.1.locations.1.symbol', 'X1-DEMO-BUYER')
+            ->where('ships.1.locations.1.type', 'ORBITAL_STATION')->where('ships.1.locations.1.traits', [['symbol' => 'MARKETPLACE']])
+            ->where('ships.2.nav.status', null)->where('ships.2.nav.waypointSymbol', 'X1-DEMO-UNSAVED')
+            ->where('ships.2.locations.0.type', null)->where('ships.2.locations.0.traits', null));
     }
 
     public function test_resume_surfaces_game_errors_without_changing_an_expired_grant(): void

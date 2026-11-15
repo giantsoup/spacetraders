@@ -321,7 +321,7 @@ function distance(point) {
                     <button type="button" class="identity-button" @click="openView('fleet')"><h1 id="ship-title">{{ selected || agent.name }}</h1><span aria-hidden="true">⌄</span><span class="sr-only">Switch owned ship</span></button>
                     <button type="button" class="home-link" @click="openView('report', 'systems')">Report</button>
                 </header>
-                <ShipScene :location="sceneLocation" :reset="agent.reset_id" v-if="ship" :ship-name="selected" :transit="presentation.transit" :progress="presentation.progress" :paused="paused || hidden || !!view" @report="openView('report', 'systems')" />
+                <ShipScene :location="sceneLocation" :reset="agent.reset_id" v-if="ship" :ship-name="selected" :pose="presentation.pose" :transit="presentation.transit" :progress="presentation.progress" :paused="paused || hidden || !!view" @report="openView('report', 'systems')" />
                 <div class="ship-status">
                     <p class="status-location">{{ presentation.status }}</p>
                     <p class="ship-eta" :class="{ 'stationary-label': !presentation.transit }">{{ presentation.transit ? presentation.arrival : ship ? assetName(ship.nav?.status) : 'Synchronize fleet' }}</p>

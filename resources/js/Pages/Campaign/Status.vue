@@ -1,11 +1,13 @@
 <script setup>
 import DangerButton from '@/Components/DangerButton.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
+import ShipScene from '@/Components/ShipScene.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { formatLocalClock, formatLocalTime } from '@/dateTime.js';
 import { readableLabel, readableText } from '@/dataPresentation.js';
+import { flightDeckLocation, shipPresentation } from '@/shipPresentation.js';
 import { Head, useForm, usePoll } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 const props = defineProps({
     grant: { type: Object, default: null },
@@ -22,6 +24,15 @@ const props = defineProps({
 });
 
 usePoll(15000);
+const now = ref(Date.now());
+let ticker;
+onMounted(() => { ticker = setInterval(() => { now.value = Date.now(); }, 1000); });
+onUnmounted(() => clearInterval(ticker));
+const shipScenes = computed(() => props.ships.map(ship => ({
+    ...ship,
+    presentation: shipPresentation(ship, props.updatedAt, 'connected', now.value),
+    location: flightDeckLocation(ship, ship.locations),
+})));
 const form = useForm({});
 const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 const amount = value => value === null || value === undefined ? 'Unknown' : `${number.format(value)} CR`;
@@ -148,8 +159,9 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
             <section v-if="grant" class="app-panel" aria-labelledby="ships-heading">
                 <h2 id="ships-heading">Ships</h2>
                 <ul v-if="ships.length" class="records">
-                    <li v-for="ship in ships" :key="ship.symbol">
+                    <li v-for="ship in shipScenes" :key="ship.symbol">
                         <h3>{{ ship.symbol }}</h3>
+                        <ShipScene :location="ship.location" :reset="episode?.reset_id" :pose="ship.presentation.pose" :transit="ship.presentation.transit" :progress="ship.presentation.progress" compact :interactive="false" />
                         <dl>
                             <div><dt>Role</dt><dd>{{ label(ship.role) }}</dd></div>
                             <div><dt>Waypoint</dt><dd>{{ ship.waypoint || 'Unknown' }}</dd></div>
@@ -203,6 +215,7 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
 .status.warning { background: #302819; border-color: #bd9e61; color: #ffe09a; }
 .campaign-status h2 { margin-bottom: 12px; }
 .campaign-status h3 { margin-top: 20px; font-size: 15px; font-weight: 700; }
+.campaign-status .ship-scene { margin: 12px 0; }
 .campaign-status dl { display: grid; gap: 14px; margin: 24px 0; font-size: 13px; }
 .campaign-status dl > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 12px; }
 .campaign-status dt, .records time { color: var(--color-muted); }

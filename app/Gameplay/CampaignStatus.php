@@ -2,6 +2,7 @@
 
 namespace App\Gameplay;
 
+use App\Maps\SystemMapKnowledge;
 use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
@@ -10,6 +11,7 @@ use App\Models\CampaignGrant;
 use App\Models\CampaignSample;
 use App\Models\LocalEngine;
 use App\Models\Ship;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 
 class CampaignStatus
@@ -35,6 +37,11 @@ class CampaignStatus
         $run = $agent ? AutomationRun::where('agent_id', $agent->id)->whereNotNull('active_agent_id')->first() : null;
         $loads = $episode ? CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])->latest('id')->limit(15)->get() : collect();
         $loadRuns = AutomationRun::whereIn('id', $loads->pluck('data.run_id')->filter())->get()->keyBy('id');
+        $ships = $agent ? Ship::where('agent_id', $agent->id)->orderBy('symbol')->get()
+            ->filter(fn ($ship) => in_array($ship->snapshot['registration']['role'] ?? null, ['COMMAND', 'SATELLITE', 'PROBE'], true) || ($ship->snapshot['frame']['symbol'] ?? null) === 'FRAME_PROBE') : collect();
+        $locations = $ships->unique(fn ($ship) => $ship->snapshot['nav']['systemSymbol'] ?? null)
+            ->flatMap(fn ($ship) => collect(app(SystemMapKnowledge::class)->forShip($agent, $ship)['locations'])
+                ->map(fn ($point) => Arr::only($point, ['symbol', 'type', 'traits', 'description'])))->values();
 
         return [
             'updatedAt' => now()->toIso8601String(),
@@ -84,12 +91,29 @@ class CampaignStatus
             'events' => $grant ? CampaignEvent::where('campaign_grant_id', $grant->id)->whereNotIn('kind', ['decision', 'load_result', 'recovery_result'])->latest('id')->limit(15)->get()
                 ->map(fn ($event) => ['at' => $event->created_at->toIso8601String(), 'kind' => $event->kind,
                     'summary' => $this->eventSummary($event)])->all() : [],
-            'ships' => $agent ? Ship::where('agent_id', $agent->id)->orderBy('symbol')->get()->filter(fn ($ship) => in_array($ship->snapshot['registration']['role'] ?? null, ['COMMAND', 'SATELLITE', 'PROBE'], true) || ($ship->snapshot['frame']['symbol'] ?? null) === 'FRAME_PROBE')
+            'ships' => $ships
                 ->map(fn ($ship) => ['symbol' => $ship->symbol,
                     'role' => ($ship->snapshot['registration']['role'] ?? null) === 'COMMAND' ? 'command' : 'probe',
                     'waypoint' => $ship->snapshot['nav']['waypointSymbol'] ?? null, 'nav_status' => $ship->snapshot['nav']['status'] ?? null,
+                    'nav' => [
+                        'status' => $ship->snapshot['nav']['status'] ?? null,
+                        'waypointSymbol' => $ship->snapshot['nav']['waypointSymbol'] ?? null,
+                        'route' => [
+                            'departureTime' => $ship->snapshot['nav']['route']['departureTime'] ?? null,
+                            'arrival' => $ship->snapshot['nav']['route']['arrival'] ?? null,
+                            'destination' => [
+                                'symbol' => $ship->snapshot['nav']['route']['destination']['symbol'] ?? null,
+                                'type' => $ship->snapshot['nav']['route']['destination']['type'] ?? null,
+                            ],
+                        ],
+                    ],
+                    'locations' => collect(array_filter([
+                        $ship->snapshot['nav']['waypointSymbol'] ?? null,
+                        $ship->snapshot['nav']['route']['destination']['symbol'] ?? null,
+                    ]))->unique()->map(fn ($symbol) => $locations->firstWhere('symbol', $symbol)
+                        ?? ['symbol' => $symbol, 'type' => null, 'traits' => null, 'description' => null])->values()->all(),
                     'fuel' => ['current' => $ship->snapshot['fuel']['current'] ?? null, 'capacity' => $ship->snapshot['fuel']['capacity'] ?? null],
-                    'cargo' => ['units' => $ship->snapshot['cargo']['units'] ?? null, 'capacity' => $ship->snapshot['cargo']['capacity'] ?? null]])->values()->all() : [],
+                    'cargo' => ['units' => $ship->snapshot['cargo']['units'] ?? null, 'capacity' => $ship->snapshot['cargo']['capacity'] ?? null]])->values()->all(),
         ];
     }
 

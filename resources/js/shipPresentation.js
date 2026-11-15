@@ -21,7 +21,9 @@ export function shipPresentation(ship, observedAt, connection, now) {
     const departure = Date.parse(ship?.nav?.route?.departureTime);
     const end = Date.parse(ship?.nav?.route?.arrival);
     const progress = transit && Number.isFinite(departure) && end > departure ? Math.max(0, Math.min(1, (now - departure) / (end - departure))) : null;
-    return { stale, transit, arrival, readiness, progress,
+    const pose = ship?.nav?.status === 'DOCKED' ? 'docked' : ship?.nav?.status === 'IN_ORBIT' ? 'orbit'
+        : transit ? arrival === 'Checking' ? 'arriving' : arrival === 'Unknown' ? 'unknown' : 'transit' : 'unknown';
+    return { stale, transit, arrival, readiness, progress, pose,
         status: !ship ? 'No ship observed' : transit ? arrival === 'Checking' ? 'Checking arrival' : `Arriving at ${ship.nav.waypointSymbol || 'Unknown'}` : `${ship.nav?.status === 'DOCKED' ? 'Docked' : ship.nav?.status === 'IN_ORBIT' ? 'In orbit' : 'Navigation unknown'} at ${ship.nav?.waypointSymbol || 'Unknown'}`,
         age: Number.isFinite(stamp) ? `${Math.max(0, Math.floor((now - stamp) / 1000))}s ago` : 'Unknown',
     };
