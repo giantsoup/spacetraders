@@ -1,4 +1,7 @@
 # Hypothesis: one-batch proofs validate the spread before three-batch and five-batch loads.
+# v2 (2026-11-15): a fresh wipe knows prices only where its two ships sit. v1 left discover after
+# 15 minutes with 2 priced markets and then idled. v2 scouts until 8 markets have prices (or 90
+# minutes) and lets the probe keep scouting in earn whenever no trade is feasible.
 name: weekly-default
 version: 1
 agent: { symbol: GIANTSOUP, faction: VOID }
@@ -14,12 +17,13 @@ trade:
   quote_max_age_seconds: 180
 phases:
   - id: discover
-    exit: { any: [ { minutes_elapsed_gte: 15 }, { markets_observed_gte: 3 } ] }
+    exit: { any: [ { minutes_elapsed_gte: 90 }, { markets_observed_gte: 8 } ] }
     activities: [ { role: probe, strategy: scout } ]
   - id: earn
     exit: { hours_to_reset_lte: 1 }
     activities:
       - { role: command, strategy: trade }
+      - { role: probe, strategy: scout }
       - { role: command, strategy: mining, when: { minutes_without_trade_gte: 15 } }
   - id: wind_down
     activities: [ { role: command, strategy: sell_aboard } ]
