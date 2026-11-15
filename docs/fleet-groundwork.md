@@ -20,9 +20,12 @@ Uncertainty takes precedence and pauses immediately.
 
 A general ship purchase records `ship_purchase`. The one-time miner purchase keeps `setup_cost` and its setup prerequisites.
 Purchase previews show the type, shipyard, `purchasePrice`, current credits, credits after purchase, and protected commitments.
-The existing explicit reserve and configured manual minimum remain. There is no additional fleet credit floor.
-For a campaign trade carrying cargo, the purchase protects `CampaignTrade::fuelReserve` for delivery.
-Other campaign runs contribute zero. Plain runs retain reserve plus remaining approved spending. Multiple purchase commitments are added together.
+A general fleet purchase uses only the explicit reserve and protected in-flight commitments: neither the configured manual minimum nor a one-credit minimum applies.
+Other manual spending commands and the one-time miner setup retain their existing manual minimums and setup checks.
+Purchase floor or ceiling refusals state the price, current credits, credits after purchase, explicit reserve, protected in-flight amount, and approved ceiling.
+All manual spending commands add commitments across every active run. Plain runs protect reserve plus remaining approved spending.
+Campaign runs protect only delivery fuel when carrying cargo, using `CampaignTrade::fuelReserve` and the run plan's `market`, regardless of strategy (including trade, mining, and sell-aboard recovery).
+A campaign run with no cargo or no `market` key contributes zero; no delivery destination is inferred when that key is absent.
 
 ## Migration and campaign ownership
 
@@ -32,6 +35,9 @@ Rollback restores the old unique index first. Rollback refuses if several ships 
 
 `CampaignFleet` pins role symbols in `episode.state.role_ships`. Historical started episode runs seed a missing pin before symbol-order fallback.
 A pinned ship remains the role ship while it exists. The same original role rules select a replacement if it disappears.
+Pin writes update only the role's JSON path, refresh the in-memory episode, and skip closed episodes, including episodes closed after loading.
+Concurrent control fields such as `probe_position_failed` and `pending_pause` survive role pinning.
+Campaign status labels only the episode's pinned command and probe ships with those roles. Other owned ships appear as fleet ships, even if they are probes.
 The director handles only its episode's runs. An occupied role ship causes `role_ship_busy`; a manual hauler run is independent.
 Pending actions on role ships or episode runs count as campaign work. Other actions only contend at the shared write boundary.
 
@@ -48,10 +54,10 @@ Pending actions on role ships or episode runs count as campaign work. Other acti
 | `CreditAccounting::record`, `outsideRunDelta` | Added purchase classification and shared outside-run attribution with historical-plan fallback. |
 | `CreditAccounting::summary`, `review` | Verified unchanged. Confirmed purchases explain balance changes. Balance review still requires every agent run to be stopped. The UI retains that agent-wide condition. |
 | `CampaignDirector` | Scoped active-run handoff, retained previews, preview cancellation, and pending work to the episode and role ships. All probe-positioning and recovery role lookups use pinned roles. |
-| `CampaignFleet` | Added common role resolution and campaign pending-action selection for director and grant replacement. |
+| `CampaignFleet` | Added common role resolution and campaign pending-action selection for director and grant replacement. Atomic role-key pinning preserves concurrent episode controls and leaves closed episodes unchanged. |
 | `CampaignSafety::reason`, `metrics` | Deferred unexplained balance during pending or sending actions. Metrics already scope runs by episode, so manual haulers do not add campaign cycles. |
 | `CampaignControl::busy`, `activatePending`, `stopRuns` | Busy counts episode runs and role or episode actions. A manual hauler cannot indefinitely hold a replacement grant. Stop already selects all grant episode runs. |
-| `CampaignStatus`, `CampaignReport` | Status now selects the episode's active run. Report already selects episode runs and uses confirmed action outcomes rather than the setup entry-kind string. |
+| `CampaignStatus`, `CampaignReport` | Status selects the episode's active run and labels the full fleet by pinned roles. Report already selects episode runs and uses confirmed action outcomes rather than the setup entry-kind string. |
 | `CycleAccounting` | Verified unchanged. Capital comes from confirmed delivered-ship purchases and transaction totals. Run economics use each run's own totals, independent of entry-kind strings. |
 | `AgentRegistration::save` | Verified unchanged with two runs. Any active run without a stop request, or any pending or sending action, refuses credential replacement. |
 | `AgentSynchronizer::archiveForReset` | Verified unchanged with two runs. It requests stop on all active runs. Their advance jobs finish the stop before further HTTP or gameplay writes. |
@@ -62,15 +68,15 @@ Pending actions on role ships or episode runs count as campaign work. Other acti
 | `DeploymentGate`, `LocalEngineManager` | Verified unchanged. Deployment drains process and queue leases. Engine end or fault calls the shared gate. Campaign grant authority survives; plain approvals do not. |
 | `RequestBudget` | Verified unchanged. Shared host and account buckets use a file lock. Reservations count each HTTP request once in each applicable bucket. Runs do not create extra allowance or reserve by run id. Pacing defaults to 1.9 requests per second. A regression verifies two callers share the same allowance and request counts. Existing deferral and queue delivery let both tested ships progress. |
 | `Adviser`, `AdviserSelector`, `AdviserPanel.vue` | Adviser evidence selects the policy ship's run. Selector consumes the corrected evidence. The panel already matches the policy ship when selecting a run. Unsettled actions still gate writes agent-wide. |
-| `AgentDashboardController`, `Dashboard.vue`, `AutomationConsole.vue` | Response includes every active run plus recent history. Controls and outcomes use the selected ship. Added the fleet purchase panel, purchase review values, and a list with Stop for every active run. |
+| `AgentDashboardController`, `Dashboard.vue`, `AutomationConsole.vue` | Response includes every active run plus recent history. Controls and outcomes use the selected ship. Purchase offers use stable yard/type identities, preserve edited maximums during polling, and require the selected ship at the yard. Purchase review shows each relevant value once. Campaign runs are labeled, and Stop explains the handoff back to the director for a fresh plan. |
 | `ManualCommands`, `ManualCommandForm.vue`, `guidedFlight.js` | Verified unchanged. The general command already exists and its warning remains accurate. The guided miner setup keeps its separate path. |
 | `scripts/campaign-smoke.php`, `scripts/verify-*.php` | Reviewed for active-agent assumptions. Existing singleton fixtures and idle preconditions remain valid. No production database smoke command was run. |
 
 ## Verification and limits
 
-Final full PHP suite on 2026-11-15: `OK (978 tests, 5871 assertions)`.
+Final full PHP suite after round-1 fixes on 2026-11-15: `OK (998 tests, 5931 assertions)`.
+The round adds 20 regression cases for spending floors and commitments, delivery-fuel protection across campaign strategies, role pinning, and fleet purchase location guidance.
 Run with `C:/Users/taylo/.config/herd/bin/php85/php.exe vendor/bin/phpunit`.
-The JUnit report is available locally at `storage/app/fleet-groundwork-phpunit.xml`.
 Pint passes for every changed PHP file, and `git diff --check` passes.
 
 
@@ -78,10 +84,16 @@ Tests use in-memory SQLite and fake SpaceTraders responses. Dependencies were in
 No production checkout, deployment, real SpaceTraders request, Discord post, push, or PR is part of this work.
 
 The application JavaScript checks and `npm run build` pass. The rendered automation selection check also verifies that another ship's run leaves the selected ship's controls enabled.
+`node scripts/verify-fleet-purchases.mjs` renders the real built dashboard against temporary SQLite data with outbound HTTP denied and no environment-file changes.
+It checks polling with a changed price and reordered offers, remote-yard disabling, purchase review rows, campaign Stop wording, and fleet role labels on the campaign page.
+Set `FLEET_PURCHASE_EVIDENCE` to choose the screenshot directory; by default evidence is saved under the system temporary directory.
 The POSIX verification-lifecycle suite was attempted and fails on Windows permissions and `process.getuid`.
 `scripts/windows/verify.ps1` explicitly skips that suite on Windows for permission, symlink, and signal assumptions. Its syntax check passes.
 
 A concurrent credit change between preview and Start can still invalidate the preview or its fingerprint. Create a fresh preview in that case.
+An approved manual action is rejected, not deferred, if another ship's action is pending or sending at execution time. Re-preview after that action settles.
+`CampaignSafety` deliberately defers the unexplained-change verdict while any action for the agent and reset is pending or sending, bounded by action expiry.
+A pending write on any ship can make the shared balance transiently unexplained; this hold is agent-wide, not limited to campaign role ships.
 This stage adds no multi-ship campaign scheduling, purchase automation, trade allocation, or fairness scheduler.
 The shared budget prevents extra request allowance, but does not promise fairness for a large fleet. The existing dispatcher batch limit is 50 runs.
 Uncertainty and operator balance reviews remain agent-wide by design.
@@ -107,12 +119,15 @@ Implementation files:
 - `database/migrations/2026_11_15_000001_allow_one_active_run_per_ship.php`
 - `resources/js/Components/AutomationConsole.vue`
 - `resources/js/Pages/Agent/Dashboard.vue`
+- `resources/js/Pages/Campaign/Status.vue`
 
 Verification and documentation files:
 
 - `scripts/verify-automation-selection.mjs`
+- `scripts/verify-fleet-purchases.mjs`
 - `tests/Feature/AdviserTest.php`
 - `tests/Feature/CampaignAutopilotTest.php`
+- `tests/Feature/CampaignStatusTest.php`
 - `tests/Feature/FoundationCommandTest.php`
 - `tests/Feature/GameplayTest.php`
 - `tests/Feature/OpportunityTest.php`
