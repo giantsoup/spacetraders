@@ -13,8 +13,10 @@ use App\Gameplay\CampaignRecovery;
 use App\Gameplay\CampaignRegistrationFailure;
 use App\Gameplay\CampaignReport;
 use App\Gameplay\CampaignSafety;
+use App\Gameplay\CampaignStatus;
 use App\Gameplay\CampaignTrade;
 use App\Gameplay\ContractPlanner;
+use App\Gameplay\CreditAccounting;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\EngineGate;
 use App\Gameplay\FuelPlanner;
@@ -90,6 +92,141 @@ class CampaignAutopilotTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_engine_close_finishes_each_run_and_restart_resumes_only_campaign_authority(): void
+    {
+        $grant = $this->tradeGrant();
+        $campaign = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $manual = $campaign->replicate();
+        $manual->fill(['campaign_episode_id' => null, 'ship_symbol' => 'LOCAL-3'])->save();
+        app(AutomationRunner::class)->advance($campaign->id);
+        $oldAction = ShipAction::where('state', 'pending')->firstOrFail();
+        app(EngineGate::class)->close('off');
+        foreach ([$campaign, $manual] as $run) {
+            $this->assertNotNull($run->fresh()->stop_requested_at);
+            app(AutomationRunner::class)->advance($run->id);
+            $this->assertSame('stopped', $run->fresh()->state->value);
+            $this->assertNull($run->fresh()->active_agent_id);
+        }
+        $this->assertSame('rejected', $oldAction->fresh()->state->value);
+        EngineFixture::healthy();
+        $this->tick();
+        $next = AutomationRun::where('campaign_episode_id', $campaign->campaign_episode_id)->whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertNotSame($campaign->id, $next->id);
+        $this->assertNull($manual->fresh()->active_agent_id);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_buying_an_earlier_sorting_probe_keeps_the_episodes_existing_role_ship(): void
+    {
+        $this->tradeWorld();
+        $this->editWorld(fn (&$world) => $world['ships'][1]['symbol'] = 'LOCAL-Z');
+        $this->approve();
+        $this->tick();
+        $episode = CampaignEpisode::firstOrFail();
+        $this->assertSame('LOCAL-Z', $episode->state['role_ships']['probe']);
+        $this->editWorld(function (&$world) {
+            $world['foundation'] = true;
+            $world['offer']['type'] = 'SHIP_PROBE';
+            $world['offer']['frame']['symbol'] = 'FRAME_PROBE';
+            $world['offer']['mounts'] = [];
+        });
+        $action = app(ShipCommandExecutor::class)->preview($this->agent->fresh(), 'LOCAL-1', 'buy_ship',
+            ['shipType' => 'SHIP_PROBE', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => 20000, 'reserve' => 0], 'second-probe');
+        app(ShipCommandExecutor::class)->approve($this->agent->fresh(), $action);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertSame('confirmed', $action->fresh()->state->value);
+        $this->assertSame('FRAME_PROBE', Ship::where('symbol', 'LOCAL-3')->firstOrFail()->snapshot['frame']['symbol']);
+        $this->tick();
+        $this->assertSame('LOCAL-Z', $episode->fresh()->state['role_ships']['probe']);
+    }
+
+    public function test_purchase_preview_protects_delivery_fuel_while_a_campaign_trade_carries_cargo(): void
+    {
+        $grant = $this->tradeGrant(1000);
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        app(AutomationRunner::class)->advance($run->id);
+        app(ShipCommandExecutor::class)->execute(ShipAction::where('state', 'pending')->firstOrFail()->id);
+        $this->assertGreaterThan(0, Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot['cargo']['units']);
+        $run->update(['plan' => array_replace($run->fresh()->plan, ['max_spend' => 100000])]);
+        $action = app(ShipCommandExecutor::class)->preview($this->agent->fresh(), 'LOCAL-1', 'buy_ship',
+            ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => 20000, 'reserve' => 0], 'fuel-protected');
+        $this->assertSame(10, $action->before_state['estimate']['protected_in_flight']);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_non_role_pending_action_defers_only_the_write_and_settled_discrepancy_still_pauses(): void
+    {
+        $grant = $this->tradeGrant();
+        AutomationRun::whereNotNull('active_agent_id')->update(['active_agent_id' => null, 'state' => 'stopped']);
+        $action = ShipAction::create(['agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id, 'ship_symbol' => 'LOCAL-3',
+            'key' => 'unrelated-pending', 'origin' => 'manual', 'command' => 'buy', 'state' => 'pending', 'arguments' => [], 'expires_at' => now()->addMinutes(3)]);
+        $this->tick();
+        $this->assertNull($grant->fresh()->paused_at);
+        $this->assertSame('awaiting_run_start', $grant->fresh()->wait_reason);
+        $action->update(['state' => 'rejected']);
+        $this->editWorld(fn (&$world) => $world['credits'] -= 100);
+        $this->tick();
+        $this->assertSame('unexplained_change', $grant->fresh()->pause_reason);
+    }
+
+    public function test_campaign_ignores_a_non_role_run_and_status_stays_with_its_own_run(): void
+    {
+        $grant = $this->tradeGrant();
+        $campaign = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $manual = $campaign->replicate();
+        $manual->fill(['campaign_episode_id' => null, 'ship_symbol' => 'LOCAL-3', 'state' => 'blocked'])->save();
+        $campaign->update(['state' => 'stopped', 'active_agent_id' => null]);
+        $this->tick();
+        $this->assertNull($manual->fresh()->stop_requested_at);
+        $this->assertSame($this->agent->id, $manual->fresh()->active_agent_id);
+        $active = AutomationRun::where('campaign_episode_id', $campaign->campaign_episode_id)->whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertSame($active->id, app(CampaignStatus::class)->read()['currentRun']['id']);
+        $this->assertSame('trade', CampaignEvent::where('kind', 'decision')->latest('id')->firstOrFail()->data['choice']);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_campaign_waits_without_stopping_a_manual_run_on_a_role_ship(): void
+    {
+        $grant = $this->tradeGrant();
+        $manual = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $manual->update(['campaign_episode_id' => null, 'state' => 'blocked']);
+        $this->tick();
+        $this->assertNull($manual->fresh()->stop_requested_at);
+        $this->assertSame('role_ship_busy', CampaignEvent::where('kind', 'decision')->latest('id')->firstOrFail()->data['choice']);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_campaign_defers_accounting_for_another_ships_in_flight_write_but_uncertainty_pauses(): void
+    {
+        $grant = $this->tradeGrant();
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $action = ShipAction::create(['agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id, 'ship_symbol' => 'LOCAL-3',
+            'key' => 'other-ship', 'origin' => 'manual', 'command' => 'buy', 'state' => 'sending', 'arguments' => [], 'expires_at' => now()->addMinutes(3)]);
+        $this->editWorld(fn (&$world) => $world['credits'] -= 100);
+        $this->tick();
+        $this->assertNull($grant->fresh()->paused_at);
+        app(AutomationRunner::class)->advance($run->id);
+        $this->assertNotSame('blocked', $run->fresh()->state->value);
+        $action->update(['state' => 'uncertain']);
+        $this->tick();
+        $this->assertSame('uncertain_action', $grant->fresh()->pause_reason);
+    }
+
+    public function test_pending_grant_replacement_ignores_a_manual_hauler_run(): void
+    {
+        $grant = $this->tradeGrant();
+        $campaign = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $pending = $this->approve($this->body()."\n# replacement\n");
+        $this->assertSame(2, $pending->slot);
+        $manual = $campaign->replicate();
+        $manual->fill(['campaign_episode_id' => null, 'ship_symbol' => 'LOCAL-3'])->save();
+        $campaign->update(['state' => 'stopped', 'active_agent_id' => null]);
+        app(CampaignControl::class)->activatePending();
+        $this->assertSame(1, $pending->fresh()->slot);
+        $this->assertNotNull($grant->fresh()->superseded_at);
+        $this->assertNull($manual->fresh()->stop_requested_at);
+    }
+
     public function test_manual_fleet_purchase_during_a_campaign_run_is_explained_and_the_run_continues(): void
     {
         $grant = $this->tradeGrant(1000);
@@ -103,7 +240,7 @@ class CampaignAutopilotTest extends TestCase
         app(ShipCommandExecutor::class)->execute($action->id);
         $this->assertSame('confirmed', $action->fresh()->state->value);
         $this->assertDatabaseHas('ships', ['agent_id' => $this->agent->id, 'symbol' => 'LOCAL-3']);
-        $this->assertSame(0, app(\App\Gameplay\CreditAccounting::class)->summary($this->agent->fresh())['unexplained_change']);
+        $this->assertSame(0, app(CreditAccounting::class)->summary($this->agent->fresh())['unexplained_change']);
         $this->assertNull(app(CampaignSafety::class)->reason($grant, CampaignEpisode::firstOrFail(), $this->agent->fresh()));
         for ($i = 0; $i < 100 && $run->fresh()->active_agent_id; $i++) {
             app(AutomationRunner::class)->advance($run->id);

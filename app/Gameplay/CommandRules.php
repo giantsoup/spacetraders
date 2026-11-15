@@ -14,6 +14,7 @@ class CommandRules
 
     public function inspect(Agent $agent, string $symbol, string $command, array $arguments, ?AutomationRun $run = null): array
     {
+        $fleetPurchase = $command === 'buy_ship' && ! isset($arguments['site'], $arguments['market']);
         $agentCommand = ! $run && in_array($command, ['contract_accept', 'contract_fulfill'], true);
         if (! $agentCommand && ! Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->exists()) {
             throw new GameException('Ship is not in the saved owned fleet. Synchronize first.');
@@ -31,7 +32,7 @@ class CommandRules
             }
         }
         $active = AutomationRun::where('agent_id', $agent->id)->whereNotNull('active_agent_id')->when(! $agentCommand, fn ($query) => $query->where('ship_symbol', $symbol))->first();
-        if ($command !== 'buy_ship' && $active && ($agentCommand || $active->ship_symbol === $symbol) && $active->id !== $run?->id) {
+        if (! $fleetPurchase && $active && ($agentCommand || $active->ship_symbol === $symbol) && $active->id !== $run?->id) {
             throw new GameException('Stop automation and settle its action before manual takeover.');
         }
         if ($run) {
@@ -66,7 +67,7 @@ class CommandRules
         if (! $run) {
             foreach (AutomationRun::where('active_agent_id', $agent->id)->get() as $protectedRun) {
                 $commitment = $protectedRun->plan['reserve'] + max(0, $protectedRun->plan['max_spend'] - ($protectedRun->totals['spending'] ?? $protectedRun->totals['fuel_cost'] ?? 0));
-                if ($command === 'buy_ship' && $protectedRun->campaign_episode_id) {
+                if ($fleetPurchase && $protectedRun->campaign_episode_id) {
                     $commitment = 0;
                     if ($protectedRun->strategy === 'trade') {
                         $carrying = $this->sync->refreshShip($agent, $protectedRun->ship_symbol)->snapshot;

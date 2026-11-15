@@ -140,10 +140,14 @@ class ShipCommandExecutor
         return $action->refresh();
     }
 
-    public function clear(Agent $agent, ?int $except = null): void
+    public function clear(Agent $agent, ?int $except = null, bool $defer = false): void
     {
-        if (ShipAction::where('agent_id', $agent->id)->when($except, fn ($q) => $q->whereKeyNot($except))->where(fn ($q) => $q->whereIn('state', ['pending', 'sending', 'uncertain'])->orWhere('review_required', true))->exists()) {
+        $others = ShipAction::where('agent_id', $agent->id)->when($except, fn ($q) => $q->whereKeyNot($except));
+        if ((clone $others)->where(fn ($q) => $q->where('state', 'uncertain')->orWhere('review_required', true))->exists()) {
             throw new GameException('An action is pending, uncertain or requires review. Settle it before another command.');
+        }
+        if ((clone $others)->whereIn('state', ['pending', 'sending'])->exists()) {
+            throw new GameException($defer ? 'An action is pending or sending. Wait for it to settle before another command.' : 'An action is pending, uncertain or requires review. Settle it before another command.', retryAfter: $defer ? 5 : 0);
         }
         if (! $agent->canonical_identity || Agent::where('name', $agent->name)->where('reset_id', $agent->reset_id)->whereKeyNot($agent->id)->exists()) {
             throw new GameException('Agent identity is not unique. Synchronize or resolve duplicate imports first.');
@@ -177,7 +181,7 @@ class ShipCommandExecutor
             $received = false;
             try {
                 $this->gate->check($action->engine_session_id);
-                $this->clear($agent, $action->id);
+                $this->clear($agent, $action->id, defer: $run !== null);
                 if ($action->reset_id !== $agent->reset_id || $action->expires_at->isPast() || ($run && ($run->stop_requested_at || $run->expires_at->isPast() || ! $run->active_agent_id))) {
                     throw new GameException('Intent expired, reset or stopped before execution.');
                 }

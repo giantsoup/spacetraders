@@ -34,7 +34,7 @@ class CampaignStatus
         $agent = $episode ? Agent::find($episode->agent_id) : null;
         $revision = $grant?->revision();
         $engine = LocalEngine::find(1);
-        $run = $agent ? AutomationRun::where('agent_id', $agent->id)->whereNotNull('active_agent_id')->first() : null;
+        $run = $episode ? AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('active_agent_id')->first() : null;
         $loads = $episode ? CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])->latest('id')->limit(15)->get() : collect();
         $loadRuns = AutomationRun::whereIn('id', $loads->pluck('data.run_id')->filter())->get()->keyBy('id');
         $ships = $agent ? Ship::where('agent_id', $agent->id)->orderBy('symbol')->get()

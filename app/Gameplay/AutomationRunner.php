@@ -27,7 +27,7 @@ class AutomationRunner
         }
 
         return $this->executor->locked($agent, function () use ($agent, $symbol, $limits) {
-            $this->executor->clear($agent);
+            $this->executor->clear($agent, defer: true);
             if (ShipAction::where('agent_id', $agent->id)->where('command', 'buy_ship')->get()->contains(fn ($a) => ! empty($a->outcome['configuration_mismatch']))) {
                 throw new GameException('Delivered miner configuration differs from its approval. Inspect the setup purchase before automation.');
             }
@@ -73,7 +73,7 @@ class AutomationRunner
                 throw new GameException('Automation is disabled. Enable it only after local migration, backup and credential checks.');
             }
             $this->gate->check($run->engine_session_id);
-            $this->executor->clear($agent);
+            $this->executor->clear($agent, defer: true);
             if ($run->expires_at->isPast() || $run->reset_id !== $agent->reset_id || AutomationRun::where('active_agent_id', $agent->id)->where('ship_symbol', $run->ship_symbol)->exists()) {
                 $this->rejectPreview($run, 'Preview expired, reset or another run already owns this ship.');
             }
@@ -160,7 +160,7 @@ class AutomationRunner
     public function previewRecovery(Agent $agent, string $symbol, string $buyer, array $limits, CampaignEpisode $episode): AutomationRun
     {
         return $this->executor->locked($agent, function () use ($agent, $symbol, $buyer, $limits, $episode) {
-            $this->executor->clear($agent);
+            $this->executor->clear($agent, defer: true);
             $fresh = app(CampaignRecovery::class)->compose($agent, $symbol, $buyer, $limits);
 
             return AutomationRun::create(['agent_id' => $agent->id, 'campaign_episode_id' => $episode->id, 'reset_id' => $agent->reset_id,
@@ -380,7 +380,7 @@ class AutomationRunner
     public function previewDraft(Agent $agent, AutomationDraft $draft): AutomationRun
     {
         return $this->executor->locked($agent, function () use ($agent, $draft) {
-            $this->executor->clear($agent);
+            $this->executor->clear($agent, defer: true);
             $draft->refresh();
             $composed = $this->compose($agent, $draft);
             $plan = $composed['plan'];

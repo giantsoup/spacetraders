@@ -17,7 +17,8 @@ class CampaignSafety
         if (ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where(fn ($query) => $query->where('state', 'uncertain')->orWhere('review_required', true))->exists()) {
             return 'uncertain_action';
         }
-        if ((app(CreditAccounting::class)->summary($agent)['unexplained_change'] ?? 0) !== 0) {
+        if (! ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereIn('state', ['pending', 'sending'])->exists()
+            && (app(CreditAccounting::class)->summary($agent)['unexplained_change'] ?? 0) !== 0) {
             return 'unexplained_change';
         }
         if (! empty($episode->state['pending_pause'])) {
