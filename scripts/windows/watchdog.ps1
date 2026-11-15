@@ -17,8 +17,11 @@ try {
     }
     $php = Get-HerdPhp
     if ($Install) {
-        $executable = Join-Path $PSHOME 'powershell.exe'
-        $arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File ' + (ConvertTo-NativeArgument $PSCommandPath)
+        # php-win.exe has no console, so the task never opens a window. powershell.exe with
+        # -WindowStyle Hidden still flashed a terminal window every run.
+        $executable = Join-Path (Split-Path -Parent $php) 'php-win.exe'
+        if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw "Herd php-win.exe not found next to $php" }
+        $arguments = (ConvertTo-NativeArgument (Join-Path $root 'artisan')) + ' campaign:watchdog --no-interaction'
         $action = New-ScheduledTaskAction -Execute $executable -Argument $arguments -WorkingDirectory $root
         $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 15)
         $trigger.Repetition.StopAtDurationEnd = $false

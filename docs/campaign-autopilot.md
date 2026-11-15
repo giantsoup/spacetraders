@@ -142,8 +142,9 @@ php artisan campaign:watchdog
 ~~~
 
 Install from the checkout to be monitored. The independent, checkout-specific Windows
-Scheduled Task runs every fifteen minutes as the current interactive user with hidden
-windows. Like the engine task, it requires that user to remain logged in. Installation
+Scheduled Task runs every fifteen minutes as the current interactive user. It starts
+php-win.exe directly, so it never opens a window; reinstall it after upgrading from a
+version that started powershell.exe. Like the engine task, it requires that user to remain logged in. Installation
 replaces only this checkout's watchdog task; uninstall removes only that task. Neither
 operation changes or starts the engine. deploy.ps1 leaves this separate task alone.
 
