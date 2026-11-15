@@ -4,8 +4,10 @@ namespace Tests\Feature;
 
 use App\Enums\ActionState;
 use App\Enums\RunState;
+use App\Gameplay\AgentRegistration;
 use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\AutomationRunner;
+use App\Gameplay\CreditAccounting;
 use App\Gameplay\GameException;
 use App\Gameplay\HostLock;
 use App\Gameplay\MiningPlanner;
@@ -28,6 +30,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Inertia\Testing\AssertableInertia as Assert;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\FakeSpaceTraders;
@@ -642,6 +645,130 @@ class GameplayTest extends TestCase
         $this->world(fn (&$w) => $w['goods'] = []);
         $this->expectException(GameException::class);
         $this->miningRun();
+    }
+
+    public function test_historical_plan_without_external_snapshot_keeps_its_manual_credit_accounting(): void
+    {
+        $this->world(fn (&$world) => $world['ships'][] = FakeSpaceTraders::ship('LOCAL-2'));
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $run = $this->miningRun();
+        $historical = $run->plan;
+        unset($historical['initial_external_credit_delta']);
+        $run->update(['plan' => $historical]);
+        $this->command('buy', ['symbol' => 'IRON_ORE', 'units' => 2, 'maxTotal' => 60], 'LOCAL-2');
+        for ($i = 0; $i < 20 && $run->active_agent_id; $i++) {
+            $run->update(['next_action_at' => now()]);
+            $this->advance($run);
+        }
+        $this->assertSame(RunState::Completed, $run->state, $run->blocked_reason ?? '');
+        $this->assertSame(-60, $run->totals['other_credit_delta']);
+    }
+
+    public function test_dashboard_includes_old_active_runs_outside_its_recent_history(): void
+    {
+        $run = $this->miningRun();
+        for ($i = 0; $i < 12; $i++) {
+            $history = $run->replicate();
+            $history->fill(['active_agent_id' => null, 'state' => 'completed'])->save();
+        }
+        $this->get(route('agents.show', $this->agent))->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->has('runs', 11)->where('runs.10.id', $run->id)->where('runs.10.active_agent_id', $this->agent->id));
+    }
+
+    public function test_reset_requests_and_finishes_all_active_ship_runs(): void
+    {
+        $this->world(fn (&$world) => $world['ships'][] = FakeSpaceTraders::ship('LOCAL-2'));
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $first = $this->miningRun();
+        $second = app(AutomationRunner::class)->preview($this->agent->fresh(), 'LOCAL-2', $first->plan);
+        app(AutomationRunner::class)->start($this->agent->fresh(), $second);
+        app(AgentSynchronizer::class)->archiveForReset($this->agent->fresh(), '2026-11-15');
+        foreach ([$first, $second] as $run) {
+            $this->assertNotNull($run->fresh()->stop_requested_at);
+            app(AutomationRunner::class)->advance($run->id);
+            $this->assertSame(RunState::Stopped, $run->fresh()->state);
+            $this->assertNull($run->fresh()->active_agent_id);
+        }
+        $this->assertEmpty($this->world()['writes']);
+    }
+
+    public function test_credential_replacement_refuses_any_remaining_active_ship_run(): void
+    {
+        $first = $this->miningRun();
+        $second = $first->replicate();
+        $second->ship_symbol = 'LOCAL-2';
+        $second->save();
+        app(AutomationRunner::class)->stop($first);
+        $this->expectException(ValidationException::class);
+        app(AgentRegistration::class)->save(User::findOrFail($this->agent->user_id),
+            ['symbol' => 'LOCAL', 'startingFaction' => 'COSMIC'], 'synthetic-replacement', $this->agent->reset_id);
+    }
+
+    public function test_active_ship_index_migration_preserves_a_live_run_and_round_trips(): void
+    {
+        $run = $this->miningRun();
+        $migration = require database_path('migrations/2026_11_15_000001_allow_one_active_run_per_ship.php');
+        $migration->down();
+        $migration->up();
+        $this->assertSame($this->agent->id, $run->fresh()->active_agent_id);
+        $second = $run->replicate();
+        $second->ship_symbol = 'LOCAL-2';
+        $second->save();
+        $preview = $run->replicate();
+        $preview->active_agent_id = null;
+        $preview->save();
+        $preview->replicate()->save();
+        $this->expectException(UniqueConstraintViolationException::class);
+        $run->replicate()->save();
+    }
+
+    public function test_second_start_on_same_ship_requires_a_fresh_preview(): void
+    {
+        $first = $this->miningRun();
+        $second = app(AutomationRunner::class)->preview($this->agent->fresh(), 'LOCAL-1', $first->plan);
+        $this->expectException(GameException::class);
+        $this->expectExceptionMessage('another run already owns this ship');
+        app(AutomationRunner::class)->start($this->agent->fresh(), $second);
+    }
+
+    public function test_run_execution_waits_for_another_ships_pending_action_without_rejecting_its_own(): void
+    {
+        $run = $this->miningRun();
+        app(AutomationRunner::class)->advance($run->id);
+        $own = ShipAction::where('automation_run_id', $run->id)->where('state', 'pending')->firstOrFail();
+        $other = ShipAction::create(['agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id, 'ship_symbol' => 'LOCAL-2',
+            'key' => 'other-pending', 'origin' => 'manual', 'command' => 'orbit', 'state' => 'pending', 'arguments' => [], 'expires_at' => now()->addMinutes(3)]);
+        app(ShipCommandExecutor::class)->execute($own->id);
+        $this->assertSame(ActionState::Pending, $own->fresh()->state);
+        $this->assertSame(RunState::Running, $run->fresh()->state);
+        $this->assertEmpty($this->world()['writes']);
+        $other->update(['state' => 'sending']);
+        app(AutomationRunner::class)->advance($run->id);
+        $this->assertNotSame(RunState::Blocked, $run->fresh()->state);
+        $other->update(['state' => 'confirmed']);
+        app(ShipCommandExecutor::class)->execute($own->id);
+        $this->assertSame(ActionState::Confirmed, $own->fresh()->state);
+    }
+
+    public function test_two_ships_can_run_and_explain_each_others_confirmed_sales(): void
+    {
+        $this->world(fn (&$w) => $w['ships'][] = FakeSpaceTraders::ship('LOCAL-2'));
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $first = $this->miningRun();
+        $second = app(AutomationRunner::class)->preview($this->agent->fresh(), 'LOCAL-2', $first->plan);
+        app(AutomationRunner::class)->start($this->agent->fresh(), $second);
+        $this->assertSame(2, AutomationRun::whereNotNull('active_agent_id')->count());
+        for ($i = 0; $i < 20 && ($first->active_agent_id || $second->active_agent_id); $i++) {
+            foreach ([$first, $second] as $run) {
+                $run->update(['next_action_at' => now()]);
+                $this->advance($run);
+            }
+        }
+        foreach ([$first, $second] as $run) {
+            $this->assertSame(RunState::Completed, $run->state, $run->blocked_reason ?? '');
+        }
+        $this->assertSame(490, $this->agent->fresh()->credits - 100000);
+        $this->assertSame(0, app(CreditAccounting::class)->summary($this->agent->fresh())['unexplained_change']);
     }
 
     public function test_single_active_run_stale_preview_and_default_disabled_starts(): void

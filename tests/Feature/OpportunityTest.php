@@ -6,6 +6,7 @@ use App\Enums\ActionState;
 use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\AutomationRunner;
 use App\Gameplay\AutomationStaging;
+use App\Gameplay\CreditAccounting;
 use App\Gameplay\CycleAccounting;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\EngineGate;
@@ -343,6 +344,30 @@ class OpportunityTest extends TestCase
         $this->assertSame('X1-TEST-ROCK', Ship::where('symbol', 'LOCAL-1')->sole()->snapshot['nav']['waypointSymbol']);
         $this->assertNotEmpty(GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-PORT')->sole()->data['tradeGoods']);
         $this->assertSame([], ShipAction::whereIn('command', ['mine', 'buy', 'sell'])->get()->all());
+    }
+
+    public function test_two_trade_runs_share_credits_and_both_complete_with_interleaved_buys_and_sales(): void
+    {
+        $this->tradeWorld();
+        $this->world(fn (&$world) => $world['ships'][] = FakeSpaceTraders::ship('LOCAL-3'));
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $first = $this->boundedRun('trade');
+        $runner = app(AutomationRunner::class);
+        $second = $runner->preview($this->agent->fresh(), 'LOCAL-3', $first->plan);
+        $runner->start($this->agent->fresh(), $second);
+        for ($step = 0; $step < 50 && ($first->active_agent_id || $second->active_agent_id); $step++) {
+            foreach ([$first, $second] as $run) {
+                $this->advance($run);
+            }
+        }
+        foreach ([$first, $second] as $run) {
+            $this->assertSame('completed', $run->state->value, $run->blocked_reason ?? '');
+            $this->assertSame(300, $run->totals['purchase_cost']);
+            $this->assertSame(600, $run->totals['sale_proceeds']);
+            $this->assertSame(295, $run->totals['credit_delta']);
+        }
+        $this->assertSame(100590, $this->agent->fresh()->credits);
+        $this->assertSame(0, app(CreditAccounting::class)->summary($this->agent->fresh())['unexplained_change']);
     }
 
     public function test_trade_batches_refresh_returns_and_accounts_for_acquisition(): void

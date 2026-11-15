@@ -7,7 +7,6 @@ use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\CampaignRevision;
-use App\Models\ShipAction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -38,8 +37,17 @@ class CampaignControl
 
     public function busy(CampaignGrant $grant): bool
     {
-        return AutomationRun::whereIn('agent_id', User::findOrFail($grant->user_id)->agents()->unarchived()->select('id'))->whereNotNull('active_agent_id')->exists()
-            || ShipAction::whereIn('agent_id', User::findOrFail($grant->user_id)->agents()->unarchived()->select('id'))->whereIn('state', ['pending', 'sending'])->exists();
+        $episodes = CampaignEpisode::where('campaign_grant_id', $grant->id)->get();
+        if (AutomationRun::whereIn('campaign_episode_id', $episodes->pluck('id'))->whereNotNull('active_agent_id')->exists()) {
+            return true;
+        }
+        foreach ($episodes as $episode) {
+            if (app(CampaignFleet::class)->pending($episode)->exists()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function activatePending(): void

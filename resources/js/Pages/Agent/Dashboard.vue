@@ -100,9 +100,10 @@ const markets = computed(() => props.observations.filter(o => o.kind === 'market
 const market = computed(() => markets.value.find(o => o.symbol === ship.value?.nav?.waypointSymbol));
 const yards = computed(() => props.observations.filter(o => o.kind === 'shipyard'));
 const offers = computed(() => yards.value.flatMap(y => (y.data.ships || []).map(o => ({ ...o, yard: y.symbol }))));
-const activeRun = computed(() => props.runs.find(r => r.active_agent_id));
+const activeRuns = computed(() => props.runs.filter(r => r.active_agent_id));
+const activeRun = computed(() => activeRuns.value.find(r => r.ship_symbol === selected.value));
 const runStep = computed(() => activeRun.value?.strategy === 'contracts' ? activeRun.value.plan?.contract_plan?.actions?.[activeRun.value.totals?.step_index]?.command || 'Awaiting next observation' : activeRun.value?.totals?.phase || activeRun.value?.state);
-const latestRun = computed(() => activeRun.value || props.runs.find(r => r.state !== 'preview'));
+const latestRun = computed(() => activeRun.value || props.runs.find(r => r.ship_symbol === selected.value && r.state !== 'preview'));
 const historyCache = ref(props.actions);
 const historyCursor = ref(props.actions.at(-1)?.id);
 const hasOlderActions = ref(props.actions.length === 40);
@@ -137,6 +138,11 @@ const quantity = ref(1);
 const priceBound = ref(0);
 const reserve = ref(props.manualReserveFloor);
 const offerIndex = ref('');
+const fleetOfferKey = ref('');
+const fleetOffer = computed(() => offers.value.find(offer => `${offer.yard}:${offer.type}` === fleetOfferKey.value));
+const fleetMaximum = ref(0);
+const fleetReserve = ref(0);
+watch(fleetOfferKey, () => { fleetMaximum.value = fleetOffer.value?.purchasePrice || 0; });
 const surveySignature = ref('');
 const runSurveySignature = ref('');
 const transferTarget = ref('');
@@ -270,6 +276,13 @@ async function preview(command) {
     commandPreview.value = await post('commands/preview', { key: submissionKey(), ship_symbol: selected.value, command, arguments: args });
     if (commandPreview.value) { notice.value = 'Preview ready. No command has been approved or queued.'; await nextTick(); previewPanel.value?.focus(); }
 }
+async function previewFleetPurchase() {
+    if (!fleetOffer.value) return;
+    await previewManual({ ship_symbol: selected.value, command: 'buy_ship', arguments: {
+        shipType: fleetOffer.value.type, waypointSymbol: fleetOffer.value.yard,
+        maxTotal: Number(fleetMaximum.value), reserve: Number(fleetReserve.value),
+    } });
+}
 async function previewManual(intent) {
     commandReturnView.value = 'commands';
     commandPreview.value = await post('commands/preview', { key: submissionKey(), ...intent });
@@ -348,7 +361,7 @@ function distance(point) {
                 <p v-if="notice" :role="error ? 'alert' : 'status'" class="notice" :class="{ fault: error }">{{ readableText(notice) }}</p>
                 <SecondaryButton v-if="view === 'commands' && error && notice.includes('Open Automation')" @click="openView('automation')">Open Automation</SecondaryButton>
                 <div v-if="mapTask && view !== 'mapTask'" class="sheet-tabs"><SecondaryButton @click="openView('mapTask')">Continue map {{ mapTask.action === 'travel' ? 'travel' : 'discovery' }}</SecondaryButton></div>
-                <MapFlightTask v-if="mapTask" v-show="view === 'mapTask'" :task="mapTask" :agent-id="agent.id" :ship="ships.find(entry => entry.symbol === mapTask.ship_symbol)?.snapshot" :actions="actions" :now="now" :reserve-floor="manualReserveFloor" :disabled="archived || busy || guiding" :blocked-reason="archived ? 'Archived agent. Commands unavailable.' : guiding ? 'Finish or pause guided flight before using map commands.' : pending ? 'An action is pending or needs review. Settle it before another command.' : activeRun?.ship_symbol === mapTask.ship_symbol ? 'Stop automation and settle its action before manual takeover.' : ''" @preview="previewMapTask" @sync="synchronize" @stop="post(`commands/${$event.id}/stop`)" @reconcile="reconcile" @activity="openView('activity')" />
+                <MapFlightTask v-if="mapTask" v-show="view === 'mapTask'" :task="mapTask" :agent-id="agent.id" :ship="ships.find(entry => entry.symbol === mapTask.ship_symbol)?.snapshot" :actions="actions" :now="now" :reserve-floor="manualReserveFloor" :disabled="archived || busy || guiding" :blocked-reason="archived ? 'Archived agent. Commands unavailable.' : guiding ? 'Finish or pause guided flight before using map commands.' : pending ? 'An action is pending or needs review. Settle it before another command.' : activeRuns.some(run => run.ship_symbol === mapTask.ship_symbol) ? 'Stop automation and settle its action before manual takeover.' : ''" @preview="previewMapTask" @sync="synchronize" @stop="post(`commands/${$event.id}/stop`)" @reconcile="reconcile" @activity="openView('activity')" />
                 <section v-show="view === 'guide'" class="agent-heading"><h2>{{ agent.name }}</h2><GameConnection /><p>Credits {{ cash(agent.credits) }} CR · {{ readableLabel(agent.connection_state) }}</p><SecondaryButton v-if="!archived && guidedFinished" @click="guided.start">Restart tutorial</SecondaryButton><p v-if="!localAutomation">Worker: {{ healthy(health.worker) ? 'recent step' : 'idle or offline' }} · {{ age(health.worker) }}. Scheduler: {{ healthy(health.scheduler) ? 'recent pass' : 'stale or offline' }}. Closing this page does not stop gameplay.</p></section>
                 <div v-show="view === 'guide' || guiding" class="guidance-slot">
             <GuidedFlight v-if="!archived && !guidedFinished" :session="guidedSession" :step="guidedStep" :storage-available="guidedStorage" :busy="busy" @reveal="openView(guidedDestination())" @start="guided.start" @pause="guided.pause" @resume="guided.resume" @finish="finishTutorial" @advance="guided.advance" @sync="synchronize" @recover="commandPreview = actions.find(action => action.id === guidedSession.pending.id && action.state === 'preview')" @clear-expired="guided.clearExpired(); commandPreview = null" />
@@ -369,7 +382,7 @@ function distance(point) {
                     </button>
                 </aside>
 
-                    <fieldset v-show="view === 'automation'" :disabled="guiding"><legend v-if="guiding">Pause guidance before using automation.</legend><AutomationConsole v-if="localAutomation && !archived" :agent="agent" :ships="ships" :engine="engine" :operator="engineOperator" :investigations="investigations" :drafts="drafts" :runs="runs" :accounting="accounting" :observations="observations" :enabled="automationEnabled" @inspect-run="openView('run')" @prepare-market="prepareMarket" @refresh="async done => { await reload(); done(); }" /></fieldset>
+                    <fieldset v-show="view === 'automation'" :disabled="guiding"><legend v-if="guiding">Pause guidance before using automation.</legend><AutomationConsole v-if="localAutomation && !archived" :agent="agent" :ships="ships" :selected="selected" :engine="engine" :operator="engineOperator" :investigations="investigations" :drafts="drafts" :runs="runs" :accounting="accounting" :observations="observations" :enabled="automationEnabled" @inspect-run="openView('run')" @prepare-market="prepareMarket" @refresh="async done => { await reload(); done(); }" /></fieldset>
                     <section v-if="view === 'intelligence' && presentation.transit" class="panel" aria-labelledby="destination-brief-heading"><div class="destination-art" aria-hidden="true"><WaypointSprite :point="sceneLocation" :reset="agent.reset_id" /></div><h2 id="destination-brief-heading">Destination brief</h2><p>{{ sceneLocation.symbol }} · {{ assetName(sceneLocation.type) }}</p><p>Arrival <time :datetime="ship.nav.route?.arrival">{{ formatLocalTime(ship.nav.route?.arrival) }}</time> · {{ presentation.arrival }}</p><p>{{ sceneLocation.traits ? sceneLocation.traits.map(assetName).join(', ') || 'Confirmed empty trait list' : 'Traits Unknown' }} · {{ arrivalPoint ? `Observed ${age(arrivalPoint.observed_at)}` : 'From saved navigation or system information' }}</p><p class="muted">Destination facts are saved observations. Arrival and command eligibility require a fresh server check.</p></section>
                     <OpportunityPanel v-show="view === 'intelligence'" :report="intelligence" :selected="selected" />
                     <section v-show="view === 'review'" v-if="!archived && (commandPreview || runPreview)" ref="previewPanel" tabindex="-1" class="panel approval" aria-labelledby="approval-heading">
@@ -390,9 +403,10 @@ function distance(point) {
                                 <p v-if="commandPreview.before_state.estimate.cargo_refuel?.rounding_unknown" class="warning">Partial cargo conversion: server rounding is unknown. Maximum approved cargo exposure {{ commandPreview.before_state.estimate.cargo_refuel.max_cargo_units }} FUEL units; this is a review threshold, not a server cap or exact consumption prediction.</p>
                                 <details v-if="commandPreview.before_state.estimate.cargo_refuel"><summary>Tank conversion and protected cargo</summary><DataDetails :value="commandPreview.before_state.estimate.cargo_refuel" /></details>
                             </template>
+                            <dl v-if="commandPreview.command === 'buy_ship'"><dt>Ship type</dt><dd>{{ assetName({ type: commandPreview.arguments.shipType }) }}</dd><dt>Shipyard</dt><dd>{{ commandPreview.arguments.waypointSymbol }}</dd><dt>Purchase price</dt><dd>{{ cash(commandPreview.before_state.estimate.purchasePrice) }} CR</dd><dt>Current credits</dt><dd>{{ cash(commandPreview.before_state.credits) }} CR</dd><dt>Credits after purchase</dt><dd>{{ cash(commandPreview.before_state.estimate.credits_after) }} CR</dd><dt>Explicit reserve</dt><dd>{{ cash(commandPreview.arguments.reserve ?? 0) }} CR</dd><dt>Protected in-flight amount</dt><dd>{{ cash(commandPreview.before_state.estimate.protected_in_flight ?? 0) }} CR</dd></dl>
                             <p v-if="commandPreview.before_state.estimate.effects">{{ commandPreview.before_state.estimate.effects }}</p>
-                            <DataDetails :value="commandPreview.arguments" class="command-arguments" />
-                            <dl><dt>Observed cost</dt><dd>{{ cash(commandPreview.before_state.estimate.cost_estimate) }} CR</dd><dt>Observed sale</dt><dd>{{ cash(commandPreview.before_state.estimate.sale_estimate) }} CR</dd><dt>Protected reserve</dt><dd>{{ cash(commandPreview.before_state.estimate.reserve) }} CR</dd><dt>Available credits</dt><dd>{{ cash(commandPreview.before_state.credits) }} CR</dd><dt>Free cargo</dt><dd>{{ commandPreview.before_state.estimate.cargo_free }}</dd></dl>
+                            <DataDetails v-if="commandPreview.command !== 'buy_ship'" :value="commandPreview.arguments" class="command-arguments" />
+                            <dl v-if="commandPreview.command !== 'buy_ship'"><dt>Observed cost</dt><dd>{{ cash(commandPreview.before_state.estimate.cost_estimate) }} CR</dd><dt>Observed sale</dt><dd>{{ cash(commandPreview.before_state.estimate.sale_estimate) }} CR</dd><dt>Protected reserve</dt><dd>{{ cash(commandPreview.before_state.estimate.reserve) }} CR</dd><dt>Available credits</dt><dd>{{ cash(commandPreview.before_state.credits) }} CR</dd><dt>Free cargo</dt><dd>{{ commandPreview.before_state.estimate.cargo_free }}</dd></dl>
                             <p v-if="commandPreview.before_state.estimate.fuel_estimate">Conservative fuel estimate: {{ commandPreview.before_state.estimate.fuel_estimate }}. Arrival comes from the navigation response.</p>
                             <DataDetails v-if="commandPreview.before_state.estimate.route" :value="commandPreview.before_state.estimate.route" />
                             <details v-if="commandPreview.before_state.estimate.equipment || commandPreview.before_state.estimate.maintenance_quote || commandPreview.before_state.estimate.scrap_quote"><summary>Equipment, condition and quote evidence</summary><DataDetails :value="commandPreview.before_state.estimate" /></details>
@@ -458,6 +472,25 @@ function distance(point) {
 
                     <OperationControls v-show="view === 'automation'" :selected="selected" :report="intelligence" :disabled="archived || busy || !ship || !!activeRun || !!pending || guiding" @preview="previewOperation" />
 
+                    <section v-show="view === 'commands'" class="panel" aria-labelledby="buy-ship-heading">
+                        <h2 id="buy-ship-heading">Buy ship</h2>
+                        <p class="muted">Choose an observed offer. Preview refreshes the shipyard price and shows the credits left after purchase. Move the selected ship to the shipyard first.</p>
+                        <fieldset :disabled="archived || busy || !ship || !!pending || guiding"><legend class="sr-only">Fleet purchase</legend>
+                            <div class="form-grid">
+                                <label>Shipyard offer<select v-model="fleetOfferKey"><option value="">Select offer</option><option v-for="offer in offers" :key="`${offer.yard}:${offer.type}`" :value="`${offer.yard}:${offer.type}`">{{ assetName(offer) }} &middot; {{ offer.yard }} &middot; {{ cash(offer.purchasePrice) }} CR</option></select></label>
+                                <label>Maximum purchase cost in CR<input v-model="fleetMaximum" type="number" min="0" step="1"></label>
+                                <label>Protected credits in CR<input v-model="fleetReserve" type="number" min="0" step="1"></label>
+                            </div>
+                            <p v-if="fleetOffer && fleetOffer.yard !== ship?.nav?.waypointSymbol" class="muted">The selected ship must be at {{ fleetOffer.yard }} to purchase this offer. Move it to that shipyard first.</p>
+                            <SecondaryButton :disabled="!fleetOffer || fleetOffer.yard !== ship?.nav?.waypointSymbol" @click="previewFleetPurchase">Preview ship purchase</SecondaryButton>
+                        </fieldset>
+                        <p v-if="!offers.length" class="muted">No shipyard offers observed. Refresh a shipyard with a ship present to see its offers.</p>
+                        <p class="warning">Approval buys one ship. Prices can change before execution. Active runs keep their protected commitments; the purchase grants no automation authority.</p>
+                    </section>
+                    <section v-if="activeRuns.length" v-show="['run', 'fleet', 'automation'].includes(view)" class="panel" aria-labelledby="active-runs-heading">
+                        <h2 id="active-runs-heading">All active runs</h2>
+                        <ul class="activity"><li v-for="run in activeRuns" :key="run.id"><p>{{ run.ship_symbol }} &middot; {{ readableLabel(run.strategy) }} &middot; {{ readableLabel(run.state) }} <span v-if="run.campaign_episode_id" class="muted">Campaign</span></p><p v-if="run.campaign_episode_id" class="muted">Stopping hands the ship back to the director. The campaign will derive a fresh plan.</p><DangerButton :disabled="archived || busy || !!run.stop_requested_at" @click="post(`runs/${run.id}/stop`, {}, true)">Stop run #{{ run.id }}{{ run.campaign_episode_id ? ' and return ship to campaign director' : '' }}</DangerButton></li></ul>
+                    </section>
                     <section data-guide="setup" v-show="view === 'commands'" id="setup" class="panel" aria-labelledby="setup-heading">
                         <h2 id="setup-heading">One-time mining setup</h2>
                         <div class="form-grid"><label>Mining site<select v-model="site" data-guide="site" :disabled="archived || (guiding && guidedStep?.target !== 'site')" aria-label="Mining site"><option value="">Select site</option><option v-for="point in waypoints.filter(p => ['ASTEROID', 'ASTEROID_FIELD', 'ENGINEERED_ASTEROID'].includes(p.data.type))" :key="point.id" :value="point.symbol">{{ point.symbol }}</option></select></label><label>Sale and refueling market<select v-model="buyer" data-guide="buyer" :disabled="archived || (guiding && guidedStep?.target !== 'buyer')" aria-label="Sale and refueling market"><option value="">Select buyer</option><option v-for="point in markets" :key="point.id" :value="point.symbol">{{ point.symbol }} · {{ point.data.tradeGoods ? 'observed quotes' : 'prices unknown' }}</option></select></label></div>

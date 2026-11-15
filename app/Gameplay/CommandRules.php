@@ -14,6 +14,7 @@ class CommandRules
 
     public function inspect(Agent $agent, string $symbol, string $command, array $arguments, ?AutomationRun $run = null): array
     {
+        $fleetPurchase = $command === 'buy_ship' && ! isset($arguments['site'], $arguments['market']);
         $agentCommand = ! $run && in_array($command, ['contract_accept', 'contract_fulfill'], true);
         if (! $agentCommand && ! Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->exists()) {
             throw new GameException('Ship is not in the saved owned fleet. Synchronize first.');
@@ -30,8 +31,8 @@ class CommandRules
                 throw new GameException('Crew or known equipment power requirements exceed available capacity.');
             }
         }
-        $active = AutomationRun::where('agent_id', $agent->id)->whereNotNull('active_agent_id')->first();
-        if ($active && ($agentCommand || $active->ship_symbol === $symbol) && $active->id !== $run?->id) {
+        $active = AutomationRun::where('agent_id', $agent->id)->whereNotNull('active_agent_id')->when(! $agentCommand, fn ($query) => $query->where('ship_symbol', $symbol))->first();
+        if (! $fleetPurchase && $active && ($agentCommand || $active->ship_symbol === $symbol) && $active->id !== $run?->id) {
             throw new GameException('Stop automation and settle its action before manual takeover.');
         }
         if ($run) {
@@ -55,15 +56,45 @@ class CommandRules
             if ($expectedInventory !== $actualInventory) {
                 throw new GameException('Cargo changed outside this run. Reconcile protected inventory before continuing.');
             }
-            $manual = (int) ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereNull('automation_run_id')->where('state', 'confirmed')->get()->sum(fn ($a) => $a->outcome['credit_delta'] ?? 0);
-            if ($agent->credits !== $run->plan['initial_credits'] + $run->totals['credit_delta'] + $manual - ($run->plan['initial_manual_credit_delta'] ?? 0)) {
+            $otherDelta = app(CreditAccounting::class)->outsideRunDelta($agent, $run);
+            if ($agent->credits !== $run->plan['initial_credits'] + $run->totals['credit_delta'] + $otherDelta) {
                 throw new GameException('Unexplained balance change before reservation. Review before a fresh approval.');
             }
         }
         $spending = in_array($command, ['buy', 'buy_ship', 'repair', 'install_mount', 'remove_mount', 'install_module', 'remove_module', 'jump', 'refuel'], true);
-        $floor = max($arguments['reserve'] ?? 0, $active?->plan['reserve'] ?? 0, ! $run && $spending ? max(1, (int) config('gameplay.manual_reserve_floor')) : 0);
-        if ($active && ! $run) {
-            $floor = max($floor, $active->plan['reserve'] + max(0, $active->plan['max_spend'] - ($active->totals['spending'] ?? $active->totals['fuel_cost'] ?? 0)));
+        $floor = max($arguments['reserve'] ?? 0, $run?->plan['reserve'] ?? 0, ! $run && $spending && ! $fleetPurchase ? max(1, (int) config('gameplay.manual_reserve_floor')) : 0);
+        $protected = 0;
+        // Only spending commands can consume another run's commitment.
+        if (! $run && $spending) {
+            $reserves = 0;
+            $remaining = 0;
+            foreach (AutomationRun::where('active_agent_id', $agent->id)->get() as $protectedRun) {
+                if ($protectedRun->campaign_episode_id) {
+                    $commitment = 0;
+                    // The run keeps its ship snapshot current; reading it costs no request.
+                    $carrying = Ship::where('agent_id', $agent->id)->where('symbol', $protectedRun->ship_symbol)->first()?->snapshot;
+                    if (isset($protectedRun->plan['market']) && ($carrying['cargo']['units'] ?? 0) > 0) {
+                        try {
+                            $commitment = app(CampaignTrade::class)->fuelReserve($agent, $protectedRun->ship_symbol, $protectedRun->plan['market']);
+                        } catch (GameException $e) {
+                            // Stale quotes mid-delivery are normal; fall back to the fuel allowances the trade plan approved:
+                            // fuel_reserve covers the delivery leg, fuel the return leg. Protect the larger.
+                            $planned = $protectedRun->plan['campaign_trade'] ?? [];
+                            if (! isset($planned['fuel_reserve']) && ! isset($planned['fuel'])) {
+                                throw new GameException('Campaign ship '.$protectedRun->ship_symbol.' carries cargo and its delivery fuel reserve cannot be verified right now ('.$e->getMessage().'). Retry after its fuel quotes refresh.');
+                            }
+                            $commitment = (int) max($planned['fuel_reserve'] ?? 0, $planned['fuel'] ?? 0);
+                        }
+                    }
+                    $protected += $commitment;
+                } else {
+                    // A reserve is a floor, not spending: protect the largest floor plus every run's remaining spend.
+                    $reserves = max($reserves, $protectedRun->plan['reserve']);
+                    $remaining += max(0, $protectedRun->plan['max_spend'] - ($protectedRun->totals['spending'] ?? $protectedRun->totals['fuel_cost'] ?? 0));
+                }
+            }
+            $protected += $reserves + $remaining;
+            $floor = max($floor, $protected);
         }
         $contract = null;
         if ($run?->strategy === 'contracts') {
@@ -359,7 +390,7 @@ class CommandRules
                 break;
             case 'transfer':
                 $target = Ship::where('agent_id', $agent->id)->where('symbol', $arguments['targetShip'])->first();
-                if (! $target || $target->symbol === $symbol || ($active && $active->ship_symbol === $target->symbol && $active->id !== $run?->id)) {
+                if (! $target || $target->symbol === $symbol || AutomationRun::where('active_agent_id', $agent->id)->where('ship_symbol', $target->symbol)->when($run, fn ($query) => $query->whereKeyNot($run->id))->exists()) {
                     throw new GameException('Transfer target must be another owned ship available for manual control.');
                 }
                 $target = $this->sync->refreshShip($agent, $target->symbol)->snapshot;
@@ -380,7 +411,7 @@ class CommandRules
                     throw new GameException('One-time setup purchase was already executed or acknowledged. Inspect the delivered fleet; further expansion is outside this MVP.');
                 }
                 if ($arguments['waypointSymbol'] !== $ship['nav']['waypointSymbol']) {
-                    throw new GameException('Approve scouting movement to the shipyard first.');
+                    throw new GameException($setup ? 'Approve scouting movement to the shipyard first.' : 'A ship must be at the shipyard waypoint to purchase a ship. Move the selected ship there first.');
                 }
                 foreach ($setup ? $this->api->ships($agent) : [] as $owned) {
                     if ($this->planner->capability($owned) === null) {
@@ -395,6 +426,14 @@ class CommandRules
                     throw new GameException('The complete ship configuration is not verified as mining capable.');
                 }
                 $cost = $offer['purchasePrice'];
+                $estimate['ship_type'] = $arguments['shipType'];
+                $estimate['shipyard_waypoint'] = $arguments['waypointSymbol'];
+                $estimate['purchasePrice'] = $cost;
+                $estimate['credits_after'] = $agent->credits - $cost;
+                $estimate['protected_in_flight'] = $protected;
+                if ($cost > $agent->credits) {
+                    throw new GameException('Insufficient credits for this ship purchase: price '.$cost.' CR exceeds current credits '.$agent->credits.' CR.');
+                }
                 $estimate['configuration'] = $offer;
                 $estimate['scouting_cost'] = 0;
                 if (! $setup) {
@@ -480,6 +519,9 @@ class CommandRules
         }
         $estimate['cost_estimate'] = ! empty($estimate['fee_unknown']) ? null : $cost;
         if (($cost > 0 || ! empty($estimate['fee_unknown'])) && ($cost > ($arguments['maxTotal'] ?? 0) || $agent->credits - $cost < $floor)) {
+            if ($fleetPurchase) {
+                throw new GameException('Purchase refused: price '.number_format($cost).' CR leaves '.number_format($agent->credits - $cost).' CR; current credits '.number_format($agent->credits).' CR; protected '.number_format($floor).' CR (reserve '.number_format($arguments['reserve'] ?? 0).', in-flight '.number_format($protected).'); approved spending ceiling '.number_format($arguments['maxTotal'] ?? 0).' CR.');
+            }
             throw new GameException('The quote exceeds the approved spending ceiling or protected reserve.');
         }
         if ($run && $cost > 0 && (($run->totals['purchase_cost'] ?? 0) + $run->totals['fuel_cost'] + $cost > $run->plan['max_spend'] || -$run->plan['max_loss'] > $run->totals['credit_delta'] - $cost)) {

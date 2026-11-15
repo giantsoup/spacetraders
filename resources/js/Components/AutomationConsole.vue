@@ -9,7 +9,7 @@ import DataDetails from '@/Components/DataDetails.vue';
 import { formatLocalTime, localTimeZone } from '@/dateTime.js';
 import { assetName, cargoSummary, readableLabel, readableText } from '@/dataPresentation.js';
 
-const props = defineProps({ agent: Object, ships: Array, engine: Object, operator: Boolean, investigations: Array, drafts: Array, runs: Array, accounting: Object, enabled: Boolean, observations: { type: Array, default: () => [] } });
+const props = defineProps({ agent: Object, ships: Array, selected: String, engine: Object, operator: Boolean, investigations: Array, drafts: Array, runs: Array, accounting: Object, enabled: Boolean, observations: { type: Array, default: () => [] } });
 const emit = defineEmits(['refresh', 'inspect-run', 'prepare-market']);
 const strategy = ref(props.drafts[0]?.candidate.strategy || props.investigations[0]?.strategy || 'mining');
 const system = ref(props.ships[0]?.snapshot.nav.systemSymbol || '');
@@ -20,8 +20,8 @@ const investigationId = ref(props.investigations.find(i => i.strategy === strate
 const investigation = computed(() => props.investigations.find(i => i.id === investigationId.value) || props.investigations.find(i => i.strategy === strategy.value));
 const draft = computed(() => props.drafts.find(d => d.id === draftId.value));
 const preview = computed(() => props.runs.find(r => r.state === 'preview' && r.plan_version === 2 && r.draft_id === draft.value?.id));
-const active = computed(() => props.runs.find(r => r.active_agent_id));
-const outcome = computed(() => active.value || props.runs.find(r => r.state !== 'preview'));
+const active = computed(() => props.runs.find(r => r.active_agent_id && r.ship_symbol === props.selected));
+const outcome = computed(() => active.value || props.runs.find(r => r.ship_symbol === props.selected && r.state !== 'preview'));
 const runShip = computed(() => props.ships.find(s => s.symbol === outcome.value?.ship_symbol)?.snapshot);
 const completedContractIds = computed(() => new Set((investigation.value?.observations.contracts || []).filter(contract => contract.fulfilled).map(contract => contract.id)));
 const noOpenContracts = computed(() => investigation.value?.strategy === 'contracts' && Array.isArray(investigation.value.observations.contracts) && investigation.value.observations.contracts.every(contract => contract.fulfilled));
@@ -277,7 +277,7 @@ async function reviewBalance() {
             <h2 id="credit-accounting-heading">Credit accounting</h2>
             <dl><dt>First observed local balance</dt><dd>{{ credit(accounting?.baseline?.credits) }}</dd><dt>First observed at</dt><dd>{{ utc(accounting?.baseline?.observed_at) }}</dd><dt>User-supplied starting balance</dt><dd>{{ credit(accounting?.baseline?.user_starting_credits) }}</dd><dt>Total change from identified starting balance</dt><dd>{{ credit(accounting?.total_balance_change) }}</dd><dt>Confirmed local changes</dt><dd>{{ credit(accounting?.confirmed_change) }}</dd><dt>Unrelated manual commands</dt><dd>{{ credit(accounting?.manual_change) }}</dd><dt>Reviewed external adjustments</dt><dd>{{ credit(accounting?.reviewed_adjustments) }}</dd><dt>Unexplained changes</dt><dd>{{ credit(accounting?.unexplained_change) }}</dd></dl>
             <p v-if="accounting?.unexplained_change" class="warning">Unexplained balance changes block new approval and attribution until reviewed.</p>
-            <details><summary>Review an external change or identify an earlier starting balance</summary><p class="muted">Stop and settle all work first. This records your review; it does not change the game or turn an adjustment into confirmed earnings. The original local observation stays recorded.</p><label>Earlier starting balance, optional<input v-model="startingBalance" type="number" min="0" max="1000000000" step="1"></label><label>Balance review note<input v-model="balanceNote" type="text" minlength="10" maxlength="500"></label><SecondaryButton :disabled="busy || !!active || balanceNote.length < 10" @click="reviewBalance">Acknowledge and record balance review</SecondaryButton></details>
+            <details><summary>Review an external change or identify an earlier starting balance</summary><p class="muted">Stop and settle all work first. This records your review; it does not change the game or turn an adjustment into confirmed earnings. The original local observation stays recorded.</p><label>Earlier starting balance, optional<input v-model="startingBalance" type="number" min="0" max="1000000000" step="1"></label><label>Balance review note<input v-model="balanceNote" type="text" minlength="10" maxlength="500"></label><SecondaryButton :disabled="busy || runs.some(run => run.active_agent_id) || balanceNote.length < 10" @click="reviewBalance">Acknowledge and record balance review</SecondaryButton></details>
         </section>
     </div>
 </template>

@@ -171,7 +171,7 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
                         </dl>
                     </li>
                 </ul>
-                <p v-else class="app-muted">No role ships saved yet.</p>
+                <p v-else class="app-muted">No fleet ships saved yet.</p>
             </section>
 
             <section v-if="grant" class="app-panel" aria-labelledby="loads-heading">

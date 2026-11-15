@@ -4,10 +4,12 @@ namespace Tests\Feature;
 
 use App\Enums\ActionState;
 use App\Gameplay\AgentSynchronizer;
+use App\Gameplay\CreditAccounting;
 use App\Gameplay\ShipCommandExecutor;
 use App\Gameplay\SurveyPool;
 use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
+use App\Models\AutomationRun;
 use App\Models\GameObservation;
 use App\Models\Ship;
 use App\Models\ShipAction;
@@ -83,11 +85,18 @@ class FoundationCommandTest extends TestCase
         });
         $action = $this->preview('buy_ship', ['shipType' => 'SHIP_LIGHT_HAULER', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => 20000, 'reserve' => 70000]);
         $this->assertEmpty($this->world()['writes']);
+        $this->assertSame(20000, $action->before_state['estimate']['purchasePrice']);
+        $this->assertSame('SHIP_LIGHT_HAULER', $action->before_state['estimate']['ship_type']);
+        $this->assertSame('X1-TEST-ROCK', $action->before_state['estimate']['shipyard_waypoint']);
+        $this->assertSame(100000, $action->before_state['estimate']['credits']);
+        $this->assertSame(80000, $action->before_state['estimate']['credits_after']);
         $action = $this->execute($action);
         $this->assertSame(ActionState::Confirmed, $action->state);
         $this->assertSame('LOCAL-2', $action->outcome['delivered_ship']);
         $this->assertSame([], Ship::where('symbol', 'LOCAL-2')->firstOrFail()->snapshot['mounts']);
         $this->assertSame(80000, $this->agent->fresh()->credits);
+        $this->assertDatabaseHas('confirmed_credit_entries', ['ship_action_id' => $action->id, 'kind' => 'ship_purchase', 'credits' => -20000]);
+        $this->assertSame(0, app(CreditAccounting::class)->summary($this->agent->fresh())['unexplained_change']);
         $transaction = $action->outcome['response']['transaction'];
         $spec = json_decode(file_get_contents(base_path('docs/api/spacetraders-openapi-2.3.0.json')), true, flags: JSON_THROW_ON_ERROR);
         foreach ($spec['components']['schemas']['ShipyardTransaction']['required'] as $field) {
@@ -96,6 +105,86 @@ class FoundationCommandTest extends TestCase
         $this->assertSame('SHIP_LIGHT_HAULER', $transaction['shipSymbol']);
         $this->assertSame('SHIP_LIGHT_HAULER', $transaction['shipType']);
         $this->assertNotSame($action->outcome['delivered_ship'], $transaction['shipSymbol']);
+    }
+
+    #[DataProvider('fleetPurchaseBalances')]
+    public function test_fleet_purchase_uses_only_the_explicit_credit_floor(int $credits, int $after): void
+    {
+        $this->world(fn (&$world) => $world['credits'] = $credits);
+        $action = $this->preview('buy_ship', ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => 20000, 'reserve' => 0]);
+        $this->assertSame($after, $action->before_state['estimate']['credits_after']);
+        $this->assertSame(0, $action->before_state['estimate']['reserve']);
+        $this->assertSame(0, $action->before_state['estimate']['protected_in_flight']);
+        $this->assertEmpty($this->world()['writes']);
+    }
+
+    public static function fleetPurchaseBalances(): array
+    {
+        return [[21000, 1000], [20000, 0]];
+    }
+
+    public function test_manual_spending_protects_the_largest_reserve_plus_every_remaining_commitment(): void
+    {
+        $this->world(fn (&$world) => $world['credits'] = 90020);
+        foreach (['LOCAL-2', 'LOCAL-3'] as $symbol) {
+            AutomationRun::create(['agent_id' => $this->agent->id, 'active_agent_id' => $this->agent->id,
+                'reset_id' => $this->agent->reset_id, 'ship_symbol' => $symbol, 'strategy' => 'mining', 'state' => 'running',
+                'plan' => ['reserve' => 10000, 'max_spend' => 50000], 'totals' => ['spending' => 10000], 'expires_at' => now()->addHour()]);
+        }
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1',
+            'command' => 'buy', 'arguments' => ['symbol' => 'IRON_ORE', 'units' => 1, 'maxTotal' => 30, 'reserve' => 0]])->assertUnprocessable();
+        $this->world(fn (&$world) => $world['credits'] = 90030);
+        $action = $this->preview('buy', ['symbol' => 'IRON_ORE', 'units' => 1, 'maxTotal' => 30, 'reserve' => 0]);
+        // max(10,000 reserves) + 40,000 + 40,000 remaining spend; reserves are floors, not summed.
+        $this->assertSame(90000, $action->before_state['estimate']['reserve']);
+        $this->assertEmpty($this->world()['writes']);
+    }
+
+    #[DataProvider('purchaseRefusalLimits')]
+    public function test_fleet_purchase_refusal_explains_the_price_balance_and_protections(int $maximum, int $commitment): void
+    {
+        $this->world(fn (&$world) => $world['credits'] = 21000);
+        if ($commitment) {
+            AutomationRun::create(['agent_id' => $this->agent->id, 'active_agent_id' => $this->agent->id,
+                'reset_id' => $this->agent->reset_id, 'ship_symbol' => 'LOCAL-2', 'strategy' => 'mining', 'state' => 'running',
+                'plan' => ['reserve' => 500, 'max_spend' => 2000], 'totals' => ['spending' => 500], 'expires_at' => now()->addHour()]);
+        }
+        $response = $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1',
+            'command' => 'buy_ship', 'arguments' => ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => $maximum, 'reserve' => 0]])->assertUnprocessable();
+        $message = $response->json('message');
+        foreach (['price 20,000 CR', 'current credits 21,000 CR', 'leaves 1,000 CR', 'reserve 0', 'in-flight '.number_format($commitment), 'ceiling '.number_format($maximum).' CR'] as $detail) {
+            $this->assertStringContainsString($detail, $message);
+        }
+        $this->assertEmpty($this->world()['writes']);
+    }
+
+    public static function purchaseRefusalLimits(): array
+    {
+        return [[20000, 2000], [19000, 0]];
+    }
+
+    public function test_ship_purchase_refuses_short_credits_and_maximum_before_a_write(): void
+    {
+        foreach ([['credits' => 19999, 'maximum' => 20000, 'message' => 'Insufficient credits'],
+            ['credits' => 100000, 'maximum' => 19999, 'message' => 'spending ceiling']] as $case) {
+            $this->world(fn (&$world) => $world['credits'] = $case['credits']);
+            $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1', 'command' => 'buy_ship',
+                'arguments' => ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => $case['maximum'], 'reserve' => 0]])
+                ->assertUnprocessable()->assertJsonPath('message', fn ($message) => str_contains($message, $case['message']));
+        }
+        $this->assertEmpty($this->world()['writes']);
+        Queue::assertNotPushed(ExecuteShipCommand::class);
+    }
+
+    public function test_fleet_purchase_location_refusal_does_not_imply_setup_scouting(): void
+    {
+        $arguments = ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-PORT', 'maxTotal' => 20000, 'reserve' => 0];
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1',
+            'command' => 'buy_ship', 'arguments' => $arguments])->assertUnprocessable()->assertJsonPath('message', 'A ship must be at the shipyard waypoint to purchase a ship. Move the selected ship there first.');
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1',
+            'command' => 'buy_ship', 'arguments' => $arguments + ['site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-PORT']])
+            ->assertUnprocessable()->assertJsonPath('message', 'Approve scouting movement to the shipyard first.');
+        $this->assertEmpty($this->world()['writes']);
     }
 
     public function test_changed_offer_and_insufficient_reserve_never_dispatch_a_purchase(): void

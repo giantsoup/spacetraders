@@ -20,7 +20,7 @@ class CreditAccounting
     {
         DB::table('confirmed_credit_entries')->insertOrIgnore(['agent_id' => $agent->id, 'reset_id' => $action->reset_id, 'ship_action_id' => $action->id, 'automation_run_id' => $action->automation_run_id,
             'kind' => match ($action->command) {
-                'sell' => 'sale_receipt', 'contract_accept', 'contract_fulfill' => 'contract_receipt', 'refuel' => 'fuel_cost', 'buy' => 'acquisition_cost', 'buy_ship' => 'setup_cost', default => 'other'
+                'sell' => 'sale_receipt', 'contract_accept', 'contract_fulfill' => 'contract_receipt', 'refuel' => 'fuel_cost', 'buy' => 'acquisition_cost', 'buy_ship' => isset($action->arguments['site'], $action->arguments['market']) ? 'setup_cost' : 'ship_purchase', default => 'other'
             },
             'credits' => $delta, 'confirmed_at' => now()]);
     }
@@ -80,6 +80,21 @@ class CreditAccounting
             $run->update(['state' => 'blocked', 'blocked_reason' => 'Execution price, spending, loss or no-progress limit reached.']);
         }
         app(CycleAccounting::class)->record($run, $ship);
+    }
+
+    public function outsideRunDelta(Agent $agent, AutomationRun $run): int
+    {
+        $modern = array_key_exists('initial_external_credit_delta', $run->plan);
+        $delta = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('state', 'confirmed')
+            ->where(function ($query) use ($run, $modern) {
+                $query->whereNull('automation_run_id');
+                if ($modern) {
+                    $query->orWhere('automation_run_id', '!=', $run->id);
+                }
+            })->get()->sum(fn ($action) => $action->outcome['credit_delta'] ?? 0);
+
+        // Historical in-flight plans retain their manual-only snapshot semantics.
+        return (int) $delta - ($modern ? $run->plan['initial_external_credit_delta'] : ($run->plan['initial_manual_credit_delta'] ?? 0));
     }
 
     public function summary(Agent $agent): array

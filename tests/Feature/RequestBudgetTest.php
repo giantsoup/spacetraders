@@ -21,6 +21,22 @@ class RequestBudgetTest extends TestCase
         return new RequestBudgetClock;
     }
 
+    public function test_two_run_callers_share_one_account_allowance_and_each_request_is_counted_once(): void
+    {
+        $first = $this->budget();
+        $second = $this->budget();
+        foreach (range(1, 8) as $request) {
+            ($request % 2 ? $first : $second)->reserve('same-agent-token', 'same-account', 'write', 0);
+        }
+        $this->assertSame(8, $first->usage('same-agent-token', 'same-account')['host']['requests']);
+        $this->assertSame(8, $second->usage('same-agent-token', 'same-account')['account']['requests']);
+        $this->assertSame(2.0, $second->usage('same-agent-token', 'same-account')['account']['available']);
+        $first->reserve('same-agent-token', 'same-account', 'write', 0);
+        $second->reserve('same-agent-token', 'same-account', 'write', 0);
+        $this->expectException(RequestDeferred::class);
+        $first->reserve('same-agent-token', 'same-account', 'write', 0);
+    }
+
     public function test_account_limit_pauses_only_that_account_and_survives_a_new_instance(): void
     {
         $budget = $this->budget();
