@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Gameplay\CampaignRegistrationFailure;
 use App\Gameplay\GameException;
 use App\Gameplay\RequestBudget;
+use App\Gameplay\RequestDeferred;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
@@ -67,7 +69,7 @@ class SpaceTradersClient
         app(RequestBudget::class)->reserve($token, $account, $read ? $this->priority : 'write', $maxWait);
         $timeout = $deadline === null ? 30 : min(30, $deadline - microtime(true));
         if ($timeout < 0.1) {
-            throw new GameException('Investigation elapsed-time limit reached before transport.');
+            throw new RequestDeferred('Investigation elapsed-time limit reached before transport.', 5);
         }
         $request = Http::baseUrl(self::BASE_URL)
             ->acceptJson()
@@ -97,7 +99,7 @@ class SpaceTradersClient
         } catch (\Throwable) {
             $budget->recordingFailed($response);
             if ($response->status() === 429 || $response->serverError()) {
-                throw new GameException('Could not save upstream budget. Reconcile before another write.', uncertain: ! $read, retryAfter: 10);
+                throw new GameException('Could not save upstream budget. Reconcile before another write.', apiCode: $response->status(), uncertain: ! $read, retryAfter: 10);
             }
             // Budget recording cannot discard a successful write or a known upstream rejection.
         }
@@ -109,14 +111,14 @@ class SpaceTradersClient
         return $response;
     }
 
-    public function register(array $data, string $accountToken): array
+    public function register(array $data, string $accountToken, bool $campaign = false): array
     {
         return $this->agentData('post', '/register', $data, $accountToken, [
             'token' => ['required', 'string'],
             'agent.accountId' => ['sometimes', 'string', 'max:255'],
             'agent.symbol' => ['required', 'string', 'min:3', 'max:14'],
             'agent.startingFaction' => ['required', 'string', 'max:255'],
-        ]);
+        ], $campaign);
     }
 
     public function agent(string $token): array
@@ -128,17 +130,25 @@ class SpaceTradersClient
         ]);
     }
 
-    private function agentData(string $method, string $path, array $data, string $token, array $rules): array
+    private function agentData(string $method, string $path, array $data, string $token, array $rules, bool $campaign = false): array
     {
         try {
             $response = $this->request($method, $path, $data, $token);
         } catch (ConnectionException|GameException $exception) {
+            if ($campaign) {
+                throw new CampaignRegistrationFailure($exception instanceof RequestDeferred || ($exception instanceof GameException && $exception->apiCode === 429) ? 'not_sent' : 'ambiguous');
+            }
             throw ValidationException::withMessages([
                 'api' => $method === 'post' ? self::REGISTRATION_UNKNOWN : 'Could not connect to SpaceTraders. Please try again later.',
             ]);
         }
 
         if (! $response->successful()) {
+            if ($campaign && in_array($response->status(), [408, 409, 429], true) || $campaign && $response->serverError()) {
+                throw new CampaignRegistrationFailure(match ($response->status()) {
+                    429 => 'not_sent', 409 => 'conflict', default => 'ambiguous',
+                });
+            }
             if ($method === 'post' && ($response->serverError() || $response->status() < 400 || in_array($response->status(), [408, 429], true))) {
                 throw ValidationException::withMessages(['api' => self::REGISTRATION_UNKNOWN]);
             }
@@ -157,6 +167,9 @@ class SpaceTradersClient
         $payload = $response->json('data');
 
         if (! is_array($payload) || Validator::make($payload, $rules)->fails()) {
+            if ($campaign) {
+                throw new CampaignRegistrationFailure('ambiguous');
+            }
             throw ValidationException::withMessages([
                 'api' => $method === 'post' ? self::REGISTRATION_UNKNOWN : 'SpaceTraders returned incomplete agent details. No agent was saved.',
             ]);

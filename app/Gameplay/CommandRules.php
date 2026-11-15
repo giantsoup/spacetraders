@@ -285,7 +285,7 @@ class CommandRules
                 if ($target['systemSymbol'] !== $ship['nav']['systemSymbol'] || $target['symbol'] === $from['symbol']) {
                     throw new GameException('Choose a different waypoint in this system.');
                 }
-                if (! $run && (isset($arguments['maxFuel']) || $ship['nav']['flightMode'] !== 'CRUISE' || $ship['fuel']['capacity'] === 0)) {
+                if (! $run && (isset($arguments['maxFuel']) || $ship['nav']['flightMode'] !== 'CRUISE' || $ship['fuel']['capacity'] === 0 && ! app(FuelPlanner::class)->fuelFree($ship))) {
                     if (empty($arguments['acknowledgeUnknown']) || ! isset($arguments['maxFuel'], $arguments['maxSeconds']) || $arguments['maxFuel'] > $ship['fuel']['current']) {
                         throw new GameException('This navigation variant needs explicit fuel/time review limits and acknowledgement of uncalibrated mechanics.');
                     }

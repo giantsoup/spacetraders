@@ -2,6 +2,8 @@
 
 namespace App\Console\Commands;
 
+use App\Gameplay\CampaignControl;
+use App\Gameplay\CampaignDirector;
 use App\Gameplay\DeploymentGate;
 use App\Gameplay\EngineGate;
 use App\Gameplay\GameException;
@@ -11,9 +13,11 @@ use App\Jobs\AdvanceAutomationRun;
 use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
 use App\Models\AutomationRun;
+use App\Models\CampaignGrant;
 use App\Models\ShipAction;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class DispatchDueSpaceTraders extends Command
 {
@@ -52,6 +56,27 @@ class DispatchDueSpaceTraders extends Command
                 });
             } catch (GameException) {
                 // The sender still holds its OS lock. Do not steal command ownership.
+            }
+        }
+        try {
+            if (app(CampaignDirector::class)->tick()) {
+                DB::table('game_runtime')->upsert([['key' => 'campaign_director_failures', 'value' => '0']], ['key'], ['value']);
+            }
+        } catch (\Throwable $exception) {
+            $message = 'Campaign director failed; exception details redacted.';
+            Log::error($message, ['exception_class' => get_class($exception)]);
+            try {
+                $failures = (int) DB::table('game_runtime')->where('key', 'campaign_director_failures')->value('value') + 1;
+                DB::table('game_runtime')->upsert([['key' => 'campaign_director_failures', 'value' => (string) $failures]], ['key'], ['value']);
+                $grant = CampaignGrant::where('slot', 1)->first();
+                if ($grant) {
+                    $control = app(CampaignControl::class);
+                    $control->event($grant, null, 'director_error', ['exception_class' => get_class($exception), 'message' => $message, 'consecutive' => $failures]);
+                    if ($failures >= 5) {
+                        $control->pause($grant, 'director_error');
+                    }
+                }
+            } catch (\Throwable) {
             }
         }
         if (app(EngineGate::class)->enabled()) {

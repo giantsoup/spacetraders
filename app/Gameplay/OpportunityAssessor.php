@@ -12,7 +12,7 @@ class OpportunityAssessor
 {
     public function __construct(private MiningPlanner $mining, private FuelPlanner $fuel) {}
 
-    public function report(Agent $agent): array
+    public function report(Agent $agent, ?string $strategy = null, ?string $shipSymbol = null, bool $allTradePairs = false): array
     {
         $observations = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->get();
         $listings = $observations->where('kind', 'market_listing')->keyBy('symbol');
@@ -36,7 +36,7 @@ class OpportunityAssessor
         $observationGaps = [];
         $history = app(CycleAccounting::class)->history($agent);
         if (! $agent->isArchived()) {
-            foreach (Ship::where('agent_id', $agent->id)->get() as $owned) {
+            foreach (Ship::where('agent_id', $agent->id)->when($shipSymbol, fn ($query) => $query->where('symbol', $shipSymbol))->get() as $owned) {
                 $ship = $owned->snapshot;
                 if (! isset($ship['nav']['flightMode'], $ship['nav']['systemSymbol'], $ship['nav']['waypointSymbol'], $ship['fuel']['current'], $ship['fuel']['capacity'], $ship['cargo']['units'], $ship['cargo']['capacity']) || ! is_array($ship['cargo']['inventory'] ?? null)) {
                     $observationGaps[] = ['ship' => $owned->symbol, 'reason' => 'Ship observations are incomplete. Missing values remain Unknown. Synchronize before planning.'];
@@ -56,7 +56,7 @@ class OpportunityAssessor
                         $questions[] = ['ship' => $owned->symbol, 'destination' => $market['symbol'], 'fact' => $missingDirectory ? 'Missing goods directory' : ($market['state'] === 'prices_unknown' ? 'Unknown prices' : 'Stale prices'),
                             'purpose' => $missingDirectory ? 'Synchronize again to fetch this directory remotely before assigning travel. Missing directories rotate ahead of old unoccupied reads within the same cap.' : 'Observe '.implode(', ', $market['goods']).' prices to compare sale, trade and fuel options.', 'benefit' => 'Unknown until prices and displaced earnings are measured.', 'stop' => 'Stop after a detailed quote or the approved budget. A goods directory alone does not answer the question.'];
                     }
-                    if ($this->mining->capability($ship) !== null) {
+                    if (($strategy !== null && $strategy !== 'mining') || $this->mining->capability($ship) !== null) {
                         continue;
                     }
                     foreach ($points as $site) {
@@ -87,22 +87,30 @@ class OpportunityAssessor
                         $opportunities[] = $record;
                     }
                 }
+                if ($strategy !== null && $strategy !== 'trade') {
+                    continue;
+                }
                 foreach ($markets as $source) {
                     foreach ($markets as $buyer) {
-                        if ($source['symbol'] === $buyer['symbol']) {
+                        if ($source['symbol'] === $buyer['symbol'] || ($allTradePairs && (empty($source['prices']) || empty($buyer['prices'])))) {
                             continue;
                         }
                         foreach (array_intersect($source['goods'], $buyer['goods']) as $symbol) {
-                            if (count($opportunities) >= config('gameplay.opportunity_limit')) {
+                            if (! $allTradePairs && count($opportunities) >= config('gameplay.opportunity_limit')) {
                                 break 3;
                             }
-                            $opportunities[] = $this->trade($agent, $ship, $source, $buyer, $symbol, $listings);
+                            $opportunities[] = $allTradePairs
+                                ? ['strategy' => 'trade', 'ship' => $ship['symbol'], 'source' => $source['symbol'], 'market' => $buyer['symbol'], 'good' => $symbol]
+                                : $this->trade($agent, $ship, $source, $buyer, $symbol, $listings);
                         }
                     }
                 }
             }
         }
         usort($opportunities, fn ($a, $b) => [$a['strategy'], $a['ship'], $a['market']] <=> [$b['strategy'], $b['ship'], $b['market']]);
+        if ($allTradePairs) {
+            return ['opportunities' => $opportunities, 'markets' => $markets];
+        }
         $fleet = Ship::where('agent_id', $agent->id)->get()->keyBy('symbol');
         foreach ($questions as &$question) {
             $question['route_options'] = $this->fuel->options($agent, $fleet[$question['ship']]->snapshot, $question['destination'], listings: $listings);

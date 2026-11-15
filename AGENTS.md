@@ -27,8 +27,12 @@ or "prod", or to deploy), do these steps in order:
    up, fast-forwards to `origin/main`, installs dependencies, migrates, builds, restarts the
    web server and checks all three addresses. The deploy ends a running engine gracefully
    and restarts it afterwards. Ending cancels unsent previews and stops active automation
-   runs, which the user re-approves afterwards. A faulted or stopping engine makes the
-   deploy refuse; then ask the user to review it on spacetraders.test.
+   runs. An approved, unpaused campaign resumes on its own after the engine is healthy,
+   using fresh state and new previews; plain automation runs still need re-approval.
+   Campaign safety pauses require operator review and `campaign:resume`. The separate campaign
+   watchdog Scheduled Task is installed per checkout and remains independent of engine restarts.
+   A faulted or stopping
+   engine makes the deploy refuse; then ask the user to review it on spacetraders.test.
 3. **Report** the deployed commit and the script's `OK:` lines.
 
 Keep Herd Settings → AI → **Enable Herd Developer Tools** off. When it's on, Herd injects

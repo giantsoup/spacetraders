@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Gameplay\DeploymentGate;
+use App\Gameplay\HostLock;
 use App\Gameplay\SpaceTradersApi;
 use App\Queue\DeploymentDatabaseQueue;
 use App\Queue\EngineWorkerGate;
@@ -28,6 +29,7 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->scoped(SpaceTradersClient::class);
         $this->app->scoped(SpaceTradersApi::class);
+        $this->app->singleton(HostLock::class);
         $this->app->singleton(DeploymentGate::class);
         $this->app->singleton(EngineWorkerGate::class);
         $this->app->resolving('queue', function ($manager) {

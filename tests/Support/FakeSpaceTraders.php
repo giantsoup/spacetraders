@@ -76,6 +76,9 @@ final class FakeSpaceTraders
             flock($handle, LOCK_EX);
             try {
                 $world = json_decode(stream_get_contents($handle), true, flags: JSON_THROW_ON_ERROR);
+                if (($world['pace_seconds'] ?? 0) > 0) {
+                    usleep((int) ($world['pace_seconds'] * 1000000));
+                }
                 [$body, $status] = self::respond($world, $request);
                 if ($request->method() !== 'GET' && str_ends_with($request->url(), '/refuel') && ($world['omit_refuel_cargo'] ?? false)) {
                     unset($body['data']['cargo']);
@@ -176,7 +179,7 @@ final class FakeSpaceTraders
             }
             unset($arriving);
             if ($path === '/') {
-                return [['version' => 'v2.3.0', 'resetDate' => $world['reset']], 200];
+                return [['version' => 'v2.3.0', 'resetDate' => $world['reset'], 'serverResets' => ['next' => $world['next_reset'] ?? null]], 200];
             }
             if ($path !== '/' && str_starts_with($world['failure'] ?? '', 'read_')) {
                 $status = (int) substr($world['failure'], 5);
@@ -235,6 +238,9 @@ final class FakeSpaceTraders
             return [['error' => ['code' => $code, 'message' => 'Never expose raw synthetic error']], $code];
         }
         $world['writes'][] = ['path' => $path, 'arguments' => $args];
+        if ($path === '/register' && ($world['campaign_registration'] ?? false)) {
+            return [['data' => ['token' => 'synthetic-new-world', 'agent' => ['symbol' => $args['symbol'], 'startingFaction' => $args['faction'], 'accountId' => 'synthetic-account']]], 201];
+        }
         if ($world['foundation'] ?? false) {
             $response = self::foundationWrite($world, $path, $args, $request->method());
             if ($response !== null) {
@@ -357,7 +363,7 @@ final class FakeSpaceTraders
                 $ship['nav']['status'] = 'IN_TRANSIT';
                 $ship['nav']['route']['departureTime'] = now()->toIso8601String();
                 $ship['nav']['route']['arrival'] = now()->addSeconds($world['travel_seconds'])->toIso8601String();
-                $ship['fuel']['current'] -= $world['fuel_consumption'] ?? 5;
+                $ship['fuel']['current'] -= $ship['fuel']['capacity'] === 0 ? 0 : ($world['fuel_consumption'] ?? 5);
 
                 return [['data' => ['nav' => $ship['nav'], 'fuel' => $ship['fuel'], 'events' => []]], 200];
             }

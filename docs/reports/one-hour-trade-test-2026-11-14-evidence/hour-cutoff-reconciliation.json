@@ -1,0 +1,10 @@
+{
+  "deadline": "2026-11-15T03:03:00Z",
+  "cash_at_deadline": 845528,
+  "snapshot_at": "2026-11-15T03:03:49.102942+00:00",
+  "basis": "The final sale settled before the deadline. The only subsequent cash transaction was the 144 CR home refuel. The later snapshot therefore has the same cash as the deadline.",
+  "final_cash": 845384,
+  "final_inventory": 0,
+  "final_waypoint": "X1-PZ83-A1",
+  "final_fuel": 400
+}

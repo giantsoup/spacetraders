@@ -182,10 +182,16 @@ class ShipCommandExecutor
                     throw new GameException('Intent expired, reset or stopped before execution.');
                 }
                 $before = $this->rules->inspect($agent, $action->ship_symbol, $action->command, $action->arguments, $run);
+                if ($run) {
+                    app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments);
+                }
                 $this->unchangedApproval($action, $before);
                 // Stop and reservation contend on a database transaction, independently of the host lock.
-                DB::transaction(function () use ($action, $run, $before) {
+                DB::transaction(function () use ($action, $run, $before, $agent) {
                     $this->gate->check($action->engine_session_id);
+                    if ($run) {
+                        app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments, boundaryOnly: true);
+                    }
                     if ($action->expires_at->isPast()) {
                         throw new GameException('Intent expired during preflight. Create a fresh preview.');
                     }
