@@ -90,6 +90,34 @@ class CampaignAutopilotTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_manual_fleet_purchase_during_a_campaign_run_is_explained_and_the_run_continues(): void
+    {
+        $grant = $this->tradeGrant(1000);
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $run->update(['plan' => array_replace($run->plan, ['max_spend' => 100000])]);
+        $action = app(ShipCommandExecutor::class)->preview($this->agent->fresh(), 'LOCAL-1', 'buy_ship',
+            ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => 20000, 'reserve' => 0], 'fleet-purchase');
+        $this->assertSame(0, $action->before_state['estimate']['protected_in_flight']);
+        $this->assertSame([], json_decode(file_get_contents($this->file), true)['writes']);
+        app(ShipCommandExecutor::class)->approve($this->agent->fresh(), $action);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertSame('confirmed', $action->fresh()->state->value);
+        $this->assertDatabaseHas('ships', ['agent_id' => $this->agent->id, 'symbol' => 'LOCAL-3']);
+        $this->assertSame(0, app(\App\Gameplay\CreditAccounting::class)->summary($this->agent->fresh())['unexplained_change']);
+        $this->assertNull(app(CampaignSafety::class)->reason($grant, CampaignEpisode::firstOrFail(), $this->agent->fresh()));
+        for ($i = 0; $i < 100 && $run->fresh()->active_agent_id; $i++) {
+            app(AutomationRunner::class)->advance($run->id);
+            foreach (ShipAction::where('state', 'pending')->get() as $pending) {
+                app(ShipCommandExecutor::class)->execute($pending->id);
+            }
+            $this->travel(6)->seconds();
+            LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+        }
+        $this->assertSame('completed', $run->fresh()->state->value, $run->fresh()->blocked_reason ?? '');
+        $this->assertSame(-20000, $run->fresh()->totals['other_credit_delta']);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
     public function test_a_budget_deferred_positioning_preview_starts_first_on_the_next_paced_tick(): void
     {
         $this->tradeWorld();

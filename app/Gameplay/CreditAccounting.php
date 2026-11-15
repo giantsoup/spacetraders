@@ -20,7 +20,7 @@ class CreditAccounting
     {
         DB::table('confirmed_credit_entries')->insertOrIgnore(['agent_id' => $agent->id, 'reset_id' => $action->reset_id, 'ship_action_id' => $action->id, 'automation_run_id' => $action->automation_run_id,
             'kind' => match ($action->command) {
-                'sell' => 'sale_receipt', 'contract_accept', 'contract_fulfill' => 'contract_receipt', 'refuel' => 'fuel_cost', 'buy' => 'acquisition_cost', 'buy_ship' => 'setup_cost', default => 'other'
+                'sell' => 'sale_receipt', 'contract_accept', 'contract_fulfill' => 'contract_receipt', 'refuel' => 'fuel_cost', 'buy' => 'acquisition_cost', 'buy_ship' => isset($action->arguments['site'], $action->arguments['market']) ? 'setup_cost' : 'ship_purchase', default => 'other'
             },
             'credits' => $delta, 'confirmed_at' => now()]);
     }

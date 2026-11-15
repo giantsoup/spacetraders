@@ -61,11 +61,23 @@ class CommandRules
             }
         }
         $spending = in_array($command, ['buy', 'buy_ship', 'repair', 'install_mount', 'remove_mount', 'install_module', 'remove_module', 'jump', 'refuel'], true);
-        $floor = max($arguments['reserve'] ?? 0, $active?->plan['reserve'] ?? 0, ! $run && $spending ? max(1, (int) config('gameplay.manual_reserve_floor')) : 0);
+        $floor = max($arguments['reserve'] ?? 0, $run?->plan['reserve'] ?? 0, ! $run && $spending ? max(1, (int) config('gameplay.manual_reserve_floor')) : 0);
+        $protected = 0;
         if (! $run) {
             foreach (AutomationRun::where('active_agent_id', $agent->id)->get() as $protectedRun) {
-                $floor = max($floor, $protectedRun->plan['reserve'] + max(0, $protectedRun->plan['max_spend'] - ($protectedRun->totals['spending'] ?? $protectedRun->totals['fuel_cost'] ?? 0)));
+                $commitment = $protectedRun->plan['reserve'] + max(0, $protectedRun->plan['max_spend'] - ($protectedRun->totals['spending'] ?? $protectedRun->totals['fuel_cost'] ?? 0));
+                if ($command === 'buy_ship' && $protectedRun->campaign_episode_id) {
+                    $commitment = 0;
+                    if ($protectedRun->strategy === 'trade') {
+                        $carrying = $this->sync->refreshShip($agent, $protectedRun->ship_symbol)->snapshot;
+                        if ($carrying['cargo']['units'] > 0) {
+                            $commitment = app(CampaignTrade::class)->fuelReserve($agent, $protectedRun->ship_symbol, $protectedRun->plan['market']);
+                        }
+                    }
+                }
+                $protected = $command === 'buy_ship' ? $protected + $commitment : max($protected, $commitment);
             }
+            $floor = max($floor, $protected);
         }
         $contract = null;
         if ($run?->strategy === 'contracts') {
@@ -397,6 +409,14 @@ class CommandRules
                     throw new GameException('The complete ship configuration is not verified as mining capable.');
                 }
                 $cost = $offer['purchasePrice'];
+                $estimate['ship_type'] = $arguments['shipType'];
+                $estimate['shipyard_waypoint'] = $arguments['waypointSymbol'];
+                $estimate['purchasePrice'] = $cost;
+                $estimate['credits_after'] = $agent->credits - $cost;
+                $estimate['protected_in_flight'] = $protected;
+                if ($cost > $agent->credits) {
+                    throw new GameException('Insufficient credits for this ship purchase: price '.$cost.' CR exceeds current credits '.$agent->credits.' CR.');
+                }
                 $estimate['configuration'] = $offer;
                 $estimate['scouting_cost'] = 0;
                 if (! $setup) {
