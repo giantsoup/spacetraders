@@ -15,6 +15,7 @@ use App\Models\ShipAction;
 use App\Models\User;
 use App\Services\SpaceTradersClient;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 
 class CampaignDirector
@@ -505,20 +506,38 @@ class CampaignDirector
 
     private function scout(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array &$considered): ?AutomationRun
     {
-        $tasks = collect(app(OpportunityAssessor::class)->report($agent)['observation_tasks'])->where('ship', $ship['symbol'])->where('ready_for_bounded_preview', true);
+        $report = app(OpportunityAssessor::class)->report($agent);
+        $tasks = self::scoutOrder(collect($report['observation_tasks'])->where('ship', $ship['symbol'])->where('ready_for_bounded_preview', true), collect($report['markets']));
         foreach ($tasks as $task) {
             if ($task['destination'] === $ship['nav']['waypointSymbol']) {
                 continue;
             }
             try {
+                // One way: the scout parks at each market it prices and starts the next hop from there,
+                // instead of flying home between markets.
                 return app(AutomationRunner::class)->preview($agent, $ship['symbol'], $this->limits($grant, $episode, $agent) + [
-                    'strategy' => 'scout', 'destination' => $task['destination'], 'max_fuel' => $ship['fuel']['capacity']]);
+                    'strategy' => 'scout', 'destination' => $task['destination'], 'max_fuel' => $ship['fuel']['capacity'], 'one_way' => true]);
             } catch (GameException $exception) {
                 $considered[] = ['strategy' => 'scout', 'destination' => $task['destination'], 'rejected' => $exception->getMessage()];
             }
         }
 
         return null;
+    }
+
+    /**
+     * Never-priced markets come first, then the market priced longest ago. Insertion order alone
+     * sent the probe back to the same stale market every tick while most markets stayed unpriced.
+     */
+    public static function scoutOrder(Collection $tasks, Collection $markets): Collection
+    {
+        $pricedAt = $markets->pluck('price_at', 'symbol');
+
+        return $tasks->sortBy([
+            fn ($a, $b) => ($a['fact'] !== 'Unknown prices') <=> ($b['fact'] !== 'Unknown prices'),
+            fn ($a, $b) => (string) ($pricedAt[$a['destination']] ?? '') <=> (string) ($pricedAt[$b['destination']] ?? ''),
+            fn ($a, $b) => $a['destination'] <=> $b['destination'],
+        ])->values();
     }
 
     private function refreshRecoveryEvidence(CampaignEpisode $episode, Agent $agent, array $ship): void
