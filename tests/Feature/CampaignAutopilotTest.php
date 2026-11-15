@@ -1392,7 +1392,7 @@ class CampaignAutopilotTest extends TestCase
     {
         $grant = $this->approve();
         $this->tick();
-        CampaignEpisode::first()->update(['opened_at' => now()->subMinutes(31)]);
+        CampaignEpisode::first()->update(['opened_at' => now()->subMinutes(91)]);
         for ($attempt = 0; $attempt < 12 && ! AutomationRun::whereNotNull('active_agent_id')->exists(); $attempt++) {
             $this->tick();
         }
