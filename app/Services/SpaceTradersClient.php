@@ -99,7 +99,7 @@ class SpaceTradersClient
         } catch (\Throwable) {
             $budget->recordingFailed($response);
             if ($response->status() === 429 || $response->serverError()) {
-                throw new GameException('Could not save upstream budget. Reconcile before another write.', apiCode: $response->status(), uncertain: ! $read, retryAfter: 10);
+                throw new GameException('Could not save upstream budget. Reconcile before another write.', uncertain: ! $read, retryAfter: 10, httpStatus: $response->status());
             }
             // Budget recording cannot discard a successful write or a known upstream rejection.
         }

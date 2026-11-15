@@ -2,9 +2,12 @@
 
 namespace App\Gameplay;
 
+use App\Models\AutomationRun;
+use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\LocalEngine;
+use Carbon\CarbonImmutable;
 
 class CampaignHealth
 {
@@ -21,18 +24,17 @@ class CampaignHealth
         }
         $alive = $engine?->state === 'running' && ! isset($problems['engine_heartbeat_stale']);
         if ($alive && ! $grant->paused_at) {
-            // Repeated identical decisions are de-duplicated, so events alone go quiet during long
-            // transits. The director stamps last_directed_at on every tick it runs; use the newer.
-            $last = CampaignEvent::where('campaign_grant_id', $grant->id)->latest('id')->value('created_at');
-            $seen = collect([$last, $grant->last_directed_at, $grant->created_at])->filter()->max();
+            $resumed = $grant->last_directed_at ? null : CampaignEvent::where('campaign_grant_id', $grant->id)->where('kind', 'resume')->latest('id')->value('created_at');
+            $seen = $grant->last_directed_at ?? $resumed ?? $grant->created_at;
             if ($seen->lt(now()->subMinutes(15))) {
                 $problems['campaign_decisions_stalled:'.$grant->id] = 'Campaign director has not run for fifteen minutes while the engine is alive.';
             }
-            $kind = $grant->wait_reason ? 'wait' : 'decision';
-            $choice = CampaignEvent::where('campaign_grant_id', $grant->id)->where('kind', $kind)->latest('id')->first();
-            if ($choice && $choice->created_at->lte(now()->subMinutes(60))
-                && ($grant->wait_reason ? ($choice->data['reason'] ?? null) === $grant->wait_reason : ($choice->data['choice'] ?? null) === 'idle')) {
-                $problems['campaign_choice_stalled:'.$grant->id.':'.($grant->wait_reason ?? 'idle')] = 'Campaign has kept the same wait or idle decision for sixty minutes.';
+            $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->latest('id')->first();
+            $started = AutomationRun::whereIn('campaign_episode_id', CampaignEpisode::where('campaign_grant_id', $grant->id)->select('id'))->max('started_at');
+            $result = CampaignEvent::where('campaign_grant_id', $grant->id)->whereIn('kind', ['load_result', 'recovery_result'])->latest('id')->value('created_at');
+            $progress = collect([$episode?->opened_at ?? $grant->created_at, $started ? CarbonImmutable::parse($started) : null, $result])->filter()->max();
+            if ($episode?->phase !== 'wind_down' && $progress->lte(now()->subMinutes(60))) {
+                $problems['campaign_progress_stalled:'.$grant->id] = 'Campaign has not started a run or recorded a load or recovery result for sixty minutes.';
             }
         }
         if ($grant->paused_at) {

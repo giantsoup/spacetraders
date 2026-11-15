@@ -47,7 +47,7 @@ class CampaignControl
         DB::transaction(function () {
             $pending = CampaignGrant::where('slot', 2)->first();
             $current = CampaignGrant::where('slot', 1)->first();
-            if (! $pending || ($current && ($current->paused_at || $this->busy($current)))) {
+            if (! $pending || ($current && (($current->paused_at && $current->pause_reason !== 'grant_expired' && ! $current->expires_at?->isPast()) || $this->busy($current)))) {
                 return;
             }
             if ($current) {
@@ -91,6 +91,7 @@ class CampaignControl
                 $state['losses_reviewed_at'] = now()->toIso8601String();
                 $episode->update(['state' => $state]);
             }
+            DB::table('game_runtime')->upsert([['key' => 'campaign_director_failures', 'value' => '0']], ['key'], ['value']);
             $this->event($grant, null, 'resume', []);
         });
     }

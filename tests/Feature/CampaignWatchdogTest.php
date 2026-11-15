@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Gameplay\CampaignControl;
+use App\Gameplay\CampaignHealth;
 use App\Gameplay\CampaignNotifier;
 use App\Gameplay\CampaignPlaybook;
 use App\Gameplay\Engine\EngineHost;
@@ -67,28 +68,44 @@ class CampaignWatchdogTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_unchanged_wait_and_idle_choices_alert_after_sixty_minutes_and_recover(): void
+    public function test_wait_and_idle_diagnostics_do_not_clear_a_productive_progress_alert(): void
     {
         config(['campaign.alert_webhook_url' => 'https://example.invalid/synthetic-hook']);
-        $this->partialMock(CampaignNotifier::class)->shouldReceive('toast')->times(5);
+        $this->partialMock(CampaignNotifier::class)->shouldReceive('toast')->twice();
         $grant = CampaignGrant::where('slot', 1)->firstOrFail();
         $control = app(CampaignControl::class);
         $grant->update(['wait_reason' => 'awaiting_fresh_state']);
         $control->event($grant, null, 'wait', ['reason' => 'awaiting_fresh_state']);
         $this->travel(61)->minutes();
         EngineFixture::healthy();
+        $grant->update(['last_directed_at' => now()]);
         $control->event($grant, null, 'wait', ['reason' => 'awaiting_fresh_state']);
         $this->artisan('campaign:watchdog')->assertFailed();
-        $this->assertStringContainsString('campaign_choice_stalled', file_get_contents($this->log));
+        $this->assertStringContainsString('campaign_progress_stalled', file_get_contents($this->log));
         $grant->update(['wait_reason' => null]);
         $control->event($grant, null, 'decision', ['choice' => 'idle']);
-        $this->artisan('campaign:watchdog')->assertSuccessful();
-        $this->travel(61)->minutes();
-        EngineFixture::healthy();
-        $control->event($grant, null, 'sample', []);
         $this->artisan('campaign:watchdog')->assertFailed();
+        $control->event($grant, null, 'load_result', ['run_id' => 1]);
+        $this->artisan('campaign:watchdog')->assertSuccessful();
         $this->assertNull($grant->fresh()->paused_at);
-        Http::assertSentCount(5);
+        Http::assertSentCount(2);
+    }
+
+    public function test_diagnostic_decisions_do_not_mask_seventy_minutes_without_productive_progress(): void
+    {
+        $grant = CampaignGrant::where('slot', 1)->firstOrFail();
+        for ($tick = 0; $tick < 7; $tick++) {
+            $this->travel(10)->minutes();
+            EngineFixture::healthy();
+            $grant->update(['last_directed_at' => now()]);
+            app(CampaignControl::class)->event($grant, null, 'decision', ['choice' => $tick % 2 ? 'idle' : 'refreshing_discovery']);
+        }
+        $problems = app(CampaignHealth::class)->problems();
+        $this->assertArrayHasKey('campaign_progress_stalled:'.$grant->id, $problems);
+        $this->assertArrayNotHasKey('campaign_decisions_stalled:'.$grant->id, $problems);
+        $this->assertNull($grant->fresh()->paused_at);
+        app(CampaignControl::class)->event($grant, null, 'recovery_result', ['run_id' => 1]);
+        $this->assertSame([], app(CampaignHealth::class)->problems());
     }
 
     public function test_no_webhook_still_logs_and_toasts_once_then_repeats_and_recovers(): void
@@ -101,7 +118,9 @@ class CampaignWatchdogTest extends TestCase
         $this->travel(2)->hours();
         $this->artisan('campaign:watchdog')->assertFailed();
         EngineFixture::healthy();
-        app(CampaignControl::class)->event(CampaignGrant::where('slot', 1)->firstOrFail(), null, 'decision', ['choice' => 'idle']);
+        $grant = CampaignGrant::where('slot', 1)->firstOrFail();
+        $grant->update(['last_directed_at' => now()]);
+        app(CampaignControl::class)->event($grant, null, 'load_result', ['run_id' => 1]);
         $this->artisan('campaign:watchdog')->assertSuccessful();
         $this->artisan('campaign:watchdog')->assertSuccessful();
         $this->assertStringContainsString('Recovered', file_get_contents($this->log));

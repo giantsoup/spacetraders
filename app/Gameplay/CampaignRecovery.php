@@ -29,7 +29,7 @@ class CampaignRecovery
         $cost = app(CampaignTrade::class)->averageCosts($agent, $symbol)[$good] ?? 0;
         $leg = $ship['nav']['waypointSymbol'] === $buyer
             ? ['destination' => $buyer, 'outbound_fuel' => 0, 'required_fuel' => 0, 'refuel_ceiling' => 0]
-            : app(FuelPlanner::class)->leg($agent, $ship, $buyer, $limits['reserve']);
+            : app(FuelPlanner::class)->recoveryLeg($agent, $ship, $buyer, $limits['reserve']);
         $plan = array_merge($limits, ['strategy' => 'sell_aboard', 'recovery_good' => $good, 'sale_floor' => (int) ceil($cost), 'cargo_cost' => $cost * MiningPlanner::inventory($ship)[$good], 'sell_only' => true, 'cycles' => 1, 'site' => $ship['nav']['waypointSymbol'], 'market' => $buyer,
             'initial_credits' => $agent->credits, 'initial_inventory' => MiningPlanner::inventory($ship), 'initial_fuel' => $ship['fuel']['current'],
             'initial_waypoint' => $ship['nav']['waypointSymbol'], 'initial_status' => $ship['nav']['status'],
@@ -74,7 +74,7 @@ class CampaignRecovery
                     continue;
                 }
                 try {
-                    app(FuelPlanner::class)->leg($agent, $ship, $alternative->symbol, 0);
+                    app(FuelPlanner::class)->recoveryLeg($agent, $ship, $alternative->symbol);
                     if ($bid['sellPrice'] >= $floor) {
                         $this->floorObserved($run);
                     }

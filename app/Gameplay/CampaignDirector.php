@@ -139,6 +139,10 @@ class CampaignDirector
             app(CampaignControl::class)->event($grant, null, 'registration', ['agent_id' => $agent->id, 'reset_id' => $schedule['reset_id']]);
         }
         app(HostLock::class)->scoped('agent-'.$agent->id, function () use ($grant, $agent, $schedule, $next) {
+            $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->where('reset_id', $schedule['reset_id'])->whereNull('closed_at')->first();
+            if ($episode && $this->startRetainedPreview($grant, $episode, $agent)) {
+                return;
+            }
             $sync = app(AgentSynchronizer::class);
             $sync->sync($agent, false);
             $episode = CampaignEpisode::firstOrCreate(['campaign_grant_id' => $grant->id, 'reset_id' => $schedule['reset_id']],
@@ -169,7 +173,7 @@ class CampaignDirector
                 $handoff = $run->campaign_episode_id && ($run->state->value === 'blocked' || $freshness || $run->stop_requested_at
                     || ($reason && empty($run->plan['sell_only'])) || (app(CampaignSafety::class)->windDown($episode) && empty($run->plan['sell_only'])));
                 if ($handoff) {
-                    if ($run->strategy === 'scout' && ! empty($run->plan['one_way']) && ($this->role($agent, 'probe')['symbol'] ?? null) === $run->ship_symbol) {
+                    if ($run->state->value === 'blocked' && ! $freshness && $run->strategy === 'scout' && ! empty($run->plan['one_way']) && ($this->role($agent, 'probe')['symbol'] ?? null) === $run->ship_symbol) {
                         $episode->update(['state' => array_merge($episode->state ?? [], ['probe_position_failed' => now()->toIso8601String()])]);
                     }
                     app(AutomationRunner::class)->stop($run);
@@ -183,6 +187,9 @@ class CampaignDirector
                     }
                 }
                 if ($run) {
+                    if ($episode->phase === 'earn' && ! app(CampaignSafety::class)->windDown($episode)) {
+                        $this->discoverIfDue($episode, $agent);
+                    }
                     $this->decision($grant, $episode, $agent, [], 'awaiting_run');
 
                     return;
@@ -219,12 +226,8 @@ class CampaignDirector
             }
             $considered = [];
             if (! app(CampaignSafety::class)->windDown($episode)) {
-                $catalogue = GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'catalogue')->latest('observed_at')->first();
-                $lastDiscovery = $episode->state['last_discovery_at'] ?? $catalogue?->observed_at?->toIso8601String();
-                $interval = $episode->phase === 'discover' ? 120 : 900;
-                if (isset($episode->state['discovery']) || ! $lastDiscovery || CarbonImmutable::parse($lastDiscovery)->lt(now()->subSeconds($interval))) {
+                if ($episode->phase !== 'earn' && $this->discoverIfDue($episode, $agent)) {
                     $this->decision($grant, $episode, $agent, [], 'refreshing_discovery');
-                    app(CampaignDiscovery::class)->advance($episode, $agent);
 
                     return;
                 }
@@ -238,6 +241,13 @@ class CampaignDirector
                         }
                     }
                 }
+            }
+            $tradeAttempted = false;
+            $miningTurn = ! empty($episode->state['mining_deferred']);
+            if ($miningTurn) {
+                $state = $episode->state;
+                unset($state['mining_deferred']);
+                $episode->update(['state' => $state]);
             }
             foreach ($phases[$index]['activities'] as $activity) {
                 if (isset($activity['when']) && ! app(CampaignPlaybook::class)->passes($activity['when'], app(CampaignSafety::class)->metrics($episode, $agent))) {
@@ -256,6 +266,15 @@ class CampaignDirector
 
                     continue;
                 }
+                if ($activity['strategy'] === 'trade' && $miningTurn) {
+                    continue;
+                }
+                if ($activity['strategy'] === 'mining' && $tradeAttempted) {
+                    $episode->update(['state' => array_merge($episode->state ?? [], ['mining_deferred' => true])]);
+
+                    continue;
+                }
+                $tradeAttempted = $tradeAttempted || $activity['strategy'] === 'trade';
                 try {
                     $run = match ($activity['strategy']) {
                         'trade' => $this->trade($grant, $episode, $agent, $ship, $activity, $considered),
@@ -276,11 +295,64 @@ class CampaignDirector
                         return;
                     }
                 } catch (GameException $exception) {
+                    if ($exception->retryAfter > 0) {
+                        $this->wait($grant, 'awaiting_run_start');
+
+                        return;
+                    }
                     $considered[] = $activity + ['rejected' => $exception->getMessage()];
                 }
             }
+            if ($episode->phase === 'earn' && ! app(CampaignSafety::class)->windDown($episode)) {
+                $this->discoverIfDue($episode, $agent);
+            }
             $this->decision($grant, $episode, $agent, $considered, 'idle');
         });
+    }
+
+    private function startRetainedPreview(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent): bool
+    {
+        if (AutomationRun::where('active_agent_id', $agent->id)->exists()) {
+            return false;
+        }
+        $run = AutomationRun::where('campaign_episode_id', $episode->id)->where('agent_id', $agent->id)->where('state', 'preview')->latest('id')->first();
+        if (! $run) {
+            return false;
+        }
+        try {
+            if (app(CampaignSafety::class)->windDown($episode) && empty($run->plan['sell_only'])) {
+                throw new GameException('Wind-down invalidates a retained buying or positioning preview.');
+            }
+            app(AutomationRunner::class)->startCampaign($agent, $run, $episode);
+            $grant->update(['wait_reason' => null]);
+            if ($run->strategy === 'trade') {
+                $episode->refresh();
+                $episode->update(['state' => array_merge($episode->state ?? [], ['current_pair' => $run->plan['campaign_trade']['key']])]);
+            }
+            $this->decision($grant, $episode, $agent, [], $run->strategy, $run->id);
+        } catch (GameException $exception) {
+            if ($exception->retryAfter > 0) {
+                $this->wait($grant, 'awaiting_run_start');
+            } else {
+                AutomationRun::whereKey($run->id)->where('state', 'preview')->update(['state' => 'stopped', 'blocked_reason' => $exception->getMessage()]);
+                $this->decision($grant, $episode, $agent, [['strategy' => $run->strategy, 'rejected' => $exception->getMessage()]], 'preview_discarded');
+            }
+        }
+
+        return true;
+    }
+
+    private function discoverIfDue(CampaignEpisode $episode, Agent $agent): bool
+    {
+        $catalogue = GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'catalogue')->latest('observed_at')->first();
+        $last = $episode->state['last_discovery_at'] ?? $catalogue?->observed_at?->toIso8601String();
+        $interval = $episode->phase === 'discover' ? 120 : 900;
+        if (! isset($episode->state['discovery']) && $last && CarbonImmutable::parse($last)->gte(now()->subSeconds($interval))) {
+            return false;
+        }
+        app(CampaignDiscovery::class)->advance($episode, $agent);
+
+        return true;
     }
 
     private function role(Agent $agent, string $role): ?array
@@ -336,8 +408,13 @@ class CampaignDirector
                         $position = $this->position($grant, $episode, $agent, $probe, $candidate['buyer']);
 
                         return app(AutomationRunner::class)->startCampaign($agent, $position, $episode);
-                    } catch (\Throwable) {
-                        $episode->update(['state' => array_merge($episode->state ?? [], ['probe_position_failed' => now()->toIso8601String()])]);
+                    } catch (\Throwable $exception) {
+                        if ($exception instanceof GameException && $exception->retryAfter > 0) {
+                            throw $exception;
+                        }
+                        if ($exception instanceof GameException && $exception->retryAfter === 0 && ! $exception->uncertain && $exception->apiCode === null) {
+                            $episode->update(['state' => array_merge($episode->state ?? [], ['probe_position_failed' => now()->toIso8601String()])]);
+                        }
                         if ($position?->fresh()->active_agent_id) {
                             return $position->fresh();
                         }
@@ -368,6 +445,9 @@ class CampaignDirector
 
                 return app(AutomationRunner::class)->preview($agent, $ship['symbol'], $plan);
             } catch (GameException $exception) {
+                if ($exception->retryAfter > 0) {
+                    throw $exception;
+                }
                 $considered[] = $candidate + ['rejected' => $exception->getMessage()];
             }
         }
@@ -449,10 +529,61 @@ class CampaignDirector
         $offset = (int) ($state['recovery_refresh'] ?? 0);
         for ($reads = 0; $reads < min(2, $markets->count()); $reads++) {
             $market = $markets[($offset + $reads) % $markets->count()];
-            app(AgentSynchronizer::class)->observe($agent, 'market', $market->symbol, app(SpaceTradersApi::class)->market($agent, $market->symbol));
+            try {
+                app(AgentSynchronizer::class)->observe($agent, 'market', $market->symbol, app(SpaceTradersApi::class)->market($agent, $market->symbol));
+            } catch (GameException) {
+            } finally {
+                $state['recovery_refresh'] = ($offset + $reads + 1) % $markets->count();
+                $episode->update(['state' => $state]);
+            }
         }
-        $state['recovery_refresh'] = $markets->count() ? ($offset + 2) % $markets->count() : 0;
-        $episode->update(['state' => $state]);
+    }
+
+    private function positionRecoveryObserver(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, string $buyer): bool
+    {
+        if ($ship['nav']['waypointSymbol'] === $buyer || app(CampaignSafety::class)->windDown($episode)) {
+            return false;
+        }
+        $probe = $this->role($agent, 'probe');
+        $failed = $episode->state['probe_position_failed'] ?? null;
+        if (! $probe || ! app(FuelPlanner::class)->fuelFree($probe) || $probe['cargo']['units'] > 0
+            || (is_string($failed) && CarbonImmutable::parse($failed)->gte(now()->subMinutes(30)))) {
+            return false;
+        }
+        $markets = GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'market')->orderBy('symbol')->get();
+        $fresh = fn ($row) => $row && empty($row->data['invalidated_by_action']) && $row->observed_at->gte(now()->subSeconds(config('gameplay.snapshot_seconds')));
+        $fuel = $markets->filter(fn ($row) => collect($row->data['tradeGoods'] ?? [])->contains(fn ($good) => $good['symbol'] === 'FUEL' && $good['purchasePrice'] > 0 && $good['tradeVolume'] > 0));
+        $destination = ! $fresh($markets->firstWhere('symbol', $buyer)) ? $buyer : ($fuel->contains($fresh) ? null : $fuel->first()?->symbol);
+        if (! $destination) {
+            return false;
+        }
+        if ($probe['nav']['status'] === 'IN_TRANSIT') {
+            $this->decision($grant, $episode, $agent, [], 'awaiting_recovery_observer');
+
+            return true;
+        }
+        $position = null;
+        try {
+            if ($probe['nav']['waypointSymbol'] === $destination) {
+                app(AgentSynchronizer::class)->observe($agent, 'market', $destination, app(SpaceTradersApi::class)->market($agent, $destination));
+
+                return false;
+            }
+            $position = $this->position($grant, $episode, $agent, $probe, $destination);
+            app(AutomationRunner::class)->startCampaign($agent, $position, $episode);
+            $this->decision($grant, $episode, $agent, [], 'recovery_evidence', $position->id);
+
+            return true;
+        } catch (GameException $exception) {
+            if ($exception->retryAfter > 0) {
+                throw $exception;
+            }
+            if (! $exception->uncertain && $exception->apiCode === null) {
+                $episode->update(['state' => array_merge($episode->state ?? [], ['probe_position_failed' => now()->toIso8601String()])]);
+            }
+
+            return (bool) $position?->fresh()->active_agent_id;
+        }
     }
 
     private function recover(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent): bool
@@ -483,6 +614,9 @@ class CampaignDirector
             $previous = AutomationRun::where('campaign_episode_id', $episode->id)->where('ship_symbol', $ship['symbol'])->where('strategy', 'trade')->latest('id')->first();
             $considered = [];
             foreach ($buyers as $candidate) {
+                if ($this->positionRecoveryObserver($grant, $episode, $agent, $ship, $candidate['buyer'])) {
+                    return true;
+                }
                 try {
                     $limits = $this->limits($grant, $episode, $agent) + ['recovery_started_at' => $state['recovery_since'][$ship['symbol']],
                         'recovery_of' => $previous && ! empty($previous->totals['unsold'][$good]) ? $previous->id : null];
@@ -492,6 +626,9 @@ class CampaignDirector
 
                     return true;
                 } catch (GameException $exception) {
+                    if ($exception->retryAfter > 0) {
+                        throw $exception;
+                    }
                     $considered[] = ['strategy' => 'sell_aboard', 'buyer' => $candidate['buyer'], 'rejected' => $exception->getMessage()];
                 }
             }
