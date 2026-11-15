@@ -17,6 +17,10 @@ define('LARAVEL_START', microtime(true));
 
 require __DIR__.'/vendor/autoload.php';
 
+// The engine and the campaign watchdog run Artisan under php-win.exe, which has no console.
+// Without this, each console program they start opens a visible Windows Terminal window.
+App\Gameplay\Engine\Windows\WindowlessConsole::attach();
+
 $app = require_once __DIR__.'/bootstrap/app.php';
 
 /*
