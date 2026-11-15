@@ -1,105 +1,116 @@
 {
-  "date": "2026-11-15",
-  "implementationCommit": "a76dd7a",
-  "inheritedBase": "427df4d",
-  "php": "8.5.12",
-  "build": {
-    "command": "pnpm build",
-    "passed": true
-  },
-  "campaignFeature": {
-    "command": "php vendor/bin/phpunit tests/Feature/CampaignStatusTest.php",
-    "passed": true,
-    "tests": 8,
-    "assertions": 250
-  },
-  "fullSuite": {
-    "command": "php vendor/bin/phpunit",
-    "passed": true,
-    "tests": 956,
-    "assertions": 5755
-  },
-  "nativeBrowser": {
-    "command": "node scripts/verify-native-ship-browser.mjs",
-    "passed": true,
-    "steps": [
-      "Measured ship identity, Fuel, Cargo and primary action fit all portrait widths; the taller scene may push content below the fold at 640–719px height.",
-      "Pause motion and reduced motion stop both orbit-ring halves and the docked port light.",
-      "Report and ship share the report; Fuel/Cargo deep links, explicit Done, Escape, native focus containment/return, browser Back/Forward and Menu verified.",
-      "Manual preview, exact approval, queued intent, real finite worker, confirmed persistence and activity navigation verified.",
-      "Pending/sending/uncertain/confirmed-with-review states block duplicates. Read-only reconciliation retains confirmed review. History retains all 95 synthetic commands across a 50-command polling update, refreshes older states and keeps older saved previews open.",
-      "Active-run approved limits and real Stop request retain Stop requested while ownership settles.",
-      "Arrival due remains Checking; presentation pause/resume and lifecycle events preserve deadlines and issue no gameplay writes; reduced motion disables animation.",
-      "Missing fields, zero-capacity fuel, long symbols, landscape/wide/enlarged text scrolling, no-ship and archive states verified."
-    ],
-    "layouts": 12,
-    "errors": [],
-    "browser": "156.0.8078.4"
-  },
-  "sceneBrowser": {
-    "command": "node scripts/verify-ship-scene-browser.mjs",
-    "passed": true,
-    "layouts": 30,
-    "screenshots": 42,
-    "errors": [],
-    "blockedExternalRequests": 0
-  },
-  "herdArtBrowser": {
-    "status": "not_run",
-    "reason": "Required spacetraders-map-90 Herd site is absent; no Herd configuration was changed."
-  },
-  "mockupRegeneration": {
-    "round2ByteForByteMatch": true
-  },
-  "visualReview": {
-    "reviewer": "implementation worker",
-    "referenceViewportWidth": 402,
-    "reviewedAllRequestedPosesAndSizes": true,
-    "reviewedCampaignPages": true,
-    "notes": [
-      "Tall docked/orbit artwork matches round 2 geometry; transit, arriving and unknown match round 1, adapting to actual scene width and real progress.",
-      "128px transit/arriving/unknown use the approved 80px location size; labels stay 112px wide so Observed location does not wrap outside the scene.",
-      "Orbit controls use a hull-height target (64px tall at K=4, 44px at K=2); the unchanged 128x96 or 64x48 artwork remains centred on the ring.",
-      "The 72px scene is a safety-only K=1 placeholder. Its fixed safe ship height does not preserve docking or route alignment; proper design is deferred.",
-      "Wide review sheets crop stationary scenes around the centre and proportionally reduce travelling scenes; full-page originals are authoritative."
-    ]
-  },
-  "inspectionAudit": {
-    "uniqueSourceDocumentConfigFilesOpened": 31,
-    "searchInvocations": 10,
-    "definition": "Unique project source/document/config files inspected, excluding dependencies, generated build output, evidence images/JSON and execution logs. Searches count rg and Select-String invocations.",
-    "files": [
-      "AGENTS.md",
-      "docs/ship-status-graphics-plan.md",
-      "docs/ship-status-graphics/mockup-generator.mjs",
-      "docs/ship-status-graphics/round-1-all-states.html",
-      "docs/ship-status-graphics/round-2-centered-phone.html",
-      "resources/js/Components/ShipScene.vue",
-      "resources/js/shipPresentation.js",
-      "resources/js/Pages/Agent/Dashboard.vue",
-      "resources/js/Pages/Campaign/Status.vue",
-      "resources/js/waypointSprites.js",
-      "resources/js/Components/SystemMap/WaypointSprite.vue",
-      "app/Gameplay/CampaignStatus.php",
-      "app/Http/Controllers/AgentDashboardController.php",
-      "tests/Feature/CampaignStatusTest.php",
-      "tests/Browser/campaign-status.php",
-      "tests/Browser/campaign-status.mjs",
-      "scripts/campaign-smoke.php",
-      "tests/Support/CampaignStatusFixture.php",
-      "scripts/verify-native-ship-browser.mjs",
-      "scripts/verify-flight-deck-art-browser.mjs",
-      "scripts/verify-ship-scene-browser.mjs",
-      "app/Maps/SystemMapKnowledge.php",
-      "package.json",
-      "phpunit.xml",
-      "scripts/mvp-fixture.php",
-      "app/Gameplay/ExplorationPolicy.php",
-      "scripts/system-map-action-fixture.php",
-      ".gitignore",
-      "app/Providers/AppServiceProvider.php",
-      "tests/Support/FakeSpaceTraders.php",
-      "app/Gameplay/AgentSynchronizer.php"
-    ]
-  }
+    "date": "2026-11-15",
+    "implementationCommit": "2ac5948",
+    "inheritedBase": "d6a0646 (origin/main after rebase)",
+    "php": "8.5.12",
+    "build": {
+        "command": "pnpm build",
+        "passed": true
+    },
+    "campaignFeature": {
+        "command": "php vendor/bin/phpunit tests/Feature/CampaignStatusTest.php",
+        "passed": true,
+        "tests": 8,
+        "assertions": 250
+    },
+    "fullSuite": {
+        "command": "php vendor/bin/phpunit",
+        "passed": true,
+        "tests": 956,
+        "assertions": 5755
+    },
+    "nativeBrowser": {
+        "command": "node scripts/verify-native-ship-browser.mjs",
+        "passed": true,
+        "steps": [
+            "Measured ship identity, Fuel, Cargo and primary action fit all portrait widths; the taller scene may push content below the fold at 640–719px height.",
+            "Pause motion and reduced motion stop both orbit-ring halves and the docked port light.",
+            "Report and ship share the report; Fuel/Cargo deep links, explicit Done, Escape, native focus containment/return, browser Back/Forward and Menu verified.",
+            "Manual preview, exact approval, queued intent, real finite worker, confirmed persistence and activity navigation verified.",
+            "Pending/sending/uncertain/confirmed-with-review states block duplicates. Read-only reconciliation retains confirmed review. History retains all 95 synthetic commands across a 50-command polling update, refreshes older states and keeps older saved previews open.",
+            "Active-run approved limits and real Stop request retain Stop requested while ownership settles.",
+            "Arrival due remains Checking; presentation pause/resume and lifecycle events preserve deadlines and issue no gameplay writes; reduced motion disables animation.",
+            "Missing fields, zero-capacity fuel, long symbols, landscape/wide/enlarged text scrolling, no-ship and archive states verified."
+        ],
+        "layouts": 12,
+        "errors": [],
+        "browser": "156.0.8078.4"
+    },
+    "sceneBrowser": {
+        "command": "node scripts/verify-ship-scene-browser.mjs",
+        "passed": true,
+        "layouts": 30,
+        "screenshots": 42,
+        "errors": [],
+        "blockedExternalRequests": 0
+    },
+    "herdArtBrowser": {
+        "status": "not_run",
+        "reason": "Required spacetraders-map-90 Herd site is absent; no Herd configuration was changed."
+    },
+    "mockupRegeneration": {
+        "round2ByteForByteMatch": true
+    },
+    "visualReview": {
+        "reviewer": "implementation worker",
+        "referenceViewportWidth": 402,
+        "reviewedAllRequestedPosesAndSizes": true,
+        "reviewedCampaignPages": true,
+        "notes": [
+            "Tall docked/orbit artwork matches round 2 geometry; transit, arriving and unknown match round 1, adapting to actual scene width and real progress.",
+            "128px transit/arriving/unknown use the approved 80px location size; labels stay 112px wide so Observed location does not wrap outside the scene.",
+            "Orbit controls use a hull-height target (64px tall at K=4, 44px at K=2); the unchanged 128x96 or 64x48 artwork remains centred on the ring.",
+            "The 72px scene is a safety-only K=1 placeholder. Its fixed safe ship height does not preserve docking or route alignment; proper design is deferred.",
+            "Wide review sheets crop stationary scenes around the centre and proportionally reduce travelling scenes; full-page originals are authoritative."
+        ]
+    },
+    "inspectionAudit": {
+        "uniqueSourceDocumentConfigFilesOpened": 31,
+        "searchInvocations": 10,
+        "definition": "Unique project source/document/config files inspected, excluding dependencies, generated build output, evidence images/JSON and execution logs. Searches count rg and Select-String invocations.",
+        "files": [
+            "AGENTS.md",
+            "docs/ship-status-graphics-plan.md",
+            "docs/ship-status-graphics/mockup-generator.mjs",
+            "docs/ship-status-graphics/round-1-all-states.html",
+            "docs/ship-status-graphics/round-2-centered-phone.html",
+            "resources/js/Components/ShipScene.vue",
+            "resources/js/shipPresentation.js",
+            "resources/js/Pages/Agent/Dashboard.vue",
+            "resources/js/Pages/Campaign/Status.vue",
+            "resources/js/waypointSprites.js",
+            "resources/js/Components/SystemMap/WaypointSprite.vue",
+            "app/Gameplay/CampaignStatus.php",
+            "app/Http/Controllers/AgentDashboardController.php",
+            "tests/Feature/CampaignStatusTest.php",
+            "tests/Browser/campaign-status.php",
+            "tests/Browser/campaign-status.mjs",
+            "scripts/campaign-smoke.php",
+            "tests/Support/CampaignStatusFixture.php",
+            "scripts/verify-native-ship-browser.mjs",
+            "scripts/verify-flight-deck-art-browser.mjs",
+            "scripts/verify-ship-scene-browser.mjs",
+            "app/Maps/SystemMapKnowledge.php",
+            "package.json",
+            "phpunit.xml",
+            "scripts/mvp-fixture.php",
+            "app/Gameplay/ExplorationPolicy.php",
+            "scripts/system-map-action-fixture.php",
+            ".gitignore",
+            "app/Providers/AppServiceProvider.php",
+            "tests/Support/FakeSpaceTraders.php",
+            "app/Gameplay/AgentSynchronizer.php"
+        ]
+    },
+    "independentReview": {
+        "reviewer": "separate agent that did not write the change",
+        "rerun": {
+            "pnpm build": "pass",
+            "node scripts/verify-ship-scene-browser.mjs": "pass",
+            "node scripts/verify-native-ship-browser.mjs": "pass",
+            "php vendor/bin/phpunit": "pass, 956 tests, 5755 assertions"
+        },
+        "plantedFault": "Shifting the docked location 12px right made verify-ship-scene-browser.mjs fail its docking-port assertion; reverted.",
+        "change": "IN_TRANSIT with an unreadable arrival time now keeps the transit pose (ship at route start, flame on, no trail) as the plan specifies, instead of the unknown pose."
+    }
 }
