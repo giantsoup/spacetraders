@@ -123,8 +123,9 @@ class FoundationCommandTest extends TestCase
         return [[21000, 1000], [20000, 0]];
     }
 
-    public function test_manual_spending_sums_remaining_commitments_from_two_plain_runs(): void
+    public function test_manual_spending_protects_the_largest_reserve_plus_every_remaining_commitment(): void
     {
+        $this->world(fn (&$world) => $world['credits'] = 90020);
         foreach (['LOCAL-2', 'LOCAL-3'] as $symbol) {
             AutomationRun::create(['agent_id' => $this->agent->id, 'active_agent_id' => $this->agent->id,
                 'reset_id' => $this->agent->reset_id, 'ship_symbol' => $symbol, 'strategy' => 'mining', 'state' => 'running',
@@ -132,9 +133,10 @@ class FoundationCommandTest extends TestCase
         }
         $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1',
             'command' => 'buy', 'arguments' => ['symbol' => 'IRON_ORE', 'units' => 1, 'maxTotal' => 30, 'reserve' => 0]])->assertUnprocessable();
-        $this->world(fn (&$world) => $world['credits'] = 100030);
+        $this->world(fn (&$world) => $world['credits'] = 90030);
         $action = $this->preview('buy', ['symbol' => 'IRON_ORE', 'units' => 1, 'maxTotal' => 30, 'reserve' => 0]);
-        $this->assertSame(100000, $action->before_state['estimate']['reserve']);
+        // max(10,000 reserves) + 40,000 + 40,000 remaining spend; reserves are floors, not summed.
+        $this->assertSame(90000, $action->before_state['estimate']['reserve']);
         $this->assertEmpty($this->world()['writes']);
     }
 

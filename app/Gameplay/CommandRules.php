@@ -64,21 +64,32 @@ class CommandRules
         $spending = in_array($command, ['buy', 'buy_ship', 'repair', 'install_mount', 'remove_mount', 'install_module', 'remove_module', 'jump', 'refuel'], true);
         $floor = max($arguments['reserve'] ?? 0, $run?->plan['reserve'] ?? 0, ! $run && $spending && ! $fleetPurchase ? max(1, (int) config('gameplay.manual_reserve_floor')) : 0);
         $protected = 0;
-        if (! $run) {
+        // Only spending commands can consume another run's commitment.
+        if (! $run && $spending) {
             foreach (AutomationRun::where('active_agent_id', $agent->id)->get() as $protectedRun) {
                 if ($protectedRun->campaign_episode_id) {
                     $commitment = 0;
-                    if (isset($protectedRun->plan['market'])) {
-                        $carrying = $this->sync->refreshShip($agent, $protectedRun->ship_symbol)->snapshot;
-                        if ($carrying['cargo']['units'] > 0) {
+                    // The run keeps its ship snapshot current; reading it costs no request.
+                    $carrying = Ship::where('agent_id', $agent->id)->where('symbol', $protectedRun->ship_symbol)->first()?->snapshot;
+                    if (isset($protectedRun->plan['market']) && ($carrying['cargo']['units'] ?? 0) > 0) {
+                        try {
                             $commitment = app(CampaignTrade::class)->fuelReserve($agent, $protectedRun->ship_symbol, $protectedRun->plan['market']);
+                        } catch (GameException $e) {
+                            // Stale quotes mid-delivery are normal; fall back to the fuel cost the trade plan approved.
+                            if (! isset($protectedRun->plan['campaign_trade']['fuel'])) {
+                                throw new GameException('Campaign ship '.$protectedRun->ship_symbol.' carries cargo and its delivery fuel reserve cannot be verified right now ('.$e->getMessage().'). Retry after its fuel quotes refresh.');
+                            }
+                            $commitment = (int) $protectedRun->plan['campaign_trade']['fuel'];
                         }
                     }
+                    $protected += $commitment;
                 } else {
-                    $commitment = $protectedRun->plan['reserve'] + max(0, $protectedRun->plan['max_spend'] - ($protectedRun->totals['spending'] ?? $protectedRun->totals['fuel_cost'] ?? 0));
+                    // A reserve is a floor, not spending: protect the largest floor plus every run's remaining spend.
+                    $reserves = max($reserves ?? 0, $protectedRun->plan['reserve']);
+                    $remaining = ($remaining ?? 0) + max(0, $protectedRun->plan['max_spend'] - ($protectedRun->totals['spending'] ?? $protectedRun->totals['fuel_cost'] ?? 0));
                 }
-                $protected += $commitment;
             }
+            $protected += ($reserves ?? 0) + ($remaining ?? 0);
             $floor = max($floor, $protected);
         }
         $contract = null;

@@ -219,6 +219,25 @@ class CampaignAutopilotTest extends TestCase
         $this->assertNull($grant->fresh()->paused_at);
     }
 
+    public function test_stale_delivery_quotes_never_block_free_commands_and_purchases_fall_back_to_the_planned_fuel(): void
+    {
+        $this->tradeGrant(1000);
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        app(AutomationRunner::class)->advance($run->id);
+        app(ShipCommandExecutor::class)->execute(ShipAction::where('state', 'pending')->firstOrFail()->id);
+        $this->assertGreaterThan(0, Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot['cargo']['units']);
+        $this->editWorld(fn (&$world) => $world['ships'][] = FakeSpaceTraders::ship('LOCAL-3'));
+        app(AgentSynchronizer::class)->sync($this->agent);
+        GameObservation::where('kind', 'market')->update(['observed_at' => now()->subHour()]);
+
+        $orbit = app(ShipCommandExecutor::class)->preview($this->agent->fresh(), 'LOCAL-3', 'orbit', [], 'stale-free-orbit');
+        $this->assertSame('preview', $orbit->state->value);
+
+        $purchase = app(ShipCommandExecutor::class)->preview($this->agent->fresh(), 'LOCAL-1', 'buy_ship',
+            ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => 20000, 'reserve' => 0], 'stale-purchase');
+        $this->assertSame((int) $run->fresh()->plan['campaign_trade']['fuel'], $purchase->before_state['estimate']['protected_in_flight']);
+    }
+
     #[DataProvider('manualCampaignSpending')]
     public function test_idle_campaign_commitments_allow_manual_spending_on_a_fleet_ship(string $command, array $arguments): void
     {

@@ -99,6 +99,15 @@ The shared budget prevents extra request allowance, but does not promise fairnes
 Uncertainty and operator balance reviews remain agent-wide by design.
 
 Run spending ceilings are not cash allocations. Each action rechecks the shared balance and its run limits; a depleted balance can require a new plan.
+
+Manual commitment protection applies only to manual spending commands (buy, buy_ship, refuel, repair, jump, mount/module changes).
+Free commands such as orbit, dock, navigate and sell never depend on another ship's state or quotes.
+For plain runs it protects the largest reserve plus every run's remaining spend; reserves are floors and are not summed.
+Concurrent plain runs do not protect each other's remaining spend inside their own checks; one run can spend what another planned to use, and the second then stops at its own reserve check.
+A campaign run carrying cargo protects its delivery fuel reserve, read from the stored ship snapshot without an API request.
+When its fuel quotes are stale (normal mid-delivery), a trade run falls back to the delivery fuel its approved plan recorded.
+A sell-aboard or mining campaign run with cargo and stale quotes has no recorded fallback, so manual spending is refused with a message naming that ship until its quotes refresh.
+Right after a deploy, the campaign status page may label the v1 command and probe ships "fleet" until the director's next tick pins their roles.
 Episode credit samples include every agent balance change, including manual fleet investments. Per-run campaign reports remain scoped to campaign actions.
 
 ## Changed files
