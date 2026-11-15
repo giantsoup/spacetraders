@@ -47,7 +47,7 @@ class CampaignControl
         DB::transaction(function () {
             $pending = CampaignGrant::where('slot', 2)->first();
             $current = CampaignGrant::where('slot', 1)->first();
-            if (! $pending || ($current && $this->busy($current))) {
+            if (! $pending || ($current && ($current->paused_at || $this->busy($current)))) {
                 return;
             }
             if ($current) {
@@ -79,7 +79,7 @@ class CampaignControl
 
     public function resume(): void
     {
-        app(HostLock::class)->run('campaign', function () {
+        app(HostLock::class)->retry('campaign', function () {
             $grant = CampaignGrant::where('slot', 1)->firstOrFail();
             if ($grant->expires_at?->isPast()) {
                 throw new GameException('Grant expired. Approve a new grant.');
@@ -97,7 +97,7 @@ class CampaignControl
 
     public function revoke(): void
     {
-        app(HostLock::class)->run('campaign', fn () => DB::transaction(function () {
+        app(HostLock::class)->retry('campaign', fn () => DB::transaction(function () {
             foreach (CampaignGrant::whereNotNull('slot')->get() as $grant) {
                 $grant->update(['slot' => null, 'revoked_at' => now()]);
                 $this->stopRuns($grant);
@@ -116,8 +116,29 @@ class CampaignControl
         }
     }
 
-    public function event(CampaignGrant $grant, ?CampaignEpisode $episode, string $kind, array $data): void
+    public function event(CampaignGrant $grant, ?CampaignEpisode $episode, string $kind, array $data): CampaignEvent
     {
-        CampaignEvent::create(['campaign_grant_id' => $grant->id, 'campaign_episode_id' => $episode?->id, 'kind' => $kind, 'data' => $data]);
+        if ($kind === 'decision') {
+            $summary = [];
+            foreach ($data['candidates'] ?? [] as $candidate) {
+                foreach ((array) ($candidate['rejected'] ?? []) as $reason) {
+                    $summary[$reason] = ($summary[$reason] ?? 0) + 1;
+                }
+            }
+            ksort($summary);
+            $data['rejections'] = $summary;
+            $candidates = $data['candidates'] ?? [];
+            usort($candidates, fn ($left, $right) => ($right['score'] ?? -PHP_FLOAT_MAX) <=> ($left['score'] ?? -PHP_FLOAT_MAX));
+            $data['candidates'] = array_slice($candidates, 0, 10);
+        }
+        if (in_array($kind, ['wait', 'decision'], true)) {
+            $previous = CampaignEvent::where('campaign_grant_id', $grant->id)->whereIn('kind', ['wait', 'decision'])->latest('id')->first();
+            if ($previous && $previous->kind === $kind && $previous->campaign_episode_id === $episode?->id && ($kind === 'wait' ? ($previous->data['reason'] ?? null) === ($data['reason'] ?? null)
+                : ($previous->data['choice'] ?? null) === ($data['choice'] ?? null) && ($previous->data['rejections'] ?? []) === $data['rejections'])) {
+                return $previous;
+            }
+        }
+
+        return CampaignEvent::create(['campaign_grant_id' => $grant->id, 'campaign_episode_id' => $episode?->id, 'kind' => $kind, 'data' => $data]);
     }
 }

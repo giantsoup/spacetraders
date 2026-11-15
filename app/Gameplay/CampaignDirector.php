@@ -9,6 +9,7 @@ use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\CampaignSample;
 use App\Models\GameObservation;
+use App\Models\OpportunityInvestigation;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
@@ -18,16 +19,18 @@ use Illuminate\Validation\ValidationException;
 
 class CampaignDirector
 {
-    public function tick(): void
+    public function tick(): bool
     {
+        $attempted = false;
         try {
-            app(HostLock::class)->run('campaign', function () {
+            app(HostLock::class)->run('campaign', function () use (&$attempted) {
                 $control = app(CampaignControl::class);
                 $control->activatePending();
                 $grant = CampaignGrant::where('slot', 1)->first();
                 if (! $grant || $grant->paused_at || ($grant->last_directed_at && $grant->last_directed_at->gt(now()->subSeconds(30)))) {
                     return;
                 }
+                $attempted = true;
                 $grant->update(['last_directed_at' => now()]);
                 if ($grant->expires_at?->isPast()) {
                     $control->pause($grant, 'grant_expired');
@@ -65,6 +68,8 @@ class CampaignDirector
             });
         } catch (GameException) {
         }
+
+        return $attempted;
     }
 
     private function wait(CampaignGrant $grant, string $reason): void
@@ -95,10 +100,21 @@ class CampaignDirector
         app(AgentSynchronizer::class)->archivePreviousWorlds($user->agents()->unarchived()->whereNotNull('reset_id')->get(), $schedule['reset_id']);
         CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->where('reset_id', '!=', $schedule['reset_id'])->update(['closed_at' => now()]);
         if (! $agent) {
-            if (CampaignEvent::where('kind', 'registration_intent')->where('data->user_id', $user->id)->where('data->reset_id', $schedule['reset_id'])->exists()) {
-                app(CampaignControl::class)->pause($grant, 'registration_unknown');
+            $intent = CampaignEvent::where('kind', 'registration_intent')->where('data->user_id', $user->id)->where('data->reset_id', $schedule['reset_id'])->latest('id')->first();
+            $attempt = $intent?->data['attempt'] ?? 1;
+            if ($intent && ($intent->data['outcome'] ?? null) !== 'not_sent') {
+                if (($intent->data['attempt'] ?? 1) >= 2 || ($intent->data['outcome'] ?? null) === 'conflict') {
+                    app(CampaignControl::class)->pause($grant, 'registration_unknown');
 
-                return;
+                    return;
+                }
+                $retryAt = CarbonImmutable::parse($intent->data['retry_at'] ?? $intent->created_at->addSeconds(60)->toIso8601String());
+                if ($retryAt->isFuture()) {
+                    $this->wait($grant, 'awaiting_registration');
+
+                    return;
+                }
+                $attempt = 2;
             }
             $token = $user->savedAccountToken();
             if (! $token) {
@@ -107,8 +123,19 @@ class CampaignDirector
                 return;
             }
             app(EngineGate::class)->check(app(EngineGate::class)->session());
-            app(CampaignControl::class)->event($grant, null, 'registration_intent', ['user_id' => $user->id, 'reset_id' => $schedule['reset_id'], 'symbol' => $spec['symbol']]);
-            $agent = app(AgentRegistration::class)->register($user, $spec + ['email' => $user->agents()->latest('id')->value('email')], $token, $schedule['reset_id'], true, $user->getRawOriginal('spacetraders_account_token'));
+            $intent = app(CampaignControl::class)->event($grant, null, 'registration_intent', ['user_id' => $user->id, 'reset_id' => $schedule['reset_id'], 'symbol' => $spec['symbol'], 'attempt' => $attempt]);
+            try {
+                $agent = app(AgentRegistration::class)->register($user, $spec + ['email' => $user->agents()->latest('id')->value('email')], $token, $schedule['reset_id'], true, $user->getRawOriginal('spacetraders_account_token'), campaign: true);
+            } catch (CampaignRegistrationFailure $exception) {
+                $intent->update(['data' => array_merge($intent->data, ['outcome' => $exception->outcome, 'retry_at' => now()->addSeconds(60)->toIso8601String()])]);
+                if ($exception->outcome === 'conflict' || ($attempt === 2 && $exception->outcome === 'ambiguous')) {
+                    app(CampaignControl::class)->pause($grant, 'registration_unknown');
+                } else {
+                    $this->wait($grant, 'awaiting_registration');
+                }
+
+                return;
+            }
             app(CampaignControl::class)->event($grant, null, 'registration', ['agent_id' => $agent->id, 'reset_id' => $schedule['reset_id']]);
         }
         app(HostLock::class)->scoped('agent-'.$agent->id, function () use ($grant, $agent, $schedule, $next) {
@@ -142,6 +169,9 @@ class CampaignDirector
                 $handoff = $run->campaign_episode_id && ($run->state->value === 'blocked' || $freshness || $run->stop_requested_at
                     || ($reason && empty($run->plan['sell_only'])) || (app(CampaignSafety::class)->windDown($episode) && empty($run->plan['sell_only'])));
                 if ($handoff) {
+                    if ($run->strategy === 'scout' && ! empty($run->plan['one_way']) && ($this->role($agent, 'probe')['symbol'] ?? null) === $run->ship_symbol) {
+                        $episode->update(['state' => array_merge($episode->state ?? [], ['probe_position_failed' => true])]);
+                    }
                     app(AutomationRunner::class)->stop($run);
                     if ($freshness) {
                         app(CampaignControl::class)->event($grant, $episode, 'freshness_hold', ['run_id' => $run->id]);
@@ -192,10 +222,9 @@ class CampaignDirector
                 $catalogue = GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'catalogue')->latest('observed_at')->first();
                 $lastDiscovery = $episode->state['last_discovery_at'] ?? $catalogue?->observed_at?->toIso8601String();
                 $interval = $episode->phase === 'discover' ? 120 : 900;
-                if (! $lastDiscovery || CarbonImmutable::parse($lastDiscovery)->lt(now()->subSeconds($interval))) {
-                    $episode->update(['state' => array_merge($episode->state ?? [], ['last_discovery_at' => now()->toIso8601String()])]);
+                if (isset($episode->state['discovery']) || ! $lastDiscovery || CarbonImmutable::parse($lastDiscovery)->lt(now()->subSeconds($interval))) {
                     $this->decision($grant, $episode, $agent, [], 'refreshing_discovery');
-                    $sync->sync($agent);
+                    app(CampaignDiscovery::class)->advance($episode, $agent);
 
                     return;
                 }
@@ -235,7 +264,9 @@ class CampaignDirector
                         'sell_aboard' => null,
                     };
                     if ($run) {
-                        app(AutomationRunner::class)->startCampaign($agent, $run, $episode);
+                        if (! $run->active_agent_id) {
+                            app(AutomationRunner::class)->startCampaign($agent, $run, $episode);
+                        }
                         if ($run->strategy === 'trade') {
                             $episode->refresh();
                             $episode->update(['state' => array_merge($episode->state ?? [], ['current_pair' => $run->plan['campaign_trade']['key']])]);
@@ -299,8 +330,19 @@ class CampaignDirector
                     return $this->position($grant, $episode, $agent, $ship, $candidate['source']);
                 }
                 $probe = $this->role($agent, 'probe');
-                if ($probe && $probe['symbol'] !== $ship['symbol'] && $probe['nav']['waypointSymbol'] !== $candidate['buyer'] && $probe['nav']['status'] !== 'IN_TRANSIT') {
-                    return $this->position($grant, $episode, $agent, $probe, $candidate['buyer']);
+                if (empty($episode->state['probe_position_failed']) && $probe && $probe['symbol'] !== $ship['symbol'] && $probe['nav']['waypointSymbol'] !== $candidate['buyer'] && $probe['nav']['status'] !== 'IN_TRANSIT') {
+                    $position = null;
+                    try {
+                        $position = $this->position($grant, $episode, $agent, $probe, $candidate['buyer']);
+
+                        return app(AutomationRunner::class)->startCampaign($agent, $position, $episode);
+                    } catch (\Throwable) {
+                        $episode->update(['state' => array_merge($episode->state ?? [], ['probe_position_failed' => true])]);
+                        if ($position?->fresh()->active_agent_id) {
+                            return $position->fresh();
+                        }
+                        $considered[] = ['strategy' => 'probe', 'rejected' => 'Probe unavailable; refresh buyer directly.'];
+                    }
                 }
                 $api = app(SpaceTradersApi::class);
                 $sync = app(AgentSynchronizer::class);
@@ -342,17 +384,17 @@ class CampaignDirector
     private function mining(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array &$considered): ?AutomationRun
     {
         $investigator = app(OpportunityInvestigator::class);
-        $record = $investigator->create($agent, 'mining', $ship['nav']['systemSymbol']);
-        $deadline = microtime(true) + 8;
-        do {
-            $record = $investigator->advance($agent, $record);
-        } while ($record->status === 'investigating' && microtime(true) < $deadline);
-        if ($record->status === 'investigating') {
-            $investigator->cancel($record);
-            $considered[] = ['strategy' => 'mining', 'rejected' => 'Investigation reached this decision time budget. Fresh investigation next tick.'];
-
-            return null;
+        $record = OpportunityInvestigation::find($episode->state['mining_investigation_id'] ?? null);
+        if (! $record || $record->reset_id !== $agent->reset_id || ($record->status !== 'investigating' && $record->finished_at?->lt(now()->subSeconds(config('gameplay.snapshot_seconds'))))) {
+            $record = $investigator->create($agent, 'mining', $ship['nav']['systemSymbol']);
+            $episode->update(['state' => array_merge($episode->state ?? [], ['mining_investigation_id' => $record->id])]);
         }
+        $record = $investigator->advance($agent, $record, campaign: true);
+        $observations = $record->observations;
+        $observations['ships'] = Ship::where('agent_id', $agent->id)->get()->pluck('snapshot')->all();
+        $observations['credits'] = $agent->credits;
+        $observations['observed_at'] = now()->toIso8601String();
+        $record->update(['observations' => $observations]);
         $candidates = app(OpportunityEvaluator::class)->evaluate($record->observations, 'mining', CarbonImmutable::now());
         foreach ($candidates as $candidate) {
             if ($candidate['ship_symbol'] !== $ship['symbol']) {
@@ -367,6 +409,9 @@ class CampaignDirector
                 $limits = $this->limits($grant, $episode, $agent);
                 $limits['reserve'] = $candidate['minimum_reserve'];
                 $limits['max_spend'] = min(max(0, $agent->credits - $limits['reserve']), $candidate['route']['fuel_ceiling']);
+                if ($record->status === 'investigating') {
+                    $record->update(['status' => 'partial', 'finished_at' => now()]);
+                }
                 $draft = app(AutomationStaging::class)->save($agent, $record, $candidate['id'], $limits);
 
                 return app(AutomationRunner::class)->previewDraft($agent, $draft);
@@ -396,6 +441,20 @@ class CampaignDirector
         return null;
     }
 
+    private function refreshRecoveryEvidence(CampaignEpisode $episode, Agent $agent, array $ship): void
+    {
+        $state = $episode->state ?? [];
+        $markets = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->whereIn('kind', ['market', 'market_listing'])->get()->unique('symbol')->sortBy('symbol')->values();
+        $offset = (int) ($state['recovery_refresh'] ?? 0);
+        for ($reads = 0; $reads < min(2, $markets->count()); $reads++) {
+            $market = $markets[($offset + $reads) % $markets->count()];
+            app(AgentSynchronizer::class)->observe($agent, 'market', $market->symbol, app(SpaceTradersApi::class)->market($agent, $market->symbol));
+        }
+        $state['recovery_refresh'] = $markets->count() ? ($offset + 2) % $markets->count() : 0;
+        $episode->update(['state' => $state]);
+    }
+
     private function recover(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent): bool
     {
         foreach (['command', 'probe'] as $role) {
@@ -408,6 +467,7 @@ class CampaignDirector
 
                 return true;
             }
+            $this->refreshRecoveryEvidence($episode, $agent, $ship);
             $good = array_key_first(MiningPlanner::inventory($ship));
             $buyers = GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'market')->get()
                 ->map(fn ($row) => ['buyer' => $row->symbol, 'bid' => collect($row->data['tradeGoods'] ?? [])->firstWhere('symbol', $good)['sellPrice'] ?? 0])

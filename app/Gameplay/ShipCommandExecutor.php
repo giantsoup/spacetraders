@@ -190,7 +190,7 @@ class ShipCommandExecutor
                 DB::transaction(function () use ($action, $run, $before, $agent) {
                     $this->gate->check($action->engine_session_id);
                     if ($run) {
-                        app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments);
+                        app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments, boundaryOnly: true);
                     }
                     if ($action->expires_at->isPast()) {
                         throw new GameException('Intent expired during preflight. Create a fresh preview.');

@@ -15,10 +15,10 @@ class CampaignReport
     public function build(CampaignEpisode $episode): array
     {
         $grant = $episode->grant();
-        $samples = CampaignSample::where('campaign_episode_id', $episode->id)->orderBy('observed_at')->get();
+        $samples = CampaignSample::where('campaign_episode_id', $episode->id)->select(['id', 'credits', 'phase', 'observed_at', 'request_budget'])->lazyById(250)->collect()->sortBy('observed_at');
         $end = $episode->closed_at ?? now()->toImmutable();
         $duration = max(0, (int) $episode->opened_at->diffInSeconds($end));
-        $runs = AutomationRun::where('campaign_episode_id', $episode->id)->orderBy('id')->get()->map(function ($run) use ($end) {
+        $runs = AutomationRun::where('campaign_episode_id', $episode->id)->select(['id', 'strategy', 'state', 'totals', 'started_at', 'updated_at', 'active_agent_id', 'blocked_reason'])->lazyById(250)->map(function ($run) use ($end) {
             $finished = $run->active_agent_id ? $end : (isset($run->totals['stopped_at']) ? CarbonImmutable::parse($run->totals['stopped_at']) : $run->updated_at->toImmutable());
             $seconds = $run->started_at ? max(0, (int) $run->started_at->diffInSeconds(min($end, $finished))) : 0;
             $net = (int) DB::table('confirmed_credit_entries')->where('automation_run_id', $run->id)->sum('credits');
@@ -27,16 +27,19 @@ class CampaignReport
                 'credits_per_ship_hour' => $seconds > 0 ? round($net * 3600 / $seconds, 2) : null, 'cycles' => $run->totals['cycles'] ?? 0,
                 'unsold' => $run->totals['unsold'] ?? null, 'reason' => $run->blocked_reason];
         });
+        $runs = $runs->collect();
         $strategies = $runs->groupBy('strategy')->map(function ($rows) {
             $seconds = $rows->sum('ship_seconds');
             $net = $rows->sum('net_credits');
 
             return ['runs' => $rows->count(), 'net_credits' => $net, 'ship_seconds' => $seconds, 'credits_per_ship_hour' => $seconds > 0 ? round($net * 3600 / $seconds, 2) : null];
         })->all();
-        $events = CampaignEvent::where('campaign_grant_id', $grant->id)->where(function ($query) use ($episode, $end) {
+        $events = CampaignEvent::where('campaign_grant_id', $grant->id)->whereIn('kind', ['pause', 'freshness_hold'])->where(function ($query) use ($episode, $end) {
             $query->where('campaign_episode_id', $episode->id)->orWhere(fn ($query) => $query->whereNull('campaign_episode_id')->whereBetween('created_at', [$episode->opened_at, $end]));
-        })->orderBy('id')->get();
-        $results = app(CampaignTrade::class)->results($episode);
+        })->select(['id', 'kind', 'data', 'created_at'])->lazyById(250)->collect();
+        $allResults = app(CampaignTrade::class)->results($episode);
+        $recoveries = array_values(array_filter($allResults, fn ($result) => ! empty($result['standalone_recovery'])));
+        $results = array_values(array_filter($allResults, fn ($result) => empty($result['standalone_recovery'])));
         $proofs = collect($results)->where('proof', true)->pluck('realized_ratio')->filter(fn ($ratio) => $ratio !== null);
         $firstProfit = collect($results)->first(fn ($result) => $result['net'] > 0);
         $metrics = ['proof_realized_ratio' => $proofs->isEmpty() ? null : $proofs->min(),
@@ -63,7 +66,7 @@ class CampaignReport
             'duration_seconds' => $duration, 'ship_seconds' => $runs->sum('ship_seconds'), 'idle_seconds' => max(0, $duration - $runs->sum('ship_seconds')),
             'requests_used_between_samples' => $requests, 'credits_over_time' => $samples->map(fn ($sample) => ['at' => $sample->observed_at->toIso8601String(), 'credits' => $sample->credits, 'phase' => $sample->phase])->all(),
             'runs' => $runs->all(), 'strategies' => $strategies, 'pauses' => $events->where('kind', 'pause')->map(fn ($event) => ['at' => $event->created_at->toIso8601String(), 'reason' => $event->data['reason']])->values()->all(),
-            'predictions' => $predictions, 'load_results' => $results, 'learning_metrics' => $metrics,
+            'predictions' => $predictions, 'load_results' => $results, 'standalone_recoveries' => $recoveries, 'learning_metrics' => $metrics,
             'measurement_notes' => 'Cash receipts minus confirmed spending, not economic profit. Load results include confirmed acquisition basis and posted fuel bills. Forced fallback sales count as losing loads regardless of net. Request counts are shared account/host counters between samples, not campaign-only attribution. Unsold cargo, wear and incomplete cycles are not profit.'];
         $markdown = '# Campaign episode '.$episode->id."\n\nReset: ".$episode->reset_id."\n\nPhase: ".$episode->phase."\n\nStart credits: ".$episode->start_credits." CR\n\n## Credits over time\n\n| Time | Credits | Phase |\n| --- | ---: | --- |\n";
         foreach ($json['credits_over_time'] as $sample) {

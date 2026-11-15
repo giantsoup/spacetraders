@@ -16,7 +16,7 @@ class FuelPlanner
     {
         $fuelReserve ??= (int) config('gameplay.fuel_reserve_units');
         $policy ??= config('gameplay.route_evidence');
-        if ($ship['nav']['flightMode'] !== 'CRUISE' || $ship['fuel']['capacity'] < 1) {
+        if ($ship['nav']['flightMode'] !== 'CRUISE' || ($ship['fuel']['capacity'] < 1 && ! $this->fuelFree($ship))) {
             throw new GameException('Fuel behavior for this mode or zero-capacity ship is unvalidated.');
         }
         $points = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->get()->keyBy('symbol');
@@ -24,6 +24,14 @@ class FuelPlanner
         $to = $points->get($destination)?->data;
         if (! $from || ! $to || $from['systemSymbol'] !== $to['systemSymbol'] || $to['systemSymbol'] !== $ship['nav']['systemSymbol']) {
             throw new GameException('Discover a same-system route before planning travel.');
+        }
+        if ($this->fuelFree($ship)) {
+            return ['destination' => $destination, 'continuation' => $destination, 'outbound_fuel' => 0, 'continuation_fuel' => 0,
+                'required_fuel' => 0, 'refuel_ceiling' => 0, 'fuel_price_at' => now()->toIso8601String(), 'uncertainty_reserve' => 0,
+                'evidence_policy' => 'fuel_free_probe', 'model' => 'Validated fuel-free CRUISE probe, same-system only.',
+                'estimated_seconds' => $this->seconds($from, $to, $ship), 'configuration' => self::configuration($ship),
+                'distance' => hypot($from['x'] - $to['x'], $from['y'] - $to['y']),
+                'from_coordinates' => ['x' => $from['x'], 'y' => $from['y']], 'to_coordinates' => ['x' => $to['x'], 'y' => $to['y']]];
         }
         $outbound = $this->units($agent, $ship, $from, $to, $policy);
         $listings ??= $this->listings($agent);
@@ -65,6 +73,13 @@ class FuelPlanner
             'distance' => hypot($from['x'] - $to['x'], $from['y'] - $to['y']),
             'from_coordinates' => ['x' => $from['x'], 'y' => $from['y']], 'to_coordinates' => ['x' => $to['x'], 'y' => $to['y']],
             'configuration' => self::configuration($ship), 'alternatives' => array_slice($candidates, 1, 3)]);
+    }
+
+    public function fuelFree(array $ship): bool
+    {
+        return ($ship['frame']['symbol'] ?? null) === 'FRAME_PROBE'
+            && ($ship['fuel']['capacity'] ?? null) === 0 && ($ship['fuel']['current'] ?? null) === 0
+            && ($ship['nav']['flightMode'] ?? null) === 'CRUISE' && ($ship['engine']['speed'] ?? 0) > 0;
     }
 
     public function seconds(array $from, array $to, array $ship): ?int

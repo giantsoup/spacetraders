@@ -16,8 +16,11 @@ class CampaignTrade
 {
     public function results(CampaignEpisode $episode): array
     {
-        $runs = AutomationRun::where('campaign_episode_id', $episode->id)->orderBy('id')->get();
-        $results = [];
+        $saved = CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])->orderBy('id')->pluck('data')->all();
+        $known = CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])->select('data->run_id');
+        $runs = AutomationRun::where('campaign_episode_id', $episode->id)->whereIn('strategy', ['trade', 'sell_aboard'])
+            ->whereNotNull('started_at')->whereNotIn('id', $known)->where(fn ($query) => $query->whereNull('plan->recovery_of')->orWhereNotIn('plan->recovery_of', $known))->orderBy('id')->get();
+        $results = $saved;
         foreach ($runs as $run) {
             if ($run->active_agent_id || ! $run->started_at || ! in_array($run->state->value, ['completed', 'stopped', 'blocked'], true)) {
                 continue;
@@ -51,7 +54,7 @@ class CampaignTrade
                 'cash_net' => $cashNet, 'unrefilled_fuel_allowance' => $fuelAllowance, 'proof_eligible' => $proofEligible,
                 'proof' => $prediction['proof'] ?? false, 'predicted_margin' => $prediction['predicted_margin'] ?? null,
                 'realized_ratio' => ($prediction['predicted_margin'] ?? 0) > 0 ? $net / $prediction['predicted_margin'] : null,
-                'forced_sale' => $forced, 'losing' => $net < 0 || $forced,
+                'standalone_recovery' => $recovery, 'forced_sale' => $forced, 'losing' => $net < 0 || $forced,
                 'finished_at' => $parts->max('updated_at')->toIso8601String()];
         }
         usort($results, fn ($left, $right) => [$left['finished_at'], $left['run_id']] <=> [$right['finished_at'], $right['run_id']]);
@@ -61,9 +64,11 @@ class CampaignTrade
 
     public function recordResults(CampaignEpisode $episode): void
     {
+        $known = array_fill_keys(CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])->pluck('data')->map(fn ($data) => $data['run_id'])->all(), true);
         foreach ($this->results($episode) as $result) {
-            if (! CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'load_result')->where('data->run_id', $result['run_id'])->exists()) {
-                app(CampaignControl::class)->event($episode->grant(), $episode, 'load_result', $result);
+            $kind = ! empty($result['standalone_recovery']) ? 'recovery_result' : 'load_result';
+            if (! isset($known[$result['run_id']])) {
+                app(CampaignControl::class)->event($episode->grant(), $episode, $kind, $result);
             }
         }
     }
@@ -74,6 +79,9 @@ class CampaignTrade
         $scaled = false;
         $minimum = $episode->grant()->revision()->body['trade']['proof']['min_realized_ratio'];
         foreach ($results ?? $this->results($episode) as $result) {
+            if (! empty($result['standalone_recovery'])) {
+                continue;
+            }
             if ($result['losing']) {
                 $proof = null;
                 $scaled = false;

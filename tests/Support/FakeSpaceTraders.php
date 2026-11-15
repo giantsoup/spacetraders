@@ -76,6 +76,9 @@ final class FakeSpaceTraders
             flock($handle, LOCK_EX);
             try {
                 $world = json_decode(stream_get_contents($handle), true, flags: JSON_THROW_ON_ERROR);
+                if (($world['pace_seconds'] ?? 0) > 0) {
+                    usleep((int) ($world['pace_seconds'] * 1000000));
+                }
                 [$body, $status] = self::respond($world, $request);
                 if ($request->method() !== 'GET' && str_ends_with($request->url(), '/refuel') && ($world['omit_refuel_cargo'] ?? false)) {
                     unset($body['data']['cargo']);
@@ -360,7 +363,7 @@ final class FakeSpaceTraders
                 $ship['nav']['status'] = 'IN_TRANSIT';
                 $ship['nav']['route']['departureTime'] = now()->toIso8601String();
                 $ship['nav']['route']['arrival'] = now()->addSeconds($world['travel_seconds'])->toIso8601String();
-                $ship['fuel']['current'] -= $world['fuel_consumption'] ?? 5;
+                $ship['fuel']['current'] -= $ship['fuel']['capacity'] === 0 ? 0 : ($world['fuel_consumption'] ?? 5);
 
                 return [['data' => ['nav' => $ship['nav'], 'fuel' => $ship['fuel'], 'events' => []]], 200];
             }

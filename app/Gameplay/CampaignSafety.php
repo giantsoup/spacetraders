@@ -5,6 +5,7 @@ namespace App\Gameplay;
 use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
+use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\GameObservation;
 use App\Models\ShipAction;
@@ -22,9 +23,12 @@ class CampaignSafety
         if (! empty($episode->state['pending_pause'])) {
             return $episode->state['pending_pause'];
         }
-        $results = array_filter(app(CampaignTrade::class)->results($episode), fn ($result) => ! isset($episode->state['losses_reviewed_at']) || $result['finished_at'] > $episode->state['losses_reviewed_at']);
+        $limit = $grant->revision()->body['trade']['losses']['pause_after_consecutive_losing_loads'];
+        $results = CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'load_result')
+            ->when(isset($episode->state['losses_reviewed_at']), fn ($query) => $query->where('data->finished_at', '>', $episode->state['losses_reviewed_at']))
+            ->orderByDesc('data->finished_at')->orderByDesc('id')->limit($limit)->pluck('data');
         $consecutive = 0;
-        foreach (array_reverse($results) as $result) {
+        foreach ($results as $result) {
             if (! $result['losing']) {
                 break;
             }
@@ -34,15 +38,15 @@ class CampaignSafety
         return $consecutive >= $grant->revision()->body['trade']['losses']['pause_after_consecutive_losing_loads'] ? 'consecutive_losing_loads' : null;
     }
 
-    public function check(AutomationRun $run, Agent $agent, ?string $command = null, array $arguments = []): void
+    public function check(AutomationRun $run, Agent $agent, ?string $command = null, array $arguments = [], bool $boundaryOnly = false): void
     {
         if (! $run->campaign_episode_id) {
             return;
         }
         $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
         $grant = $episode->grant();
-        $reason = $this->reason($grant, $episode, $agent);
-        if ($reason && $reason !== 'consecutive_losing_loads') {
+        $reason = $boundaryOnly ? ($episode->state['pending_pause'] ?? null) : $this->reason($grant, $episode, $agent);
+        if (! $boundaryOnly && $reason && $reason !== 'consecutive_losing_loads') {
             app(CampaignControl::class)->pause($grant, $reason, $episode);
         }
         if (($reason && ($reason !== 'consecutive_losing_loads' || empty($run->plan['sell_only'])))
@@ -58,7 +62,7 @@ class CampaignSafety
         if ($this->windDown($episode) && in_array($command, ['buy', 'mine', 'mine_survey'], true)) {
             throw new GameException('Wind-down only permits selling aboard.');
         }
-        if ($command === 'buy') {
+        if ($command === 'buy' && ! $boundaryOnly) {
             if ($run->strategy !== 'trade' || ! empty($run->plan['sell_only'])) {
                 throw new GameException('Recovery blocks new trade buys.');
             }

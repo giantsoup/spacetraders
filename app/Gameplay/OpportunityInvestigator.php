@@ -18,9 +18,9 @@ class OpportunityInvestigator
     }
 
     // Each browser-requested step persists progress. Engine-off investigation requires no queue worker.
-    public function advance(Agent $agent, OpportunityInvestigation $record): OpportunityInvestigation
+    public function advance(Agent $agent, OpportunityInvestigation $record, bool $campaign = false): OpportunityInvestigation
     {
-        return $this->executor->locked($agent, function () use ($agent, $record) {
+        return $this->executor->locked($agent, function () use ($agent, $record, $campaign) {
             $record->refresh();
             if ($record->status !== 'investigating') {
                 return $record;
@@ -32,18 +32,18 @@ class OpportunityInvestigator
             $coverage = $record->coverage;
             $started = microtime(true);
             try {
-                $this->api->readOnly(function () use ($record, &$coverage) {
+                $this->api->readOnly(function () use ($record, &$coverage, $campaign, $started) {
                     if ($record->fresh()->cancelled_at) {
                         throw new GameException('Investigation cancelled. No further reads issued.');
                     }
-                    if ($coverage['requests'] >= $coverage['request_limit'] || microtime(true) >= $record->created_at->getTimestamp() + $coverage['seconds_limit']) {
+                    if ($coverage['requests'] >= $coverage['request_limit'] || ($campaign ? ($coverage['active_seconds'] ?? 0) + microtime(true) - $started >= $coverage['seconds_limit'] : microtime(true) >= $record->created_at->getTimestamp() + $coverage['seconds_limit'])) {
                         throw new GameException('Investigation request or elapsed-time limit reached.');
                     }
                     $coverage['requests']++;
                     $record->update(['coverage' => $coverage]);
 
-                    return (float) ($record->created_at->getTimestamp() + $coverage['seconds_limit']);
-                }, function () use ($agent, $record, &$observations, &$coverage) {
+                    return $campaign ? $started + 6 : (float) ($record->created_at->getTimestamp() + $coverage['seconds_limit']);
+                }, function () use ($agent, $record, &$observations, &$coverage, $campaign) {
                     switch ($coverage['phase']) {
                         case 'agent':
                             $reset = $this->api->status();
@@ -70,8 +70,16 @@ class OpportunityInvestigator
                             $coverage['phase'] = $record->strategy === 'contracts' && ! collect($observations['contracts'])->contains('fulfilled', false) ? 'done' : 'waypoints';
                             break;
                         case 'waypoints':
-                            $points = $this->api->waypoints($agent, $observations['system']);
-                            $observations['waypoints'] = array_column($points, null, 'symbol');
+                            if ($campaign) {
+                                $page = $coverage['waypoint_page'] ?? 1;
+                                $batch = $this->api->cataloguePage($agent, $observations['system'], $page);
+                                $points = $batch['rows'];
+                                $observations['waypoints'] = array_replace($observations['waypoints'] ?? [], array_column($points, null, 'symbol'));
+                                $coverage['waypoint_page'] = $page + 1;
+                            } else {
+                                $points = $this->api->waypoints($agent, $observations['system']);
+                                $observations['waypoints'] = array_column($points, null, 'symbol');
+                            }
                             $locations = array_column(array_column($observations['ships'], 'nav'), 'waypointSymbol');
                             usort($points, fn ($a, $b) => (int) in_array($b['symbol'], $locations, true) <=> (int) in_array($a['symbol'], $locations, true));
                             foreach ($points as $point) {
@@ -84,15 +92,16 @@ class OpportunityInvestigator
                                 $coverage['markets'] = array_slice($coverage['markets'], 0, config('gameplay.max_observations'));
                                 $coverage['limits_reached'][] = 'Market observation cap reached; coverage is partial.';
                             }
-                            $coverage['phase'] = 'markets';
+                            $coverage['phase'] = $campaign && $page * 20 < $batch['total'] ? 'waypoints' : 'markets';
                             break;
                         case 'markets':
-                            $market = array_shift($coverage['markets']);
+                            $market = $coverage['markets'][0] ?? null;
                             if ($market) {
                                 $quote = $this->api->market($agent, $market);
                                 $observations['markets'][$market] = $quote;
                                 $observations['market_times'][$market] = now()->toIso8601String();
                                 $this->sync->observe($agent, 'market', $market, $quote);
+                                array_shift($coverage['markets']);
                             }
                             if ($coverage['markets'] === []) {
                                 $coverage['phase'] = 'done';
@@ -101,8 +110,10 @@ class OpportunityInvestigator
                     }
                 });
             } catch (GameException $e) {
-                $coverage['limits_reached'][] = $e->getMessage();
-                $coverage['phase'] = 'done';
+                if (! $campaign || $e->retryAfter === 0) {
+                    $coverage['limits_reached'][] = $e->getMessage();
+                    $coverage['phase'] = 'done';
+                }
             }
             $coverage['active_seconds'] = round(($coverage['active_seconds'] ?? 0) + microtime(true) - $started, 3);
             $coverage['elapsed_seconds'] = round(microtime(true) - $record->created_at->getTimestamp(), 3);

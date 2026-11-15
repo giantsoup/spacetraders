@@ -48,6 +48,7 @@ return new class extends Migration
         });
         Schema::create('campaign_events', function (Blueprint $table) {
             $table->id();
+            $table->index(['campaign_episode_id', 'kind']);
             $table->foreignId('campaign_grant_id')->constrained();
             $table->foreignId('campaign_episode_id')->nullable()->constrained();
             $table->string('kind');

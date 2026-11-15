@@ -38,7 +38,7 @@ Artisan::command('campaign:approve {revision} {--user=} {--expires=}', function 
 })->purpose('Approve a revision for unattended execution');
 
 Artisan::command('campaign:pause', function (CampaignControl $control, HostLock $lock) {
-    $lock->run('campaign', fn () => $control->pause(CampaignGrant::where('slot', 1)->firstOrFail(), 'operator_pause'));
+    $lock->retry('campaign', fn () => $control->pause(CampaignGrant::where('slot', 1)->firstOrFail(), 'operator_pause'));
     $this->info('Campaign paused.');
 })->purpose('Pause campaign authority and stop its runs');
 
@@ -65,7 +65,7 @@ Artisan::command('campaign:status', function () {
     $stale = isset($problems['engine_heartbeat_stale']);
     $this->line(json_encode(['engine_heartbeat_stale' => $stale, 'grant' => $grant->id, 'revision_hash' => $grant->revision_hash, 'operator_user' => $grant->user_id,
         'active' => $grant->available(), 'expires_at' => $grant->expires_at?->toIso8601String(), 'episode' => $episode?->id, 'phase' => $episode?->phase,
-        'pause_reason' => $grant->pause_reason, 'wait_reason' => $grant->wait_reason, 'last_decision' => $event?->data,
+        'pause_reason' => $grant->pause_reason, 'wait_reason' => $grant->wait_reason, 'last_decision' => $event ? ['at' => $event->created_at->toIso8601String(), 'choice' => $event->data['choice'] ?? null, 'run_id' => $event->data['run_id'] ?? null, 'rejections' => $event->data['rejections'] ?? []] : null,
         'pending_grant' => CampaignGrant::where('slot', 2)->value('id')], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 
     return $problems ? 1 : 0;

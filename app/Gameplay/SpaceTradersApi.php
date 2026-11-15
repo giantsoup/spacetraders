@@ -202,6 +202,14 @@ class SpaceTradersApi
         return $ship;
     }
 
+    public function cataloguePage(Agent $agent, string $system, int $page): array
+    {
+        $body = $this->call('get', '/systems/'.$system.'/waypoints', ['page' => $page, 'limit' => 20], $agent);
+        $this->validatePage($body, $page);
+
+        return ['rows' => $this->waypointRows($body['data'], $system), 'total' => $body['meta']['total']];
+    }
+
     public function waypoints(Agent $agent, string $system): array
     {
         return $this->waypointRows($this->pages('/systems/'.$system.'/waypoints', $agent), $system);
@@ -572,7 +580,7 @@ class SpaceTradersApi
                 $method !== 'get' && ($response->serverError() || $response->status() === 429), max(5, (int) $response->header('Retry-After')));
         }
         if (strlen($response->body()) > 2 * 1024 * 1024) {
-            throw new GameException('SpaceTraders response exceeds the local state limit.', uncertain: $method !== 'get');
+            throw $method === 'get' ? new ReadStateUnavailable('SpaceTraders response exceeds the local state limit.') : new GameException('SpaceTraders response exceeds the local state limit.', uncertain: true);
         }
         if ($response->status() === 204 && $allowNoContent) {
             return ['data' => [], '_http_status' => 204];
@@ -589,7 +597,7 @@ class SpaceTradersApi
             $receipt(['http_status' => $response->status(), 'body_sha256' => hash('sha256', $response->body()), 'response' => $safe]);
         }
         if (! is_array($data)) {
-            throw new GameException('SpaceTraders returned an incompatible response.', uncertain: $method !== 'get');
+            throw $method === 'get' ? new ReadStateUnavailable('SpaceTraders returned an incompatible response.') : new GameException('SpaceTraders returned an incompatible response.', uncertain: true);
         }
 
         return $data;
@@ -598,7 +606,7 @@ class SpaceTradersApi
     private function payload(array $body, bool $uncertain = false): array
     {
         if (! isset($body['data']) || ! is_array($body['data'])) {
-            throw new GameException('SpaceTraders returned an incompatible data envelope.', uncertain: $uncertain);
+            throw $uncertain ? new GameException('SpaceTraders returned an incompatible data envelope.', uncertain: true) : new ReadStateUnavailable('SpaceTraders returned an incompatible data envelope.');
         }
 
         return $body['data'];
@@ -607,7 +615,7 @@ class SpaceTradersApi
     private function validate(array $data, array $rules, bool $uncertain = false): void
     {
         if (Validator::make($data, $rules)->fails()) {
-            throw new GameException('SpaceTraders returned incomplete or incompatible state.', uncertain: $uncertain);
+            throw $uncertain ? new GameException('SpaceTraders returned incomplete or incompatible state.', uncertain: true) : new ReadStateUnavailable('SpaceTraders returned incomplete or incompatible state.');
         }
     }
 }

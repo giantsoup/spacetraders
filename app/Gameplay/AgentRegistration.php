@@ -11,12 +11,12 @@ use Illuminate\Validation\ValidationException;
 
 class AgentRegistration
 {
-    public function register(User $user, array $data, string $accountToken, string $reset, bool $usingSavedToken = false, ?string $savedCiphertext = null): Agent
+    public function register(User $user, array $data, string $accountToken, string $reset, bool $usingSavedToken = false, ?string $savedCiphertext = null, bool $campaign = false): Agent
     {
         try {
             $payload = app(SpaceTradersClient::class)->register(array_filter([
                 'symbol' => strtoupper($data['symbol']), 'faction' => strtoupper($data['faction']), 'email' => $data['email'] ?? null,
-            ], fn ($value) => $value !== null), $accountToken);
+            ], fn ($value) => $value !== null), $accountToken, $campaign);
         } catch (ValidationException $exception) {
             if ($usingSavedToken && in_array($exception->errors()['api'][0] ?? null, [SpaceTradersClient::TOKEN_INVALID, SpaceTradersClient::TOKEN_FORBIDDEN], true)) {
                 $user->forgetAccountTokenIfUnchanged($savedCiphertext);

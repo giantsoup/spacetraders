@@ -21,6 +21,26 @@ class HostLock
         });
     }
 
+    public function retry(string $key, callable $work, float $seconds = 15): mixed
+    {
+        $deadline = microtime(true) + $seconds;
+        do {
+            $entered = false;
+            try {
+                return $this->run($key, function () use ($work, &$entered) {
+                    $entered = true;
+
+                    return $work();
+                });
+            } catch (GameException $exception) {
+                if ($entered || $exception->retryAfter === 0 || microtime(true) >= $deadline) {
+                    throw $exception;
+                }
+                usleep(100000);
+            }
+        } while (true);
+    }
+
     public function run(string $key, callable $work): mixed
     {
         if (isset($this->held[$key]) && ($this->nested[$key] ?? false)) {
