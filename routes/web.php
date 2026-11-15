@@ -6,6 +6,7 @@ use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AgentDashboardController;
 use App\Http\Controllers\AgentReadController;
 use App\Http\Controllers\AutomationRunController;
+use App\Http\Controllers\CampaignStatusController;
 use App\Http\Controllers\ForwarderController;
 use App\Http\Controllers\LocalAutomationController;
 use App\Http\Controllers\OpenAiKeyController;
@@ -38,6 +39,9 @@ Route::get('/', function () {
 });
 
 Route::middleware('auth')->group(function () {
+    Route::get('/campaign', [CampaignStatusController::class, 'show'])->name('campaign.show');
+    Route::post('/campaign/pause', [CampaignStatusController::class, 'pause'])->name('campaign.pause');
+    Route::post('/campaign/resume', [CampaignStatusController::class, 'resume'])->name('campaign.resume');
     Route::delete('/agents/account-token', [AgentController::class, 'forgetAccountToken'])->name('agents.accountToken.forget');
     Route::get('/rate-limit', RateLimitController::class)->name('game.rate-limit');
     Route::get('/guide', [PlayerGuideController::class, 'show'])->name('guide');
