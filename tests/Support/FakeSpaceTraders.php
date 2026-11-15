@@ -176,7 +176,7 @@ final class FakeSpaceTraders
             }
             unset($arriving);
             if ($path === '/') {
-                return [['version' => 'v2.3.0', 'resetDate' => $world['reset']], 200];
+                return [['version' => 'v2.3.0', 'resetDate' => $world['reset'], 'serverResets' => ['next' => $world['next_reset'] ?? null]], 200];
             }
             if ($path !== '/' && str_starts_with($world['failure'] ?? '', 'read_')) {
                 $status = (int) substr($world['failure'], 5);
@@ -235,6 +235,9 @@ final class FakeSpaceTraders
             return [['error' => ['code' => $code, 'message' => 'Never expose raw synthetic error']], $code];
         }
         $world['writes'][] = ['path' => $path, 'arguments' => $args];
+        if ($path === '/register' && ($world['campaign_registration'] ?? false)) {
+            return [['data' => ['token' => 'synthetic-new-world', 'agent' => ['symbol' => $args['symbol'], 'startingFaction' => $args['faction'], 'accountId' => 'synthetic-account']]], 201];
+        }
         if ($world['foundation'] ?? false) {
             $response = self::foundationWrite($world, $path, $args, $request->method());
             if ($response !== null) {

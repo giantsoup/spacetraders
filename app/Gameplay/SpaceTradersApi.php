@@ -168,6 +168,14 @@ class SpaceTradersApi
         return $body['resetDate'];
     }
 
+    public function resetSchedule(): array
+    {
+        $body = $this->call('get', '/');
+        $this->validate($body, ['resetDate' => 'required|string|max:80', 'version' => 'required|string|max:80']);
+
+        return ['reset_id' => $body['resetDate'], 'next_reset' => $body['serverResets']['next'] ?? null];
+    }
+
     public function agent(Agent $agent): array
     {
         $data = $this->payload($this->call('get', '/my/agent', [], $agent));

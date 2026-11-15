@@ -3,6 +3,8 @@
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 
+require __DIR__.'/campaign.php';
+
 /*
 |--------------------------------------------------------------------------
 | Console Routes

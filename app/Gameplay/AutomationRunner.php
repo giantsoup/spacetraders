@@ -8,6 +8,7 @@ use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
 use App\Models\AutomationDraft;
 use App\Models\AutomationRun;
+use App\Models\CampaignEpisode;
 use App\Models\GameObservation;
 use App\Models\LocalEngine;
 use App\Models\Ship;
@@ -76,10 +77,16 @@ class AutomationRunner
             if ($run->expires_at->isPast() || $run->reset_id !== $agent->reset_id || AutomationRun::where('active_agent_id', $agent->id)->exists()) {
                 $this->rejectPreview($run, 'Preview expired, reset or another run already owns this agent.');
             }
-            if (! in_array($run->plan_version, [1, 2, 3], true) || ($this->gate->enabled() && ! in_array($run->plan_version, [2, 3], true)) || ($run->plan_version === 3 && ! in_array($run->strategy, ['scout', 'trade'], true))) {
+            if (! in_array($run->plan_version, [1, 2, 3, 4], true) || ($this->gate->enabled() && ! in_array($run->plan_version, [2, 3, 4], true)) || ($run->plan_version === 3 && ! in_array($run->strategy, ['scout', 'trade'], true)) || ($run->plan_version === 4 && (! $run->campaign_episode_id || $run->strategy !== 'sell_aboard'))) {
                 throw new GameException('Unsupported or historical plan version. Create a fresh staged preview.');
             }
-            if ($run->plan_version === 2) {
+            if ($run->plan_version === 4) {
+                $fresh = app(CampaignRecovery::class)->compose($agent, $run->ship_symbol, $run->plan['market'], $run->plan);
+                if (! hash_equals($run->fingerprint, $fresh['fingerprint'])) {
+                    $this->rejectPreview($run, 'Recovery ship, balance or quote changed. Create a fresh preview.');
+                }
+                $plan = $fresh['plan'];
+            } elseif ($run->plan_version === 2) {
                 $draft = AutomationDraft::where('agent_id', $agent->id)->findOrFail($run->draft_id);
                 if ($draft->revision !== $run->draft_revision || $draft->reset_id !== $agent->reset_id) {
                     $this->rejectPreview($run, 'Draft revision changed. Create a fresh preview.');
@@ -107,6 +114,7 @@ class AutomationRunner
                 $plan['route'] = $fresh['route'];
             }
             $plan['initial_manual_credit_delta'] = $this->manualCreditDelta($agent);
+            app(CampaignSafety::class)->check($run, $agent);
             DB::transaction(function () use ($run, $agent, $plan) {
                 $this->gate->check($run->engine_session_id);
                 $run->update(['plan' => $plan, 'active_agent_id' => $agent->id, 'state' => RunState::Running, 'started_at' => now(), 'expires_at' => now()->addMinutes($plan['minutes']), 'next_action_at' => now(), 'last_dispatched_at' => now()]);
@@ -120,6 +128,42 @@ class AutomationRunner
     public function stop(AutomationRun $run): void
     {
         AutomationRun::whereKey($run->id)->whereNotNull('active_agent_id')->update(['stop_requested_at' => now(), 'state' => 'stopping', 'next_action_at' => now(), 'last_dispatched_at' => null]);
+    }
+
+    public function startCampaign(Agent $agent, AutomationRun $run, CampaignEpisode $episode): AutomationRun
+    {
+        return app(HostLock::class)->scoped('agent-'.$agent->id, function () use ($agent, $run, $episode) {
+            $grant = $episode->grant();
+            if (! $grant->available() || $episode->agent_id !== $agent->id || $episode->closed_at || $run->agent_id !== $agent->id
+                || ! hash_equals($grant->revision_hash, $grant->revision()->content_hash)
+                || ! in_array($run->strategy, ['scout', 'trade', 'mining', 'sell_aboard'], true)
+                || $run->plan['reserve'] < $grant->limits['reserve_credits'] || $run->plan['minutes'] > $grant->limits['run_max_minutes']
+                || $run->plan['cycles'] !== 1
+                || (in_array($run->strategy, ['trade', 'mining'], true) && app(CampaignSafety::class)->windDown($episode))) {
+                throw new GameException('Preview exceeds campaign authority.');
+            }
+            if ($run->strategy === 'trade') {
+                app(CampaignTrade::class)->authorize($agent, $run, $episode);
+            }
+            $run->update(['campaign_episode_id' => $episode->id]);
+
+            return $this->start($agent, $run);
+        });
+    }
+
+    public function previewRecovery(Agent $agent, string $symbol, string $buyer, array $limits, CampaignEpisode $episode): AutomationRun
+    {
+        return $this->executor->locked($agent, function () use ($agent, $symbol, $buyer, $limits, $episode) {
+            $this->executor->clear($agent);
+            $fresh = app(CampaignRecovery::class)->compose($agent, $symbol, $buyer, $limits);
+
+            return AutomationRun::create(['agent_id' => $agent->id, 'campaign_episode_id' => $episode->id, 'reset_id' => $agent->reset_id,
+                'engine_session_id' => $this->gate->enabled() ? LocalEngine::find(1)?->session_id : null,
+                'ship_symbol' => $symbol, 'strategy' => 'sell_aboard', 'plan_version' => 4, 'state' => RunState::Preview,
+                'expires_at' => now()->addSeconds(config('gameplay.preview_seconds')), 'plan' => $fresh['plan'], 'fingerprint' => $fresh['fingerprint'],
+                'totals' => ['phase' => 'sell', 'cycles' => 0, 'visits' => 0, 'attempts' => 0, 'no_progress' => 0, 'extracted' => [], 'sold' => [],
+                    'sale_proceeds' => 0, 'fuel_cost' => 0, 'fuel_units' => 0, 'travel_fuel' => 0, 'credit_delta' => 0]]);
+        });
     }
 
     public function advance(int $id): void
@@ -136,6 +180,10 @@ class AutomationRunner
             }
             $run->update(['heartbeat_at' => now()]);
             if (ShipAction::where('agent_id', $agent->id)->where(fn ($q) => $q->whereIn('state', ['sending', 'uncertain'])->orWhere('review_required', true))->exists()) {
+                if ($run->campaign_episode_id && ShipAction::where('agent_id', $agent->id)->where('state', 'uncertain')->exists()) {
+                    $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
+                    app(CampaignControl::class)->pause($episode->grant(), 'uncertain_action', $episode);
+                }
                 $this->executor->block($run, 'An action is uncertain or requires price review. Reconcile before takeover.');
 
                 return;
@@ -157,6 +205,7 @@ class AutomationRunner
                 $ship = $this->sync->refreshShip($agent, $run->ship_symbol)->snapshot;
                 $credits = $this->api->agent($agent)['credits'];
                 $agent->update(['credits' => $credits]);
+                app(CampaignSafety::class)->check($run, $agent);
                 $otherDelta = $this->manualCreditDelta($agent) - ($run->plan['initial_manual_credit_delta'] ?? 0);
                 if ($credits !== $run->plan['initial_credits'] + $run->totals['credit_delta'] + $otherDelta) {
                     throw new GameException('Agent credits changed outside this run. Create a new preview after reconciliation.');
@@ -171,6 +220,9 @@ class AutomationRunner
                 if ($run->strategy === 'contracts') {
                     $this->assertContractState($agent, $run, $ship);
                     $step = $this->contracts->next($ship, $run->plan, $run->totals, now()->toImmutable());
+                } elseif (! empty($run->plan['sell_only'])) {
+                    $this->refreshBuyer($agent, $run->plan['market']);
+                    $step = app(CampaignRecovery::class)->next($agent, $ship, $run);
                 } else {
                     $this->refreshBuyer($agent, $run->plan['market']);
                     if (($run->plan['strategy'] ?? 'mining') !== 'mining') {
@@ -265,6 +317,7 @@ class AutomationRunner
 
     private function enqueue(AutomationRun $run, AutomationStep $step): void
     {
+        app(CampaignSafety::class)->check($run, Agent::findOrFail($run->agent_id), $step->command, $step->arguments);
         DB::transaction(function () use ($run, $step) {
             $this->gate->check($run->engine_session_id);
             if (! AutomationRun::whereKey($run->id)->whereNull('stop_requested_at')->whereNotNull('active_agent_id')->where('expires_at', '>', now())->update(['state' => 'running', 'next_action_at' => now()->addSeconds(5)])) {
@@ -285,7 +338,7 @@ class AutomationRunner
     private function completeTrip(AutomationRun $run, array $ship): void
     {
         $totals = $run->totals;
-        if (($run->plan['strategy'] ?? 'mining') !== 'mining' && $totals['phase'] !== 'return') {
+        if (empty($run->plan['sell_only']) && empty($run->plan['one_way']) && ($run->plan['strategy'] ?? 'mining') !== 'mining' && $totals['phase'] !== 'return') {
             $totals['phase'] = 'return';
             $totals['visits'] += $ship['nav']['waypointSymbol'] === $run->plan['market'] ? 1 : 0;
             $run->update(['totals' => $totals, 'next_action_at' => now(), 'state' => RunState::Running, 'last_dispatched_at' => null]);

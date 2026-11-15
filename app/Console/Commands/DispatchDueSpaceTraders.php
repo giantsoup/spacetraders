@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Gameplay\CampaignDirector;
 use App\Gameplay\DeploymentGate;
 use App\Gameplay\EngineGate;
 use App\Gameplay\GameException;
@@ -54,6 +55,7 @@ class DispatchDueSpaceTraders extends Command
                 // The sender still holds its OS lock. Do not steal command ownership.
             }
         }
+        app(CampaignDirector::class)->tick();
         if (app(EngineGate::class)->enabled()) {
             try {
                 app(EngineGate::class)->session();
