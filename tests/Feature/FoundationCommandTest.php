@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\ActionState;
 use App\Gameplay\AgentSynchronizer;
+use App\Gameplay\CreditAccounting;
 use App\Gameplay\ShipCommandExecutor;
 use App\Gameplay\SurveyPool;
 use App\Jobs\ExecuteShipCommand;
@@ -94,7 +95,7 @@ class FoundationCommandTest extends TestCase
         $this->assertSame([], Ship::where('symbol', 'LOCAL-2')->firstOrFail()->snapshot['mounts']);
         $this->assertSame(80000, $this->agent->fresh()->credits);
         $this->assertDatabaseHas('confirmed_credit_entries', ['ship_action_id' => $action->id, 'kind' => 'ship_purchase', 'credits' => -20000]);
-        $this->assertSame(0, app(\App\Gameplay\CreditAccounting::class)->summary($this->agent->fresh())['unexplained_change']);
+        $this->assertSame(0, app(CreditAccounting::class)->summary($this->agent->fresh())['unexplained_change']);
         $transaction = $action->outcome['response']['transaction'];
         $spec = json_decode(file_get_contents(base_path('docs/api/spacetraders-openapi-2.3.0.json')), true, flags: JSON_THROW_ON_ERROR);
         foreach ($spec['components']['schemas']['ShipyardTransaction']['required'] as $field) {

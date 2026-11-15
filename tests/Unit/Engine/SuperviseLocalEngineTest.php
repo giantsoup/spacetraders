@@ -8,7 +8,9 @@ use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\EngineGate;
 use App\Gameplay\HostLock;
 use App\Gameplay\LocalEngineManager;
+use App\Models\AutomationRun;
 use App\Models\LocalEngine;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -69,6 +71,29 @@ class SuperviseLocalEngineTest extends TestCase
         };
 
         return $command->handle(app(HostLock::class), app(EngineGate::class), $this->host);
+    }
+
+    public function test_supervisor_finishes_every_settled_ship_run_after_children_exit(): void
+    {
+        $user = User::factory()->create();
+        $agent = $user->agents()->create(['name' => 'LOCAL', 'token' => 'synthetic-only', 'faction' => 'VOID', 'reset_id' => '2026-10-25']);
+        $runs = [];
+        $this->assertSame(0, $this->supervise(function () use ($agent, &$runs) {
+            if ($runs === []) {
+                foreach (['LOCAL-1', 'LOCAL-2'] as $symbol) {
+                    $runs[] = AutomationRun::create(['agent_id' => $agent->id, 'active_agent_id' => $agent->id,
+                        'reset_id' => $agent->reset_id, 'ship_symbol' => $symbol, 'strategy' => 'scout', 'state' => 'running',
+                        'expires_at' => now()->addHour(), 'plan' => [], 'totals' => ['credit_delta' => 0]]);
+                }
+                app(EngineGate::class)->close();
+            }
+
+            return null;
+        }));
+        foreach ($runs as $run) {
+            $this->assertSame('stopped', $run->fresh()->state->value);
+            $this->assertNull($run->fresh()->active_agent_id);
+        }
     }
 
     public function test_missing_service_marker_never_starts_a_session(): void
