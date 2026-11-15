@@ -13,7 +13,7 @@ the shape below. This document is the build contract; keep scope to it.
 - The campaign resumes on its own after a deploy or engine restart, deriving the next step from
   fresh game state. It never replays a stale preview or an uncertain write.
 - The campaign re-registers the agent at each weekly reset with the operator's saved account token.
-- Reserve 20,000 CR. A cumulative loss cap stops the whole plan (not one run).
+- No credit floor and no loss cap (revised 2026-11-15: "risk it all"; a lost wipe means re-registering under a new symbol by hand). Only a fuel reserve for the next delivery, and a pause after two losing loads in a row as a bug guard.
 - The PC keeps the engine running all week.
 - **Not authorized:** ship purchases, equipment changes, accepting contracts. Leave them out.
 - **No LLM** anywhere in the execution path.
@@ -44,15 +44,18 @@ name: weekly-default
 version: 1
 agent: { symbol: GIANTSOUP, faction: VOID }     # used for re-registration; email reused from DB
 limits:
-  reserve_credits: 20000           # prospective: a buy must leave cash >= reserve
-  episode_loss_cap: 25000          # equity (cash + cargo at cost) < start - cap -> sell aboard, pause
+  reserve_credits: 0               # Taylor 2026-11-15: no credit floor; a wipe can be lost
+  fuel_reserve: next_leg           # a buy must leave cash for fuel to reach the buyer and refuel
   run_max_minutes: 15              # one load per trade run
 trade:
   proof: { max_units_batches: 1, max_credits: 10000, min_realized_ratio: 0.8 }
   lot:
     max_buyer_batches: 5           # units <= 5 x buyer tradeVolume, and <= hold
-    adverse_drop: 0.3              # exposure <= loss headroom / adverse_drop
+    first_scaled_max_buyer_batches: 3   # first load after a proof
     default_batch_decay: 0.04      # predicted bid drop per buyer batch until learned
+  losses:
+    losing_load: reprove           # a completed load with negative net (incl. fuel) -> next load is a proof
+    pause_after_consecutive_losing_loads: 2   # likely a bug or bad data, not bad luck
   switch: { bid_below_first_seen: 0.9, better_pair_ratio: 1.1 }
   quote_max_age_seconds: 180       # unchanged; buy only if quotes outlive planned loading
 phases:
@@ -80,9 +83,10 @@ one is started. Unknown keys fail validation. Keep the vocabulary this small.
 
 Each time the command ship is free, rank every observed source→buyer pair for one good:
 
-- **Units** = min(hold, `max_buyer_batches` × buyer tradeVolume, affordable above reserve,
-  exposure cap ÷ ask), where exposure cap = remaining loss headroom ÷ `adverse_drop`. The first
-  trade of an episode (and the first on any new good+buyer pair) is a **proof** limited by `trade.proof`.
+- **Units** = min(hold, `max_buyer_batches` × buyer tradeVolume, affordable while leaving the fuel
+  reserve). There is no credit floor or loss cap. The first trade of an episode (and the first on
+  any new good+buyer pair, and the next after a losing load) is a **proof** limited by `trade.proof`;
+  the first load after a passing proof uses `first_scaled_max_buyer_batches`.
 - **Predicted revenue** prices buyer batch *n* at bid × (1 − decay)^(n−1). Decay comes from our own
   realized sales for that good at that buyer this episode, else `default_batch_decay`. Purchase
   cost rises the same way using source batches.
@@ -108,17 +112,17 @@ Each time the command ship is free, rank every observed source→buyer pair for 
    agent with the saved token and the file's symbol/faction, sync, open a new episode. If the public
    reset schedule is unknown or the reset is overdue and unconfirmed, wait; never assume.
 4. Safety checks, any failure **pauses** the campaign with a reason (manual `campaign:resume` needed):
-   any `uncertain` ship action; an unexplained credit change (`CreditAccounting`); equity (cash +
-   cargo at cost) below `start_credits - episode_loss_cap`. Checks run between transactions, never
-   mid-batch. A loss-cap or reserve breach first stops buying and sells what is aboard, then pauses.
-   The reserve is prospective: a buy that would leave cash below it is not made.
+   any `uncertain` ship action; an unexplained credit change (`CreditAccounting`);
+   `pause_after_consecutive_losing_loads` reached. Checks run between transactions, never mid-batch.
+   A losing-loads pause first sells what is aboard. The fuel reserve is prospective: a buy that
+   would leave too little cash to fuel the delivery is reduced or skipped, which is not a fault.
 5. An active run that is **blocked or waiting on a freshness hold** with cargo aboard → stop it and
    go to step 6. Otherwise an active run → nothing (runs advance through the existing jobs). This
    check comes before the early return; the test showed a blocked run otherwise waits forever.
 6. Cargo aboard the role ship and no active run → start a sell-only recovery (`sell_aboard`): go to
    the best known buyer, refresh its quote on arrival, sell at or above the lot's average cost. If
-   no buyer clears the floor for 10 minutes, sell at the best bid anyway (the loss cap still
-   applies). Pause only if no buyer for the good is known.
+   no buyer clears the floor for 10 minutes, sell at the best bid anyway (a loss there
+   counts toward the losing-loads pause). Pause only if no buyer for the good is known.
 7. Evaluate the phase exits, advance phase, journal the transition.
 8. Pick the first feasible activity, create its run through the **existing** preview/start code with
    limits from the grant, and start it. The grant replaces only the human approval; every existing
@@ -166,9 +170,10 @@ multi-stop routes, notifications.
 
 - Feature tests with a faked SpaceTraders client: import/validation errors; approve/supersede/revoke;
   reset → registration → episode; engine closed → waits, reopened → resumes from fresh state without
-  replay; uncertain action, unexplained balance and loss cap each pause (loss cap after selling aboard);
-  buying cargo is not counted as a loss; proof trade sized by `trade.proof`, scaling only after a
-  passing proof; units limited by buyer batches and loss headroom; decay-adjusted prediction;
+  replay; uncertain action and unexplained balance each pause; one losing load forces a proof, two
+  in a row sell aboard and pause; a buy is reduced or skipped when it would leave too little for fuel;
+  proof trade sized by `trade.proof`, first scaled load capped at 3 buyer batches, full size only after
+  a passing proof; units limited by hold and buyer batches; decay-adjusted prediction;
   switch on bid ≤ 90% first-seen and on a better pair; buy skipped when the quote would expire
   during loading; freshness-held run with cargo → stopped → cargo delivered; fully loaded ship departs
   despite a stale source quote; mining only after 15 minutes without a trade; wind-down only sells;
