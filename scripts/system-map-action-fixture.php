@@ -43,12 +43,19 @@ if ($scenario === '--scene') {
     $point = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->where('symbol', $symbol)->first()?->data;
     $ship = Ship::where('agent_id', $agent->id)->where('symbol', 'LOCAL-2')->firstOrFail();
     $snapshot = $ship->snapshot;
-    $snapshot['nav']['status'] = ($argv[4] ?? '') === 'DOCKED' ? 'DOCKED' : 'IN_TRANSIT';
+    $status = $argv[4] ?? '';
+    $snapshot['nav']['status'] = match ($status) {
+        'DOCKED', 'IN_ORBIT' => $status,
+        default => 'IN_TRANSIT',
+    };
+    if ($status === 'UNKNOWN') {
+        unset($snapshot['nav']['status']);
+    }
     $snapshot['nav']['waypointSymbol'] = $symbol;
     $snapshot['nav']['systemSymbol'] = 'X1-TEST';
     $snapshot['nav']['route']['destination'] = ['symbol' => $symbol, 'type' => $point['type'] ?? ($argv[3] ?? null)];
-    $snapshot['nav']['route']['departureTime'] = '2019-12-31T23:00:00Z';
-    $snapshot['nav']['route']['arrival'] = '2020-01-01T00:00:00Z';
+    $snapshot['nav']['route']['departureTime'] = $status === 'TRANSIT' ? now()->subMinute()->toIso8601String() : '2019-12-31T23:00:00Z';
+    $snapshot['nav']['route']['arrival'] = $status === 'TRANSIT' ? now()->addMinute()->toIso8601String() : '2020-01-01T00:00:00Z';
     $ship->update(['snapshot' => $snapshot]);
     echo "Owned scene snapshot selected.\n";
     exit;
