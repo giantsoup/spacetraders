@@ -139,6 +139,10 @@ class CampaignDirector
             app(CampaignControl::class)->event($grant, null, 'registration', ['agent_id' => $agent->id, 'reset_id' => $schedule['reset_id']]);
         }
         app(HostLock::class)->scoped('agent-'.$agent->id, function () use ($grant, $agent, $schedule, $next) {
+            $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->where('reset_id', $schedule['reset_id'])->whereNull('closed_at')->first();
+            if ($episode && $this->startRetainedPreview($grant, $episode, $agent)) {
+                return;
+            }
             $sync = app(AgentSynchronizer::class);
             $sync->sync($agent, false);
             $episode = CampaignEpisode::firstOrCreate(['campaign_grant_id' => $grant->id, 'reset_id' => $schedule['reset_id']],
@@ -239,6 +243,13 @@ class CampaignDirector
                     }
                 }
             }
+            $tradeAttempted = false;
+            $miningTurn = ! empty($episode->state['mining_deferred']);
+            if ($miningTurn) {
+                $state = $episode->state;
+                unset($state['mining_deferred']);
+                $episode->update(['state' => $state]);
+            }
             foreach ($phases[$index]['activities'] as $activity) {
                 if (isset($activity['when']) && ! app(CampaignPlaybook::class)->passes($activity['when'], app(CampaignSafety::class)->metrics($episode, $agent))) {
                     $considered[] = $activity + ['rejected' => 'Activity gate has not passed.'];
@@ -256,6 +267,15 @@ class CampaignDirector
 
                     continue;
                 }
+                if ($activity['strategy'] === 'trade' && $miningTurn) {
+                    continue;
+                }
+                if ($activity['strategy'] === 'mining' && $tradeAttempted) {
+                    $episode->update(['state' => array_merge($episode->state ?? [], ['mining_deferred' => true])]);
+
+                    continue;
+                }
+                $tradeAttempted = $tradeAttempted || $activity['strategy'] === 'trade';
                 try {
                     $run = match ($activity['strategy']) {
                         'trade' => $this->trade($grant, $episode, $agent, $ship, $activity, $considered),
@@ -276,11 +296,48 @@ class CampaignDirector
                         return;
                     }
                 } catch (GameException $exception) {
+                    if ($exception->retryAfter > 0) {
+                        $this->wait($grant, 'awaiting_run_start');
+
+                        return;
+                    }
                     $considered[] = $activity + ['rejected' => $exception->getMessage()];
                 }
             }
             $this->decision($grant, $episode, $agent, $considered, 'idle');
         });
+    }
+
+    private function startRetainedPreview(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent): bool
+    {
+        if (AutomationRun::where('active_agent_id', $agent->id)->exists()) {
+            return false;
+        }
+        $run = AutomationRun::where('campaign_episode_id', $episode->id)->where('agent_id', $agent->id)->where('state', 'preview')->latest('id')->first();
+        if (! $run) {
+            return false;
+        }
+        try {
+            if (app(CampaignSafety::class)->windDown($episode) && empty($run->plan['sell_only'])) {
+                throw new GameException('Wind-down invalidates a retained buying or positioning preview.');
+            }
+            app(AutomationRunner::class)->startCampaign($agent, $run, $episode);
+            $grant->update(['wait_reason' => null]);
+            if ($run->strategy === 'trade') {
+                $episode->refresh();
+                $episode->update(['state' => array_merge($episode->state ?? [], ['current_pair' => $run->plan['campaign_trade']['key']])]);
+            }
+            $this->decision($grant, $episode, $agent, [], $run->strategy, $run->id);
+        } catch (GameException $exception) {
+            if ($exception->retryAfter > 0) {
+                $this->wait($grant, 'awaiting_run_start');
+            } else {
+                AutomationRun::whereKey($run->id)->where('state', 'preview')->update(['state' => 'stopped', 'blocked_reason' => $exception->getMessage()]);
+                $this->decision($grant, $episode, $agent, [['strategy' => $run->strategy, 'rejected' => $exception->getMessage()]], 'preview_discarded');
+            }
+        }
+
+        return true;
     }
 
     private function role(Agent $agent, string $role): ?array
@@ -336,7 +393,10 @@ class CampaignDirector
                         $position = $this->position($grant, $episode, $agent, $probe, $candidate['buyer']);
 
                         return app(AutomationRunner::class)->startCampaign($agent, $position, $episode);
-                    } catch (\Throwable) {
+                    } catch (\Throwable $exception) {
+                        if ($exception instanceof GameException && $exception->retryAfter > 0) {
+                            throw $exception;
+                        }
                         $episode->update(['state' => array_merge($episode->state ?? [], ['probe_position_failed' => now()->toIso8601String()])]);
                         if ($position?->fresh()->active_agent_id) {
                             return $position->fresh();
@@ -368,6 +428,9 @@ class CampaignDirector
 
                 return app(AutomationRunner::class)->preview($agent, $ship['symbol'], $plan);
             } catch (GameException $exception) {
+                if ($exception->retryAfter > 0) {
+                    throw $exception;
+                }
                 $considered[] = $candidate + ['rejected' => $exception->getMessage()];
             }
         }
@@ -492,6 +555,9 @@ class CampaignDirector
 
                     return true;
                 } catch (GameException $exception) {
+                    if ($exception->retryAfter > 0) {
+                        throw $exception;
+                    }
                     $considered[] = ['strategy' => 'sell_aboard', 'buyer' => $candidate['buyer'], 'rejected' => $exception->getMessage()];
                 }
             }

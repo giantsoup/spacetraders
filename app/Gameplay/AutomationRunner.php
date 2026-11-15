@@ -94,6 +94,9 @@ class AutomationRunner
                 try {
                     $fresh = $this->compose($agent, $draft);
                 } catch (GameException $e) {
+                    if ($run->campaign_episode_id && $e->retryAfter > 0) {
+                        throw $e;
+                    }
                     $this->rejectPreview($run, $e->getMessage());
                 }
                 if (! hash_equals($run->fingerprint, $fresh['fingerprint'])) {
@@ -142,10 +145,10 @@ class AutomationRunner
                 || (in_array($run->strategy, ['trade', 'mining'], true) && app(CampaignSafety::class)->windDown($episode))) {
                 throw new GameException('Preview exceeds campaign authority.');
             }
+            $run->update(['campaign_episode_id' => $episode->id]);
             if ($run->strategy === 'trade') {
                 app(CampaignTrade::class)->authorize($agent, $run, $episode);
             }
-            $run->update(['campaign_episode_id' => $episode->id]);
 
             return $this->start($agent, $run);
         });

@@ -84,6 +84,79 @@ class CampaignAutopilotTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_a_budget_deferred_positioning_preview_starts_first_on_the_next_paced_tick(): void
+    {
+        $this->tradeWorld();
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $grant = $this->approve();
+        $this->tick();
+        $episode = CampaignEpisode::firstOrFail();
+        $episode->update(['phase' => 'earn', 'opened_at' => now()->subMinutes(16)]);
+        $this->editWorld(function (&$world) {
+            $point = $world['waypoints'][0];
+            $point['symbol'] = 'X1-TEST-MINE';
+            $point['traits'] = [];
+            $world['waypoints'][] = $point;
+            $world['ships'][0]['nav']['waypointSymbol'] = $point['symbol'];
+            $world['pace_seconds'] = 0.5;
+        });
+        app(AgentSynchronizer::class)->observe($this->agent, 'waypoint', 'X1-TEST-MINE', json_decode(file_get_contents($this->file), true)['waypoints'][2]);
+        $deferStart = true;
+        $requests = 0;
+        $this->partialMock(RequestBudget::class)->shouldReceive('reserve')->andReturnUsing(function () use (&$deferStart, &$requests) {
+            $requests++;
+            if (($deferStart && AutomationRun::where('state', 'preview')->exists()) || (! $deferStart && $requests > 6)) {
+                throw new RequestDeferred('Synthetic paced start budget exhausted.', 5);
+            }
+        });
+        $this->tick();
+        $preview = AutomationRun::where('state', 'preview')->latest('id')->firstOrFail();
+        $this->assertSame('scout', $preview->strategy);
+        $this->assertSame('LOCAL-1', $preview->ship_symbol);
+        $this->assertSame('X1-TEST-ROCK', $preview->plan['market']);
+        $this->assertDatabaseCount('opportunity_investigations', 0);
+        $deferStart = false;
+        $requests = 0;
+        $this->tick();
+        $this->assertSame($preview->id, AutomationRun::whereNotNull('active_agent_id')->value('id'));
+        $this->assertSame('running', $preview->fresh()->state->value);
+        $this->assertLessThanOrEqual(6, $requests);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_a_retained_preview_with_changed_ship_state_is_discarded_without_starting(): void
+    {
+        $this->tradeWorld();
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $this->approve();
+        $this->tick();
+        $episode = CampaignEpisode::firstOrFail();
+        $preview = app(AutomationRunner::class)->preview($this->agent, 'LOCAL-1', ['strategy' => 'scout', 'destination' => 'X1-TEST-PORT',
+            'reserve' => 0, 'max_fuel' => 100, 'max_spend' => 100, 'max_loss' => 100, 'minutes' => 15, 'cycles' => 1, 'one_way' => true]);
+        $preview->update(['campaign_episode_id' => $episode->id]);
+        $this->editWorld(function (&$world) {
+            $world['ships'][0]['fuel']['current']--;
+        });
+        $this->tick();
+        $this->assertSame('stopped', $preview->fresh()->state->value);
+        $this->assertStringContainsString('Ship state', $preview->fresh()->blocked_reason);
+        $this->assertNull($preview->fresh()->active_agent_id);
+        $this->assertDatabaseMissing('automation_runs', ['active_agent_id' => $this->agent->id]);
+    }
+
+    public function test_mining_investigation_is_deferred_to_a_tick_without_a_trade_attempt(): void
+    {
+        $grant = $this->approve();
+        $this->tick();
+        $episode = CampaignEpisode::firstOrFail();
+        $episode->update(['phase' => 'earn', 'opened_at' => now()->subMinutes(16)]);
+        $this->tick();
+        $this->assertDatabaseCount('opportunity_investigations', 0);
+        $this->tick();
+        $this->assertDatabaseCount('opportunity_investigations', 1);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
     public function test_a_pending_grant_cannot_bypass_a_pause_after_the_run_settles(): void
     {
         $grant = $this->tradeGrant(100);
@@ -228,7 +301,7 @@ class CampaignAutopilotTest extends TestCase
             }
         });
         $id = null;
-        for ($tick = 0; $tick < 10 && ! AutomationRun::whereNotNull('active_agent_id')->exists(); $tick++) {
+        for ($tick = 0; $tick < 20 && ! AutomationRun::whereNotNull('active_agent_id')->exists(); $tick++) {
             $this->tick();
             $current = $episode->fresh()->state['mining_investigation_id'] ?? null;
             if ($current) {
