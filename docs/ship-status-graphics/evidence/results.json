@@ -1,0 +1,1500 @@
+{
+  "passed": true,
+  "checks": [
+    "Five poses, control bounds, 44px targets, label separation and no horizontal scroll at all six viewports; 230/128/72px breakpoints.",
+    "Playwright clock advances transit ship rightwards.",
+    "Docked nose, 3K gap and clamp meet computed sprite port for planet, station, asteroid and jump gate at S=9 and S=5.",
+    "Pause freezes every animation/currentTime; reduced motion removes port blink, both ring paths, bob and flame in docked, orbit and transit.",
+    "Expired flight-deck countdown switches to arriving without confirming arrival.",
+    "Campaign renders one non-interactive compact scene per ship, destination in transit, unique IDs, all text retained, and ticker advances then expires between 15-second polls."
+  ],
+  "layouts": [
+    {
+      "pose": "docked",
+      "width": 402,
+      "height": 874,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 230,
+          "top": 104,
+          "right": 386,
+          "bottom": 334,
+          "left": 16
+        },
+        "ship": {
+          "x": 51,
+          "y": 171,
+          "width": 128,
+          "height": 96,
+          "top": 171,
+          "right": 179,
+          "bottom": 267,
+          "left": 51
+        },
+        "art": {
+          "x": 139,
+          "y": 111,
+          "width": 216,
+          "height": 216,
+          "top": 111,
+          "right": 355,
+          "bottom": 327,
+          "left": 139
+        },
+        "label": {
+          "x": 18,
+          "y": 306,
+          "width": 80.34375,
+          "height": 28,
+          "top": 306,
+          "right": 98.34375,
+          "bottom": 334,
+          "left": 18
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "orbit",
+      "width": 402,
+      "height": 874,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 230,
+          "top": 104,
+          "right": 386,
+          "bottom": 334,
+          "left": 16
+        },
+        "ship": {
+          "x": 46,
+          "y": 230,
+          "width": 128,
+          "height": 64,
+          "top": 230,
+          "right": 174,
+          "bottom": 294,
+          "left": 46
+        },
+        "art": {
+          "x": 93,
+          "y": 111,
+          "width": 216,
+          "height": 216,
+          "top": 111,
+          "right": 309,
+          "bottom": 327,
+          "left": 93
+        },
+        "label": {
+          "x": 18,
+          "y": 306,
+          "width": 80.34375,
+          "height": 28,
+          "top": 306,
+          "right": 98.34375,
+          "bottom": 334,
+          "left": 18
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "transit",
+      "width": 402,
+      "height": 874,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 230,
+          "top": 104,
+          "right": 386,
+          "bottom": 334,
+          "left": 16
+        },
+        "ship": {
+          "x": 117.046875,
+          "y": 198.796875,
+          "width": 64,
+          "height": 48,
+          "top": 198.796875,
+          "right": 181.046875,
+          "bottom": 246.796875,
+          "left": 117.046875
+        },
+        "art": {
+          "x": 249.0625,
+          "y": 113.1875,
+          "width": 112,
+          "height": 112,
+          "top": 113.1875,
+          "right": 361.0625,
+          "bottom": 225.1875,
+          "left": 249.0625
+        },
+        "label": {
+          "x": 249.0625,
+          "y": 229.1875,
+          "width": 112,
+          "height": 28,
+          "top": 229.1875,
+          "right": 361.0625,
+          "bottom": 257.1875,
+          "left": 249.0625
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "arriving",
+      "width": 402,
+      "height": 874,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 230,
+          "top": 104,
+          "right": 386,
+          "bottom": 334,
+          "left": 16
+        },
+        "ship": {
+          "x": 203.71875,
+          "y": 145.1875,
+          "width": 64,
+          "height": 48,
+          "top": 145.1875,
+          "right": 267.71875,
+          "bottom": 193.1875,
+          "left": 203.71875
+        },
+        "art": {
+          "x": 249.0625,
+          "y": 113.1875,
+          "width": 112,
+          "height": 112,
+          "top": 113.1875,
+          "right": 361.0625,
+          "bottom": 225.1875,
+          "left": 249.0625
+        },
+        "label": {
+          "x": 249.0625,
+          "y": 229.1875,
+          "width": 112,
+          "height": 28,
+          "top": 229.1875,
+          "right": 361.0625,
+          "bottom": 257.1875,
+          "left": 249.0625
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "unknown",
+      "width": 402,
+      "height": 874,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 230,
+          "top": 104,
+          "right": 386,
+          "bottom": 334,
+          "left": 16
+        },
+        "ship": {
+          "x": 45.59375,
+          "y": 258.390625,
+          "width": 64,
+          "height": 48,
+          "top": 258.390625,
+          "right": 109.59375,
+          "bottom": 306.390625,
+          "left": 45.59375
+        },
+        "art": {
+          "x": 249.0625,
+          "y": 113.1875,
+          "width": 112,
+          "height": 112,
+          "top": 113.1875,
+          "right": 361.0625,
+          "bottom": 225.1875,
+          "left": 249.0625
+        },
+        "label": {
+          "x": 249.0625,
+          "y": 229.1875,
+          "width": 112,
+          "height": 28,
+          "top": 229.1875,
+          "right": 361.0625,
+          "bottom": 257.1875,
+          "left": 249.0625
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "docked",
+      "width": 402,
+      "height": 700,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 230,
+          "top": 104,
+          "right": 386,
+          "bottom": 334,
+          "left": 16
+        },
+        "ship": {
+          "x": 51,
+          "y": 171,
+          "width": 128,
+          "height": 96,
+          "top": 171,
+          "right": 179,
+          "bottom": 267,
+          "left": 51
+        },
+        "art": {
+          "x": 139,
+          "y": 111,
+          "width": 216,
+          "height": 216,
+          "top": 111,
+          "right": 355,
+          "bottom": 327,
+          "left": 139
+        },
+        "label": {
+          "x": 18,
+          "y": 306,
+          "width": 80.34375,
+          "height": 28,
+          "top": 306,
+          "right": 98.34375,
+          "bottom": 334,
+          "left": 18
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "orbit",
+      "width": 402,
+      "height": 700,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 230,
+          "top": 104,
+          "right": 386,
+          "bottom": 334,
+          "left": 16
+        },
+        "ship": {
+          "x": 46,
+          "y": 230,
+          "width": 128,
+          "height": 64,
+          "top": 230,
+          "right": 174,
+          "bottom": 294,
+          "left": 46
+        },
+        "art": {
+          "x": 93,
+          "y": 111,
+          "width": 216,
+          "height": 216,
+          "top": 111,
+          "right": 309,
+          "bottom": 327,
+          "left": 93
+        },
+        "label": {
+          "x": 18,
+          "y": 306,
+          "width": 80.34375,
+          "height": 28,
+          "top": 306,
+          "right": 98.34375,
+          "bottom": 334,
+          "left": 18
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "transit",
+      "width": 402,
+      "height": 700,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 230,
+          "top": 104,
+          "right": 386,
+          "bottom": 334,
+          "left": 16
+        },
+        "ship": {
+          "x": 117.234375,
+          "y": 198.6875,
+          "width": 64,
+          "height": 48,
+          "top": 198.6875,
+          "right": 181.234375,
+          "bottom": 246.6875,
+          "left": 117.234375
+        },
+        "art": {
+          "x": 249.0625,
+          "y": 113.1875,
+          "width": 112,
+          "height": 112,
+          "top": 113.1875,
+          "right": 361.0625,
+          "bottom": 225.1875,
+          "left": 249.0625
+        },
+        "label": {
+          "x": 249.0625,
+          "y": 229.1875,
+          "width": 112,
+          "height": 28,
+          "top": 229.1875,
+          "right": 361.0625,
+          "bottom": 257.1875,
+          "left": 249.0625
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "arriving",
+      "width": 402,
+      "height": 700,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 230,
+          "top": 104,
+          "right": 386,
+          "bottom": 334,
+          "left": 16
+        },
+        "ship": {
+          "x": 203.71875,
+          "y": 145.1875,
+          "width": 64,
+          "height": 48,
+          "top": 145.1875,
+          "right": 267.71875,
+          "bottom": 193.1875,
+          "left": 203.71875
+        },
+        "art": {
+          "x": 249.0625,
+          "y": 113.1875,
+          "width": 112,
+          "height": 112,
+          "top": 113.1875,
+          "right": 361.0625,
+          "bottom": 225.1875,
+          "left": 249.0625
+        },
+        "label": {
+          "x": 249.0625,
+          "y": 229.1875,
+          "width": 112,
+          "height": 28,
+          "top": 229.1875,
+          "right": 361.0625,
+          "bottom": 257.1875,
+          "left": 249.0625
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "unknown",
+      "width": 402,
+      "height": 700,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 230,
+          "top": 104,
+          "right": 386,
+          "bottom": 334,
+          "left": 16
+        },
+        "ship": {
+          "x": 45.59375,
+          "y": 258.390625,
+          "width": 64,
+          "height": 48,
+          "top": 258.390625,
+          "right": 109.59375,
+          "bottom": 306.390625,
+          "left": 45.59375
+        },
+        "art": {
+          "x": 249.0625,
+          "y": 113.1875,
+          "width": 112,
+          "height": 112,
+          "top": 113.1875,
+          "right": 361.0625,
+          "bottom": 225.1875,
+          "left": 249.0625
+        },
+        "label": {
+          "x": 249.0625,
+          "y": 229.1875,
+          "width": 112,
+          "height": 28,
+          "top": 229.1875,
+          "right": 361.0625,
+          "bottom": 257.1875,
+          "left": 249.0625
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "docked",
+      "width": 402,
+      "height": 620,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 128,
+          "top": 104,
+          "right": 386,
+          "bottom": 232,
+          "left": 16
+        },
+        "ship": {
+          "x": 122,
+          "y": 144,
+          "width": 64,
+          "height": 48,
+          "top": 144,
+          "right": 186,
+          "bottom": 192,
+          "left": 122
+        },
+        "art": {
+          "x": 164,
+          "y": 108,
+          "width": 120,
+          "height": 120,
+          "top": 108,
+          "right": 284,
+          "bottom": 228,
+          "left": 164
+        },
+        "label": {
+          "x": 18,
+          "y": 204,
+          "width": 80.34375,
+          "height": 28,
+          "top": 204,
+          "right": 98.34375,
+          "bottom": 232,
+          "left": 18
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "orbit",
+      "width": 402,
+      "height": 620,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 128,
+          "top": 104,
+          "right": 386,
+          "bottom": 232,
+          "left": 16
+        },
+        "ship": {
+          "x": 119,
+          "y": 170,
+          "width": 64,
+          "height": 44,
+          "top": 170,
+          "right": 183,
+          "bottom": 214,
+          "left": 119
+        },
+        "art": {
+          "x": 141,
+          "y": 108,
+          "width": 120,
+          "height": 120,
+          "top": 108,
+          "right": 261,
+          "bottom": 228,
+          "left": 141
+        },
+        "label": {
+          "x": 18,
+          "y": 204,
+          "width": 80.34375,
+          "height": 28,
+          "top": 204,
+          "right": 98.34375,
+          "bottom": 232,
+          "left": 18
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "transit",
+      "width": 402,
+      "height": 620,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 128,
+          "top": 104,
+          "right": 386,
+          "bottom": 232,
+          "left": 16
+        },
+        "ship": {
+          "x": 122.78125,
+          "y": 150.421875,
+          "width": 64,
+          "height": 48,
+          "top": 150.421875,
+          "right": 186.78125,
+          "bottom": 198.421875,
+          "left": 122.78125
+        },
+        "art": {
+          "x": 265.0625,
+          "y": 109.109375,
+          "width": 80,
+          "height": 80,
+          "top": 109.109375,
+          "right": 345.0625,
+          "bottom": 189.109375,
+          "left": 265.0625
+        },
+        "label": {
+          "x": 249.0625,
+          "y": 193.109375,
+          "width": 112,
+          "height": 28,
+          "top": 193.109375,
+          "right": 361.0625,
+          "bottom": 221.109375,
+          "left": 249.0625
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "arriving",
+      "width": 402,
+      "height": 620,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 128,
+          "top": 104,
+          "right": 386,
+          "bottom": 232,
+          "left": 16
+        },
+        "ship": {
+          "x": 214.390625,
+          "y": 125.109375,
+          "width": 64,
+          "height": 48,
+          "top": 125.109375,
+          "right": 278.390625,
+          "bottom": 173.109375,
+          "left": 214.390625
+        },
+        "art": {
+          "x": 265.0625,
+          "y": 109.109375,
+          "width": 80,
+          "height": 80,
+          "top": 109.109375,
+          "right": 345.0625,
+          "bottom": 189.109375,
+          "left": 265.0625
+        },
+        "label": {
+          "x": 249.0625,
+          "y": 193.109375,
+          "width": 112,
+          "height": 28,
+          "top": 193.109375,
+          "right": 361.0625,
+          "bottom": 221.109375,
+          "left": 249.0625
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "unknown",
+      "width": 402,
+      "height": 620,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 128,
+          "top": 104,
+          "right": 386,
+          "bottom": 232,
+          "left": 16
+        },
+        "ship": {
+          "x": 45.59375,
+          "y": 168.625,
+          "width": 64,
+          "height": 48,
+          "top": 168.625,
+          "right": 109.59375,
+          "bottom": 216.625,
+          "left": 45.59375
+        },
+        "art": {
+          "x": 265.0625,
+          "y": 109.109375,
+          "width": 80,
+          "height": 80,
+          "top": 109.109375,
+          "right": 345.0625,
+          "bottom": 189.109375,
+          "left": 265.0625
+        },
+        "label": {
+          "x": 249.0625,
+          "y": 193.109375,
+          "width": 112,
+          "height": 28,
+          "top": 193.109375,
+          "right": 361.0625,
+          "bottom": 221.109375,
+          "left": 249.0625
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "docked",
+      "width": 820,
+      "height": 1180,
+      "boxes": {
+        "scene": {
+          "x": 106,
+          "y": 104,
+          "width": 608,
+          "height": 230,
+          "top": 104,
+          "right": 714,
+          "bottom": 334,
+          "left": 106
+        },
+        "ship": {
+          "x": 260,
+          "y": 171,
+          "width": 128,
+          "height": 96,
+          "top": 171,
+          "right": 388,
+          "bottom": 267,
+          "left": 260
+        },
+        "art": {
+          "x": 348,
+          "y": 111,
+          "width": 216,
+          "height": 216,
+          "top": 111,
+          "right": 564,
+          "bottom": 327,
+          "left": 348
+        },
+        "label": {
+          "x": 108,
+          "y": 306,
+          "width": 80.34375,
+          "height": 28,
+          "top": 306,
+          "right": 188.34375,
+          "bottom": 334,
+          "left": 108
+        },
+        "scrollWidth": 820
+      }
+    },
+    {
+      "pose": "orbit",
+      "width": 820,
+      "height": 1180,
+      "boxes": {
+        "scene": {
+          "x": 106,
+          "y": 104,
+          "width": 608,
+          "height": 230,
+          "top": 104,
+          "right": 714,
+          "bottom": 334,
+          "left": 106
+        },
+        "ship": {
+          "x": 255,
+          "y": 230,
+          "width": 128,
+          "height": 64,
+          "top": 230,
+          "right": 383,
+          "bottom": 294,
+          "left": 255
+        },
+        "art": {
+          "x": 302,
+          "y": 111,
+          "width": 216,
+          "height": 216,
+          "top": 111,
+          "right": 518,
+          "bottom": 327,
+          "left": 302
+        },
+        "label": {
+          "x": 108,
+          "y": 306,
+          "width": 80.34375,
+          "height": 28,
+          "top": 306,
+          "right": 188.34375,
+          "bottom": 334,
+          "left": 108
+        },
+        "scrollWidth": 820
+      }
+    },
+    {
+      "pose": "transit",
+      "width": 820,
+      "height": 1180,
+      "boxes": {
+        "scene": {
+          "x": 106,
+          "y": 104,
+          "width": 608,
+          "height": 230,
+          "top": 104,
+          "right": 714,
+          "bottom": 334,
+          "left": 106
+        },
+        "ship": {
+          "x": 316,
+          "y": 198.46875,
+          "width": 64,
+          "height": 48,
+          "top": 198.46875,
+          "right": 380,
+          "bottom": 246.46875,
+          "left": 316
+        },
+        "art": {
+          "x": 525,
+          "y": 113.1875,
+          "width": 112,
+          "height": 112,
+          "top": 113.1875,
+          "right": 637,
+          "bottom": 225.1875,
+          "left": 525
+        },
+        "label": {
+          "x": 525,
+          "y": 229.1875,
+          "width": 112,
+          "height": 28,
+          "top": 229.1875,
+          "right": 637,
+          "bottom": 257.1875,
+          "left": 525
+        },
+        "scrollWidth": 820
+      }
+    },
+    {
+      "pose": "arriving",
+      "width": 820,
+      "height": 1180,
+      "boxes": {
+        "scene": {
+          "x": 106,
+          "y": 104,
+          "width": 608,
+          "height": 230,
+          "top": 104,
+          "right": 714,
+          "bottom": 334,
+          "left": 106
+        },
+        "ship": {
+          "x": 479.65625,
+          "y": 145.1875,
+          "width": 64,
+          "height": 48,
+          "top": 145.1875,
+          "right": 543.65625,
+          "bottom": 193.1875,
+          "left": 479.65625
+        },
+        "art": {
+          "x": 525,
+          "y": 113.1875,
+          "width": 112,
+          "height": 112,
+          "top": 113.1875,
+          "right": 637,
+          "bottom": 225.1875,
+          "left": 525
+        },
+        "label": {
+          "x": 525,
+          "y": 229.1875,
+          "width": 112,
+          "height": 28,
+          "top": 229.1875,
+          "right": 637,
+          "bottom": 257.1875,
+          "left": 525
+        },
+        "scrollWidth": 820
+      }
+    },
+    {
+      "pose": "unknown",
+      "width": 820,
+      "height": 1180,
+      "boxes": {
+        "scene": {
+          "x": 106,
+          "y": 104,
+          "width": 608,
+          "height": 230,
+          "top": 104,
+          "right": 714,
+          "bottom": 334,
+          "left": 106
+        },
+        "ship": {
+          "x": 154.625,
+          "y": 258.390625,
+          "width": 64,
+          "height": 48,
+          "top": 258.390625,
+          "right": 218.625,
+          "bottom": 306.390625,
+          "left": 154.625
+        },
+        "art": {
+          "x": 525,
+          "y": 113.1875,
+          "width": 112,
+          "height": 112,
+          "top": 113.1875,
+          "right": 637,
+          "bottom": 225.1875,
+          "left": 525
+        },
+        "label": {
+          "x": 525,
+          "y": 229.1875,
+          "width": 112,
+          "height": 28,
+          "top": 229.1875,
+          "right": 637,
+          "bottom": 257.1875,
+          "left": 525
+        },
+        "scrollWidth": 820
+      }
+    },
+    {
+      "pose": "docked",
+      "width": 1280,
+      "height": 800,
+      "boxes": {
+        "scene": {
+          "x": 336,
+          "y": 104,
+          "width": 608,
+          "height": 230,
+          "top": 104,
+          "right": 944,
+          "bottom": 334,
+          "left": 336
+        },
+        "ship": {
+          "x": 490,
+          "y": 171,
+          "width": 128,
+          "height": 96,
+          "top": 171,
+          "right": 618,
+          "bottom": 267,
+          "left": 490
+        },
+        "art": {
+          "x": 578,
+          "y": 111,
+          "width": 216,
+          "height": 216,
+          "top": 111,
+          "right": 794,
+          "bottom": 327,
+          "left": 578
+        },
+        "label": {
+          "x": 338,
+          "y": 306,
+          "width": 80.34375,
+          "height": 28,
+          "top": 306,
+          "right": 418.34375,
+          "bottom": 334,
+          "left": 338
+        },
+        "scrollWidth": 1280
+      }
+    },
+    {
+      "pose": "orbit",
+      "width": 1280,
+      "height": 800,
+      "boxes": {
+        "scene": {
+          "x": 336,
+          "y": 104,
+          "width": 608,
+          "height": 230,
+          "top": 104,
+          "right": 944,
+          "bottom": 334,
+          "left": 336
+        },
+        "ship": {
+          "x": 485,
+          "y": 230,
+          "width": 128,
+          "height": 64,
+          "top": 230,
+          "right": 613,
+          "bottom": 294,
+          "left": 485
+        },
+        "art": {
+          "x": 532,
+          "y": 111,
+          "width": 216,
+          "height": 216,
+          "top": 111,
+          "right": 748,
+          "bottom": 327,
+          "left": 532
+        },
+        "label": {
+          "x": 338,
+          "y": 306,
+          "width": 80.34375,
+          "height": 28,
+          "top": 306,
+          "right": 418.34375,
+          "bottom": 334,
+          "left": 338
+        },
+        "scrollWidth": 1280
+      }
+    },
+    {
+      "pose": "transit",
+      "width": 1280,
+      "height": 800,
+      "boxes": {
+        "scene": {
+          "x": 336,
+          "y": 104,
+          "width": 608,
+          "height": 230,
+          "top": 104,
+          "right": 944,
+          "bottom": 334,
+          "left": 336
+        },
+        "ship": {
+          "x": 546.34375,
+          "y": 198.34375,
+          "width": 64,
+          "height": 48,
+          "top": 198.34375,
+          "right": 610.34375,
+          "bottom": 246.34375,
+          "left": 546.34375
+        },
+        "art": {
+          "x": 755,
+          "y": 113.1875,
+          "width": 112,
+          "height": 112,
+          "top": 113.1875,
+          "right": 867,
+          "bottom": 225.1875,
+          "left": 755
+        },
+        "label": {
+          "x": 755,
+          "y": 229.1875,
+          "width": 112,
+          "height": 28,
+          "top": 229.1875,
+          "right": 867,
+          "bottom": 257.1875,
+          "left": 755
+        },
+        "scrollWidth": 1280
+      }
+    },
+    {
+      "pose": "arriving",
+      "width": 1280,
+      "height": 800,
+      "boxes": {
+        "scene": {
+          "x": 336,
+          "y": 104,
+          "width": 608,
+          "height": 230,
+          "top": 104,
+          "right": 944,
+          "bottom": 334,
+          "left": 336
+        },
+        "ship": {
+          "x": 709.65625,
+          "y": 145.1875,
+          "width": 64,
+          "height": 48,
+          "top": 145.1875,
+          "right": 773.65625,
+          "bottom": 193.1875,
+          "left": 709.65625
+        },
+        "art": {
+          "x": 755,
+          "y": 113.1875,
+          "width": 112,
+          "height": 112,
+          "top": 113.1875,
+          "right": 867,
+          "bottom": 225.1875,
+          "left": 755
+        },
+        "label": {
+          "x": 755,
+          "y": 229.1875,
+          "width": 112,
+          "height": 28,
+          "top": 229.1875,
+          "right": 867,
+          "bottom": 257.1875,
+          "left": 755
+        },
+        "scrollWidth": 1280
+      }
+    },
+    {
+      "pose": "unknown",
+      "width": 1280,
+      "height": 800,
+      "boxes": {
+        "scene": {
+          "x": 336,
+          "y": 104,
+          "width": 608,
+          "height": 230,
+          "top": 104,
+          "right": 944,
+          "bottom": 334,
+          "left": 336
+        },
+        "ship": {
+          "x": 384.625,
+          "y": 258.390625,
+          "width": 64,
+          "height": 48,
+          "top": 258.390625,
+          "right": 448.625,
+          "bottom": 306.390625,
+          "left": 384.625
+        },
+        "art": {
+          "x": 755,
+          "y": 113.1875,
+          "width": 112,
+          "height": 112,
+          "top": 113.1875,
+          "right": 867,
+          "bottom": 225.1875,
+          "left": 755
+        },
+        "label": {
+          "x": 755,
+          "y": 229.1875,
+          "width": 112,
+          "height": 28,
+          "top": 229.1875,
+          "right": 867,
+          "bottom": 257.1875,
+          "left": 755
+        },
+        "scrollWidth": 1280
+      }
+    },
+    {
+      "pose": "docked",
+      "width": 402,
+      "height": 560,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 72,
+          "top": 104,
+          "right": 386,
+          "bottom": 176,
+          "left": 16
+        },
+        "ship": {
+          "x": 157.5,
+          "y": 108,
+          "width": 32,
+          "height": 44,
+          "top": 108,
+          "right": 189.5,
+          "bottom": 152,
+          "left": 157.5
+        },
+        "art": {
+          "x": 176.5,
+          "y": 104,
+          "width": 72,
+          "height": 72,
+          "top": 104,
+          "right": 248.5,
+          "bottom": 176,
+          "left": 176.5
+        },
+        "label": {
+          "x": 28,
+          "y": 158,
+          "width": 54.984375,
+          "height": 14,
+          "top": 158,
+          "right": 82.984375,
+          "bottom": 172,
+          "left": 28
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "orbit",
+      "width": 402,
+      "height": 560,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 72,
+          "top": 104,
+          "right": 386,
+          "bottom": 176,
+          "left": 16
+        },
+        "ship": {
+          "x": 155,
+          "y": 108,
+          "width": 32,
+          "height": 44,
+          "top": 108,
+          "right": 187,
+          "bottom": 152,
+          "left": 155
+        },
+        "art": {
+          "x": 165,
+          "y": 104,
+          "width": 72,
+          "height": 72,
+          "top": 104,
+          "right": 237,
+          "bottom": 176,
+          "left": 165
+        },
+        "label": {
+          "x": 28,
+          "y": 158,
+          "width": 54.984375,
+          "height": 14,
+          "top": 158,
+          "right": 82.984375,
+          "bottom": 172,
+          "left": 28
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "transit",
+      "width": 402,
+      "height": 560,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 72,
+          "top": 104,
+          "right": 386,
+          "bottom": 176,
+          "left": 16
+        },
+        "ship": {
+          "x": 144.75,
+          "y": 108,
+          "width": 32,
+          "height": 44,
+          "top": 108,
+          "right": 176.75,
+          "bottom": 152,
+          "left": 144.75
+        },
+        "art": {
+          "x": 281.0625,
+          "y": 106.875,
+          "width": 48,
+          "height": 48,
+          "top": 106.875,
+          "right": 329.0625,
+          "bottom": 154.875,
+          "left": 281.0625
+        },
+        "label": {
+          "x": 28,
+          "y": 158,
+          "width": 60.484375,
+          "height": 14,
+          "top": 158,
+          "right": 88.484375,
+          "bottom": 172,
+          "left": 28
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "arriving",
+      "width": 402,
+      "height": 560,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 72,
+          "top": 104,
+          "right": 386,
+          "bottom": 176,
+          "left": 16
+        },
+        "ship": {
+          "x": 241.0625,
+          "y": 108,
+          "width": 32,
+          "height": 44,
+          "top": 108,
+          "right": 273.0625,
+          "bottom": 152,
+          "left": 241.0625
+        },
+        "art": {
+          "x": 281.0625,
+          "y": 106.875,
+          "width": 48,
+          "height": 48,
+          "top": 106.875,
+          "right": 329.0625,
+          "bottom": 154.875,
+          "left": 281.0625
+        },
+        "label": {
+          "x": 28,
+          "y": 158,
+          "width": 60.484375,
+          "height": 14,
+          "top": 158,
+          "right": 88.484375,
+          "bottom": 172,
+          "left": 28
+        },
+        "scrollWidth": 402
+      }
+    },
+    {
+      "pose": "unknown",
+      "width": 402,
+      "height": 560,
+      "boxes": {
+        "scene": {
+          "x": 16,
+          "y": 104,
+          "width": 370,
+          "height": 72,
+          "top": 104,
+          "right": 386,
+          "bottom": 176,
+          "left": 16
+        },
+        "ship": {
+          "x": 45.59375,
+          "y": 108,
+          "width": 32,
+          "height": 44,
+          "top": 108,
+          "right": 77.59375,
+          "bottom": 152,
+          "left": 45.59375
+        },
+        "art": {
+          "x": 281.0625,
+          "y": 106.875,
+          "width": 48,
+          "height": 48,
+          "top": 106.875,
+          "right": 329.0625,
+          "bottom": 154.875,
+          "left": 281.0625
+        },
+        "label": {
+          "x": 28,
+          "y": 158,
+          "width": 87.96875,
+          "height": 14,
+          "top": 158,
+          "right": 115.96875,
+          "bottom": 172,
+          "left": 28
+        },
+        "scrollWidth": 402
+      }
+    }
+  ],
+  "screenshots": [
+    "approved-round-1-all-states-402.png",
+    "approved-round-2-centered-phone-402.png",
+    "flight-docked-402x874.png",
+    "flight-orbit-402x874.png",
+    "flight-transit-402x874.png",
+    "flight-arriving-402x874.png",
+    "flight-unknown-402x874.png",
+    "flight-docked-402x700.png",
+    "flight-orbit-402x700.png",
+    "flight-transit-402x700.png",
+    "flight-arriving-402x700.png",
+    "flight-unknown-402x700.png",
+    "flight-docked-402x620.png",
+    "flight-orbit-402x620.png",
+    "flight-transit-402x620.png",
+    "flight-arriving-402x620.png",
+    "flight-unknown-402x620.png",
+    "flight-docked-820x1180.png",
+    "flight-orbit-820x1180.png",
+    "flight-transit-820x1180.png",
+    "flight-arriving-820x1180.png",
+    "flight-unknown-820x1180.png",
+    "flight-docked-1280x800.png",
+    "flight-orbit-1280x800.png",
+    "flight-transit-1280x800.png",
+    "flight-arriving-1280x800.png",
+    "flight-unknown-1280x800.png",
+    "flight-docked-402x560.png",
+    "flight-orbit-402x560.png",
+    "flight-transit-402x560.png",
+    "flight-arriving-402x560.png",
+    "flight-unknown-402x560.png",
+    "dock-port-planet-402x874.png",
+    "dock-port-orbital_station-402x874.png",
+    "dock-port-asteroid-402x874.png",
+    "dock-port-jump_gate-402x874.png",
+    "dock-port-planet-402x620.png",
+    "dock-port-orbital_station-402x620.png",
+    "dock-port-asteroid-402x620.png",
+    "dock-port-jump_gate-402x620.png",
+    "campaign-402x874.png",
+    "campaign-1280x800.png"
+  ],
+  "errors": [],
+  "blockedExternalRequests": 0,
+  "browser": "156.0.8078.4"
+}

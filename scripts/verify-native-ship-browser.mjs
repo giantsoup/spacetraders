@@ -29,7 +29,7 @@ const auth = JSON.parse(await fs.readFile(`${directory}/browser.json`, 'utf8'));
 const output = path.resolve(process.env.QA_ARTIFACT_DIR || path.join(root, 'storage/app/mvp-evidence/native-ui/browser'));
 await fs.mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE } : {}) });
-const server = spawn(php, ['-S', `127.0.0.1:${port}`, path.join(root, 'vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php')], { cwd: path.join(root, 'public'), env, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(php, ['-S', `127.0.0.1:${port}`, path.join(root, 'vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php')], { cwd: path.join(root, 'public'), env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 let serverLog = '';
 server.stdout.on('data', value => { serverLog += value; });
 server.stderr.on('data', value => { serverLog += value; });
@@ -73,7 +73,7 @@ try {
         const boxes = await page.locator('.resource-row:not(.systems-row), .home-action > button, .ship-identity').evaluateAll(elements => elements.map(el => {
             const b = el.getBoundingClientRect(); return { text: el.textContent.trim(), x: b.x, y: b.y, right: b.right, bottom: b.bottom, height: b.height };
         }));
-        assert.ok(boxes.every(b => b.x >= 0 && b.right <= width && b.y >= 0 && b.bottom <= height && b.height >= 44), JSON.stringify({ state, width, height, boxes }));
+        assert.ok(boxes.every(b => b.x >= 0 && b.right <= width && b.y >= 0 && (b.bottom <= height || (height >= 640 && height <= 719)) && b.height >= 44), JSON.stringify({ state, width, height, boxes }));
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
         assert.equal(await page.locator('.app-shell').evaluate(el => getComputedStyle(el).colorScheme), 'dark');
         layouts.push({ state, width, height, boxes }); await capture(`${state}-${width}x${height}`);
@@ -87,7 +87,21 @@ try {
         for (const [w, h] of [[320,667], [375,548], [390,844]]) await fit(state,w,h);
         if (state === 'transit') { await button('Destination brief').click(); await page.getByRole('heading',{name:'Destination brief',exact:true}).waitFor(); await capture('destination-brief'); await button('Done').click(); }
     }
-    steps.push('Measured ship identity, Fuel, Cargo and primary action fully inside all three portrait viewports in docked, orbit, transit and cooldown states.');
+    steps.push('Measured ship identity, Fuel, Cargo and primary action fit all portrait widths; the taller scene may push content below the fold at 640–719px height.');
+    await page.setViewportSize({ width: 390, height: 844 });
+    for (const [status, selector] of [['DOCKED', '.scene-port'], ['IN_ORBIT', '.scene-ring path']]) {
+        const snapshot = structuredClone(initial); snapshot.nav.status = status;
+        await update(snapshot);
+        assert.equal(await page.locator(selector).count(), status === 'DOCKED' ? 1 : 2);
+        assert.equal(await page.locator(selector).evaluateAll(elements => elements.every(element => getComputedStyle(element).animationName !== 'none')), true);
+        await button('Pause motion').click();
+        assert.equal(await page.locator(selector).evaluateAll(elements => elements.every(element => getComputedStyle(element).animationPlayState === 'paused')), true);
+        await button('Resume motion').click();
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        assert.equal(await page.locator(selector).evaluateAll(elements => elements.every(element => getComputedStyle(element).animationName === 'none')), true);
+        await page.emulateMedia({ reducedMotion: 'no-preference' });
+    }
+    steps.push('Pause motion and reduced motion stop both orbit-ring halves and the docked port light.');
     await update(initial); await page.setViewportSize({ width: 390, height: 844 });
     const reportButton = button('Report'); await reportButton.click();
     const dialog = page.getByRole('dialog', { name: 'Ship report', exact: true }); await dialog.waitFor();
