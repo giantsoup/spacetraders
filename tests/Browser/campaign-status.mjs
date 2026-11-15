@@ -78,7 +78,7 @@ try {
             actionHeights: [...document.querySelectorAll('.app-form-actions button')].map(button => button.getBoundingClientRect().height),
         }));
         assert.ok(layout.scrollWidth <= width, JSON.stringify(layout));
-        assert.deepEqual(layout.headings, ['Status', 'Now', 'This wipe', 'Ships', 'Recent loads', 'Recent events']);
+        assert.deepEqual(layout.headings, name === 'empty' ? ['Status'] : ['Status', 'Now', 'This wipe', 'Ships', 'Recent loads', 'Recent events']);
         assert.equal(layout.campaignCurrent, 'page');
         for (const height of layout.actionHeights) assert.ok(height >= 44);
         if (width === 390) assert.equal(layout.gutter, '16px');

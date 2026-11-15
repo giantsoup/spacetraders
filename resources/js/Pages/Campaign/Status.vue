@@ -31,7 +31,7 @@ const label = value => value ? readableText(readableLabel(value)) : 'Unknown';
 const state = computed(() => {
     if (!props.grant) return { label: 'Idle', tone: 'neutral', why: 'No campaign approved.' };
     if (props.grant.paused_at) return { label: 'Paused', tone: 'warning', why: label(props.grant.pause_reason) };
-    if (props.health.problems.length) return { label: 'Needs attention', tone: 'warning', why: 'Review the health problems below.' };
+    if (problems.value.length) return { label: 'Needs attention', tone: 'warning', why: 'Review the health problems below.' };
     if (!props.grant.active) return { label: 'Idle', tone: 'neutral', why: 'Campaign authority is inactive.' };
     if (props.grant.wait_reason) return { label: 'Waiting', tone: 'neutral', why: label(props.grant.wait_reason) };
     if (!props.episode) return { label: 'Waiting', tone: 'neutral', why: 'Waiting for the first decision.' };
@@ -40,6 +40,8 @@ const state = computed(() => {
     if (props.currentRun && props.health.engine.state === 'running') return { label: 'Running', tone: 'good', why: 'The engine is carrying out the current run.' };
     return { label: 'Idle', tone: 'neutral', why: 'Waiting for the next decision.' };
 });
+const problems = computed(() => props.health.problems.filter(problem => !(props.grant?.paused_at && problem.key.startsWith('campaign_paused:'))));
+const recentCredits = computed(() => props.credits.slice(-8));
 const post = action => form.post(route(`campaign.${action}`), { preserveScroll: true });
 </script>
 
@@ -58,10 +60,10 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
                     <h2 id="status-heading">Status</h2>
                     <span class="status" :class="state.tone">{{ state.label }}</span>
                 </div>
-                <p>{{ state.why }}</p>
+                <p :class="{ 'app-muted': !grant }">{{ state.why }}</p>
                 <p v-if="!grant" class="app-muted">Approve a playbook with <code>php artisan campaign:approve &lt;revision&gt;</code>.</p>
-                <ul v-if="health.problems.length" class="problems">
-                    <li v-for="problem in health.problems" :key="problem.key">{{ label(problem.message) }}</li>
+                <ul v-if="problems.length" class="problems">
+                    <li v-for="problem in problems" :key="problem.key">{{ label(problem.message) }}</li>
                 </ul>
                 <dl>
                     <div><dt>Engine</dt><dd>{{ label(health.engine.state) }}</dd></div>
@@ -84,7 +86,7 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
                 <p class="app-muted updated">Updated <time :datetime="updatedAt">{{ formatLocalTime(updatedAt) }}</time></p>
             </section>
 
-            <section class="app-panel" aria-labelledby="now-heading">
+            <section v-if="grant" class="app-panel" aria-labelledby="now-heading">
                 <h2 id="now-heading">Now</h2>
                 <p v-if="!episode" class="app-muted">Waiting for the first decision.</p>
                 <dl v-else>
@@ -119,7 +121,7 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
                 <p v-else-if="episode" class="app-muted">Waiting for the first decision.</p>
             </section>
 
-            <section class="app-panel" aria-labelledby="wipe-heading">
+            <section v-if="grant" class="app-panel" aria-labelledby="wipe-heading">
                 <h2 id="wipe-heading">This wipe</h2>
                 <template v-if="episode">
                     <dl>
@@ -134,16 +136,16 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
                         <div><dt>Net credit change</dt><dd :class="netTone(episode.net)">{{ amount(episode.net) }}</dd></div>
                     </dl>
                     <p class="app-muted">Credit change is cash, not economic profit.</p>
-                    <h3>Credit trend</h3>
-                    <ol v-if="credits.length" class="trend">
-                        <li v-for="sample in credits" :key="sample.at"><time :datetime="sample.at" :title="formatLocalTime(sample.at)">{{ formatLocalClock(sample.at) }}</time><span>{{ amount(sample.credits) }}</span></li>
+                    <h3>Credit trend <span v-if="recentCredits.length" class="app-muted">· since {{ formatLocalClock(recentCredits[0].at) }}</span></h3>
+                    <ol v-if="recentCredits.length" class="trend">
+                        <li v-for="sample in recentCredits" :key="sample.at"><time :datetime="sample.at" :title="formatLocalTime(sample.at)">{{ formatLocalClock(sample.at) }}</time><span>{{ amount(sample.credits) }}</span></li>
                     </ol>
                     <p v-else class="app-muted">No credit samples yet.</p>
                 </template>
-                <p v-else class="app-muted">No episode yet.</p>
+                <p v-else class="app-muted">Waiting for the first decision.</p>
             </section>
 
-            <section class="app-panel" aria-labelledby="ships-heading">
+            <section v-if="grant" class="app-panel" aria-labelledby="ships-heading">
                 <h2 id="ships-heading">Ships</h2>
                 <ul v-if="ships.length" class="records">
                     <li v-for="ship in ships" :key="ship.symbol">
@@ -160,7 +162,7 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
                 <p v-else class="app-muted">No role ships saved yet.</p>
             </section>
 
-            <section class="app-panel" aria-labelledby="loads-heading">
+            <section v-if="grant" class="app-panel" aria-labelledby="loads-heading">
                 <h2 id="loads-heading">Recent loads</h2>
                 <ul v-if="loads.length" class="records">
                     <li v-for="(load, index) in loads" :key="index">
@@ -178,7 +180,7 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
                 <p v-else class="app-muted">No completed loads yet.</p>
             </section>
 
-            <section class="app-panel" aria-labelledby="events-heading">
+            <section v-if="grant" class="app-panel" aria-labelledby="events-heading">
                 <h2 id="events-heading">Recent events</h2>
                 <ul v-if="events.length" class="records">
                     <li v-for="(event, index) in events" :key="index">
@@ -201,12 +203,13 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
 .status.warning { background: #302819; border-color: #bd9e61; color: #ffe09a; }
 .campaign-status h2 { margin-bottom: 12px; }
 .campaign-status h3 { margin-top: 20px; font-size: 15px; font-weight: 700; }
-.campaign-status dl { display: grid; gap: 12px; margin: 20px 0; font-size: 14px; }
+.campaign-status dl { display: grid; gap: 14px; margin: 24px 0; font-size: 13px; }
 .campaign-status dl > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 12px; }
-.campaign-status dt, .campaign-status time { color: var(--color-muted); }
+.campaign-status dt, .records time { color: var(--color-muted); }
 .campaign-status dd { text-align: right; min-width: 0; }
 .positive { color: var(--color-accent); }
-.negative, .problems { color: var(--color-fault); }
+.negative { color: var(--color-fault); }
+.problems { color: #ffe09a; }
 .problems { padding-left: 20px; margin-top: 16px; }
 .updated { margin-top: 20px; font-size: 12px; }
 .records, .trend { list-style: none; padding: 0; }
