@@ -396,7 +396,7 @@ class CommandRules
                     throw new GameException('One-time setup purchase was already executed or acknowledged. Inspect the delivered fleet; further expansion is outside this MVP.');
                 }
                 if ($arguments['waypointSymbol'] !== $ship['nav']['waypointSymbol']) {
-                    throw new GameException('Approve scouting movement to the shipyard first.');
+                    throw new GameException($setup ? 'Approve scouting movement to the shipyard first.' : 'A ship must be at the shipyard waypoint to purchase a ship. Move the selected ship there first.');
                 }
                 foreach ($setup ? $this->api->ships($agent) : [] as $owned) {
                     if ($this->planner->capability($owned) === null) {

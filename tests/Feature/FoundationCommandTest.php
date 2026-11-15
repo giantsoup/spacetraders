@@ -174,6 +174,17 @@ class FoundationCommandTest extends TestCase
         Queue::assertNotPushed(ExecuteShipCommand::class);
     }
 
+    public function test_fleet_purchase_location_refusal_does_not_imply_setup_scouting(): void
+    {
+        $arguments = ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-PORT', 'maxTotal' => 20000, 'reserve' => 0];
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1',
+            'command' => 'buy_ship', 'arguments' => $arguments])->assertUnprocessable()->assertJsonPath('message', 'A ship must be at the shipyard waypoint to purchase a ship. Move the selected ship there first.');
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1',
+            'command' => 'buy_ship', 'arguments' => $arguments + ['site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-PORT']])
+            ->assertUnprocessable()->assertJsonPath('message', 'Approve scouting movement to the shipyard first.');
+        $this->assertEmpty($this->world()['writes']);
+    }
+
     public function test_changed_offer_and_insufficient_reserve_never_dispatch_a_purchase(): void
     {
         $arguments = ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => 20000, 'reserve' => 90000];

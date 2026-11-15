@@ -90,7 +90,8 @@ class CampaignStatusTest extends TestCase
 
     public function test_ship_scenes_use_saved_navigation_and_waypoint_knowledge_only(): void
     {
-        ['agent' => $agent, 'ship' => $ship] = CampaignStatusFixture::seed($this->operator);
+        ['agent' => $agent, 'ship' => $ship, 'episode' => $episode] = CampaignStatusFixture::seed($this->operator);
+        $episode->update(['state' => ['role_ships' => ['command' => 'OFFLINE-1', 'probe' => 'OFFLINE-2']]]);
         $snapshot = $ship->snapshot;
         $snapshot['nav']['systemSymbol'] = 'X1-DEMO';
         $ship->update(['snapshot' => $snapshot]);
@@ -121,12 +122,12 @@ class CampaignStatusTest extends TestCase
             ->where('ships.0.locations.0.symbol', 'X1-DEMO-SOURCE')->where('ships.0.locations.0.type', 'PLANET')
             ->where('ships.0.locations.0.traits', [['symbol' => 'MARKETPLACE']])
             ->where('ships.0.fuel.current', 90)->where('ships.0.cargo.units', 20)
-            ->where('ships.1.nav_status', 'IN_TRANSIT')->where('ships.1.waypoint', 'X1-DEMO-SOURCE')
+            ->where('ships.1.role', 'probe')->where('ships.1.nav_status', 'IN_TRANSIT')->where('ships.1.waypoint', 'X1-DEMO-SOURCE')
             ->where('ships.1.nav.route.departureTime', $departure)->where('ships.1.nav.route.arrival', $arrival)
             ->where('ships.1.nav.route.destination', ['symbol' => 'X1-DEMO-BUYER', 'type' => 'ORBITAL_STATION'])
             ->has('ships.1.locations', 2)->where('ships.1.locations.1.symbol', 'X1-DEMO-BUYER')
             ->where('ships.1.locations.1.type', 'ORBITAL_STATION')->where('ships.1.locations.1.traits', [['symbol' => 'MARKETPLACE']])
-            ->where('ships.2.nav.status', null)->where('ships.2.nav.waypointSymbol', 'X1-DEMO-UNSAVED')
+            ->where('ships.2.role', 'fleet')->where('ships.2.nav.status', null)->where('ships.2.nav.waypointSymbol', 'X1-DEMO-UNSAVED')
             ->where('ships.2.locations.0.type', null)->where('ships.2.locations.0.traits', null));
     }
 

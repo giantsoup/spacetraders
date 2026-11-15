@@ -138,11 +138,11 @@ const quantity = ref(1);
 const priceBound = ref(0);
 const reserve = ref(props.manualReserveFloor);
 const offerIndex = ref('');
-const fleetOfferIndex = ref('');
-const fleetOffer = computed(() => fleetOfferIndex.value === '' ? null : offers.value[Number(fleetOfferIndex.value)]);
+const fleetOfferKey = ref('');
+const fleetOffer = computed(() => offers.value.find(offer => `${offer.yard}:${offer.type}` === fleetOfferKey.value));
 const fleetMaximum = ref(0);
-const fleetReserve = ref(props.manualReserveFloor);
-watch(fleetOffer, offer => { fleetMaximum.value = offer?.purchasePrice || 0; });
+const fleetReserve = ref(0);
+watch(fleetOfferKey, () => { fleetMaximum.value = fleetOffer.value?.purchasePrice || 0; });
 const surveySignature = ref('');
 const runSurveySignature = ref('');
 const transferTarget = ref('');
@@ -403,10 +403,10 @@ function distance(point) {
                                 <p v-if="commandPreview.before_state.estimate.cargo_refuel?.rounding_unknown" class="warning">Partial cargo conversion: server rounding is unknown. Maximum approved cargo exposure {{ commandPreview.before_state.estimate.cargo_refuel.max_cargo_units }} FUEL units; this is a review threshold, not a server cap or exact consumption prediction.</p>
                                 <details v-if="commandPreview.before_state.estimate.cargo_refuel"><summary>Tank conversion and protected cargo</summary><DataDetails :value="commandPreview.before_state.estimate.cargo_refuel" /></details>
                             </template>
-                            <dl v-if="commandPreview.command === 'buy_ship'"><dt>Ship type</dt><dd>{{ assetName(commandPreview.arguments.shipType) }}</dd><dt>Shipyard</dt><dd>{{ commandPreview.arguments.waypointSymbol }}</dd><dt>Purchase price</dt><dd>{{ cash(commandPreview.before_state.estimate.purchasePrice) }} CR</dd><dt>Current credits</dt><dd>{{ cash(commandPreview.before_state.credits) }} CR</dd><dt>Credits after purchase</dt><dd>{{ cash(commandPreview.before_state.estimate.credits_after) }} CR</dd><template v-if="commandPreview.before_state.estimate.protected_in_flight"><dt>Protected in-flight amount</dt><dd>{{ cash(commandPreview.before_state.estimate.protected_in_flight) }} CR</dd></template></dl>
+                            <dl v-if="commandPreview.command === 'buy_ship'"><dt>Ship type</dt><dd>{{ assetName({ type: commandPreview.arguments.shipType }) }}</dd><dt>Shipyard</dt><dd>{{ commandPreview.arguments.waypointSymbol }}</dd><dt>Purchase price</dt><dd>{{ cash(commandPreview.before_state.estimate.purchasePrice) }} CR</dd><dt>Current credits</dt><dd>{{ cash(commandPreview.before_state.credits) }} CR</dd><dt>Credits after purchase</dt><dd>{{ cash(commandPreview.before_state.estimate.credits_after) }} CR</dd><dt>Explicit reserve</dt><dd>{{ cash(commandPreview.arguments.reserve ?? 0) }} CR</dd><dt>Protected in-flight amount</dt><dd>{{ cash(commandPreview.before_state.estimate.protected_in_flight ?? 0) }} CR</dd></dl>
                             <p v-if="commandPreview.before_state.estimate.effects">{{ commandPreview.before_state.estimate.effects }}</p>
-                            <DataDetails :value="commandPreview.arguments" class="command-arguments" />
-                            <dl><dt>Observed cost</dt><dd>{{ cash(commandPreview.before_state.estimate.cost_estimate) }} CR</dd><dt>Observed sale</dt><dd>{{ cash(commandPreview.before_state.estimate.sale_estimate) }} CR</dd><dt>Protected reserve</dt><dd>{{ cash(commandPreview.before_state.estimate.reserve) }} CR</dd><dt>Available credits</dt><dd>{{ cash(commandPreview.before_state.credits) }} CR</dd><dt>Free cargo</dt><dd>{{ commandPreview.before_state.estimate.cargo_free }}</dd></dl>
+                            <DataDetails v-if="commandPreview.command !== 'buy_ship'" :value="commandPreview.arguments" class="command-arguments" />
+                            <dl v-if="commandPreview.command !== 'buy_ship'"><dt>Observed cost</dt><dd>{{ cash(commandPreview.before_state.estimate.cost_estimate) }} CR</dd><dt>Observed sale</dt><dd>{{ cash(commandPreview.before_state.estimate.sale_estimate) }} CR</dd><dt>Protected reserve</dt><dd>{{ cash(commandPreview.before_state.estimate.reserve) }} CR</dd><dt>Available credits</dt><dd>{{ cash(commandPreview.before_state.credits) }} CR</dd><dt>Free cargo</dt><dd>{{ commandPreview.before_state.estimate.cargo_free }}</dd></dl>
                             <p v-if="commandPreview.before_state.estimate.fuel_estimate">Conservative fuel estimate: {{ commandPreview.before_state.estimate.fuel_estimate }}. Arrival comes from the navigation response.</p>
                             <DataDetails v-if="commandPreview.before_state.estimate.route" :value="commandPreview.before_state.estimate.route" />
                             <details v-if="commandPreview.before_state.estimate.equipment || commandPreview.before_state.estimate.maintenance_quote || commandPreview.before_state.estimate.scrap_quote"><summary>Equipment, condition and quote evidence</summary><DataDetails :value="commandPreview.before_state.estimate" /></details>
@@ -477,18 +477,19 @@ function distance(point) {
                         <p class="muted">Choose an observed offer. Preview refreshes the shipyard price and shows the credits left after purchase. Move the selected ship to the shipyard first.</p>
                         <fieldset :disabled="archived || busy || !ship || !!pending || guiding"><legend class="sr-only">Fleet purchase</legend>
                             <div class="form-grid">
-                                <label>Shipyard offer<select v-model="fleetOfferIndex"><option value="">Select offer</option><option v-for="(offer, index) in offers" :key="`${offer.yard}-${offer.type}`" :value="String(index)">{{ assetName(offer) }} &middot; {{ offer.yard }} &middot; {{ cash(offer.purchasePrice) }} CR</option></select></label>
+                                <label>Shipyard offer<select v-model="fleetOfferKey"><option value="">Select offer</option><option v-for="offer in offers" :key="`${offer.yard}:${offer.type}`" :value="`${offer.yard}:${offer.type}`">{{ assetName(offer) }} &middot; {{ offer.yard }} &middot; {{ cash(offer.purchasePrice) }} CR</option></select></label>
                                 <label>Maximum purchase cost in CR<input v-model="fleetMaximum" type="number" min="0" step="1"></label>
                                 <label>Protected credits in CR<input v-model="fleetReserve" type="number" min="0" step="1"></label>
                             </div>
-                            <SecondaryButton :disabled="!fleetOffer" @click="previewFleetPurchase">Preview ship purchase</SecondaryButton>
+                            <p v-if="fleetOffer && fleetOffer.yard !== ship?.nav?.waypointSymbol" class="muted">The selected ship must be at {{ fleetOffer.yard }} to purchase this offer. Move it to that shipyard first.</p>
+                            <SecondaryButton :disabled="!fleetOffer || fleetOffer.yard !== ship?.nav?.waypointSymbol" @click="previewFleetPurchase">Preview ship purchase</SecondaryButton>
                         </fieldset>
                         <p v-if="!offers.length" class="muted">No shipyard offers observed. Refresh a shipyard with a ship present to see its offers.</p>
                         <p class="warning">Approval buys one ship. Prices can change before execution. Active runs keep their protected commitments; the purchase grants no automation authority.</p>
                     </section>
                     <section v-if="activeRuns.length" v-show="['run', 'fleet', 'automation'].includes(view)" class="panel" aria-labelledby="active-runs-heading">
                         <h2 id="active-runs-heading">All active runs</h2>
-                        <ul class="activity"><li v-for="run in activeRuns" :key="run.id"><p>{{ run.ship_symbol }} &middot; {{ readableLabel(run.strategy) }} &middot; {{ readableLabel(run.state) }}</p><DangerButton :disabled="archived || busy || !!run.stop_requested_at" @click="post(`runs/${run.id}/stop`, {}, true)">Stop run #{{ run.id }}</DangerButton></li></ul>
+                        <ul class="activity"><li v-for="run in activeRuns" :key="run.id"><p>{{ run.ship_symbol }} &middot; {{ readableLabel(run.strategy) }} &middot; {{ readableLabel(run.state) }} <span v-if="run.campaign_episode_id" class="muted">Campaign</span></p><p v-if="run.campaign_episode_id" class="muted">Stopping hands the ship back to the director. The campaign will derive a fresh plan.</p><DangerButton :disabled="archived || busy || !!run.stop_requested_at" @click="post(`runs/${run.id}/stop`, {}, true)">Stop run #{{ run.id }}{{ run.campaign_episode_id ? ' and return ship to campaign director' : '' }}</DangerButton></li></ul>
                     </section>
                     <section data-guide="setup" v-show="view === 'commands'" id="setup" class="panel" aria-labelledby="setup-heading">
                         <h2 id="setup-heading">One-time mining setup</h2>
