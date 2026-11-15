@@ -33,6 +33,7 @@ const signedIn = computed(() => Boolean(page.props.auth?.user));
                         <Link :href="route('agents.index')" :aria-current="route().current('agents.index') ? 'page' : undefined">Agents</Link>
                         <Link v-if="agentId" :href="route('agents.show', { agent: agentId, ship: shipSymbol || undefined })" :aria-current="route().current('agents.show') ? 'page' : undefined">Flight deck</Link>
                         <Link v-if="agentId" :href="route('agents.map', { agent: agentId, ship: shipSymbol || undefined })" :aria-current="route().current('agents.map') ? 'page' : undefined">System map</Link>
+                        <Link v-if="page.props.auth.campaignOperator" :href="route('campaign.show')" :aria-current="route().current('campaign.show') ? 'page' : undefined">Campaign</Link>
                         <Link :href="guideHref || route('guide')" :aria-current="route().current('guide') || route().current('agents.guide') ? 'page' : undefined">Player guide</Link>
                         <Link :href="route('profile.edit')" :aria-current="route().current('profile.edit') ? 'page' : undefined">Profile</Link>
                         <Link :href="route('logout')" method="post" as="button">Log out</Link>

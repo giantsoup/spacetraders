@@ -39,6 +39,7 @@ class HandleInertiaRequests extends Middleware
             ]),
             'auth' => [
                 'user' => $request->user(),
+                'campaignOperator' => $request->user() !== null && (string) $request->user()->id === (string) config('gameplay.operator_id'),
             ],
             'ziggy' => function () use ($request) {
                 return array_merge((new Ziggy)->toArray(), [

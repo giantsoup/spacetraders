@@ -1,14 +1,13 @@
 <?php
 
 use App\Gameplay\CampaignControl;
-use App\Gameplay\CampaignHealth;
 use App\Gameplay\CampaignPlaybook;
 use App\Gameplay\CampaignReport;
+use App\Gameplay\CampaignStatus;
 use App\Gameplay\CampaignWatchdog;
 use App\Gameplay\GameException;
 use App\Gameplay\HostLock;
 use App\Models\CampaignEpisode;
-use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\CampaignRevision;
 use App\Models\User;
@@ -52,21 +51,18 @@ Artisan::command('campaign:revoke', function (CampaignControl $control) {
     $this->info('Campaign grants revoked.');
 })->purpose('Revoke active and pending campaign authority');
 
-Artisan::command('campaign:status', function () {
-    $grant = CampaignGrant::where('slot', 1)->first() ?? CampaignGrant::latest('id')->first();
+Artisan::command('campaign:status', function (CampaignStatus $status) {
+    ['grant' => $grant, 'episode' => $episode, 'decision' => $event, 'problems' => $problems, 'pending_grant' => $pending] = $status->authority();
     if (! $grant) {
         $this->line('No campaign grant.');
 
         return;
     }
-    $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->latest('id')->first();
-    $event = CampaignEvent::where('campaign_grant_id', $grant->id)->where('kind', 'decision')->latest('id')->first();
-    $problems = app(CampaignHealth::class)->problems();
     $stale = isset($problems['engine_heartbeat_stale']);
     $this->line(json_encode(['engine_heartbeat_stale' => $stale, 'grant' => $grant->id, 'revision_hash' => $grant->revision_hash, 'operator_user' => $grant->user_id,
         'active' => $grant->available(), 'expires_at' => $grant->expires_at?->toIso8601String(), 'episode' => $episode?->id, 'phase' => $episode?->phase,
         'pause_reason' => $grant->pause_reason, 'wait_reason' => $grant->wait_reason, 'last_decision' => $event ? ['at' => $event->created_at->toIso8601String(), 'choice' => $event->data['choice'] ?? null, 'run_id' => $event->data['run_id'] ?? null, 'rejections' => $event->data['rejections'] ?? []] : null,
-        'pending_grant' => CampaignGrant::where('slot', 2)->value('id')], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+        'pending_grant' => $pending], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 
     return $problems ? 1 : 0;
 })->purpose('Show campaign authority and latest decision without contacting SpaceTraders');
