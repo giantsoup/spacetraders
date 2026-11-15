@@ -53,6 +53,7 @@ class CampaignStatusTest extends TestCase
 
     public function test_guests_redirect_and_non_operators_get_404_for_every_endpoint(): void
     {
+        ['grant' => $grant, 'run' => $run] = CampaignStatusFixture::seed($this->operator);
         $this->get('/campaign')->assertRedirect('/login');
         foreach (['pause', 'resume'] as $action) {
             $this->post('/campaign/'.$action)->assertRedirect('/login');
@@ -62,6 +63,8 @@ class CampaignStatusTest extends TestCase
         foreach (['pause', 'resume'] as $action) {
             $this->post('/campaign/'.$action)->assertNotFound();
         }
+        $this->assertTrue($grant->fresh()->available());
+        $this->assertSame('running', $run->fresh()->state->value);
         $this->get('/profile')->assertInertia(fn (Assert $page) => $page->where('auth.campaignOperator', false));
         config(['gameplay.operator_id' => null]);
         $this->actingAs($this->operator)->get('/campaign')->assertNotFound();
