@@ -62,21 +62,22 @@ class CommandRules
             }
         }
         $spending = in_array($command, ['buy', 'buy_ship', 'repair', 'install_mount', 'remove_mount', 'install_module', 'remove_module', 'jump', 'refuel'], true);
-        $floor = max($arguments['reserve'] ?? 0, $run?->plan['reserve'] ?? 0, ! $run && $spending ? max(1, (int) config('gameplay.manual_reserve_floor')) : 0);
+        $floor = max($arguments['reserve'] ?? 0, $run?->plan['reserve'] ?? 0, ! $run && $spending && ! $fleetPurchase ? max(1, (int) config('gameplay.manual_reserve_floor')) : 0);
         $protected = 0;
         if (! $run) {
             foreach (AutomationRun::where('active_agent_id', $agent->id)->get() as $protectedRun) {
-                $commitment = $protectedRun->plan['reserve'] + max(0, $protectedRun->plan['max_spend'] - ($protectedRun->totals['spending'] ?? $protectedRun->totals['fuel_cost'] ?? 0));
-                if ($fleetPurchase && $protectedRun->campaign_episode_id) {
+                if ($protectedRun->campaign_episode_id) {
                     $commitment = 0;
-                    if ($protectedRun->strategy === 'trade') {
+                    if (isset($protectedRun->plan['market'])) {
                         $carrying = $this->sync->refreshShip($agent, $protectedRun->ship_symbol)->snapshot;
                         if ($carrying['cargo']['units'] > 0) {
                             $commitment = app(CampaignTrade::class)->fuelReserve($agent, $protectedRun->ship_symbol, $protectedRun->plan['market']);
                         }
                     }
+                } else {
+                    $commitment = $protectedRun->plan['reserve'] + max(0, $protectedRun->plan['max_spend'] - ($protectedRun->totals['spending'] ?? $protectedRun->totals['fuel_cost'] ?? 0));
                 }
-                $protected = $command === 'buy_ship' ? $protected + $commitment : max($protected, $commitment);
+                $protected += $commitment;
             }
             $floor = max($floor, $protected);
         }
@@ -503,6 +504,9 @@ class CommandRules
         }
         $estimate['cost_estimate'] = ! empty($estimate['fee_unknown']) ? null : $cost;
         if (($cost > 0 || ! empty($estimate['fee_unknown'])) && ($cost > ($arguments['maxTotal'] ?? 0) || $agent->credits - $cost < $floor)) {
+            if ($fleetPurchase) {
+                throw new GameException('Purchase refused: price '.number_format($cost).' CR leaves '.number_format($agent->credits - $cost).' CR; current credits '.number_format($agent->credits).' CR; protected '.number_format($floor).' CR (reserve '.number_format($arguments['reserve'] ?? 0).', in-flight '.number_format($protected).'); approved spending ceiling '.number_format($arguments['maxTotal'] ?? 0).' CR.');
+            }
             throw new GameException('The quote exceeds the approved spending ceiling or protected reserve.');
         }
         if ($run && $cost > 0 && (($run->totals['purchase_cost'] ?? 0) + $run->totals['fuel_cost'] + $cost > $run->plan['max_spend'] || -$run->plan['max_loss'] > $run->totals['credit_delta'] - $cost)) {

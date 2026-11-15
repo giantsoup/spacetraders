@@ -9,6 +9,7 @@ use App\Gameplay\ShipCommandExecutor;
 use App\Gameplay\SurveyPool;
 use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
+use App\Models\AutomationRun;
 use App\Models\GameObservation;
 use App\Models\Ship;
 use App\Models\ShipAction;
@@ -104,6 +105,60 @@ class FoundationCommandTest extends TestCase
         $this->assertSame('SHIP_LIGHT_HAULER', $transaction['shipSymbol']);
         $this->assertSame('SHIP_LIGHT_HAULER', $transaction['shipType']);
         $this->assertNotSame($action->outcome['delivered_ship'], $transaction['shipSymbol']);
+    }
+
+    #[DataProvider('fleetPurchaseBalances')]
+    public function test_fleet_purchase_uses_only_the_explicit_credit_floor(int $credits, int $after): void
+    {
+        $this->world(fn (&$world) => $world['credits'] = $credits);
+        $action = $this->preview('buy_ship', ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => 20000, 'reserve' => 0]);
+        $this->assertSame($after, $action->before_state['estimate']['credits_after']);
+        $this->assertSame(0, $action->before_state['estimate']['reserve']);
+        $this->assertSame(0, $action->before_state['estimate']['protected_in_flight']);
+        $this->assertEmpty($this->world()['writes']);
+    }
+
+    public static function fleetPurchaseBalances(): array
+    {
+        return [[21000, 1000], [20000, 0]];
+    }
+
+    public function test_manual_spending_sums_remaining_commitments_from_two_plain_runs(): void
+    {
+        foreach (['LOCAL-2', 'LOCAL-3'] as $symbol) {
+            AutomationRun::create(['agent_id' => $this->agent->id, 'active_agent_id' => $this->agent->id,
+                'reset_id' => $this->agent->reset_id, 'ship_symbol' => $symbol, 'strategy' => 'mining', 'state' => 'running',
+                'plan' => ['reserve' => 10000, 'max_spend' => 50000], 'totals' => ['spending' => 10000], 'expires_at' => now()->addHour()]);
+        }
+        $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1',
+            'command' => 'buy', 'arguments' => ['symbol' => 'IRON_ORE', 'units' => 1, 'maxTotal' => 30, 'reserve' => 0]])->assertUnprocessable();
+        $this->world(fn (&$world) => $world['credits'] = 100030);
+        $action = $this->preview('buy', ['symbol' => 'IRON_ORE', 'units' => 1, 'maxTotal' => 30, 'reserve' => 0]);
+        $this->assertSame(100000, $action->before_state['estimate']['reserve']);
+        $this->assertEmpty($this->world()['writes']);
+    }
+
+    #[DataProvider('purchaseRefusalLimits')]
+    public function test_fleet_purchase_refusal_explains_the_price_balance_and_protections(int $maximum, int $commitment): void
+    {
+        $this->world(fn (&$world) => $world['credits'] = 21000);
+        if ($commitment) {
+            AutomationRun::create(['agent_id' => $this->agent->id, 'active_agent_id' => $this->agent->id,
+                'reset_id' => $this->agent->reset_id, 'ship_symbol' => 'LOCAL-2', 'strategy' => 'mining', 'state' => 'running',
+                'plan' => ['reserve' => 500, 'max_spend' => 2000], 'totals' => ['spending' => 500], 'expires_at' => now()->addHour()]);
+        }
+        $response = $this->postJson('/agents/'.$this->agent->id.'/commands/preview', ['key' => (string) Str::uuid(), 'ship_symbol' => 'LOCAL-1',
+            'command' => 'buy_ship', 'arguments' => ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => $maximum, 'reserve' => 0]])->assertUnprocessable();
+        $message = $response->json('message');
+        foreach (['price 20,000 CR', 'current credits 21,000 CR', 'leaves 1,000 CR', 'reserve 0', 'in-flight '.number_format($commitment), 'ceiling '.number_format($maximum).' CR'] as $detail) {
+            $this->assertStringContainsString($detail, $message);
+        }
+        $this->assertEmpty($this->world()['writes']);
+    }
+
+    public static function purchaseRefusalLimits(): array
+    {
+        return [[20000, 2000], [19000, 0]];
     }
 
     public function test_ship_purchase_refuses_short_credits_and_maximum_before_a_write(): void
