@@ -235,7 +235,57 @@ class CampaignAutopilotTest extends TestCase
 
         $purchase = app(ShipCommandExecutor::class)->preview($this->agent->fresh(), 'LOCAL-1', 'buy_ship',
             ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => 20000, 'reserve' => 0], 'stale-purchase');
-        $this->assertSame((int) $run->fresh()->plan['campaign_trade']['fuel'], $purchase->before_state['estimate']['protected_in_flight']);
+        $planned = $run->fresh()->plan['campaign_trade'];
+        $this->assertSame((int) max($planned['fuel_reserve'], $planned['fuel']), $purchase->before_state['estimate']['protected_in_flight']);
+    }
+
+    public function test_stale_fallback_never_protects_less_than_the_fresh_delivery_reserve_with_asymmetric_fuel_prices(): void
+    {
+        $this->tradeWorld();
+        $this->editWorld(fn (&$world) => $world['market_goods']['X1-TEST-PORT'][2]['purchasePrice'] = 100);
+        $this->approve(str_replace('max_credits: 10000', 'max_credits: 1000', $this->body()));
+        $this->tick();
+        CampaignEpisode::firstOrFail()->update(['phase' => 'earn']);
+        $this->tick();
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        app(AutomationRunner::class)->advance($run->id);
+        app(ShipCommandExecutor::class)->execute(ShipAction::where('state', 'pending')->firstOrFail()->id);
+        $this->editWorld(fn (&$world) => $world['ships'][] = FakeSpaceTraders::ship('LOCAL-3'));
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $arguments = ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => 20000, 'reserve' => 0];
+        $fresh = app(ShipCommandExecutor::class)->preview($this->agent->fresh(), 'LOCAL-3', 'buy_ship', $arguments, 'asymmetric-fresh');
+        GameObservation::where('kind', 'market')->update(['observed_at' => now()->subHour()]);
+        $stale = app(ShipCommandExecutor::class)->preview($this->agent->fresh(), 'LOCAL-3', 'buy_ship', $arguments, 'asymmetric-stale');
+        $planned = $run->fresh()->plan['campaign_trade'];
+        $this->assertNotSame($planned['fuel_reserve'], $planned['fuel']);
+        $this->assertGreaterThan(0, $fresh->before_state['estimate']['protected_in_flight']);
+        $this->assertGreaterThanOrEqual($fresh->before_state['estimate']['protected_in_flight'], $stale->before_state['estimate']['protected_in_flight']);
+    }
+
+    public function test_stale_recovery_without_a_planned_allowance_refuses_only_spending(): void
+    {
+        $this->tradeGrant(1000);
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        app(AutomationRunner::class)->advance($run->id);
+        app(ShipCommandExecutor::class)->execute(ShipAction::where('state', 'pending')->firstOrFail()->id);
+        $plan = $run->fresh()->plan;
+        unset($plan['campaign_trade']);
+        $run->update(['strategy' => 'sell_aboard', 'plan' => $plan]);
+        $this->editWorld(fn (&$world) => $world['ships'][] = FakeSpaceTraders::ship('LOCAL-3'));
+        app(AgentSynchronizer::class)->sync($this->agent);
+        GameObservation::where('kind', 'market')->update(['observed_at' => now()->subHour()]);
+        $before = count(json_decode(file_get_contents($this->file), true)['calls'] ?? []);
+        $orbit = app(ShipCommandExecutor::class)->preview($this->agent->fresh(), 'LOCAL-3', 'orbit', [], 'recovery-free-orbit');
+        $this->assertSame('preview', $orbit->state->value);
+        $calls = array_slice(json_decode(file_get_contents($this->file), true)['calls'] ?? [], $before);
+        $this->assertSame([], array_values(array_filter($calls, fn ($call) => str_contains($call['path'], '/ships/LOCAL-1'))));
+        try {
+            app(ShipCommandExecutor::class)->preview($this->agent->fresh(), 'LOCAL-3', 'buy_ship',
+                ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => 20000, 'reserve' => 0], 'recovery-stale-purchase');
+            $this->fail('Spending should wait for a verifiable delivery reserve.');
+        } catch (GameException $e) {
+            $this->assertStringContainsString('Campaign ship LOCAL-1 carries cargo', $e->getMessage());
+        }
     }
 
     #[DataProvider('manualCampaignSpending')]

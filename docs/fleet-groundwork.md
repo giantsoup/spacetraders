@@ -23,7 +23,7 @@ Purchase previews show the type, shipyard, `purchasePrice`, current credits, cre
 A general fleet purchase uses only the explicit reserve and protected in-flight commitments: neither the configured manual minimum nor a one-credit minimum applies.
 Other manual spending commands and the one-time miner setup retain their existing manual minimums and setup checks.
 Purchase floor or ceiling refusals state the price, current credits, credits after purchase, explicit reserve, protected in-flight amount, and approved ceiling.
-All manual spending commands add commitments across every active run. Plain runs protect reserve plus remaining approved spending.
+All manual spending commands add commitments across every active run. Plain runs protect the largest reserve plus every run's remaining approved spending (reserves are floors and are not summed).
 Campaign runs protect only delivery fuel when carrying cargo, using `CampaignTrade::fuelReserve` and the run plan's `market`, regardless of strategy (including trade, mining, and sell-aboard recovery).
 A campaign run with no cargo or no `market` key contributes zero; no delivery destination is inferred when that key is absent.
 
@@ -105,7 +105,7 @@ Free commands such as orbit, dock, navigate and sell never depend on another shi
 For plain runs it protects the largest reserve plus every run's remaining spend; reserves are floors and are not summed.
 Concurrent plain runs do not protect each other's remaining spend inside their own checks; one run can spend what another planned to use, and the second then stops at its own reserve check.
 A campaign run carrying cargo protects its delivery fuel reserve, read from the stored ship snapshot without an API request.
-When its fuel quotes are stale (normal mid-delivery), a trade run falls back to the delivery fuel its approved plan recorded.
+When its fuel quotes are stale (normal mid-delivery), a trade run falls back to the larger of the delivery-leg (`fuel_reserve`) and return-leg (`fuel`) allowances its approved plan recorded.
 A sell-aboard or mining campaign run with cargo and stale quotes has no recorded fallback, so manual spending is refused with a message naming that ship until its quotes refresh.
 Right after a deploy, the campaign status page may label the v1 command and probe ships "fleet" until the director's next tick pins their roles.
 Episode credit samples include every agent balance change, including manual fleet investments. Per-run campaign reports remain scoped to campaign actions.

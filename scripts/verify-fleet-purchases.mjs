@@ -10,6 +10,7 @@ import { chromium } from 'playwright';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const evidence = process.env.FLEET_PURCHASE_EVIDENCE || path.join(tmpdir(), 'fleet-purchase-evidence');
+const prefix = process.env.FLEET_PURCHASE_PREFIX || 'fleet-';
 await mkdir(evidence, { recursive: true });
 const directory = await mkdtemp(path.join(tmpdir(), 'fleet-purchase-browser-'));
 for (const folder of ['sessions', 'views', 'logs']) await mkdir(path.join(directory, folder));
@@ -110,13 +111,13 @@ try {
         assert.equal(await maximum.inputValue(), '20500');
     }
     assert.equal(await panel.getByLabel('Protected credits in CR', { exact: true }).inputValue(), '0');
-    await panel.screenshot({ path: path.join(evidence, 'sol-r1-buy-ship.png') });
+    await panel.screenshot({ path: path.join(evidence, `${prefix}buy-ship.png`) });
     await page.goto(origin + '/agents/' + fixture.agent + '#fleet');
     const runs = page.getByRole('region', { name: 'All active runs', exact: true });
     assert.equal(await runs.getByText('Campaign', { exact: true }).count(), 1);
     await runs.getByRole('button', { name: /Stop run #.*return ship to campaign director/i }).waitFor();
     await runs.getByText(/campaign will derive a fresh plan/i).waitFor();
-    await runs.screenshot({ path: path.join(evidence, 'sol-r1-active-runs.png') });
+    await runs.screenshot({ path: path.join(evidence, `${prefix}active-runs.png`) });
     await page.goto(origin + '/agents/' + fixture.agent + '#activity');
     await page.getByRole('button', { name: 'Review saved preview #' + fixture.action.id, exact: true }).click();
     const dialog = page.getByRole('dialog');
@@ -126,7 +127,7 @@ try {
     await dialog.getByText('Ship: Light Hauler', { exact: true }).waitFor();
     await dialog.getByText('20,000 CR', { exact: true }).waitFor();
     await dialog.getByText('80,000 CR', { exact: true }).waitFor();
-    await dialog.screenshot({ path: path.join(evidence, 'sol-r1-purchase-review.png') });
+    await dialog.screenshot({ path: path.join(evidence, `${prefix}purchase-review.png`) });
     await page.goto(origin + '/agents/' + fixture.agent + '#activity');
     await page.getByRole('button', { name: 'Review saved preview #' + fixture.ordinary, exact: true }).click();
     await dialog.getByText('Observed sale', { exact: true }).waitFor();
@@ -139,7 +140,7 @@ try {
     console.log('PASS fleet offer polling, location guard, purchase review, campaign run labels and pinned status roles. Evidence: ' + evidence);
 } catch (error) {
     console.error(JSON.stringify({ errors, body: await page?.locator('body').innerText().catch(() => '') }));
-    await page?.screenshot({ path: path.join(evidence, 'sol-r1-failure.png'), fullPage: true });
+    await page?.screenshot({ path: path.join(evidence, `${prefix}failure.png`), fullPage: true });
     throw error;
 } finally {
     await browser?.close();

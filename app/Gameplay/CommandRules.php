@@ -66,6 +66,8 @@ class CommandRules
         $protected = 0;
         // Only spending commands can consume another run's commitment.
         if (! $run && $spending) {
+            $reserves = 0;
+            $remaining = 0;
             foreach (AutomationRun::where('active_agent_id', $agent->id)->get() as $protectedRun) {
                 if ($protectedRun->campaign_episode_id) {
                     $commitment = 0;
@@ -75,21 +77,23 @@ class CommandRules
                         try {
                             $commitment = app(CampaignTrade::class)->fuelReserve($agent, $protectedRun->ship_symbol, $protectedRun->plan['market']);
                         } catch (GameException $e) {
-                            // Stale quotes mid-delivery are normal; fall back to the fuel cost the trade plan approved.
-                            if (! isset($protectedRun->plan['campaign_trade']['fuel'])) {
+                            // Stale quotes mid-delivery are normal; fall back to the fuel allowances the trade plan approved:
+                            // fuel_reserve covers the delivery leg, fuel the return leg. Protect the larger.
+                            $planned = $protectedRun->plan['campaign_trade'] ?? [];
+                            if (! isset($planned['fuel_reserve']) && ! isset($planned['fuel'])) {
                                 throw new GameException('Campaign ship '.$protectedRun->ship_symbol.' carries cargo and its delivery fuel reserve cannot be verified right now ('.$e->getMessage().'). Retry after its fuel quotes refresh.');
                             }
-                            $commitment = (int) $protectedRun->plan['campaign_trade']['fuel'];
+                            $commitment = (int) max($planned['fuel_reserve'] ?? 0, $planned['fuel'] ?? 0);
                         }
                     }
                     $protected += $commitment;
                 } else {
                     // A reserve is a floor, not spending: protect the largest floor plus every run's remaining spend.
-                    $reserves = max($reserves ?? 0, $protectedRun->plan['reserve']);
-                    $remaining = ($remaining ?? 0) + max(0, $protectedRun->plan['max_spend'] - ($protectedRun->totals['spending'] ?? $protectedRun->totals['fuel_cost'] ?? 0));
+                    $reserves = max($reserves, $protectedRun->plan['reserve']);
+                    $remaining += max(0, $protectedRun->plan['max_spend'] - ($protectedRun->totals['spending'] ?? $protectedRun->totals['fuel_cost'] ?? 0));
                 }
             }
-            $protected += ($reserves ?? 0) + ($remaining ?? 0);
+            $protected += $reserves + $remaining;
             $floor = max($floor, $protected);
         }
         $contract = null;
