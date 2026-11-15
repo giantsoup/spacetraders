@@ -1,7 +1,8 @@
 # Ship status graphics on the flight deck
 
-Status: design approved by Taylor on 2026-11-14 (PST). **Not implemented.** This is the plan for a
-later session. No code has changed.
+Status: **Implemented 2026-11-15 (PST)**, including the campaign status scenes and the owner's
+2026-11-15 phone-breakpoint change. Approved mockups remain unchanged; verification evidence is
+in [ship-status-graphics/evidence/](ship-status-graphics/evidence/results.json).
 
 ## Problem
 
@@ -39,8 +40,10 @@ Other approved choices:
 - In docked and in orbit, the location label ("Observed location" plus the symbol) moves from under
   the art to the **bottom-left corner** of the scene, so the art can use the full height. In transit
   it stays under the destination.
-- The hero keeps its heights (230 px, 128 px at viewport height ≤ 719, 72 px at ≤ 600), so the
-  status text and buttons below do not move.
+- The hero keeps its three heights: 230 px at viewport height ≥ 640, 128 px from 601–639,
+  and 72 px at ≤ 600. Phones now get the tall scene. Only ShipScene's first breakpoint changes;
+  Dashboard's 719 px and 600 px text/system-row rules stay unchanged. Content below the scene
+  sitting lower on phones is accepted pending device review.
 - The ship stays in one place in orbit (only the ring moves), because the ship is the button that
   opens the ship report.
 - "Pause motion" and `prefers-reduced-motion` stop every animation: bob, flame flicker, ring drift
@@ -52,11 +55,11 @@ Sprites are pixel grids: the location is 24×24 (`waypointSprite()` in `resource
 the ship is 32×24. `S` is CSS pixels per location pixel, `K` is CSS pixels per ship pixel. Use whole
 numbers so the pixel art stays crisp.
 
-| Hero height | Docked / in orbit | Transit, checking, unknown |
+| Hero height (viewport height) | Docked / in orbit | Transit, checking, unknown |
 | --- | --- | --- |
-| 230 px | `S = 9` (216 px), `K = 4` (128×96) | location 112 px as today, `K = 2` (64×48) |
-| 128 px | `S = 5` (120 px), `K = 2` (64×48) | location 80 px as today, `K = 2` |
-| 72 px | **not designed yet**, see open questions | location 48 px as today |
+| 230 px (≥ 640 px) | `S = 9` (216 px), `K = 4` (128×96) | location 112 px, `K = 2` (64×48) |
+| 128 px (601–639 px) | `S = 5` (120 px), `K = 2` (64×48) | location 80 px, `K = 2` |
+| 72 px (≤ 600 px) | Safe placeholder: `S = 3`, `K = 1`, 44 px control | location 48 px, `K = 1`, 44 px control |
 
 The ship's hull spans columns 8–28 of its 32-wide grid; the nose is at column 28 and the hull's
 vertical middle is row 12.
@@ -96,7 +99,7 @@ start with the flame on and no trail. For checking arrival use `progress = 1`.
    `ShipScene`. Nothing else on the page changes.
 3. **`resources/js/Components/ShipScene.vue`**: rebuild the template around `pose`.
    - Compute `minX`/`maxX` from `waypointSprite(location, reset).pixels` inside the component.
-     `ShipScene` is used only by the dashboard, so this keeps shared files
+     `ShipScene` is shared by the dashboard and campaign status page. This keeps shared files
      (`waypointSprites.js`, `WaypointSprite.vue`, which the system map also uses) untouched.
    - Keep the class names existing checks rely on: `.ship-scene`, `.scene-location` (with
      `data-location-symbol`), `.scene-location-label`, `.scene-location-context`, `.scene-ship`.
@@ -106,9 +109,13 @@ start with the flame on and no trail. For checking arrival use `progress = 1`.
      at least 44 px tall at every size, even where the drawn ship is smaller.
    - All scene art stays `aria-hidden`. The status text below the scene remains the accessible
      source of truth.
-   - Sizes switch on the same height breakpoints the component already has (719 and 600).
+   - Flight-deck sizes switch at 639 and 600 px. Campaign compact scenes always use 128 px geometry.
    - `.still` (Pause motion) pauses every animation; the reduced-motion media query removes them.
-4. **No changes** to the status text block, the report sheet, the system map or any PHP.
+4. **Campaign status:** read navigation and bounded location metadata from saved local state via
+   `SystemMapKnowledge`, keeping all existing ship fields. Reuse `flightDeckLocation()` and
+   `shipPresentation()` on the page, with a one-second ticker cleared on unmount. Use a
+   non-interactive compact scene between each ship heading and its unchanged text rows.
+5. **No changes** to the status text block, the report sheet, the system map or shared sprite code.
 
 ## Checks to update
 
@@ -132,26 +139,32 @@ start with the flame on and no trail. For checking arrival use `progress = 1`.
 
 ## Verification
 
-1. `pnpm build`, then run both browser scripts above against the development site
-   (http://spacetraders-dev.test).
-2. Screenshot all five poses at 402×874 and 402×700 (iPhone 17 Pro, tall and short hero), 820×1180
-   (iPad) and 1280×800. Check each against the mockups.
+1. Run `pnpm build`, then `scripts/verify-ship-scene-browser.mjs` and
+   `scripts/verify-native-ship-browser.mjs` with Herd PHP via `PHP_BIN`. Both own disposable
+   fixture databases and local servers; neither uses a development/production database or
+   real SpaceTraders HTTP. The Herd-dependent art script is updated but cannot run here:
+   its required `spacetraders-map-90` site does not exist. Do not create it.
+2. Screenshot all five poses at 402×874 and 402×700 (tall), 402×620 (128 px scene),
+   820×1180 and 1280×800. Compare them with the two approved HTML files at 402 px wide.
+   Check 402×560 for safe overflow/no-error behaviour only, not design fidelity. Capture
+   the campaign page at 402×874 and 1280×800.
 3. Repeat docked at a planet, an orbital station, an asteroid and a jump gate to confirm the clamp
    meets the shape's left edge.
 4. Check Pause motion and reduced motion in docked, orbit and transit.
-5. Have an agent that did not write the change review it (`ui-consistency:verifying`), and show
-   Taylor the screenshots before deploying.
-6. Full PHP suite must still pass; no PHP is expected to change.
+5. Inspect all screenshots and show Taylor the evidence before any deployment. Independent
+   review is separate; the implementation worker was instructed not to start subagents.
+6. Run the full PHP suite, including campaign saved-state feature coverage.
 
 ## Out of scope
 
-Taller hero, a ship that physically circles the location, rotating the ship along the route,
+A new hero height, a ship that physically circles the location, rotating the ship along the route,
 different ship art per frame type, and any change to the system map.
 
-## Open questions for Taylor
+## Later
 
-1. **Smallest hero (72 px, viewport height ≤ 600).** Not mocked. Proposed: `S = 3`, ship drawn at
-   `K = 1.5` inside a 44 px button, label on one line in the corner. Show a mockup before building.
-2. **Which hero height the iPhone 17 Pro actually gets.** It depends on how much height Safari's
-   bars leave; below 720 pt the page uses the 128 px hero. Measure on the device. If it lands on
-   128 px, decide whether to move that breakpoint so the phone gets the tall scene.
+- The smallest scene (72 px, viewport height ≤ 600) is a safe placeholder. It still needs a
+  proper design and mockup. It draws the ship at `K = 1` in a 44 px control, keeps its label
+  on one line, and omits bobbing; this is not a design approval.
+- The 639 px breakpoint was picked so phones get the tall scene without measuring a device.
+  Revisit it and Dashboard's 719 px text breakpoint once the owner has seen the result on an
+  iPhone 17 Pro. The original mockup captions still describe the earlier breakpoint.
