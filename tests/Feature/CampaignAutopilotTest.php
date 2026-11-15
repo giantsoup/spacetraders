@@ -814,6 +814,54 @@ class CampaignAutopilotTest extends TestCase
         $this->assertSame($ship['fuel']['capacity'], $ship['fuel']['current']);
     }
 
+    public function test_scout_order_prefers_unpriced_markets_then_the_oldest_price(): void
+    {
+        $tasks = collect([
+            ['ship' => 'P', 'destination' => 'A2', 'fact' => 'Stale prices'],
+            ['ship' => 'P', 'destination' => 'B7', 'fact' => 'Stale prices'],
+            ['ship' => 'P', 'destination' => 'C4', 'fact' => 'Unknown prices'],
+            ['ship' => 'P', 'destination' => 'A3', 'fact' => 'Unknown prices'],
+        ]);
+        $markets = collect([
+            ['symbol' => 'A2', 'price_at' => '2026-11-15T19:00:06+00:00'],
+            ['symbol' => 'B7', 'price_at' => '2026-11-15T18:10:00+00:00'],
+            ['symbol' => 'C4', 'price_at' => null],
+            ['symbol' => 'A3', 'price_at' => null],
+        ]);
+
+        $this->assertSame(['A3', 'C4', 'B7', 'A2'], CampaignDirector::scoutOrder($tasks, $markets)->pluck('destination')->all());
+    }
+
+    public function test_the_probe_scouts_an_unpriced_market_one_way_instead_of_repricing_a_stale_one(): void
+    {
+        $this->tradeWorld();
+        $this->editWorld(function (&$world) {
+            foreach ([['X1-TEST-ALPHA', 6, 8], ['X1-TEST-ZULU', 9, 12]] as [$symbol, $x, $y]) {
+                $world['waypoints'][] = ['symbol' => $symbol, 'systemSymbol' => 'X1-TEST', 'type' => 'PLANET', 'x' => $x, 'y' => $y, 'traits' => [['symbol' => 'MARKETPLACE']]];
+            }
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $sync = app(AgentSynchronizer::class);
+        $directory = ['imports' => [['symbol' => 'IRON_ORE']], 'exports' => [], 'exchange' => [['symbol' => 'FUEL']]];
+        // Markets come back in symbol order, so the stale market is listed before the unpriced one,
+        // as on the live wipe where the probe looped on X1-NK60-A2 while A3 onward stayed unpriced.
+        $this->travel(-10)->minutes();
+        $sync->observe($this->agent, 'market_listing', 'X1-TEST-ALPHA', ['symbol' => 'X1-TEST-ALPHA'] + $directory);
+        $sync->observe($this->agent, 'market', 'X1-TEST-ALPHA', ['symbol' => 'X1-TEST-ALPHA', 'tradeGoods' => [['symbol' => 'FUEL', 'tradeVolume' => 10, 'purchasePrice' => 5, 'sellPrice' => 3, 'supply' => 'MODERATE', 'type' => 'EXCHANGE']]] + $directory);
+        $sync->observe($this->agent, 'market_listing', 'X1-TEST-ZULU', ['symbol' => 'X1-TEST-ZULU'] + $directory);
+        $this->travel(10)->minutes();
+        LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+        $this->approve();
+        for ($step = 0; $step < 5 && ! AutomationRun::whereNotNull('active_agent_id')->exists(); $step++) {
+            $this->tick();
+        }
+        $scout = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertSame('scout', $scout->strategy);
+        $this->assertSame('LOCAL-2', $scout->ship_symbol);
+        $this->assertSame('X1-TEST-ZULU', $scout->plan['destination']);
+        $this->assertTrue($scout->plan['one_way']);
+    }
+
     public function test_a_blocked_probe_positioning_run_does_not_permanently_block_trade(): void
     {
         $this->tradeWorld();
