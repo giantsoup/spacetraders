@@ -57,6 +57,16 @@ class CampaignWatchdogTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_director_still_ticking_without_new_events_is_not_a_stall(): void
+    {
+        $this->partialMock(CampaignNotifier::class)->shouldReceive('toast')->never();
+        $this->travel(40)->minutes();
+        EngineFixture::healthy();
+        CampaignGrant::where('slot', 1)->firstOrFail()->update(['last_directed_at' => now()->subSeconds(20)]);
+        $this->artisan('campaign:watchdog')->assertSuccessful();
+        Http::assertNothingSent();
+    }
+
     public function test_unchanged_wait_and_idle_choices_alert_after_sixty_minutes_and_recover(): void
     {
         config(['campaign.alert_webhook_url' => 'https://example.invalid/synthetic-hook']);

@@ -20,7 +20,7 @@ class CampaignControl
             throw new GameException('Grant expiry must be in the future.');
         }
 
-        return app(HostLock::class)->run('campaign', fn () => DB::transaction(function () use ($revision, $user, $expires) {
+        return app(HostLock::class)->retry('campaign', fn () => DB::transaction(function () use ($revision, $user, $expires) {
             app(CampaignPlaybook::class)->validate($revision->body);
             CampaignGrant::where('slot', 2)->get()->each(fn ($grant) => $grant->update(['slot' => null, 'superseded_at' => now()]));
             $current = CampaignGrant::where('slot', 1)->first();

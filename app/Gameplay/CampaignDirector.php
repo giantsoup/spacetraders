@@ -170,7 +170,7 @@ class CampaignDirector
                     || ($reason && empty($run->plan['sell_only'])) || (app(CampaignSafety::class)->windDown($episode) && empty($run->plan['sell_only'])));
                 if ($handoff) {
                     if ($run->strategy === 'scout' && ! empty($run->plan['one_way']) && ($this->role($agent, 'probe')['symbol'] ?? null) === $run->ship_symbol) {
-                        $episode->update(['state' => array_merge($episode->state ?? [], ['probe_position_failed' => true])]);
+                        $episode->update(['state' => array_merge($episode->state ?? [], ['probe_position_failed' => now()->toIso8601String()])]);
                     }
                     app(AutomationRunner::class)->stop($run);
                     if ($freshness) {
@@ -330,14 +330,14 @@ class CampaignDirector
                     return $this->position($grant, $episode, $agent, $ship, $candidate['source']);
                 }
                 $probe = $this->role($agent, 'probe');
-                if (empty($episode->state['probe_position_failed']) && $probe && $probe['symbol'] !== $ship['symbol'] && $probe['nav']['waypointSymbol'] !== $candidate['buyer'] && $probe['nav']['status'] !== 'IN_TRANSIT') {
+                if ((empty($episode->state['probe_position_failed']) || ! is_string($episode->state['probe_position_failed']) || CarbonImmutable::parse($episode->state['probe_position_failed'])->lt(now()->subMinutes(30))) && $probe && $probe['symbol'] !== $ship['symbol'] && $probe['nav']['waypointSymbol'] !== $candidate['buyer'] && $probe['nav']['status'] !== 'IN_TRANSIT') {
                     $position = null;
                     try {
                         $position = $this->position($grant, $episode, $agent, $probe, $candidate['buyer']);
 
                         return app(AutomationRunner::class)->startCampaign($agent, $position, $episode);
                     } catch (\Throwable) {
-                        $episode->update(['state' => array_merge($episode->state ?? [], ['probe_position_failed' => true])]);
+                        $episode->update(['state' => array_merge($episode->state ?? [], ['probe_position_failed' => now()->toIso8601String()])]);
                         if ($position?->fresh()->active_agent_id) {
                             return $position->fresh();
                         }
