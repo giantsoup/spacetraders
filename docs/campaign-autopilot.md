@@ -140,7 +140,10 @@ operation changes or starts the engine. deploy.ps1 leaves this separate task alo
 
 On a problem the watchdog always attempts a Windows toast and appends to
 storage/logs/campaign-watchdog.log. Optionally configure CAMPAIGN_ALERT_WEBHOOK_URL privately
-in .env for a Discord webhook; keep its value out of source control and logs. Rebuild any
+in .env for a Discord webhook; keep its value out of source control and logs. Alerts post a
+red embed (problem, first seen, next reminder); recoveries post a silent green embed.
+CAMPAIGN_ALERT_MENTION_USER_ID (a Discord user id, digits only) pings that user on alerts, and
+CAMPAIGN_ALERT_DASHBOARD_URL (https) adds an "Open dashboard" button. Rebuild any
 cached application configuration after changing the environment. Delivery errors are
 redacted and do not suppress local alerts. A toast may be hidden by Windows notification
 settings; the file log remains available.
