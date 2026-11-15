@@ -6,7 +6,7 @@ use RuntimeException;
 
 class GameException extends RuntimeException
 {
-    public function __construct(string $message, public readonly ?int $apiCode = null, public readonly bool $uncertain = false, public readonly int $retryAfter = 0) // seconds
+    public function __construct(string $message, public readonly ?int $apiCode = null, public readonly bool $uncertain = false, public readonly int $retryAfter = 0, public readonly ?int $httpStatus = null) // seconds
     {
         parent::__construct($message);
     }

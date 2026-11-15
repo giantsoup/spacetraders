@@ -116,15 +116,24 @@ outcome pauses with registration_unknown. Inspect the official account and impor
 credentials through the existing import flow, then resume. The imported agent is reused.
 Missing or rejected saved credentials require operator review. Initial discovery advances
 one catalogue page or at most two market reads per tick; mining investigations retain their
-cursor across ticks. Cargo recovery refreshes bounded buyer and fuel evidence before retrying.
+cursor across ticks. In earn, discovery advances during active runs and refreshes detailed
+prices only where a ship is present. Cargo recovery uses a fuel-free probe to refresh stale
+buyer or fuel evidence. Without a probe, sell-only delivery can use onboard fuel when it
+covers the leg plus the existing fuel reserve. Actual sales still require a fresh buyer quote.
+
+A preview whose start is deferred by the request budget is retained. The next tick retries
+its start before optional reads, using the existing freshness and fingerprint checks.
+Mining investigations run on separate ticks from trade attempts.
 
 ## Monitor independently of the engine
 
 campaign:status reads local state only. It prints the grant, episode, phase, latest decision,
 wait and pause reasons. It exits nonzero for a paused campaign or a missing/older-than-five-
-minute engine heartbeat. With a live engine, it also flags no campaign event for fifteen
-minutes or an unchanged wait/idle choice for sixty minutes. These stall alerts do not pause
-execution. No approved campaign means there is nothing to monitor.
+minute engine heartbeat. With a live engine, it also flags a director that has not run for
+fifteen minutes, using last_directed_at. Outside wind_down, sixty minutes without a run
+starting or a load/recovery result also alerts. Discovery and diagnostic decisions do not
+reset that timer. These stall alerts do not pause execution. No approved campaign means
+there is nothing to monitor.
 
 ~~~powershell
 php artisan campaign:watchdog

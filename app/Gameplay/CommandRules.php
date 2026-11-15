@@ -300,7 +300,9 @@ class CommandRules
                 try {
                     $estimate['route'] = $run?->strategy === 'mining'
                         ? app(FuelPlanner::class)->miningLeg($agent, $ship, $target['symbol'], $run->plan)
-                        : app(FuelPlanner::class)->leg($agent, $ship, $target['symbol'], $floor, policy: $run ? null : 'conservative');
+                        : ($run?->strategy === 'sell_aboard'
+                            ? app(FuelPlanner::class)->recoveryLeg($agent, $ship, $target['symbol'], $floor)
+                            : app(FuelPlanner::class)->leg($agent, $ship, $target['symbol'], $floor, policy: $run ? null : 'conservative'));
                 } catch (GameException $e) {
                     if ($run) {
                         throw $e;

@@ -501,7 +501,7 @@ class SpaceTradersApi
             'reactor.powerOutput' => 'required|integer|min:0', 'cooldown.remainingSeconds' => 'required|integer|min:0', 'cooldown.expiration' => 'sometimes|nullable|date',
         ]);
         if (array_sum(array_column($data['cargo']['inventory'], 'units')) !== $data['cargo']['units'] || $data['cargo']['units'] > $data['cargo']['capacity'] || $data['fuel']['current'] > $data['fuel']['capacity']) {
-            throw new GameException('Inconsistent ship cargo or fuel response.');
+            throw new ReadStateUnavailable('Inconsistent ship cargo or fuel response.');
         }
         $data = Arr::only($data, ['symbol', 'nav', 'fuel', 'cargo', 'cooldown', 'mounts', 'modules', 'crew', 'frame', 'reactor', 'engine', 'registration']);
         $data['cooldown'] = $this->cooldownData($data['cooldown']);
@@ -513,7 +513,7 @@ class SpaceTradersApi
     {
         $this->validate($data, ['remainingSeconds' => 'required|integer|min:0', 'totalSeconds' => 'sometimes|integer|min:0', 'expiration' => 'sometimes|nullable|date']);
         if (isset($data['totalSeconds']) && $data['remainingSeconds'] > $data['totalSeconds']) {
-            throw new GameException('Inconsistent cooldown duration.');
+            throw new ReadStateUnavailable('Inconsistent cooldown duration.');
         }
         $data['readyAt'] = isset($data['expiration']) ? CarbonImmutable::parse($data['expiration'])->utc()->toIso8601String() : now()->addSeconds($data['remainingSeconds'])->utc()->toIso8601String();
         $data['deadlineSource'] = isset($data['expiration']) ? 'api_expiration' : 'derived_from_remaining_seconds';

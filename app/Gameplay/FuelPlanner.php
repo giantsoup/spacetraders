@@ -12,7 +12,7 @@ class FuelPlanner
     public const MODEL = 'Client CRUISE upper allowance: ceil(Euclidean distance) + 2 per distinct waypoint; not a server formula.';
 
     /** @param  Collection<string, GameObservation>|null  $listings  Same-agent/reset listings keyed by symbol for this planning scope. */
-    public function leg(Agent $agent, array $ship, string $destination, int $creditReserve = 0, ?int $fuelReserve = null, ?string $policy = null, ?Collection $listings = null): array
+    public function leg(Agent $agent, array $ship, string $destination, int $creditReserve = 0, ?int $fuelReserve = null, ?string $policy = null, ?Collection $listings = null, bool $onboardOnly = false): array
     {
         $fuelReserve ??= (int) config('gameplay.fuel_reserve_units');
         $policy ??= config('gameplay.route_evidence');
@@ -36,7 +36,11 @@ class FuelPlanner
         $outbound = $this->units($agent, $ship, $from, $to, $policy);
         $listings ??= $this->listings($agent);
         $candidates = [];
-        foreach (GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->get() as $quote) {
+        if ($onboardOnly && $ship['fuel']['current'] >= $outbound + $fuelReserve) {
+            $candidates[] = ['continuation' => $destination, 'continuation_fuel' => 0, 'required_fuel' => $outbound + $fuelReserve,
+                'refuel_ceiling' => 0, 'fuel_price_at' => null, 'arrival_state' => 'Sell-only recovery; onboard fuel covers delivery plus reserve.'];
+        }
+        foreach ($onboardOnly ? [] : GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->get() as $quote) {
             if (! empty($quote->data['invalidated_by_action']) || $quote->observed_at->lt(now()->subSeconds(config('gameplay.snapshot_seconds')))) {
                 continue;
             }
@@ -73,6 +77,19 @@ class FuelPlanner
             'distance' => hypot($from['x'] - $to['x'], $from['y'] - $to['y']),
             'from_coordinates' => ['x' => $from['x'], 'y' => $from['y']], 'to_coordinates' => ['x' => $to['x'], 'y' => $to['y']],
             'configuration' => self::configuration($ship), 'alternatives' => array_slice($candidates, 1, 3)]);
+    }
+
+    public function recoveryLeg(Agent $agent, array $ship, string $destination, int $creditReserve = 0): array
+    {
+        try {
+            return $this->leg($agent, $ship, $destination, $creditReserve);
+        } catch (GameException $exception) {
+            if ($exception->retryAfter > 0) {
+                throw $exception;
+            }
+
+            return $this->leg($agent, $ship, $destination, $creditReserve, onboardOnly: true);
+        }
     }
 
     public function fuelFree(array $ship): bool

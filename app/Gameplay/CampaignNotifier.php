@@ -95,6 +95,7 @@ class CampaignNotifier
         $xml = '<toast><visual><binding template="ToastGeneric"><text>SpaceTraders campaign</text><text>'.htmlspecialchars($message, ENT_XML1 | ENT_QUOTES, 'UTF-8').'</text></binding></visual></toast>';
         $encoded = base64_encode($xml);
         $script = '$ErrorActionPreference = "Stop"; [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; '
+            .'[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] > $null; '
             .'$xml = New-Object Windows.Data.Xml.Dom.XmlDocument; $xml.LoadXml([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("'.$encoded.'"))); '
             .'$toast = [Windows.UI.Notifications.ToastNotification]::new($xml); '
             .'[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe").Show($toast);';
