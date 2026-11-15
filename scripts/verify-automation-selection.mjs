@@ -9,11 +9,11 @@ const compiler = await createServer({ configFile: false, envDir: false, plugins:
 try {
     const { default: Console } = await compiler.ssrLoadModule('/resources/js/Components/AutomationConsole.vue');
     const candidate = (id, classification, preparation) => ({ id, strategy: 'mining', ship_symbol: 'LOCAL-1', site: 'X1-TEST-ROCK', market: 'X1-TEST-PORT', classification, preparation, required_equipment: [], reasons: [], trial_required: true, duration_seconds: null });
-    const render = async (candidates, strategy = 'mining', contracts = []) => (await renderToString(createSSRApp(Console, {
+    const render = async (candidates, strategy = 'mining', contracts = [], extra = {}) => (await renderToString(createSSRApp(Console, {
         agent: { id: 1 }, ships: [], engine: {}, operator: false, enabled: true, drafts: [], runs: [], accounting: {},
         investigations: [{ id: 1, strategy, status: 'partial', system_symbol: 'X1-TEST',
             observations: { contracts, observed_at: '2026-11-02T04:31:53Z' }, candidates,
-            coverage: { requests: 33, request_limit: 40, seconds_limit: 45, limits_reached: ['Market observation cap reached; coverage is partial.'] } }],
+            coverage: { requests: 33, request_limit: 40, seconds_limit: 45, limits_reached: ['Market observation cap reached; coverage is partial.'] } }], ...extra,
     }))).replace(/<!--[\s\S]*?-->/g, '');
     const ready = await render([candidate('ready', 'ready')]);
     assert.match(ready, /1 mining route ready to stage/);
@@ -29,6 +29,13 @@ try {
     const completed = await render([{ ...candidate('completed', 'needs_information'), contract_id: 'done' }], 'contracts', [{ id: 'done', fulfilled: true }]);
     assert.match(completed, /No open contracts to automate/);
     assert.doesNotMatch(completed, /class="candidate"/);
+    const otherRun = { id: 9, ship_symbol: 'LOCAL-2', active_agent_id: 1, strategy: 'mining', state: 'running', plan: {}, totals: {} };
+    const separateShip = await render([], 'mining', [], { selected: 'LOCAL-1', runs: [otherRun] });
+    assert.match(separateShip, /<fieldset(?![^>]*disabled)[^>]*><legend[^>]*>Choose a strategy/);
+    assert.doesNotMatch(separateShip, /Run #9/);
+    const sameShip = await render([], 'mining', [], { selected: 'LOCAL-2', runs: [otherRun] });
+    assert.match(sameShip, /<fieldset[^>]*disabled[^>]*><legend[^>]*>Choose a strategy/);
+    assert.match(sameShip, /Run #9/);
     console.log('PASS partial ready selection, blocked price selection, deduplicated scouting controls, local refresh and fulfilled-contract guidance.');
 } finally {
     await compiler.close();

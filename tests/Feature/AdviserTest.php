@@ -85,6 +85,18 @@ class AdviserTest extends TestCase
         return $record->fresh();
     }
 
+    public function test_adviser_reports_only_the_policy_ships_active_run(): void
+    {
+        $policy = $this->grant();
+        $other = AutomationRun::create(['agent_id' => $this->agent->id, 'active_agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
+            'ship_symbol' => 'LOCAL-2', 'state' => 'running', 'plan' => [], 'totals' => [], 'expires_at' => now()->addHour()]);
+        $this->assertNull($this->assess($policy)->evidence['active_run']);
+        $own = $other->replicate();
+        $own->ship_symbol = 'LOCAL-1';
+        $own->save();
+        $this->assertSame($own->id, $this->assess($policy)->evidence['active_run']['id']);
+    }
+
     public function test_grants_are_versioned_expiring_owner_scoped_and_cannot_silently_replace(): void
     {
         $policy = $this->grant();

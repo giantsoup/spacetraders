@@ -95,7 +95,7 @@ class Adviser
                 'observations' => $observations->map(fn ($o) => ['id' => $o->id, 'kind' => $o->kind, 'symbol' => $o->symbol, 'data' => $o->data, 'observed_at' => $o->observed_at->toIso8601String()])->all(),
                 'investigation' => $investigation ? ['id' => $investigation->id, 'status' => $investigation->status, 'coverage' => $investigation->coverage, 'observations' => $investigation->observations] : null,
                 'unsettled' => ShipAction::where('agent_id', $agent->id)->where(fn ($q) => $q->whereIn('state', ['pending', 'sending', 'uncertain'])->orWhere('review_required', true))->orderBy('id')->get(['id', 'ship_symbol', 'state', 'review_required'])->toArray(),
-                'active_run' => AutomationRun::where('agent_id', $agent->id)->whereNotNull('active_agent_id')->first(['id', 'ship_symbol', 'strategy', 'state', 'stop_requested_at'])?->toArray(),
+                'active_run' => AutomationRun::where('agent_id', $agent->id)->where('ship_symbol', $policy->ship_symbol)->whereNotNull('active_agent_id')->first(['id', 'ship_symbol', 'strategy', 'state', 'stop_requested_at'])?->toArray(),
                 'last_exploration_at' => AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('strategy', 'scout')->max('started_at'),
                 'parameters' => ['snapshot_seconds' => config('gameplay.snapshot_seconds'), 'scheduling_allowance_seconds' => config('gameplay.scheduling_allowance_seconds')],
                 'possible_yields' => array_values(array_unique($possibleYields)),
