@@ -74,8 +74,8 @@ class AutomationRunner
             }
             $this->gate->check($run->engine_session_id);
             $this->executor->clear($agent);
-            if ($run->expires_at->isPast() || $run->reset_id !== $agent->reset_id || AutomationRun::where('active_agent_id', $agent->id)->exists()) {
-                $this->rejectPreview($run, 'Preview expired, reset or another run already owns this agent.');
+            if ($run->expires_at->isPast() || $run->reset_id !== $agent->reset_id || AutomationRun::where('active_agent_id', $agent->id)->where('ship_symbol', $run->ship_symbol)->exists()) {
+                $this->rejectPreview($run, 'Preview expired, reset or another run already owns this ship.');
             }
             if (! in_array($run->plan_version, [1, 2, 3, 4], true) || ($this->gate->enabled() && ! in_array($run->plan_version, [2, 3, 4], true)) || ($run->plan_version === 3 && ! in_array($run->strategy, ['scout', 'trade'], true)) || ($run->plan_version === 4 && (! $run->campaign_episode_id || $run->strategy !== 'sell_aboard'))) {
                 throw new GameException('Unsupported or historical plan version. Create a fresh staged preview.');
@@ -117,6 +117,9 @@ class AutomationRunner
                 $plan['route'] = $fresh['route'];
             }
             $plan['initial_manual_credit_delta'] = $this->manualCreditDelta($agent);
+            $plan['initial_external_credit_delta'] = (int) ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('state', 'confirmed')
+                ->where(fn ($query) => $query->whereNull('automation_run_id')->orWhere('automation_run_id', '!=', $run->id))
+                ->get()->sum(fn ($action) => $action->outcome['credit_delta'] ?? 0);
             app(CampaignSafety::class)->check($run, $agent);
             DB::transaction(function () use ($run, $agent, $plan) {
                 $this->gate->check($run->engine_session_id);
@@ -182,7 +185,7 @@ class AutomationRunner
                 return;
             }
             $run->update(['heartbeat_at' => now()]);
-            if (ShipAction::where('agent_id', $agent->id)->where(fn ($q) => $q->whereIn('state', ['sending', 'uncertain'])->orWhere('review_required', true))->exists()) {
+            if (ShipAction::where('agent_id', $agent->id)->where(fn ($q) => $q->where('state', 'uncertain')->orWhere('review_required', true))->exists()) {
                 if ($run->campaign_episode_id && ShipAction::where('agent_id', $agent->id)->where('state', 'uncertain')->exists()) {
                     $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
                     app(CampaignControl::class)->pause($episode->grant(), 'uncertain_action', $episode);
@@ -191,7 +194,9 @@ class AutomationRunner
 
                 return;
             }
-            if (ShipAction::where('agent_id', $agent->id)->where('state', 'pending')->exists()) {
+            if (ShipAction::where('agent_id', $agent->id)->whereIn('state', ['pending', 'sending'])->exists()) {
+                $run->update(['next_action_at' => now()->addSeconds(5)]);
+
                 return;
             }
             if ($run->stop_requested_at || $run->expires_at->isPast() || ! config('gameplay.enabled')) {
@@ -209,7 +214,7 @@ class AutomationRunner
                 $credits = $this->api->agent($agent)['credits'];
                 $agent->update(['credits' => $credits]);
                 app(CampaignSafety::class)->check($run, $agent);
-                $otherDelta = $this->manualCreditDelta($agent) - ($run->plan['initial_manual_credit_delta'] ?? 0);
+                $otherDelta = app(CreditAccounting::class)->outsideRunDelta($agent, $run);
                 if ($credits !== $run->plan['initial_credits'] + $run->totals['credit_delta'] + $otherDelta) {
                     throw new GameException('Agent credits changed outside this run. Create a new preview after reconciliation.');
                 }

@@ -82,6 +82,21 @@ class CreditAccounting
         app(CycleAccounting::class)->record($run, $ship);
     }
 
+    public function outsideRunDelta(Agent $agent, AutomationRun $run): int
+    {
+        $modern = array_key_exists('initial_external_credit_delta', $run->plan);
+        $delta = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('state', 'confirmed')
+            ->where(function ($query) use ($run, $modern) {
+                $query->whereNull('automation_run_id');
+                if ($modern) {
+                    $query->orWhere('automation_run_id', '!=', $run->id);
+                }
+            })->get()->sum(fn ($action) => $action->outcome['credit_delta'] ?? 0);
+
+        // Historical in-flight plans retain their manual-only snapshot semantics.
+        return (int) $delta - ($modern ? $run->plan['initial_external_credit_delta'] : ($run->plan['initial_manual_credit_delta'] ?? 0));
+    }
+
     public function summary(Agent $agent): array
     {
         $baseline = DB::table('agent_credit_baselines')->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->first();

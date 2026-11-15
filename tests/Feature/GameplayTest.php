@@ -644,6 +644,54 @@ class GameplayTest extends TestCase
         $this->miningRun();
     }
 
+    public function test_active_ship_index_migration_preserves_a_live_run_and_round_trips(): void
+    {
+        $run = $this->miningRun();
+        $migration = require database_path('migrations/2026_11_15_000001_allow_one_active_run_per_ship.php');
+        $migration->down();
+        $migration->up();
+        $this->assertSame($this->agent->id, $run->fresh()->active_agent_id);
+        $second = $run->replicate();
+        $second->ship_symbol = 'LOCAL-2';
+        $second->save();
+        $preview = $run->replicate();
+        $preview->active_agent_id = null;
+        $preview->save();
+        $preview->replicate()->save();
+        $this->expectException(UniqueConstraintViolationException::class);
+        $run->replicate()->save();
+    }
+
+    public function test_second_start_on_same_ship_requires_a_fresh_preview(): void
+    {
+        $first = $this->miningRun();
+        $second = app(AutomationRunner::class)->preview($this->agent->fresh(), 'LOCAL-1', $first->plan);
+        $this->expectException(GameException::class);
+        $this->expectExceptionMessage('another run already owns this ship');
+        app(AutomationRunner::class)->start($this->agent->fresh(), $second);
+    }
+
+    public function test_two_ships_can_run_and_explain_each_others_confirmed_sales(): void
+    {
+        $this->world(fn (&$w) => $w['ships'][] = FakeSpaceTraders::ship('LOCAL-2'));
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $first = $this->miningRun();
+        $second = app(AutomationRunner::class)->preview($this->agent->fresh(), 'LOCAL-2', $first->plan);
+        app(AutomationRunner::class)->start($this->agent->fresh(), $second);
+        $this->assertSame(2, AutomationRun::whereNotNull('active_agent_id')->count());
+        for ($i = 0; $i < 20 && ($first->active_agent_id || $second->active_agent_id); $i++) {
+            foreach ([$first, $second] as $run) {
+                $run->update(['next_action_at' => now()]);
+                $this->advance($run);
+            }
+        }
+        foreach ([$first, $second] as $run) {
+            $this->assertSame(RunState::Completed, $run->state, $run->blocked_reason ?? '');
+        }
+        $this->assertSame(490, $this->agent->fresh()->credits - 100000);
+        $this->assertSame(0, app(\App\Gameplay\CreditAccounting::class)->summary($this->agent->fresh())['unexplained_change']);
+    }
+
     public function test_single_active_run_stale_preview_and_default_disabled_starts(): void
     {
         $run = $this->miningRun();

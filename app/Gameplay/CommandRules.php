@@ -30,8 +30,8 @@ class CommandRules
                 throw new GameException('Crew or known equipment power requirements exceed available capacity.');
             }
         }
-        $active = AutomationRun::where('agent_id', $agent->id)->whereNotNull('active_agent_id')->first();
-        if ($active && ($agentCommand || $active->ship_symbol === $symbol) && $active->id !== $run?->id) {
+        $active = AutomationRun::where('agent_id', $agent->id)->whereNotNull('active_agent_id')->when(! $agentCommand, fn ($query) => $query->where('ship_symbol', $symbol))->first();
+        if ($command !== 'buy_ship' && $active && ($agentCommand || $active->ship_symbol === $symbol) && $active->id !== $run?->id) {
             throw new GameException('Stop automation and settle its action before manual takeover.');
         }
         if ($run) {
@@ -55,15 +55,17 @@ class CommandRules
             if ($expectedInventory !== $actualInventory) {
                 throw new GameException('Cargo changed outside this run. Reconcile protected inventory before continuing.');
             }
-            $manual = (int) ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereNull('automation_run_id')->where('state', 'confirmed')->get()->sum(fn ($a) => $a->outcome['credit_delta'] ?? 0);
-            if ($agent->credits !== $run->plan['initial_credits'] + $run->totals['credit_delta'] + $manual - ($run->plan['initial_manual_credit_delta'] ?? 0)) {
+            $otherDelta = app(CreditAccounting::class)->outsideRunDelta($agent, $run);
+            if ($agent->credits !== $run->plan['initial_credits'] + $run->totals['credit_delta'] + $otherDelta) {
                 throw new GameException('Unexplained balance change before reservation. Review before a fresh approval.');
             }
         }
         $spending = in_array($command, ['buy', 'buy_ship', 'repair', 'install_mount', 'remove_mount', 'install_module', 'remove_module', 'jump', 'refuel'], true);
         $floor = max($arguments['reserve'] ?? 0, $active?->plan['reserve'] ?? 0, ! $run && $spending ? max(1, (int) config('gameplay.manual_reserve_floor')) : 0);
-        if ($active && ! $run) {
-            $floor = max($floor, $active->plan['reserve'] + max(0, $active->plan['max_spend'] - ($active->totals['spending'] ?? $active->totals['fuel_cost'] ?? 0)));
+        if (! $run) {
+            foreach (AutomationRun::where('active_agent_id', $agent->id)->get() as $protectedRun) {
+                $floor = max($floor, $protectedRun->plan['reserve'] + max(0, $protectedRun->plan['max_spend'] - ($protectedRun->totals['spending'] ?? $protectedRun->totals['fuel_cost'] ?? 0)));
+            }
         }
         $contract = null;
         if ($run?->strategy === 'contracts') {
@@ -359,7 +361,7 @@ class CommandRules
                 break;
             case 'transfer':
                 $target = Ship::where('agent_id', $agent->id)->where('symbol', $arguments['targetShip'])->first();
-                if (! $target || $target->symbol === $symbol || ($active && $active->ship_symbol === $target->symbol && $active->id !== $run?->id)) {
+                if (! $target || $target->symbol === $symbol || AutomationRun::where('active_agent_id', $agent->id)->where('ship_symbol', $target->symbol)->when($run, fn ($query) => $query->whereKeyNot($run->id))->exists()) {
                     throw new GameException('Transfer target must be another owned ship available for manual control.');
                 }
                 $target = $this->sync->refreshShip($agent, $target->symbol)->snapshot;
