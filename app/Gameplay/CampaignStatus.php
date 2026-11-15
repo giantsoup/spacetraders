@@ -37,8 +37,8 @@ class CampaignStatus
         $run = $episode ? AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('active_agent_id')->first() : null;
         $loads = $episode ? CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])->latest('id')->limit(15)->get() : collect();
         $loadRuns = AutomationRun::whereIn('id', $loads->pluck('data.run_id')->filter())->get()->keyBy('id');
-        $ships = $agent ? Ship::where('agent_id', $agent->id)->orderBy('symbol')->get()
-            ->filter(fn ($ship) => in_array($ship->snapshot['registration']['role'] ?? null, ['COMMAND', 'SATELLITE', 'PROBE'], true) || ($ship->snapshot['frame']['symbol'] ?? null) === 'FRAME_PROBE') : collect();
+        $ships = $agent ? Ship::where('agent_id', $agent->id)->orderBy('symbol')->get() : collect();
+        $roles = array_flip(Arr::only($episode?->state['role_ships'] ?? [], ['command', 'probe']));
         $locations = $ships->unique(fn ($ship) => $ship->snapshot['nav']['systemSymbol'] ?? null)
             ->flatMap(fn ($ship) => collect(app(SystemMapKnowledge::class)->forShip($agent, $ship)['locations'])
                 ->map(fn ($point) => Arr::only($point, ['symbol', 'type', 'traits', 'description'])))->values();
@@ -93,7 +93,7 @@ class CampaignStatus
                     'summary' => $this->eventSummary($event)])->all() : [],
             'ships' => $ships
                 ->map(fn ($ship) => ['symbol' => $ship->symbol,
-                    'role' => ($ship->snapshot['registration']['role'] ?? null) === 'COMMAND' ? 'command' : 'probe',
+                    'role' => $roles[$ship->symbol] ?? 'fleet',
                     'waypoint' => $ship->snapshot['nav']['waypointSymbol'] ?? null, 'nav_status' => $ship->snapshot['nav']['status'] ?? null,
                     'nav' => [
                         'status' => $ship->snapshot['nav']['status'] ?? null,

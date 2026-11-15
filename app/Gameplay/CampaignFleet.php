@@ -25,9 +25,9 @@ class CampaignFleet
         $used = AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('started_at')
             ->whereIn('ship_symbol', $candidates->pluck('symbol'))->oldest('id')->value('ship_symbol');
         $ship = $candidates->firstWhere('symbol', $used) ?? $candidates->first();
-        if ($ship) {
-            $state['role_ships'][$role] = $ship->symbol;
-            $episode->update(['state' => $state]);
+        if ($ship && ! $episode->closed_at) {
+            CampaignEpisode::whereKey($episode->id)->whereNull('closed_at')->update(['state->role_ships->'.$role => $ship->symbol]);
+            $episode->refresh();
         }
 
         return $ship?->snapshot;

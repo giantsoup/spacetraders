@@ -7,6 +7,7 @@ use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\AutomationRunner;
 use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignDirector;
+use App\Gameplay\CampaignFleet;
 use App\Gameplay\CampaignHealth;
 use App\Gameplay\CampaignPlaybook;
 use App\Gameplay\CampaignRecovery;
@@ -116,6 +117,30 @@ class CampaignAutopilotTest extends TestCase
         $this->assertNull($grant->fresh()->paused_at);
     }
 
+    public function test_role_pinning_preserves_controls_written_after_the_episode_was_loaded(): void
+    {
+        $this->tradeGrant();
+        $episode = CampaignEpisode::firstOrFail();
+        $episode->update(['state' => []]);
+        CampaignEpisode::whereKey($episode->id)->update(['state' => ['probe_position_failed' => '2026-11-15T12:00:00Z', 'pending_pause' => 'operator_review']]);
+        $this->assertSame('LOCAL-2', app(CampaignFleet::class)->role($episode, 'probe')['symbol']);
+        $state = $episode->fresh()->state;
+        $this->assertSame('2026-11-15T12:00:00Z', $state['probe_position_failed']);
+        $this->assertSame('operator_review', $state['pending_pause']);
+        $this->assertSame('LOCAL-2', $state['role_ships']['probe']);
+        $this->assertSame($state, $episode->state);
+    }
+
+    public function test_role_reads_do_not_pin_closed_episodes_even_if_they_closed_after_loading(): void
+    {
+        $this->tradeGrant();
+        $episode = CampaignEpisode::firstOrFail();
+        $episode->update(['state' => []]);
+        CampaignEpisode::whereKey($episode->id)->update(['closed_at' => now()]);
+        app(CampaignFleet::class)->symbols($episode);
+        $this->assertSame([], $episode->fresh()->state);
+    }
+
     public function test_buying_an_earlier_sorting_probe_keeps_the_episodes_existing_role_ship(): void
     {
         $this->tradeWorld();
@@ -138,6 +163,10 @@ class CampaignAutopilotTest extends TestCase
         $this->assertSame('FRAME_PROBE', Ship::where('symbol', 'LOCAL-3')->firstOrFail()->snapshot['frame']['symbol']);
         $this->tick();
         $this->assertSame('LOCAL-Z', $episode->fresh()->state['role_ships']['probe']);
+        $this->editWorld(fn (&$world) => $world['ships'][] = FakeSpaceTraders::ship('LOCAL-HAULER'));
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $roles = array_column(app(CampaignStatus::class)->read()['ships'], 'role', 'symbol');
+        $this->assertSame(['LOCAL-1' => 'command', 'LOCAL-3' => 'fleet', 'LOCAL-HAULER' => 'fleet', 'LOCAL-Z' => 'probe'], $roles);
     }
 
     #[DataProvider('campaignDeliverySpending')]
