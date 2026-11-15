@@ -109,16 +109,22 @@ and concurrent runs are outside the grant.
 A new episode requires the public reset id and a future serverResets.next. Unknown,
 overdue, or unconfirmed schedules wait. Confirming a new reset closes the old episode.
 
-A durable registration intent is recorded before sending. An ambiguous response or crash
-never causes a repeat registration, even after resume. Inspect the official account
-and import the current agent credentials through the existing import flow, then resume.
-The imported agent is reused. Missing or rejected saved credentials require operator review.
+A durable registration intent is recorded before sending. A local refusal before transport
+or HTTP 429 neutralizes that intent and waits. An ambiguous response or crash waits sixty
+seconds, then permits exactly one retry. A duplicate-symbol response or a second ambiguous
+outcome pauses with registration_unknown. Inspect the official account and import current
+credentials through the existing import flow, then resume. The imported agent is reused.
+Missing or rejected saved credentials require operator review. Initial discovery advances
+one catalogue page or at most two market reads per tick; mining investigations retain their
+cursor across ticks. Cargo recovery refreshes bounded buyer and fuel evidence before retrying.
 
 ## Monitor independently of the engine
 
 campaign:status reads local state only. It prints the grant, episode, phase, latest decision,
 wait and pause reasons. It exits nonzero for a paused campaign or a missing/older-than-five-
-minute engine heartbeat. No approved campaign means there is nothing to monitor.
+minute engine heartbeat. With a live engine, it also flags no campaign event for fifteen
+minutes or an unchanged wait/idle choice for sixty minutes. These stall alerts do not pause
+execution. No approved campaign means there is nothing to monitor.
 
 ~~~powershell
 php artisan campaign:watchdog

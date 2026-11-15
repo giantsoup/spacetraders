@@ -21,6 +21,8 @@ try {
         $arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File ' + (ConvertTo-NativeArgument $PSCommandPath)
         $action = New-ScheduledTaskAction -Execute $executable -Argument $arguments -WorkingDirectory $root
         $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 15)
+        $trigger.Repetition.StopAtDurationEnd = $false
+        if ($trigger.Repetition.Duration -or $trigger.EndBoundary) { throw 'Watchdog trigger must repeat indefinitely.' }
         $principal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
         $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 3) -Hidden
         Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Independent campaign health alerts for $root" -Force | Out-Null

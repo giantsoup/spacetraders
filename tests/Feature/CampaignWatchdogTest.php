@@ -46,6 +46,41 @@ class CampaignWatchdogTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_live_engine_with_no_decisions_for_fifteen_minutes_alerts_without_pausing(): void
+    {
+        $this->partialMock(CampaignNotifier::class)->shouldReceive('toast')->once();
+        $this->travel(16)->minutes();
+        EngineFixture::healthy();
+        $this->artisan('campaign:watchdog')->assertFailed();
+        $this->assertStringContainsString('campaign_decisions_stalled', file_get_contents($this->log));
+        $this->assertNull(CampaignGrant::where('slot', 1)->firstOrFail()->paused_at);
+        Http::assertNothingSent();
+    }
+
+    public function test_unchanged_wait_and_idle_choices_alert_after_sixty_minutes_and_recover(): void
+    {
+        config(['campaign.alert_webhook_url' => 'https://example.invalid/synthetic-hook']);
+        $this->partialMock(CampaignNotifier::class)->shouldReceive('toast')->times(5);
+        $grant = CampaignGrant::where('slot', 1)->firstOrFail();
+        $control = app(CampaignControl::class);
+        $grant->update(['wait_reason' => 'awaiting_fresh_state']);
+        $control->event($grant, null, 'wait', ['reason' => 'awaiting_fresh_state']);
+        $this->travel(61)->minutes();
+        EngineFixture::healthy();
+        $control->event($grant, null, 'wait', ['reason' => 'awaiting_fresh_state']);
+        $this->artisan('campaign:watchdog')->assertFailed();
+        $this->assertStringContainsString('campaign_choice_stalled', file_get_contents($this->log));
+        $grant->update(['wait_reason' => null]);
+        $control->event($grant, null, 'decision', ['choice' => 'idle']);
+        $this->artisan('campaign:watchdog')->assertSuccessful();
+        $this->travel(61)->minutes();
+        EngineFixture::healthy();
+        $control->event($grant, null, 'sample', []);
+        $this->artisan('campaign:watchdog')->assertFailed();
+        $this->assertNull($grant->fresh()->paused_at);
+        Http::assertSentCount(5);
+    }
+
     public function test_no_webhook_still_logs_and_toasts_once_then_repeats_and_recovers(): void
     {
         $this->partialMock(CampaignNotifier::class)->shouldReceive('toast')->times(3);
@@ -56,6 +91,7 @@ class CampaignWatchdogTest extends TestCase
         $this->travel(2)->hours();
         $this->artisan('campaign:watchdog')->assertFailed();
         EngineFixture::healthy();
+        app(CampaignControl::class)->event(CampaignGrant::where('slot', 1)->firstOrFail(), null, 'decision', ['choice' => 'idle']);
         $this->artisan('campaign:watchdog')->assertSuccessful();
         $this->artisan('campaign:watchdog')->assertSuccessful();
         $this->assertStringContainsString('Recovered', file_get_contents($this->log));
