@@ -143,6 +143,14 @@ The engine was faulted for about 43 hours before the test, and nobody noticed. T
 report its own absence. `campaign:status` exits non-zero when the engine heartbeat is older than 5
 minutes or the campaign is paused, so an outside check can alert on it.
 
+`php artisan campaign:watchdog` runs that check and sends an alert when it fails: to the Discord
+webhook in `CAMPAIGN_ALERT_WEBHOOK_URL` (.env, optional), and always as a Windows toast plus a line in
+`storage/logs/campaign-watchdog.log`. It alerts once per distinct problem, repeats every 2 hours while
+the problem lasts, and sends a "recovered" message when it clears. Because the engine may be the
+thing that died, the watchdog runs from its **own** Windows Scheduled Task every 15 minutes, not from
+the engine's scheduler. `scripts/windows/watchdog.ps1 -Install` registers that task for the production
+checkout; `deploy.ps1` leaves it alone. The webhook URL is a secret: never commit or log it.
+
 ## Measurement
 
 Tables: `campaign_revisions`, `campaign_grants`, `campaign_episodes`, `campaign_events` (decisions,
@@ -164,7 +172,7 @@ settings, each with a stated hypothesis in the file's comments.
 
 UI pages (CLI only; status page later), ship purchases, contracts, multiple concurrent runs,
 shared multi-ship ledger, replay/simulation, automatic tuning, jump gates, refining, siphoning,
-multi-stop routes, notifications.
+multi-stop routes, notifications beyond the watchdog alert.
 
 ## Acceptance
 
@@ -177,7 +185,8 @@ multi-stop routes, notifications.
   switch on bid ≤ 90% first-seen and on a better pair; buy skipped when the quote would expire
   during loading; freshness-held run with cargo → stopped → cargo delivered; fully loaded ship departs
   despite a stale source quote; mining only after 15 minutes without a trade; wind-down only sells;
-  `campaign:status` non-zero on stale heartbeat or pause; report output with learning predictions.
+  `campaign:status` non-zero on stale heartbeat or pause; watchdog alerts once, repeats after 2 h,
+  sends recovery, works with and without a webhook (HTTP faked); report output with learning predictions.
 - Full existing suite passes.
 - A dry run against the dev checkout's database (engine off) shows `campaign:status` and a
   `campaign:report` for a faked episode.
