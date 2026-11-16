@@ -539,7 +539,10 @@ class CommandRules
     {
         $point = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->where('symbol', $symbol)->first();
         if (! $point || $point->observed_at->lt(now()->subHour())) {
-            throw new GameException('Waypoint is unknown or stale. Synchronize first.');
+            $data = $this->api->waypoint($agent, $symbol);
+            $this->sync->observe($agent, 'waypoint', $symbol, $data);
+
+            return $data;
         }
 
         return $point->data;

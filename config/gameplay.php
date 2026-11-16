@@ -20,6 +20,8 @@ return [
     'manual_reserve_floor' => 2000,
     'preview_seconds' => 120,
     'snapshot_seconds' => 180,
+    'fuel_quote_max_seconds' => 21600,
+    'campaign_recovery_attempts' => 5,
     'route_evidence' => env('SPACETRADERS_ROUTE_EVIDENCE', 'conservative'),
     'fuel_reserve_units' => 2,
     'opportunity_limit' => 120,

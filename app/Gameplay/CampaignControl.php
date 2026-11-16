@@ -95,7 +95,7 @@ class CampaignControl
             $grant->update(['paused_at' => null, 'pause_reason' => null, 'wait_reason' => null, 'last_directed_at' => null]);
             foreach (CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->get() as $episode) {
                 $state = $episode->state ?? [];
-                unset($state['pending_pause']);
+                unset($state['pending_pause'], $state['recovery_attempts_since']);
                 $state['losses_reviewed_at'] = now()->toIso8601String();
                 $episode->update(['state' => $state]);
             }
@@ -143,7 +143,8 @@ class CampaignControl
         if (in_array($kind, ['wait', 'decision'], true)) {
             $previous = CampaignEvent::where('campaign_grant_id', $grant->id)->whereIn('kind', ['wait', 'decision'])->latest('id')->first();
             if ($previous && $previous->kind === $kind && $previous->campaign_episode_id === $episode?->id && ($kind === 'wait' ? ($previous->data['reason'] ?? null) === ($data['reason'] ?? null)
-                : ($previous->data['choice'] ?? null) === ($data['choice'] ?? null) && ($previous->data['rejections'] ?? []) === $data['rejections'])) {
+                : ($previous->data['choice'] ?? null) === ($data['choice'] ?? null) && ($previous->data['rejections'] ?? []) === $data['rejections']
+                    && ($previous->data['run_id'] ?? null) === ($data['run_id'] ?? null))) {
                 return $previous;
             }
         }

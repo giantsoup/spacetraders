@@ -628,6 +628,20 @@ class CampaignDirector
 
                 return true;
             }
+            $state = $episode->state ?? [];
+            // Checked before any reads. Attempts count from their own marker, which an operator resume clears, so a review gets a fresh window.
+            $state['recovery_attempts_since'][$ship['symbol']] ??= now()->toIso8601String();
+            $episode->update(['state' => $state]);
+            $attemptLimit = max(1, (int) config('gameplay.campaign_recovery_attempts', 5));
+            $attempts = AutomationRun::where('campaign_episode_id', $episode->id)->where('ship_symbol', $ship['symbol'])->where('strategy', 'sell_aboard')
+                ->where('started_at', '>=', CarbonImmutable::parse($state['recovery_attempts_since'][$ship['symbol']]))->latest('id')->limit($attemptLimit)->get();
+            $fruitless = $attempts->takeWhile(fn ($run) => in_array($run->state->value, ['stopped', 'blocked'], true)
+                && ($run->totals['sale_proceeds'] ?? 0) <= 0 && ($run->totals['credit_delta'] ?? 0) <= 0)->count();
+            if ($fruitless >= $attemptLimit) {
+                app(CampaignControl::class)->pause($grant, 'recovery_stalled', $episode);
+
+                return true;
+            }
             $this->refreshRecoveryEvidence($episode, $agent, $ship);
             $good = array_key_first(MiningPlanner::inventory($ship));
             $buyers = GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'market')->get()
@@ -667,7 +681,7 @@ class CampaignDirector
             return true;
         }
         $state = $episode->state ?? [];
-        unset($state['recovery_since']);
+        unset($state['recovery_since'], $state['recovery_attempts_since']);
         $episode->update(['state' => $state]);
 
         return false;
