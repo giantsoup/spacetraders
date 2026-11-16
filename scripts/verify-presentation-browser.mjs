@@ -128,11 +128,13 @@ try {
     await post('Synchronize', '/sync');
     await page.getByRole('button', { name: 'Back to ship', exact: true }).click();
     await page.getByRole('button', { name: 'Report', exact: true }).click();
-    const equipment = page.locator('.equipment-list');
-    await equipment.getByText('Mount: Sensor Array II', { exact: true }).waitFor();
-    await equipment.getByText('Module: Crew Quarters I × 2', { exact: true }).waitFor();
-    assert.equal(await equipment.locator('li').count(), 8);
-    assert.doesNotMatch(await equipment.innerText(), /MOUNT_|MODULE_/);
+    const shipDetails = page.locator('.ship-details');
+    await shipDetails.locator(':scope > summary').click();
+    for (const kind of ['Mounts', 'Modules']) await shipDetails.locator(':scope > details > summary').filter({ hasText: kind }).click();
+    const equipment = page.locator('.ship-equipment');
+    await equipment.getByText(/Sensor Array II/).first().waitFor();
+    assert.equal(await equipment.locator(':scope > ol > li').count(), equipmentWorld.ships[0].mounts.length + equipmentWorld.ships[0].modules.length);
+    assert.equal(await equipment.locator('summary').filter({ hasText: 'MODULE_CREW_QUARTERS_I' }).count(), 2);
     await shipView(page, 'intelligence');
     assert.match(await page.locator('#market').innerText(), /Iron Ore/);
     assert.match(await page.locator('#waypoints').innerText(), /Asteroid Field/);

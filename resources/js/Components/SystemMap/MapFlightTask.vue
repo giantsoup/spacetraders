@@ -5,6 +5,7 @@ import PrimaryButton from '@/Components/PrimaryButton.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
 import { formatLocalTime } from '@/dateTime.js';
 import { assetName, readableLabel } from '@/dataPresentation.js';
+import { resourceSummary } from '@/shipFacts.js';
 const props = defineProps({ task: Object, agentId: Number, ship: Object, disabled: Boolean, blockedReason: String, reserveFloor: Number, now: Number, actions: Array });
 const emit = defineEmits(['preview', 'sync', 'stop', 'reconcile', 'activity']);
 const reserve = ref(props.reserveFloor), cooldown = ref(300), question = ref('MARKETPLACE'), manualLimits = ref(false), maxFuel = ref(''), maxSeconds = ref(''), acknowledge = ref(false);
@@ -30,7 +31,7 @@ function preview(command) {
 <template>
     <section class="map-flight-task" aria-label="Map action">
         <p class="task-identity">{{ task.ship_symbol }} → {{ task.point.symbol }}</p>
-        <p>{{ assetName(ship?.nav?.status) }} · Observed at {{ ship?.nav?.waypointSymbol || 'Unknown' }} · Fuel {{ ship?.fuel?.current ?? 'Unknown' }} / {{ ship?.fuel?.capacity ?? 'Unknown' }} · {{ assetName(ship?.nav?.flightMode) }}</p>
+        <p>{{ assetName(ship?.nav?.status) }} · Observed at {{ ship?.nav?.waypointSymbol || 'Unknown' }} · Fuel {{ resourceSummary(ship?.fuel?.current, ship?.fuel?.capacity, 'No fuel tank').text }} · {{ assetName(ship?.nav?.flightMode) }}</p>
         <Link class="task-return" :href="route('agents.map', { agent: agentId, ship: task.ship_symbol, location: task.point.symbol })">Back to selected map location</Link>
         <p v-if="blockedReason" role="status" class="warning">{{ blockedReason }} <button type="button" class="task-return" @click="emit('activity')">Review activity</button></p>
         <section v-if="action" class="task-status" aria-label="Latest ship action">

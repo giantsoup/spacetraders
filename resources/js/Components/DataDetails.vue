@@ -2,23 +2,51 @@
 import { readableLabel, readableValue } from '@/dataPresentation.js';
 import { formatLocalTime } from '@/dateTime.js';
 
-defineProps({ value: { required: true }, field: { type: String, default: '' } });
+const props = defineProps({
+    value: { required: true },
+    field: { type: String, default: '' },
+    context: { type: String, default: '' },
+    path: { type: String, default: '' },
+});
 const structured = value => value !== null && typeof value === 'object';
+const childPath = key => props.path ? props.path + '.' + key : key;
+const fieldLabel = key => {
+    if (props.context !== 'ship') return readableLabel(key);
+    if (childPath(key) === 'nav.waypointSymbol') return 'Current waypoint';
+    if (key === 'waypointSymbol') return 'Waypoint symbol';
+    if (key === 'symbol') return 'Symbol';
+    if (key === 'units') return 'Units';
+    if (key === 'wages') return 'Wages per crew member per hour';
+    if (key === 'morale') return 'Morale (0–100)';
+    return readableLabel(key);
+};
+const fieldValue = value => {
+    if (props.context !== 'ship') return readableValue(value, props.field);
+    if (value === null || value === undefined) return 'Not observed';
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) return 'Unknown';
+        if (['condition', 'integrity'].includes(props.field)) return Math.round(value * 100) + '%';
+        if (props.path === 'crew.wages') return value + ' CR per crew member per hour';
+        return String(value);
+    }
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    return value === '' ? 'Not provided' : value;
+};
 </script>
 
 <template>
     <div v-if="structured(value) && !Object.keys(value).length" class="data-empty">None recorded</div>
     <ol v-else-if="Array.isArray(value)" class="data-list">
-        <li v-for="(item, index) in value" :key="index"><DataDetails :value="item" :field="field" /></li>
+        <li v-for="(item, index) in value" :key="index"><DataDetails :value="item" :field="field" :context="context" :path="path + '[' + index + ']'" /></li>
     </ol>
     <dl v-else-if="structured(value)" class="data-details">
         <div v-for="(item, key) in value" :key="key" class="data-row" :class="{ 'data-group': structured(item) }">
-            <dt>{{ readableLabel(key) }}</dt>
-            <dd><DataDetails :value="item" :field="key" /></dd>
+            <dt>{{ fieldLabel(key) }}</dt>
+            <dd><DataDetails :value="item" :field="key" :context="context" :path="childPath(key)" /></dd>
         </div>
     </dl>
-    <time v-else-if="formatLocalTime(value, null)" :datetime="value">{{ readableValue(value, field) }}</time>
-    <span v-else class="data-value">{{ readableValue(value, field) }}</span>
+    <time v-else-if="formatLocalTime(value, null)" :datetime="value">{{ fieldValue(value) }}</time>
+    <span v-else class="data-value">{{ fieldValue(value) }}</span>
 </template>
 
 <style scoped>

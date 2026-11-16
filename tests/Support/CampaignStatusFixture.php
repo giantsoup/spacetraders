@@ -4,6 +4,7 @@ namespace Tests\Support;
 
 use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignPlaybook;
+use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignSample;
@@ -13,7 +14,7 @@ use App\Models\User;
 
 class CampaignStatusFixture
 {
-    public static function seed(User $user): array
+    public static function seed(User $user, bool $shipMatrix = false): array
     {
         $revision = app(CampaignPlaybook::class)->import(file_get_contents(base_path('campaigns/weekly-default.yaml')));
         $grant = app(CampaignControl::class)->approve($revision, $user);
@@ -42,6 +43,32 @@ class CampaignStatusFixture
         }
         LocalEngine::updateOrCreate(['id' => 1], ['state' => 'running', 'heartbeat_at' => now()]);
 
+        if ($shipMatrix) {
+            $ship->delete();
+            $ships = self::seedShipMatrix($agent);
+            $ship = $ships['ship_command_frigate'];
+            $run->update(['ship_symbol' => $ship->symbol]);
+            $episode->update(['state' => ['role_ships' => ['command' => $ship->symbol, 'probe' => $ships['ship_probe']->symbol]]]);
+        }
+
         return compact('grant', 'agent', 'episode', 'run', 'ship');
+    }
+
+    public static function shipScenarios(): array
+    {
+        return json_decode(file_get_contents(base_path('tests/Fixtures/ship-information.json')), true, flags: JSON_THROW_ON_ERROR)['scenarios'];
+    }
+
+    public static function seedShipMatrix(Agent $agent): array
+    {
+        $ships = [];
+        foreach (self::shipScenarios() as $scenario) {
+            $ships[$scenario['id']] = Ship::create([
+                'agent_id' => $agent->id, 'symbol' => $scenario['ship']['symbol'],
+                'observed_at' => $scenario['observed_at'] ?? null, 'snapshot' => $scenario['ship'],
+            ]);
+        }
+
+        return $ships;
     }
 }

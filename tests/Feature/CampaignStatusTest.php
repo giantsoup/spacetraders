@@ -4,11 +4,13 @@ namespace Tests\Feature;
 
 use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignPlaybook;
+use App\Gameplay\CampaignStatus;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\GameObservation;
 use App\Models\Ship;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -140,6 +142,297 @@ class CampaignStatusTest extends TestCase
         $this->actingAs($this->operator)->from('/campaign')->post('/campaign/resume')
             ->assertRedirect('/campaign')->assertSessionHasErrors(['campaign' => 'Grant expired. Approve a new grant.']);
         $this->assertNotNull($grant->fresh()->paused_at);
+    }
+
+    public function test_projection_tree_covers_every_pinned_ship_schema_leaf_and_only_the_ready_at_extension(): void
+    {
+        $schema = $this->shipSchema();
+        $documented = $this->schemaLeaves($schema['components']['schemas']['Ship'], $schema);
+        $projected = $this->projectionLeaves(CampaignStatus::SHIP_DETAILS);
+        $documented['cooldown.readyAt'] = 'string';
+        ksort($documented);
+        ksort($projected);
+        $this->assertSame($documented, $projected);
+    }
+
+    public function test_matrix_roundtrips_all_documented_values_and_preserves_missing_null_empty_and_instance_order(): void
+    {
+        CampaignStatusFixture::seed($this->operator, shipMatrix: true);
+        $schema = $this->shipSchema();
+        $shipSchema = $schema['components']['schemas']['Ship'];
+        $schema['components']['schemas']['Cooldown']['properties']['readyAt'] = ['type' => 'string'];
+        $ships = collect(app(CampaignStatus::class)->read()['ships'])->keyBy('symbol');
+        $scenarios = CampaignStatusFixture::shipScenarios();
+        $this->assertCount(24, $scenarios);
+        $this->assertCount(count($scenarios), $ships);
+        $observedLeaves = [];
+        foreach ($scenarios as $scenario) {
+            $ship = $ships[$scenario['ship']['symbol']];
+            $this->assertSame($this->documentedValues($scenario['ship'], $shipSchema, $schema), $ship['details'], $scenario['id']);
+            $this->assertSame(CarbonImmutable::parse($scenario['observed_at'])->toIso8601String(), $ship['observed_at']);
+            $this->assertArrayNotHasKey('ship_type', $ship['details']);
+            $this->assertArrayNotHasKey('synthetic', $ship['details']);
+            $this->assertSame($ship['details'], json_decode(json_encode($ship['details'], JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR));
+            $observedLeaves += $this->observedSchemaLeaves($ship['details'], $shipSchema, $schema);
+        }
+        foreach ($this->schemaLeaves($shipSchema, $schema) as $path => $type) {
+            $this->assertArrayHasKey($path, $observedLeaves, 'Matrix never observes '.$path);
+        }
+        $missing = $ships['QA-MISSING-EQUIPMENT']['details'];
+        $empty = $ships['QA-EMPTY-EQUIPMENT']['details'];
+        $this->assertArrayNotHasKey('mounts', $missing);
+        $this->assertArrayNotHasKey('modules', $missing);
+        $this->assertSame([], $empty['mounts']);
+        $this->assertSame([], $empty['modules']);
+        $this->assertNull($ships['QA-UNKNOWN-RESOURCES']['details']['fuel']['capacity']);
+        $this->assertSame(0.991, $ships['QA-DISTINCT-DUPLICATES']['details']['frame']['condition']);
+        $this->assertSame(0.994, $ships['QA-DISTINCT-DUPLICATES']['details']['frame']['integrity']);
+        $this->assertSame(3, $ships['QA-DISTINCT-DUPLICATES']['details']['frame']['quality']);
+        $this->actingAs($this->operator)->get('/campaign')->assertOk()->assertInertia(fn (Assert $page) => $page->has('ships', 24));
+    }
+
+    public function test_matrix_covers_all_canonical_ship_types_mounts_and_modules_without_inferring_owned_types(): void
+    {
+        $schema = $this->shipSchema()['components']['schemas'];
+        $canonical = array_values(array_filter(CampaignStatusFixture::shipScenarios(), fn ($scenario) => $scenario['ship_type'] !== null));
+        $this->assertCount(13, $canonical);
+        $this->assertEqualsCanonicalizing($schema['ShipType']['enum'], array_column($canonical, 'ship_type'));
+        foreach (['mounts' => ['ShipMount', 15], 'modules' => ['ShipModule', 20]] as $field => [$type, $count]) {
+            $symbols = collect($canonical)->flatMap(fn ($scenario) => array_column($scenario['ship'][$field], 'symbol'))->unique()->values()->all();
+            $this->assertCount($count, $schema[$type]['properties']['symbol']['enum']);
+            $this->assertEqualsCanonicalizing($schema[$type]['properties']['symbol']['enum'], $symbols);
+        }
+    }
+
+    public function test_unlisted_fields_include_nested_names_but_never_unknown_or_token_values(): void
+    {
+        CampaignStatusFixture::seed($this->operator, shipMatrix: true);
+        $ships = collect(app(CampaignStatus::class)->read()['ships'])->keyBy('symbol');
+        $excluded = $ships['QA-EXCLUDED-FIELDS'];
+        $this->assertEqualsCanonicalizing([
+            'token', 'futureField', 'frame.newStat', 'nav.route.destination.secret',
+            'mounts[0].requirements.secret', 'modules[0].newField', 'cargo.inventory[0].secret',
+        ], $excluded['unlisted_fields']);
+        $response = $this->actingAs($this->operator)->get('/campaign')->assertOk();
+        $scenario = collect(CampaignStatusFixture::shipScenarios())->firstWhere('id', 'excluded-fields');
+        foreach ($this->unknownValues($scenario['ship'], $this->shipSchema()['components']['schemas']['Ship'], $this->shipSchema()) as $secret) {
+            $this->assertStringNotContainsString($secret, json_encode($ships, JSON_THROW_ON_ERROR));
+            $this->assertStringNotContainsString($secret, $response->getContent());
+        }
+    }
+
+    public function test_wrong_shapes_and_tokens_cannot_escape_through_approved_scalar_or_array_fields_or_legacy_props(): void
+    {
+        ['ship' => $ship] = CampaignStatusFixture::seed($this->operator);
+        $snapshot = CampaignStatusFixture::shipScenarios()[0]['ship'];
+        $snapshot['nav']['waypointSymbol'] = ['token' => 'poison-waypoint'];
+        $snapshot['nav']['route']['destination']['symbol'] = ['token' => 'poison-destination'];
+        $snapshot['registration']['role'] = ['token' => 'poison-role'];
+        $snapshot['fuel']['capacity'] = ['token' => 'poison-capacity'];
+        $snapshot['frame']['condition'] = ['token' => 'poison-condition'];
+        $snapshot['frame']['quality'] = 'poison-quality';
+        $snapshot['engine'] = [['token' => 'poison-engine']];
+        $snapshot['mounts'] = [['symbol' => 'MOUNT_FUTURE', 'deposits' => ['IRON_ORE', ['token' => 'poison-deposit']]]];
+        $snapshot['modules'] = ['token' => 'poison-modules'];
+        $snapshot['cargo']['inventory'] = [null, 'poison-inventory', ['symbol' => 'IRON_ORE', 'units' => 1]];
+        $snapshot['crew'] = 'poison-crew';
+        $snapshot['future'] = ['nested' => [['token' => 'poison-future']]];
+        $ship->update(['snapshot' => $snapshot]);
+        $props = app(CampaignStatus::class)->read()['ships'][0];
+        $this->assertSame($ship->observed_at->toIso8601String(), $props['observed_at']);
+        $this->assertNull($props['waypoint']);
+        $this->assertNull($props['fuel']['capacity']);
+        $this->assertNull($props['details']['crew']);
+        $this->assertNull($props['details']['engine']);
+        $this->assertNull($props['details']['modules']);
+        $this->assertSame(['IRON_ORE', null], $props['details']['mounts'][0]['deposits']);
+        $this->assertSame([null, null, ['symbol' => 'IRON_ORE', 'units' => 1]], $props['details']['cargo']['inventory']);
+        $this->assertContains('future.nested[0].token', $props['unlisted_fields']);
+        $this->assertContains('mounts[0].deposits[1].token', $props['unlisted_fields']);
+        $this->assertContains('nav.waypointSymbol.token', $props['unlisted_fields']);
+        $this->assertSame($snapshot, $ship->fresh()->snapshot);
+        $response = $this->actingAs($this->operator)->get('/campaign')->assertOk();
+        $this->assertStringNotContainsString('poison-', $response->getContent());
+        $ship->update(['snapshot' => ['mounts' => null, 'modules' => null, 'cargo' => ['inventory' => null]]]);
+        $this->assertSame(['mounts' => null, 'modules' => null, 'cargo' => ['inventory' => null]], app(CampaignStatus::class)->read()['ships'][0]['details']);
+    }
+
+    public function test_unknown_fields_at_every_observed_object_depth_are_names_only(): void
+    {
+        ['ship' => $ship] = CampaignStatusFixture::seed($this->operator);
+        $original = collect(CampaignStatusFixture::shipScenarios())->firstWhere('id', 'distinct-duplicates')['ship'];
+        $paths = [];
+        $inject = function (array $value, string $path = '') use (&$inject, &$paths): array {
+            foreach ($value as $key => $child) {
+                if (is_array($child)) {
+                    $childPath = is_int($key) ? $path.'['.$key.']' : ($path === '' ? $key : $path.'.'.$key);
+                    $value[$key] = $inject($child, $childPath);
+                }
+            }
+            if (! array_is_list($value)) {
+                $tokenPath = $path === '' ? 'token' : $path.'.token';
+                $paths[] = $tokenPath;
+                $value['token'] = 'never-expose-'.$tokenPath;
+            }
+
+            return $value;
+        };
+        $ship->update(['snapshot' => $inject($original)]);
+        $props = app(CampaignStatus::class)->read()['ships'][0];
+        $this->assertSame($original, $props['details']);
+        $this->assertEqualsCanonicalizing($paths, $props['unlisted_fields']);
+        $this->assertGreaterThan(20, count($paths));
+        $this->assertStringNotContainsString('never-expose-', json_encode($props, JSON_THROW_ON_ERROR));
+        $this->assertStringNotContainsString('never-expose-', $this->actingAs($this->operator)->get('/campaign')->assertOk()->getContent());
+    }
+
+    public function test_refresh_retains_distinct_equipment_instances_and_per_ship_observation_times(): void
+    {
+        CampaignStatusFixture::seed($this->operator, shipMatrix: true);
+        $ship = Ship::where('symbol', 'QA-DISTINCT-DUPLICATES')->firstOrFail();
+        $before = collect(app(CampaignStatus::class)->read()['ships'])->keyBy('symbol');
+        $snapshot = $ship->snapshot;
+        $snapshot['mounts'][0]['requirements']['power'] = 11;
+        $snapshot['mounts'][1]['requirements']['power'] = 19;
+        $snapshot['modules'][0]['requirements']['slots'] = 2;
+        $snapshot['modules'][1]['requirements']['slots'] = 5;
+        $observedAt = $ship->observed_at->addMinutes(3);
+        $ship->update(['snapshot' => $snapshot, 'observed_at' => $observedAt]);
+        $after = collect(app(CampaignStatus::class)->read()['ships'])->keyBy('symbol');
+        $this->assertSame($snapshot, $after[$ship->symbol]['details']);
+        $this->assertSame($observedAt->toIso8601String(), $after[$ship->symbol]['observed_at']);
+        $this->assertNotSame($before[$ship->symbol]['observed_at'], $after[$ship->symbol]['observed_at']);
+        $this->assertSame($before['QA-1']['observed_at'], $after['QA-1']['observed_at']);
+        $this->assertNotSame($before[$ship->symbol]['details']['mounts'], $after[$ship->symbol]['details']['mounts']);
+        $this->assertNotSame($before[$ship->symbol]['details']['modules'], $after[$ship->symbol]['details']['modules']);
+    }
+
+    public function test_fixed_thirteen_ship_payload_stays_within_two_hundred_kibibytes(): void
+    {
+        CampaignStatusFixture::seed($this->operator, shipMatrix: true);
+        $canonical = array_column(array_filter(CampaignStatusFixture::shipScenarios(), fn ($scenario) => $scenario['ship_type'] !== null), 'ship');
+        $symbols = array_column($canonical, 'symbol');
+        $ships = array_values(array_filter(app(CampaignStatus::class)->read()['ships'], fn ($ship) => in_array($ship['symbol'], $symbols, true)));
+        $this->assertCount(13, $ships);
+        $bytes = strlen(json_encode($ships, JSON_THROW_ON_ERROR));
+        $this->assertLessThanOrEqual(200 * 1024, $bytes);
+        $detailsBytes = strlen(json_encode(array_column($ships, 'details'), JSON_THROW_ON_ERROR));
+        $sizes = [];
+        foreach ($ships as $ship) {
+            $sizes[$ship['symbol']] = [
+                'ship' => strlen(json_encode($ship, JSON_THROW_ON_ERROR)),
+                'details' => strlen(json_encode($ship['details'], JSON_THROW_ON_ERROR)),
+            ];
+        }
+        fwrite(STDERR, 'Campaign fixed13 ships JSON: '.$bytes.' bytes; details JSON: '.$detailsBytes.' bytes; per ship: '.json_encode($sizes, JSON_THROW_ON_ERROR).PHP_EOL);
+    }
+
+    private function shipSchema(): array
+    {
+        return json_decode(file_get_contents(base_path('docs/api/spacetraders-openapi-2.3.0.json')), true, flags: JSON_THROW_ON_ERROR);
+    }
+
+    private function resolveSchema(array $node, array $schema): array
+    {
+        while (isset($node['$ref'])) {
+            $node = $schema['components']['schemas'][basename($node['$ref'])];
+        }
+
+        return $node;
+    }
+
+    private function schemaLeaves(array $node, array $schema, string $path = ''): array
+    {
+        $node = $this->resolveSchema($node, $schema);
+        if ($node['type'] === 'array') {
+            return $this->schemaLeaves($node['items'], $schema, $path.'[]');
+        }
+        if ($node['type'] !== 'object') {
+            return [$path => $node['type']];
+        }
+        $leaves = [];
+        foreach ($node['properties'] as $key => $child) {
+            $leaves += $this->schemaLeaves($child, $schema, $path === '' ? $key : $path.'.'.$key);
+        }
+
+        return $leaves;
+    }
+
+    private function projectionLeaves(array|string $projection, string $path = ''): array
+    {
+        if (is_string($projection)) {
+            return [$path => $projection];
+        }
+        $leaves = [];
+        foreach ($projection as $key => $child) {
+            $leaves += $this->projectionLeaves($child, $key === '*' ? $path.'[]' : ($path === '' ? $key : $path.'.'.$key));
+        }
+
+        return $leaves;
+    }
+
+    private function documentedValues(mixed $value, array $node, array $schema): mixed
+    {
+        if ($value === null) {
+            return null;
+        }
+        $node = $this->resolveSchema($node, $schema);
+        if ($node['type'] === 'array') {
+            return array_map(fn ($child) => $this->documentedValues($child, $node['items'], $schema), $value);
+        }
+        if ($node['type'] !== 'object') {
+            return $value;
+        }
+        $result = [];
+        foreach ($value as $key => $child) {
+            if (isset($node['properties'][$key])) {
+                $result[$key] = $this->documentedValues($child, $node['properties'][$key], $schema);
+            }
+        }
+
+        return $result;
+    }
+
+    private function observedSchemaLeaves(mixed $value, array $node, array $schema, string $path = ''): array
+    {
+        if ($value === null) {
+            return [];
+        }
+        $node = $this->resolveSchema($node, $schema);
+        if ($node['type'] !== 'object' && $node['type'] !== 'array') {
+            return [$path => true];
+        }
+        $leaves = [];
+        foreach ($value as $key => $child) {
+            if ($node['type'] === 'array') {
+                $leaves += $this->observedSchemaLeaves($child, $node['items'], $schema, $path.'[]');
+            } elseif (isset($node['properties'][$key])) {
+                $leaves += $this->observedSchemaLeaves($child, $node['properties'][$key], $schema, $path === '' ? $key : $path.'.'.$key);
+            }
+        }
+
+        return $leaves;
+    }
+
+    private function unknownValues(mixed $value, array $node, array $schema): array
+    {
+        $node = $this->resolveSchema($node, $schema);
+        $unknown = [];
+        if (! is_array($value)) {
+            return [];
+        }
+        foreach ($value as $key => $child) {
+            if ($node['type'] === 'array') {
+                $unknown = array_merge($unknown, $this->unknownValues($child, $node['items'], $schema));
+            } elseif (isset($node['properties'][$key])) {
+                $unknown = array_merge($unknown, $this->unknownValues($child, $node['properties'][$key], $schema));
+            } else {
+                $this->assertIsString($child);
+                $unknown[] = $child;
+            }
+        }
+
+        return $unknown;
     }
 
     public function test_no_grant_and_no_episode_have_empty_props_and_actions_do_not_create_authority(): void

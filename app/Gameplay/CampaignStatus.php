@@ -16,6 +16,54 @@ use Illuminate\Support\Str;
 
 class CampaignStatus
 {
+    private const REQUIREMENTS = ['power' => 'integer', 'crew' => 'integer', 'slots' => 'integer'];
+
+    private const COMPONENT = [
+        'symbol' => 'string', 'name' => 'string', 'description' => 'string',
+        'condition' => 'number', 'integrity' => 'number', 'quality' => 'number',
+        'requirements' => self::REQUIREMENTS,
+    ];
+
+    private const ROUTE_WAYPOINT = [
+        'symbol' => 'string', 'type' => 'string', 'systemSymbol' => 'string', 'x' => 'integer', 'y' => 'integer',
+    ];
+
+    public const SHIP_DETAILS = [
+        'symbol' => 'string',
+        'registration' => ['name' => 'string', 'factionSymbol' => 'string', 'role' => 'string'],
+        'nav' => [
+            'systemSymbol' => 'string', 'waypointSymbol' => 'string', 'status' => 'string', 'flightMode' => 'string',
+            'route' => [
+                'origin' => self::ROUTE_WAYPOINT, 'destination' => self::ROUTE_WAYPOINT,
+                'departureTime' => 'string', 'arrival' => 'string',
+            ],
+        ],
+        'crew' => [
+            'current' => 'integer', 'required' => 'integer', 'capacity' => 'integer',
+            'rotation' => 'string', 'morale' => 'integer', 'wages' => 'integer',
+        ],
+        'frame' => self::COMPONENT + ['moduleSlots' => 'integer', 'mountingPoints' => 'integer', 'fuelCapacity' => 'integer'],
+        'reactor' => self::COMPONENT + ['powerOutput' => 'integer'],
+        'engine' => self::COMPONENT + ['speed' => 'integer'],
+        'cooldown' => [
+            'shipSymbol' => 'string', 'totalSeconds' => 'integer', 'remainingSeconds' => 'integer',
+            'expiration' => 'string', 'readyAt' => 'string',
+        ],
+        'mounts' => ['*' => [
+            'symbol' => 'string', 'name' => 'string', 'description' => 'string', 'strength' => 'integer',
+            'deposits' => ['*' => 'string'], 'requirements' => self::REQUIREMENTS,
+        ]],
+        'modules' => ['*' => [
+            'symbol' => 'string', 'name' => 'string', 'description' => 'string',
+            'capacity' => 'integer', 'range' => 'integer', 'requirements' => self::REQUIREMENTS,
+        ]],
+        'cargo' => [
+            'capacity' => 'integer', 'units' => 'integer',
+            'inventory' => ['*' => ['symbol' => 'string', 'name' => 'string', 'description' => 'string', 'units' => 'integer']],
+        ],
+        'fuel' => ['current' => 'integer', 'capacity' => 'integer', 'consumed' => ['amount' => 'integer', 'timestamp' => 'string']],
+    ];
+
     public function authority(): array
     {
         $grant = CampaignGrant::where('slot', 1)->first() ?? CampaignGrant::latest('id')->first();
@@ -38,6 +86,11 @@ class CampaignStatus
         $loads = $episode ? CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])->latest('id')->limit(15)->get() : collect();
         $loadRuns = AutomationRun::whereIn('id', $loads->pluck('data.run_id')->filter())->get()->keyBy('id');
         $ships = $agent ? Ship::where('agent_id', $agent->id)->orderBy('symbol')->get() : collect();
+        $unlistedFields = [];
+        foreach ($ships as $ship) {
+            $unlistedFields[$ship->id] = [];
+            $ship->snapshot = $this->projectShipValue($ship->snapshot, self::SHIP_DETAILS, '', $unlistedFields[$ship->id]);
+        }
         $roles = array_flip(Arr::only($episode?->state['role_ships'] ?? [], ['command', 'probe']));
         $locations = $ships->unique(fn ($ship) => $ship->snapshot['nav']['systemSymbol'] ?? null)
             ->flatMap(fn ($ship) => collect(app(SystemMapKnowledge::class)->forShip($agent, $ship)['locations'])
@@ -93,6 +146,9 @@ class CampaignStatus
                     'summary' => $this->eventSummary($event)])->all() : [],
             'ships' => $ships
                 ->map(fn ($ship) => ['symbol' => $ship->symbol,
+                    'observed_at' => $ship->observed_at?->toIso8601String(),
+                    'details' => $ship->snapshot,
+                    'unlisted_fields' => $unlistedFields[$ship->id],
                     'role' => $roles[$ship->symbol] ?? 'fleet',
                     'waypoint' => $ship->snapshot['nav']['waypointSymbol'] ?? null, 'nav_status' => $ship->snapshot['nav']['status'] ?? null,
                     'nav' => [
@@ -115,6 +171,57 @@ class CampaignStatus
                     'fuel' => ['current' => $ship->snapshot['fuel']['current'] ?? null, 'capacity' => $ship->snapshot['fuel']['capacity'] ?? null],
                     'cargo' => ['units' => $ship->snapshot['cargo']['units'] ?? null, 'capacity' => $ship->snapshot['cargo']['capacity'] ?? null]])->values()->all(),
         ];
+    }
+
+    private function projectShipValue(mixed $value, array|string $projection, string $path, array &$unlisted): mixed
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_string($projection)) {
+            $valid = match ($projection) {
+                'string' => is_string($value),
+                'integer' => is_int($value),
+                'number' => (is_int($value) || is_float($value)) && is_finite((float) $value),
+            };
+            if ($valid) {
+                return $value;
+            }
+            $this->unlistedShipPaths($value, $path, $unlisted);
+
+            return null;
+        }
+
+        if (! is_array($value) || (isset($projection['*']) ? ! array_is_list($value) : ($value !== [] && array_is_list($value)))) {
+            $this->unlistedShipPaths($value, $path, $unlisted);
+
+            return null;
+        }
+
+        $result = [];
+        foreach ($value as $key => $child) {
+            $childPath = is_int($key) ? $path.'['.$key.']' : ($path === '' ? $key : $path.'.'.$key);
+            if (isset($projection['*'])) {
+                $result[] = $this->projectShipValue($child, $projection['*'], $childPath, $unlisted);
+            } elseif (array_key_exists($key, $projection)) {
+                $result[$key] = $this->projectShipValue($child, $projection[$key], $childPath, $unlisted);
+            } else {
+                $this->unlistedShipPaths($child, $childPath, $unlisted);
+            }
+        }
+
+        return $result;
+    }
+
+    private function unlistedShipPaths(mixed $value, string $path, array &$unlisted): void
+    {
+        $unlisted[] = $path;
+        if (is_array($value)) {
+            foreach ($value as $key => $child) {
+                $this->unlistedShipPaths($child, is_int($key) ? $path.'['.$key.']' : $path.'.'.$key, $unlisted);
+            }
+        }
     }
 
     private function eventSummary(CampaignEvent $event): string
