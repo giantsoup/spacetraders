@@ -73,11 +73,13 @@ class ArmDirectorTest extends TestCase
 
     public function test_arm_directs_only_its_own_ship_and_its_runs_carry_the_arm_episode(): void
     {
-        $c0 = $this->c0();
-        $c0Run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        // The fake world has one pair. The arm decides first; C0 uses its claims rollback flag so both trade it.
+        config(['gameplay.campaign_claims' => false]);
         $arm = $this->arm('T1b', 'LOCAL-3');
         $this->assertTrue($arm->available());
         $this->assertTrue(app(CampaignDirector::class)->tickArms());
+        $c0 = $this->c0();
+        $c0Run = AutomationRun::where('ship_symbol', 'LOCAL-1')->whereNotNull('active_agent_id')->firstOrFail();
         $episode = CampaignEpisode::where('campaign_grant_id', $arm->id)->firstOrFail();
         $this->assertSame('earn', $episode->phase);
         $this->assertSame('T1b', $episode->state['arm']);
@@ -97,7 +99,8 @@ class ArmDirectorTest extends TestCase
         $this->assertSame(['LOCAL-1', 'LOCAL-2'], app(CampaignFleet::class)->symbols($c0Episode->fresh()));
         $this->assertFalse(AutomationRun::where('campaign_episode_id', $c0Episode->id)->where('ship_symbol', 'LOCAL-3')->exists());
         $this->assertNull($c0->fresh()->paused_at);
-        // The next arm pass is throttled for 30 s per arm grant.
+        // The next arm pass is throttled for 30 s per arm grant (c0() travelled 62 s, so pass time back).
+        app(CampaignDirector::class)->tickArms();
         $this->assertFalse(app(CampaignDirector::class)->tickArms());
     }
 
@@ -105,6 +108,8 @@ class ArmDirectorTest extends TestCase
     public function test_c0_decision_is_the_same_with_an_arm_active(bool $withArm): void
     {
         if ($withArm) {
+            // With claims on, C0 would skip the arm's pair; the rollback flag restores pure v1 ranking.
+            config(['gameplay.campaign_claims' => false]);
             $this->arm('T1b', 'LOCAL-3');
             app(CampaignDirector::class)->tickArms();
             $this->assertTrue(AutomationRun::where('ship_symbol', 'LOCAL-3')->whereNotNull('active_agent_id')->exists());
@@ -114,6 +119,19 @@ class ArmDirectorTest extends TestCase
         $run = AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('active_agent_id')->firstOrFail();
         $this->assertSame(['LOCAL-1', 'trade', 'IRON_ORE', 'X1-TEST-PORT', 'X1-TEST-ROCK', 3, 100],
             [$run->ship_symbol, $run->strategy, $run->plan['symbol'], $run->plan['market'], $run->plan['site'], $run->plan['units'], $run->plan['max_inventory']]);
+    }
+
+    public function test_c0_skips_a_pair_an_arm_has_claimed(): void
+    {
+        $this->arm('T1b', 'LOCAL-3');
+        app(CampaignDirector::class)->tickArms();
+        $this->assertTrue(AutomationRun::where('ship_symbol', 'LOCAL-3')->whereNotNull('active_agent_id')->exists());
+        $c0 = $this->c0();
+        $episode = CampaignEpisode::where('campaign_grant_id', $c0->id)->firstOrFail();
+        $this->assertFalse(AutomationRun::where('campaign_episode_id', $episode->id)->where('strategy', 'trade')->whereNotNull('active_agent_id')->exists());
+        $decision = CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'decision')->latest('id')->firstOrFail();
+        $this->assertArrayHasKey('Claimed by another ship.', $decision->data['rejections']);
+        $this->assertNull($c0->fresh()->paused_at);
     }
 
     public static function withArm(): array
@@ -214,9 +232,9 @@ class ArmDirectorTest extends TestCase
 
     public function test_revoke_arm_stops_its_run_and_campaign_revoke_includes_arms(): void
     {
-        $c0 = $this->c0();
         $arm = $this->arm('T1b', 'LOCAL-3');
         app(CampaignDirector::class)->tickArms();
+        $c0 = $this->c0();
         $run = AutomationRun::where('ship_symbol', 'LOCAL-3')->whereNotNull('active_agent_id')->firstOrFail();
         app(CampaignControl::class)->revokeArm($arm);
         $this->assertNotNull($arm->fresh()->revoked_at);

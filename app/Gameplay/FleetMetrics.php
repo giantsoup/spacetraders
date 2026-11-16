@@ -74,10 +74,10 @@ class FleetMetrics
             self::$pending[$kind][$ship][$field]++;
             if (! self::$hooked) {
                 self::$hooked = true;
-                self::$flushedAt ??= microtime(true);
+                self::$flushedAt ??= (float) now()->getTimestamp();
                 register_shutdown_function(fn () => self::flush());
             }
-            if (microtime(true) - self::$flushedAt >= 30) {
+            if ((float) now()->getTimestamp() - self::$flushedAt >= 30) {
                 self::flush();
             }
         } catch (\Throwable) {
@@ -88,7 +88,7 @@ class FleetMetrics
     {
         $pending = self::$pending;
         self::$pending = [];
-        self::$flushedAt = microtime(true);
+        self::$flushedAt = (float) now()->getTimestamp();
         if ($pending === []) {
             return;
         }
