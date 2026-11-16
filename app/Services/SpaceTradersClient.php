@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Gameplay\CampaignRegistrationFailure;
+use App\Gameplay\FleetMetrics;
 use App\Gameplay\GameException;
 use App\Gameplay\RequestBudget;
 use App\Gameplay\RequestDeferred;
@@ -92,6 +93,7 @@ class SpaceTradersClient
             }
             $options['query'] = implode('&', $pairs);
         }
+        FleetMetrics::count($method, $path);
         $response = $request->send(strtoupper($method), $path, $options);
         $budget = app(RequestBudget::class);
         try {
