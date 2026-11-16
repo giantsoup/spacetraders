@@ -140,10 +140,10 @@ class ShipCommandExecutor
         return $action->refresh();
     }
 
-    public function clear(Agent $agent, ?int $except = null, bool $defer = false): void
+    public function clear(Agent $agent, ?int $except = null, bool $defer = false, ?string $ship = null): void
     {
         $others = ShipAction::where('agent_id', $agent->id)->when($except, fn ($q) => $q->whereKeyNot($except));
-        if ((clone $others)->where(fn ($q) => $q->where('state', 'uncertain')->orWhere('review_required', true))->exists()) {
+        if ((clone $others)->where(fn ($q) => $q->where('state', 'uncertain')->orWhere(fn ($q) => self::reviewFor($q, $ship)))->exists()) {
             throw new GameException('An action is pending, uncertain or requires review. Settle it before another command.');
         }
         if ((clone $others)->whereIn('state', ['pending', 'sending'])->exists()) {
@@ -152,6 +152,12 @@ class ShipCommandExecutor
         if (! $agent->canonical_identity || Agent::where('name', $agent->name)->where('reset_id', $agent->reset_id)->whereKeyNot($agent->id)->exists()) {
             throw new GameException('Agent identity is not unique. Synchronize or resolve duplicate imports first.');
         }
+    }
+
+    // A price review holds only its own ship for automation; a review without a ship (contracts) or a manual command holds the agent.
+    public static function reviewFor($query, ?string $ship): void
+    {
+        $query->where('review_required', true)->when($ship !== null, fn ($q) => $q->where(fn ($q) => $q->where('ship_symbol', $ship)->orWhereNull('ship_symbol')->orWhere('ship_symbol', '')));
     }
 
     public function execute(int $id): void
@@ -181,7 +187,7 @@ class ShipCommandExecutor
             $received = false;
             try {
                 $this->gate->check($action->engine_session_id);
-                $this->clear($agent, $action->id, defer: $run !== null);
+                $this->clear($agent, $action->id, defer: $run !== null, ship: $run ? $action->ship_symbol : null);
                 if ($action->reset_id !== $agent->reset_id || $action->expires_at->isPast() || ($run && ($run->stop_requested_at || $run->expires_at->isPast() || ! $run->active_agent_id))) {
                     throw new GameException('Intent expired, reset or stopped before execution.');
                 }
