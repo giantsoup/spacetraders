@@ -40,30 +40,40 @@ class FuelPlanner
             $candidates[] = ['continuation' => $destination, 'continuation_fuel' => 0, 'required_fuel' => $outbound + $fuelReserve,
                 'refuel_ceiling' => 0, 'fuel_price_at' => null, 'arrival_state' => 'Sell-only recovery; onboard fuel covers delivery plus reserve.'];
         }
-        foreach ($onboardOnly ? [] : GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->get() as $quote) {
-            if (! empty($quote->data['invalidated_by_action']) || $quote->observed_at->lt(now()->subSeconds(config('gameplay.snapshot_seconds')))) {
-                continue;
+        $quotes = $onboardOnly ? [] : GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->get();
+        foreach ([false, true] as $stale) {
+            if ($candidates !== []) {
+                break;
             }
-            $seller = $points->get($quote->symbol)?->data;
-            $fuel = collect($quote->data['tradeGoods'] ?? [])->firstWhere('symbol', 'FUEL');
-            if (! $seller || $seller['systemSymbol'] !== $to['systemSymbol'] || ! $fuel || $fuel['purchasePrice'] < 1 || $fuel['tradeVolume'] < 1) {
-                continue;
-            }
-            $listing = $listings->get($quote->symbol);
-            if ($listing && ! in_array('FUEL', array_column(array_merge($listing->data['exports'], $listing->data['exchange']), 'symbol'), true)) {
-                continue;
-            }
-            try {
-                $continuation = $this->units($agent, $ship, $to, $seller, $policy);
-            } catch (GameException) {
-                continue;
-            }
-            $required = $outbound + $continuation + $fuelReserve;
-            // Whole market units and a 2x allowance bound cost, pending observed billing rules.
-            $cost = (int) ceil($ship['fuel']['capacity'] / 100) * $fuel['purchasePrice'] * 2;
-            if ($required <= $ship['fuel']['current'] && $required <= $ship['fuel']['capacity'] && $agent->credits - $cost >= $creditReserve) {
-                $candidates[] = ['continuation' => $seller['symbol'], 'continuation_fuel' => $continuation, 'required_fuel' => $required,
-                    'refuel_ceiling' => $cost, 'fuel_price_at' => $quote->observed_at->toIso8601String(), 'arrival_state' => 'IN_ORBIT; dock and refresh fuel quote before refueling'];
+            foreach ($quotes as $quote) {
+                $fresh = $quote->observed_at->gte(now()->subSeconds(config('gameplay.snapshot_seconds')));
+                if (! empty($quote->data['invalidated_by_action']) || ($stale
+                    ? $fresh || $quote->observed_at->lt(now()->subSeconds(config('gameplay.fuel_quote_max_seconds', 21600)))
+                    : ! $fresh)) {
+                    continue;
+                }
+                $seller = $points->get($quote->symbol)?->data;
+                $fuel = collect($quote->data['tradeGoods'] ?? [])->firstWhere('symbol', 'FUEL');
+                if (! $seller || $seller['systemSymbol'] !== $to['systemSymbol'] || ! $fuel || $fuel['purchasePrice'] < 1 || $fuel['tradeVolume'] < 1) {
+                    continue;
+                }
+                $listing = $listings->get($quote->symbol);
+                if ($listing && ! in_array('FUEL', array_column(array_merge($listing->data['exports'], $listing->data['exchange']), 'symbol'), true)) {
+                    continue;
+                }
+                try {
+                    $continuation = $this->units($agent, $ship, $to, $seller, $policy);
+                } catch (GameException) {
+                    continue;
+                }
+                $required = $outbound + $continuation + $fuelReserve;
+                // Whole market units and a 2x allowance bound cost, pending observed billing rules.
+                $cost = (int) ceil($ship['fuel']['capacity'] / 100) * $fuel['purchasePrice'] * 2 * ($stale ? 2 : 1);
+                if ($required <= $ship['fuel']['current'] && $required <= $ship['fuel']['capacity'] && $agent->credits - $cost >= $creditReserve) {
+                    $candidates[] = ['continuation' => $seller['symbol'], 'continuation_fuel' => $continuation, 'required_fuel' => $required,
+                        'refuel_ceiling' => $cost, 'fuel_price_at' => $quote->observed_at->toIso8601String(), 'arrival_state' => 'IN_ORBIT; dock and refresh fuel quote before refueling']
+                        + ($stale ? ['fuel_price_stale' => true] : []);
+                }
             }
         }
         if ($candidates === []) {

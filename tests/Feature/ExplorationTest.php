@@ -430,7 +430,7 @@ class ExplorationTest extends TestCase
         $this->assertTrue(ExplorationPolicy::traitsKnown($point->data));
     }
 
-    public function test_stale_continuation_price_and_foreign_or_old_reset_target_cannot_authorize_exploration(): void
+    public function test_expired_continuation_price_and_foreign_or_old_reset_target_cannot_authorize_exploration(): void
     {
         $target = GameObservation::where('kind', 'waypoint')->where('symbol', self::TARGET)->firstOrFail();
         $target->update(['reset_id' => 'previous-world']);
@@ -448,10 +448,10 @@ class ExplorationTest extends TestCase
             $this->assertStringContainsString('known candidate', $e->getMessage());
         }
         $target->update(['agent_id' => $this->agent->id]);
-        GameObservation::where('kind', 'market')->update(['observed_at' => now()->subHour()]);
+        GameObservation::where('kind', 'market')->update(['observed_at' => now()->subHours(7)]);
         try {
             $this->preview();
-            $this->fail('Stale continuation fuel quote accepted.');
+            $this->fail('Expired continuation fuel quote accepted.');
         } catch (GameException $e) {
             $this->assertStringContainsString('fuel-safe continuation', $e->getMessage());
         }

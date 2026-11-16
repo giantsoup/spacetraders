@@ -180,7 +180,7 @@ class OpportunityTest extends TestCase
         app(FuelPlanner::class)->leg($this->agent->fresh(), $ship, 'X1-TEST-PORT');
     }
 
-    public function test_fuel_safety_requires_fresh_prices_affordability_and_explicit_uncertainty_fuel(): void
+    public function test_fuel_safety_requires_bounded_prices_affordability_and_explicit_uncertainty_fuel(): void
     {
         app(AgentSynchronizer::class)->sync($this->agent);
         $ship = FakeSpaceTraders::ship();
@@ -191,6 +191,10 @@ class OpportunityTest extends TestCase
         $this->assertNull($plan['estimated_seconds']);
         $this->assertSame('X1-TEST-ROCK', $plan['continuation']);
         $this->travel(181)->seconds();
+        $stale = app(FuelPlanner::class)->leg($this->agent->fresh(), $ship, 'X1-TEST-PORT');
+        $this->assertTrue($stale['fuel_price_stale']);
+        $this->assertSame(20, $stale['refuel_ceiling']);
+        $this->travel(6)->hours();
         $this->expectException(GameException::class);
         app(FuelPlanner::class)->leg($this->agent->fresh(), $ship, 'X1-TEST-PORT');
     }

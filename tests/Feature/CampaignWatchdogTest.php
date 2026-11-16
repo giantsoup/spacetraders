@@ -7,6 +7,9 @@ use App\Gameplay\CampaignHealth;
 use App\Gameplay\CampaignNotifier;
 use App\Gameplay\CampaignPlaybook;
 use App\Gameplay\Engine\EngineHost;
+use App\Models\Agent;
+use App\Models\AutomationRun;
+use App\Models\CampaignEpisode;
 use App\Models\CampaignGrant;
 use App\Models\LocalEngine;
 use App\Models\User;
@@ -106,6 +109,33 @@ class CampaignWatchdogTest extends TestCase
         $this->assertNull($grant->fresh()->paused_at);
         app(CampaignControl::class)->event($grant, null, 'recovery_result', ['run_id' => 1]);
         $this->assertSame([], app(CampaignHealth::class)->problems());
+    }
+
+    public function test_repeated_recovery_starts_do_not_mask_sixty_minutes_without_progress(): void
+    {
+        $this->partialMock(CampaignNotifier::class)->shouldReceive('toast')->twice();
+        $grant = CampaignGrant::where('slot', 1)->firstOrFail();
+        $agent = Agent::create(['user_id' => $grant->user_id, 'name' => 'LOCAL', 'token' => 'synthetic-only', 'faction' => 'VOID', 'reset_id' => 'synthetic-reset']);
+        $episode = CampaignEpisode::create(['campaign_grant_id' => $grant->id, 'agent_id' => $agent->id,
+            'reset_id' => $agent->reset_id, 'start_credits' => 100000, 'phase' => 'earn', 'opened_at' => now(), 'next_reset_at' => now()->addDay()]);
+        for ($attempt = 0; $attempt < 6; $attempt++) {
+            $this->travel(10)->minutes();
+            AutomationRun::create(['agent_id' => $agent->id, 'campaign_episode_id' => $episode->id,
+                'reset_id' => $agent->reset_id, 'ship_symbol' => 'LOCAL-1', 'strategy' => 'sell_aboard',
+                'state' => 'stopped', 'started_at' => now(), 'expires_at' => now()->addHour(), 'plan' => [], 'totals' => ['sale_proceeds' => 0, 'credit_delta' => 0]]);
+        }
+        EngineFixture::healthy();
+        $grant->update(['last_directed_at' => now()]);
+
+        $this->assertArrayHasKey('campaign_progress_stalled:'.$grant->id, app(CampaignHealth::class)->problems());
+        $this->artisan('campaign:watchdog')->assertFailed();
+        $this->assertStringContainsString('campaign_progress_stalled', file_get_contents($this->log));
+        $this->assertNull($grant->fresh()->paused_at);
+
+        app(CampaignControl::class)->event($grant, $episode, 'recovery_result', ['run_id' => 6]);
+        $this->assertSame([], app(CampaignHealth::class)->problems());
+        $this->artisan('campaign:watchdog')->assertSuccessful();
+        Http::assertNothingSent();
     }
 
     public function test_no_webhook_still_logs_and_toasts_once_then_repeats_and_recovers(): void

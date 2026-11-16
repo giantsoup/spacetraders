@@ -219,7 +219,7 @@ class CampaignAutopilotTest extends TestCase
         $this->assertNull($grant->fresh()->paused_at);
     }
 
-    public function test_stale_delivery_quotes_never_block_free_commands_and_purchases_fall_back_to_the_planned_fuel(): void
+    public function test_expired_delivery_quotes_never_block_free_commands_and_purchases_fall_back_to_the_planned_fuel(): void
     {
         $this->tradeGrant(1000);
         $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
@@ -228,7 +228,7 @@ class CampaignAutopilotTest extends TestCase
         $this->assertGreaterThan(0, Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot['cargo']['units']);
         $this->editWorld(fn (&$world) => $world['ships'][] = FakeSpaceTraders::ship('LOCAL-3'));
         app(AgentSynchronizer::class)->sync($this->agent);
-        GameObservation::where('kind', 'market')->update(['observed_at' => now()->subHour()]);
+        GameObservation::where('kind', 'market')->update(['observed_at' => now()->subHours(7)]);
 
         $orbit = app(ShipCommandExecutor::class)->preview($this->agent->fresh(), 'LOCAL-3', 'orbit', [], 'stale-free-orbit');
         $this->assertSame('preview', $orbit->state->value);
@@ -262,7 +262,7 @@ class CampaignAutopilotTest extends TestCase
         $this->assertGreaterThanOrEqual($fresh->before_state['estimate']['protected_in_flight'], $stale->before_state['estimate']['protected_in_flight']);
     }
 
-    public function test_stale_recovery_without_a_planned_allowance_refuses_only_spending(): void
+    public function test_expired_recovery_without_a_planned_allowance_refuses_only_spending(): void
     {
         $this->tradeGrant(1000);
         $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
@@ -273,7 +273,7 @@ class CampaignAutopilotTest extends TestCase
         $run->update(['strategy' => 'sell_aboard', 'plan' => $plan]);
         $this->editWorld(fn (&$world) => $world['ships'][] = FakeSpaceTraders::ship('LOCAL-3'));
         app(AgentSynchronizer::class)->sync($this->agent);
-        GameObservation::where('kind', 'market')->update(['observed_at' => now()->subHour()]);
+        GameObservation::where('kind', 'market')->update(['observed_at' => now()->subHours(7)]);
         $before = count(json_decode(file_get_contents($this->file), true)['calls'] ?? []);
         $orbit = app(ShipCommandExecutor::class)->preview($this->agent->fresh(), 'LOCAL-3', 'orbit', [], 'recovery-free-orbit');
         $this->assertSame('preview', $orbit->state->value);
@@ -972,6 +972,28 @@ class CampaignAutopilotTest extends TestCase
         $wait = $control->event($grant, null, 'wait', ['reason' => 'awaiting_fresh_state']);
         $this->assertSame($wait->id, $control->event($grant, null, 'wait', ['reason' => 'awaiting_fresh_state'])->id);
         $this->artisan('campaign:status')->doesntExpectOutputToContain('candidates')->assertSuccessful();
+    }
+
+    #[DataProvider('decisionRunIds')]
+    public function test_decision_deduplication_respects_the_run_id(?int $firstRun, ?int $secondRun, bool $deduplicated): void
+    {
+        $grant = $this->approve();
+        $this->tick();
+        $episode = CampaignEpisode::firstOrFail();
+        $control = app(CampaignControl::class);
+        $count = CampaignEvent::where('kind', 'decision')->count();
+        $first = $control->event($grant, $episode, 'decision', ['choice' => 'sell_aboard', 'run_id' => $firstRun]);
+        $second = $control->event($grant, $episode, 'decision', ['choice' => 'sell_aboard', 'run_id' => $secondRun]);
+
+        $this->assertSame($deduplicated, $first->id === $second->id);
+        $this->assertSame($count + ($deduplicated ? 1 : 2), CampaignEvent::where('kind', 'decision')->count());
+        $this->assertSame($secondRun, $second->data['run_id']);
+    }
+
+    public static function decisionRunIds(): array
+    {
+        return ['different runs' => [1, 2, false], 'same run' => [1, 1, true],
+            'missing then present' => [null, 1, false], 'both missing' => [null, null, true]];
     }
 
     public function test_director_crashes_do_not_block_dispatch_and_five_consecutive_failures_pause(): void
@@ -1812,6 +1834,145 @@ class CampaignAutopilotTest extends TestCase
         $this->assertDatabaseMissing('ship_actions', ['automation_run_id' => $run->id, 'command' => 'buy']);
     }
 
+    #[DataProvider('navigationWaypointCache')]
+    public function test_automated_navigation_refreshes_only_missing_or_stale_waypoints(?int $ageSeconds): void
+    {
+        $this->tradeGrant();
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        for ($step = 0; $step < 10; $step++) {
+            app(AutomationRunner::class)->advance($run->id);
+            $action = ShipAction::where('automation_run_id', $run->id)->where('state', 'pending')->firstOrFail();
+            if ($action->command === 'navigate') {
+                break;
+            }
+            app(ShipCommandExecutor::class)->execute($action->id);
+            $this->travel(6)->seconds();
+        }
+        $this->assertSame('navigate', $action->command);
+        $symbol = $action->arguments['waypointSymbol'];
+        $point = GameObservation::where('agent_id', $this->agent->id)->where('kind', 'waypoint')->where('symbol', $symbol)->firstOrFail();
+        $observedAt = now()->subSeconds($ageSeconds ?? 0);
+        if ($ageSeconds === null) {
+            $point->delete();
+        } else {
+            $point->update(['observed_at' => $observedAt]);
+        }
+        $callsBefore = count(json_decode(file_get_contents($this->file), true)['calls']);
+
+        app(ShipCommandExecutor::class)->execute($action->id);
+
+        $this->assertSame('confirmed', $action->fresh()->state->value, json_encode($action->fresh()->outcome));
+        $calls = array_slice(json_decode(file_get_contents($this->file), true)['calls'], $callsBefore);
+        $reads = array_filter($calls, fn ($call) => $call['method'] === 'GET' && $call['path'] === '/systems/X1-TEST/waypoints/'.$symbol);
+        $this->assertCount($ageSeconds === null || $ageSeconds > 3600 ? 1 : 0, $reads);
+        $saved = GameObservation::where('agent_id', $this->agent->id)->where('kind', 'waypoint')->where('symbol', $symbol)->firstOrFail();
+        $this->assertSame(($ageSeconds === null || $ageSeconds > 3600 ? now() : $observedAt)->toDateTimeString(), $saved->observed_at->toDateTimeString());
+    }
+
+    public static function navigationWaypointCache(): array
+    {
+        return ['stale' => [3601], 'fresh' => [60], 'missing' => [null]];
+    }
+
+    #[DataProvider('recoveryAttemptHistory')]
+    public function test_recovery_pauses_only_after_consecutive_fruitless_attempts(array $history, int $limit, bool $pauses): void
+    {
+        config(['gameplay.campaign_recovery_attempts' => $limit]);
+        $grant = $this->approve();
+        $this->tick();
+        $this->editWorld(function (&$world) {
+            $world['ships'][0]['cargo'] = ['capacity' => 40, 'units' => 3, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 3]]];
+        });
+        $this->tick();
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertSame('sell_aboard', $run->strategy);
+        $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
+        $window = ['LOCAL-1' => now()->subMinutes(10)->toIso8601String()];
+        $episode->update(['state' => array_merge($episode->state, ['recovery_since' => $window, 'recovery_attempts_since' => $window])]);
+        foreach ($history as $index => $attempt) {
+            $past = $index === 0 ? $run : $run->replicate();
+            $past->fill(['active_agent_id' => null, 'state' => $attempt['state'] ?? 'stopped',
+                'ship_symbol' => $attempt['ship_symbol'] ?? 'LOCAL-1',
+                'campaign_episode_id' => array_key_exists('campaign_episode_id', $attempt) ? $attempt['campaign_episode_id'] : $episode->id,
+                'started_at' => ! empty($attempt['before_window']) ? now()->subMinutes(11) : now(),
+                'totals' => array_merge($run->totals, ['sale_proceeds' => $attempt['sale_proceeds'] ?? 0, 'credit_delta' => $attempt['credit_delta'] ?? 0])])->save();
+        }
+        $count = AutomationRun::count();
+
+        $this->tick();
+
+        $this->assertSame($pauses ? 'recovery_stalled' : null, $grant->fresh()->pause_reason);
+        $this->assertSame($count + ($pauses ? 0 : 1), AutomationRun::count());
+        $this->assertSame(! $pauses, AutomationRun::whereNotNull('active_agent_id')->exists());
+        if ($pauses) {
+            $this->assertSame('recovery_stalled', app(CampaignStatus::class)->read()['grant']['pause_reason']);
+            $this->assertArrayHasKey('campaign_paused:'.$grant->id.':recovery_stalled', app(CampaignHealth::class)->problems());
+        } else {
+            $this->assertSame('sell_aboard', AutomationRun::whereNotNull('active_agent_id')->firstOrFail()->strategy);
+        }
+    }
+
+    public function test_recovery_attempts_count_from_their_own_marker_and_resume_starts_a_fresh_window(): void
+    {
+        $grant = $this->approve();
+        $this->tick();
+        $this->editWorld(function (&$world) {
+            $world['ships'][0]['cargo'] = ['capacity' => 40, 'units' => 3, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 3]]];
+        });
+        $this->tick();
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
+        // Fruitless runs recorded before this code ran: recovery_since is old, but there is no attempts marker yet.
+        $state = $episode->fresh()->state;
+        $state['recovery_since'] = ['LOCAL-1' => now()->subHours(2)->toIso8601String()];
+        unset($state['recovery_attempts_since']);
+        $episode->update(['state' => $state]);
+        $run->fill(['active_agent_id' => null, 'state' => 'stopped', 'started_at' => now()->subHour()])->save();
+        foreach (range(1, 6) as $minutes) {
+            $run->replicate()->fill(['started_at' => now()->subMinutes($minutes)])->save();
+        }
+
+        $this->tick();
+
+        $this->assertNull($grant->fresh()->pause_reason, 'Earlier fruitless runs must not pause the first tick after deploy.');
+        $this->assertSame('sell_aboard', AutomationRun::whereNotNull('active_agent_id')->firstOrFail()->strategy);
+
+        AutomationRun::whereNotNull('active_agent_id')->update(['active_agent_id' => null, 'state' => 'stopped']);
+        $since = $episode->fresh()->state['recovery_attempts_since']['LOCAL-1'];
+        foreach (range(1, 5) as $ignored) {
+            $run->replicate()->fill(['started_at' => $since])->save();
+        }
+        $this->tick();
+        $this->assertSame('recovery_stalled', $grant->fresh()->pause_reason);
+
+        $this->travel(5)->seconds();
+        app(CampaignControl::class)->resume();
+        $this->assertArrayNotHasKey('recovery_attempts_since', $episode->fresh()->state);
+        $this->tick();
+
+        $this->assertNull($grant->fresh()->pause_reason, 'An operator resume gives recovery a fresh window.');
+        $this->assertSame('sell_aboard', AutomationRun::whereNotNull('active_agent_id')->firstOrFail()->strategy);
+    }
+
+    public static function recoveryAttemptHistory(): array
+    {
+        $four = array_fill(0, 4, []);
+
+        return [
+            'five failures pause' => [[...$four, []], 5, true],
+            'four failures start the fifth' => [$four, 5, false],
+            'blocked failures count' => [array_fill(0, 5, ['state' => 'blocked']), 5, true],
+            'sale with zero net resets streak' => [[...$four, ['sale_proceeds' => 10], ...$four], 5, false],
+            'positive credit delta resets streak' => [[...$four, ['credit_delta' => 10], ...$four], 5, false],
+            'completed run resets streak' => [[...$four, ['state' => 'completed'], ...$four], 5, false],
+            'older recovery window excluded' => [[['before_window' => true], ...$four], 5, false],
+            'other ship excluded' => [[['ship_symbol' => 'LOCAL-2'], ...$four], 5, false],
+            'other episode excluded' => [[['campaign_episode_id' => null], ...$four], 5, false],
+            'configured limit respected' => [array_fill(0, 2, []), 2, true],
+            'zero limit treated as one' => [[['state' => 'completed']], 0, false],
+        ];
+    }
+
     private function tradeWorld(): void
     {
         $this->editWorld(function (&$world) {
@@ -1967,6 +2128,7 @@ class CampaignAutopilotTest extends TestCase
         $this->tick();
         $this->assertSame('no_cargo_buyer', $grant->fresh()->pause_reason);
         $this->assertSame([], json_decode(file_get_contents($this->file), true)['writes']);
+        $this->assertArrayNotHasKey('recovery_since', CampaignEpisode::firstOrFail()->state ?? [], 'The sale-floor clock starts only once a buyer is known.');
     }
 
     public function test_director_throttle_is_durable_and_status_does_not_make_requests(): void

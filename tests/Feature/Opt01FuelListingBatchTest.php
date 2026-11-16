@@ -76,7 +76,7 @@ class Opt01FuelListingBatchTest extends TestCase
 
     public static function sellerCases(): array
     {
-        return [
+        $cases = [
             'exports' => ['exports', true], 'exchange' => ['exchange', true],
             'imports only' => ['imports', false], 'missing directory keeps fallback' => ['missing', true],
             'stale quote with fresh directory' => ['stale', false], 'freshness boundary' => ['boundary', true],
@@ -86,16 +86,26 @@ class Opt01FuelListingBatchTest extends TestCase
             'insufficient fuel' => ['fuel', false], 'exact fuel bound' => ['exact-fuel', true],
             'insufficient capacity' => ['capacity', false], 'different system' => ['system', false],
         ];
+        foreach ($cases as $name => [$case, $allowed]) {
+            if (! in_array($case, ['stale', 'boundary'], true)) {
+                $cases['stale fallback: '.$name] = [$case, $allowed, true];
+            }
+        }
+
+        return $cases;
     }
 
     #[DataProvider('sellerCases')]
-    public function test_standalone_leg_preserves_seller_freshness_and_bounds(string $case, bool $allowed): void
+    public function test_standalone_leg_preserves_seller_freshness_and_bounds(string $case, bool $allowed, bool $stale = false): void
     {
         $ship = $this->fixture(2);
         $this->listing('X1-TEST-M1')->update(['data' => ['exports' => [], 'exchange' => [], 'imports' => [['symbol' => 'FUEL']]]]);
         $listing = $this->listing('X1-TEST-M0');
         $quote = $this->quote('X1-TEST-M0');
-        $reserve = 99990;
+        $reserve = $stale ? 99980 : 99990;
+        if ($stale) {
+            $quote->update(['observed_at' => now()->subHour()]);
+        }
         if (in_array($case, ['exports', 'exchange', 'imports'], true)) {
             $listing->update(['data' => array_replace(['exports' => [], 'exchange' => [], 'imports' => []], [$case => [['symbol' => 'FUEL']]])]);
         } elseif ($case === 'missing') {
@@ -126,12 +136,103 @@ class Opt01FuelListingBatchTest extends TestCase
             $this->assertTrue($allowed, $case.' unexpectedly allowed travel');
             $this->assertSame('X1-TEST-M0', $route['continuation']);
             $this->assertSame(8, $route['required_fuel']);
-            $this->assertSame(10, $route['refuel_ceiling']);
+            $this->assertSame($stale ? 20 : 10, $route['refuel_ceiling']);
+            if ($stale) {
+                $this->assertTrue($route['fuel_price_stale']);
+            } else {
+                $this->assertArrayNotHasKey('fuel_price_stale', $route);
+            }
             $this->assertSame($quote->fresh()->observed_at->toIso8601String(), $route['fuel_price_at']);
         } catch (GameException $e) {
             $this->assertFalse($allowed, $e->getMessage());
         }
         $this->assertSame($before, GameObservation::orderBy('id')->get()->toJson());
+        Http::assertNothingSent();
+    }
+
+    #[DataProvider('staleFuelBounds')]
+    public function test_stale_fuel_fallback_keeps_onboard_fuel_credit_and_age_bounds(int $age, int $fuel, int $capacity, int $reserve, ?int $maxAge, bool $allowed): void
+    {
+        $ship = $this->fixture(2);
+        $ship['fuel'] = ['current' => $fuel, 'capacity' => $capacity];
+        $this->listing('X1-TEST-M1')->update(['data' => ['exports' => [], 'exchange' => [], 'imports' => [['symbol' => 'FUEL']]]]);
+        $quote = $this->quote('X1-TEST-M0');
+        $quote->update(['observed_at' => now()->subSeconds($age)]);
+        if ($maxAge !== null) {
+            config(['gameplay.fuel_quote_max_seconds' => $maxAge]);
+        }
+        $before = GameObservation::orderBy('id')->get()->toJson();
+        if (! $allowed) {
+            $this->expectException(GameException::class);
+            $this->expectExceptionMessage('No fuel-safe continuation to a verified affordable fuel seller.');
+        }
+
+        $route = app(FuelPlanner::class)->leg($this->agent, $ship, 'X1-TEST-M1', $reserve);
+
+        $this->assertSame('X1-TEST-M0', $route['continuation']);
+        $this->assertSame(8, $route['required_fuel']);
+        $this->assertTrue($route['fuel_price_stale']);
+        $this->assertSame(20, $route['refuel_ceiling']);
+        $this->assertSame($quote->observed_at->toIso8601String(), $route['fuel_price_at']);
+        $this->assertSame($before, GameObservation::orderBy('id')->get()->toJson());
+        Http::assertNothingSent();
+    }
+
+    public static function staleFuelBounds(): array
+    {
+        return [
+            'one hour old and exact credit allowance' => [3600, 100, 100, 99980, null, true],
+            'exact onboard fuel' => [3600, 8, 100, 99980, null, true],
+            'not enough onboard fuel' => [3600, 7, 100, 0, null, false],
+            'not enough capacity' => [3600, 100, 7, 0, null, false],
+            'doubled cost violates reserve' => [3600, 100, 100, 99981, null, false],
+            'seven hours old' => [25200, 100, 100, 0, null, false],
+            'six hour boundary' => [21600, 100, 100, 0, null, true],
+            'beyond six hour boundary' => [21601, 100, 100, 0, null, false],
+            'configured age bound' => [3600, 100, 100, 0, 1800, false],
+        ];
+    }
+
+    public function test_fresh_fuel_continuations_win_even_when_a_stale_seller_needs_less_fuel(): void
+    {
+        $ship = $this->fixture(2);
+        $stale = $this->quote('X1-TEST-M1');
+        $stale->update(['observed_at' => now()->subHour()]);
+
+        $route = app(FuelPlanner::class)->leg($this->agent, $ship, 'X1-TEST-M1');
+
+        $this->assertSame('X1-TEST-M0', $route['continuation']);
+        $this->assertSame(8, $route['required_fuel']);
+        $this->assertSame(10, $route['refuel_ceiling']);
+        $this->assertArrayNotHasKey('fuel_price_stale', $route);
+        $this->assertSame([], $route['alternatives']);
+
+        $fresh = $this->quote('X1-TEST-M0');
+        $fresh->update(['data' => $fresh->data + ['invalidated_by_action' => 1]]);
+        $fallback = app(FuelPlanner::class)->leg($this->agent, $ship, 'X1-TEST-M1');
+        $this->assertSame('X1-TEST-M1', $fallback['continuation']);
+        $this->assertSame(5, $fallback['required_fuel']);
+        $this->assertSame(20, $fallback['refuel_ceiling']);
+        $this->assertTrue($fallback['fuel_price_stale']);
+        $this->assertSame($stale->observed_at->toIso8601String(), $fallback['fuel_price_at']);
+        Http::assertNothingSent();
+    }
+
+    public function test_stale_price_allowance_scales_with_the_full_tank_and_preserves_onboard_only_recovery(): void
+    {
+        $ship = $this->fixture(2);
+        $ship['fuel'] = ['capacity' => 400, 'current' => 304];
+        GameObservation::where('kind', 'market')->update(['observed_at' => now()->subHour()]);
+        $route = app(FuelPlanner::class)->leg($this->agent, $ship, 'X1-TEST-M1');
+        $this->assertSame(80, $route['refuel_ceiling']);
+        $this->assertTrue($route['fuel_price_stale']);
+
+        $onboard = app(FuelPlanner::class)->leg($this->agent, $ship, 'X1-TEST-M1', onboardOnly: true);
+        $this->assertSame('X1-TEST-M1', $onboard['continuation']);
+        $this->assertSame(5, $onboard['required_fuel']);
+        $this->assertSame(0, $onboard['refuel_ceiling']);
+        $this->assertNull($onboard['fuel_price_at']);
+        $this->assertArrayNotHasKey('fuel_price_stale', $onboard);
         Http::assertNothingSent();
     }
 
@@ -148,6 +249,8 @@ class Opt01FuelListingBatchTest extends TestCase
         GameObservation::where('kind', 'market_listing')->delete();
         $this->assertNotEmpty($planner->options($this->agent, $ship, 'X1-TEST-M1'));
         $this->travel(161)->seconds();
+        $this->assertCount(1, $planner->options($this->agent, $ship, 'X1-TEST-M1'));
+        $this->travel(6)->hours();
         $this->assertSame([], $planner->options($this->agent, $ship, 'X1-TEST-M1'));
     }
 
@@ -167,6 +270,10 @@ class Opt01FuelListingBatchTest extends TestCase
             $this->assertStringContainsString('affordable fuel seller', $e->getMessage());
         }
         $this->travel(161)->seconds();
+        $stale = $planner->leg($this->agent, $ship, 'X1-TEST-M1', listings: $listings);
+        $this->assertTrue($stale['fuel_price_stale']);
+        $this->assertSame(20, $stale['refuel_ceiling']);
+        $this->travel(6)->hours();
         $this->expectException(GameException::class);
         $this->expectExceptionMessage('affordable fuel seller');
         $planner->leg($this->agent, $ship, 'X1-TEST-M1', listings: $listings);
