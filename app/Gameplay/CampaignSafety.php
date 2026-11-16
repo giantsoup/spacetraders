@@ -30,7 +30,7 @@ class CampaignSafety
             ->orderByDesc('data->finished_at')->orderByDesc('id')->limit($limit)->pluck('data');
         $consecutive = 0;
         foreach ($results as $result) {
-            if (! $result['losing']) {
+            if (! CampaignTrade::losing($result)) {
                 break;
             }
             $consecutive++;

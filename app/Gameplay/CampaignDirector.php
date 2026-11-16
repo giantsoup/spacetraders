@@ -198,6 +198,7 @@ class CampaignDirector
                 if ($run) {
                     if ($episode->phase === 'earn' && ! app(CampaignSafety::class)->windDown($episode)) {
                         $this->discoverIfDue($episode, $agent);
+                        $this->refreshParkedMarket($episode, $agent);
                     }
                     $this->decision($grant, $episode, $agent, [], 'awaiting_run');
 
@@ -254,6 +255,9 @@ class CampaignDirector
                             $sync->observe($agent, 'market', $market, app(SpaceTradersApi::class)->market($agent, $market));
                         }
                     }
+                }
+                if ($episode->phase === 'earn') {
+                    $this->refreshParkedMarket($episode, $agent);
                 }
             }
             $tradeAttempted = false;
@@ -414,7 +418,7 @@ class CampaignDirector
                     return $this->position($grant, $episode, $agent, $ship, $candidate['source']);
                 }
                 $probe = $this->role($episode, 'probe');
-                if ((empty($episode->state['probe_position_failed']) || ! is_string($episode->state['probe_position_failed']) || CarbonImmutable::parse($episode->state['probe_position_failed'])->lt(now()->subMinutes(30))) && $probe && $probe['symbol'] !== $ship['symbol'] && $probe['nav']['waypointSymbol'] !== $candidate['buyer'] && $probe['nav']['status'] !== 'IN_TRANSIT') {
+                if ((empty($episode->state['probe_position_failed']) || ! is_string($episode->state['probe_position_failed']) || CarbonImmutable::parse($episode->state['probe_position_failed'])->lt(now()->subMinutes(30))) && $probe && $probe['symbol'] !== $ship['symbol'] && ! $this->parked($agent, $candidate['buyer']) && $probe['nav']['status'] !== 'IN_TRANSIT') {
                     $position = null;
                     try {
                         $position = $this->position($grant, $episode, $agent, $probe, $candidate['buyer']);
@@ -447,7 +451,7 @@ class CampaignDirector
                 }
                 $candidate = $fresh;
                 $limits = $this->limits($grant, $episode, $agent);
-                $limits['max_spend'] = min($limits['max_spend'], $candidate['max_inventory'] + $candidate['fuel']);
+                $limits['max_spend'] = min($limits['max_spend'], $candidate['max_inventory'] + $candidate['fuel'] + $candidate['departure_refuel']);
                 $plan = $limits + ['strategy' => 'trade', 'market' => $candidate['buyer'], 'symbol' => $candidate['good'], 'units' => $candidate['units'],
                     'min_sell_price' => (int) ceil($candidate['predicted_cost'] / $candidate['units']), 'min_margin' => 1,
                     'max_inventory' => $candidate['max_inventory'], 'max_fuel' => $ship['fuel']['capacity'],
@@ -470,7 +474,48 @@ class CampaignDirector
     private function position(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, string $destination): AutomationRun
     {
         return app(AutomationRunner::class)->preview($agent, $ship['symbol'], $this->limits($grant, $episode, $agent) + [
-            'strategy' => 'scout', 'destination' => $destination, 'max_fuel' => $ship['fuel']['capacity'], 'one_way' => true]);
+            'strategy' => 'scout', 'destination' => $destination, 'max_fuel' => $ship['fuel']['capacity'], 'one_way' => true, 'departure_refuel' => true]);
+    }
+
+    /** Any of our ships, role or not, that sits at the waypoint (not in transit) reads its full prices. */
+    private function parked(Agent $agent, string $waypoint): bool
+    {
+        return Ship::where('agent_id', $agent->id)->get()->contains(fn ($ship) => $ship->snapshot['nav']['waypointSymbol'] === $waypoint && $ship->snapshot['nav']['status'] !== 'IN_TRANSIT');
+    }
+
+    /**
+     * Keeps rank() inputs fresh where extra (non-role) ships are parked: one market read per tick,
+     * round-robin, skipping markets read within the quote age. It never blocks the decision.
+     */
+    private function refreshParkedMarket(CampaignEpisode $episode, Agent $agent): void
+    {
+        $roles = app(CampaignFleet::class)->symbols($episode);
+        $occupied = Ship::where('agent_id', $agent->id)->get()
+            ->filter(fn ($ship) => ! in_array($ship->symbol, $roles, true) && $ship->snapshot['nav']['status'] !== 'IN_TRANSIT')
+            ->map(fn ($ship) => $ship->snapshot['nav']['waypointSymbol'])->unique()->values()->all();
+        $markets = GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'waypoint')->whereIn('symbol', $occupied)->get()
+            ->filter(fn ($point) => in_array('MARKETPLACE', array_column($point->data['traits'] ?? [], 'symbol'), true))->pluck('symbol')->sort()->values();
+        if ($markets->isEmpty()) {
+            return;
+        }
+        $read = GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'market')->whereIn('symbol', $markets)->get()->keyBy('symbol');
+        $last = $episode->state['parked_refresh'] ?? null;
+        $start = $last === null ? 0 : ($markets->search(fn ($symbol) => strcmp($symbol, $last) > 0) ?: 0);
+        for ($offset = 0; $offset < $markets->count(); $offset++) {
+            $symbol = $markets[($start + $offset) % $markets->count()];
+            $quote = $read->get($symbol);
+            if ($quote && ! empty($quote->data['tradeGoods']) && empty($quote->data['invalidated_by_action']) && $quote->observed_at->gte(now()->subSeconds(config('gameplay.snapshot_seconds')))) {
+                continue;
+            }
+            CampaignEpisode::whereKey($episode->id)->update(['state->parked_refresh' => $symbol]);
+            $episode->refresh();
+            try {
+                app(AgentSynchronizer::class)->observe($agent, 'market', $symbol, app(SpaceTradersApi::class)->market($agent, $symbol));
+            } catch (GameException) {
+            }
+
+            return;
+        }
     }
 
     private function mining(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array &$considered): ?AutomationRun
@@ -574,17 +619,30 @@ class CampaignDirector
         if ($ship['nav']['waypointSymbol'] === $buyer || app(CampaignSafety::class)->windDown($episode)) {
             return false;
         }
-        $probe = $this->role($episode, 'probe');
-        $failed = $episode->state['probe_position_failed'] ?? null;
-        if (! $probe || ! app(FuelPlanner::class)->fuelFree($probe) || $probe['cargo']['units'] > 0
-            || (is_string($failed) && CarbonImmutable::parse($failed)->gte(now()->subMinutes(30)))) {
-            return false;
-        }
         $markets = GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'market')->orderBy('symbol')->get();
         $fresh = fn ($row) => $row && empty($row->data['invalidated_by_action']) && $row->observed_at->gte(now()->subSeconds(config('gameplay.snapshot_seconds')));
         $fuel = $markets->filter(fn ($row) => collect($row->data['tradeGoods'] ?? [])->contains(fn ($good) => $good['symbol'] === 'FUEL' && $good['purchasePrice'] > 0 && $good['tradeVolume'] > 0));
         $destination = ! $fresh($markets->firstWhere('symbol', $buyer)) ? $buyer : ($fuel->contains($fresh) ? null : $fuel->first()?->symbol);
         if (! $destination) {
+            return false;
+        }
+        // One of our ships already at the destination (the role probe or a parked extra one) reads it
+        // directly, before any wait on or trip by the role probe.
+        if ($this->parked($agent, $destination)) {
+            try {
+                app(AgentSynchronizer::class)->observe($agent, 'market', $destination, app(SpaceTradersApi::class)->market($agent, $destination));
+            } catch (GameException $exception) {
+                if ($exception->retryAfter > 0) {
+                    throw $exception;
+                }
+            }
+
+            return false;
+        }
+        $probe = $this->role($episode, 'probe');
+        $failed = $episode->state['probe_position_failed'] ?? null;
+        if (! $probe || ! app(FuelPlanner::class)->fuelFree($probe) || $probe['cargo']['units'] > 0
+            || (is_string($failed) && CarbonImmutable::parse($failed)->gte(now()->subMinutes(30)))) {
             return false;
         }
         if ($probe['nav']['status'] === 'IN_TRANSIT') {
@@ -594,11 +652,6 @@ class CampaignDirector
         }
         $position = null;
         try {
-            if ($probe['nav']['waypointSymbol'] === $destination) {
-                app(AgentSynchronizer::class)->observe($agent, 'market', $destination, app(SpaceTradersApi::class)->market($agent, $destination));
-
-                return false;
-            }
             $position = $this->position($grant, $episode, $agent, $probe, $destination);
             app(AutomationRunner::class)->startCampaign($agent, $position, $episode);
             $this->decision($grant, $episode, $agent, [], 'recovery_evidence', $position->id);

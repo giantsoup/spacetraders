@@ -27,14 +27,31 @@ class CampaignRecovery
             throw new GameException('Recovery requires a known buyer for the cargo good.');
         }
         $cost = app(CampaignTrade::class)->averageCosts($agent, $symbol)[$good] ?? 0;
-        $leg = $ship['nav']['waypointSymbol'] === $buyer
+        $fuel = app(FuelPlanner::class);
+        $atBuyer = $ship['nav']['waypointSymbol'] === $buyer;
+        // recover() runs before the director's role-market refresh, so this ship's own fuel quote may
+        // be stale. One read at a FUEL listing lets a part-empty tank top up before departure.
+        $here = $ship['nav']['waypointSymbol'];
+        if (! $atBuyer && $ship['fuel']['current'] < $ship['fuel']['capacity'] && $fuel->listsFuel($agent, $here) && ! $fuel->sellerQuote($agent, $here)) {
+            app(AgentSynchronizer::class)->observe($agent, 'market', $here, app(SpaceTradersApi::class)->market($agent, $here));
+        }
+        // Docked at a verified fuel seller, the run tops up before it leaves, so the leg is planned from a full tank.
+        $departure = $atBuyer ? null : $fuel->departureRefuel($agent, $ship);
+        $leg = $atBuyer
             ? ['destination' => $buyer, 'outbound_fuel' => 0, 'required_fuel' => 0, 'refuel_ceiling' => 0]
-            : app(FuelPlanner::class)->recoveryLeg($agent, $ship, $buyer, $limits['reserve']);
+            : $fuel->recoveryLeg($departure['agent'] ?? $agent, $departure['ship'] ?? $ship, $buyer, $limits['reserve']);
+        $arrived = $departure['ship'] ?? $ship;
+        $arrived['nav']['waypointSymbol'] = $buyer;
+        $arrived['fuel']['current'] -= $leg['outbound_fuel'];
+        // Second safeguard: after the final sale, top up again if the buyer is itself a verified fuel seller.
+        $postSale = $fuel->departureRefuel($agent, $arrived);
+        $route = ['fuel_ceiling' => ($departure['ceiling'] ?? 0) + ($postSale['ceiling'] ?? 0), 'outbound' => $leg,
+            'departure_refuel_ceiling' => $departure['ceiling'] ?? 0, 'post_sale_refuel_ceiling' => $postSale['ceiling'] ?? 0];
         $plan = array_merge($limits, ['strategy' => 'sell_aboard', 'recovery_good' => $good, 'sale_floor' => (int) ceil($cost), 'cargo_cost' => $cost * MiningPlanner::inventory($ship)[$good], 'sell_only' => true, 'cycles' => 1, 'site' => $ship['nav']['waypointSymbol'], 'market' => $buyer,
             'initial_credits' => $agent->credits, 'initial_inventory' => MiningPlanner::inventory($ship), 'initial_fuel' => $ship['fuel']['current'],
             'initial_waypoint' => $ship['nav']['waypointSymbol'], 'initial_status' => $ship['nav']['status'],
             'initial_configuration' => FuelPlanner::configuration($ship), 'equipment' => OpportunityEvaluator::equipment($ship),
-            'participating_ships' => [$symbol], 'route' => ['fuel_ceiling' => 0, 'outbound' => $leg],
+            'participating_ships' => [$symbol], 'route' => $route,
             'quote_signature' => OpportunityEvaluator::quoteSignature($market)]);
         $fingerprint = hash('sha256', json_encode(array_intersect_key($plan, array_flip(['initial_credits', 'initial_inventory', 'initial_fuel', 'initial_waypoint', 'initial_status', 'initial_configuration', 'equipment', 'quote_signature']))));
 
@@ -46,10 +63,32 @@ class CampaignRecovery
         if ($ship['nav']['status'] === 'IN_TRANSIT') {
             return AutomationStep::wait(max(CarbonImmutable::parse($ship['nav']['route']['arrival']), CarbonImmutable::now()->addSeconds(5)));
         }
+        $fuelCost = $run->totals['fuel_cost'] ?? 0;
+        $missing = $ship['fuel']['capacity'] - $ship['fuel']['current'];
         if ((MiningPlanner::inventory($ship)[$run->plan['recovery_good']] ?? 0) === 0) {
+            $windDown = app(CampaignSafety::class)->windDown(CampaignEpisode::findOrFail($run->campaign_episode_id));
+            $quote = ! $windDown && $ship['nav']['status'] === 'DOCKED' && $missing > 0 ? app(FuelPlanner::class)->sellerQuote($agent, $ship['nav']['waypointSymbol']) : null;
+            if ($quote) {
+                $step = $this->refuel($run, $missing, $quote, ($run->plan['route']['fuel_ceiling'] ?? 0) - $fuelCost);
+                if ($step) {
+                    return $step;
+                }
+            }
+
             return AutomationStep::trip();
         }
         if ($ship['nav']['waypointSymbol'] !== $run->plan['market']) {
+            $departure = $run->plan['route']['departure_refuel_ceiling'] ?? 0;
+            if ($departure > 0 && $missing > 0 && $ship['nav']['waypointSymbol'] === $run->plan['site'] && ($run->totals['travel_fuel'] ?? 0) === 0) {
+                $step = $this->refuel($run, $missing, app(OperationPlanner::class)->quote($agent, $run->plan['site'], 'FUEL'), $departure - $fuelCost);
+                if (! $step) {
+                    // The leg was planned from a full tank; never depart on a partial one.
+                    return AutomationStep::blocked('Departure refuel exceeds its approved ceiling. Cargo retained; replan recovery.');
+                }
+
+                return $ship['nav']['status'] === 'DOCKED' ? $step : AutomationStep::act('dock');
+            }
+
             return $ship['nav']['status'] === 'DOCKED' ? AutomationStep::act('orbit') : AutomationStep::act('navigate', ['waypointSymbol' => $run->plan['market']]);
         }
         if ($ship['nav']['status'] !== 'DOCKED') {
@@ -93,6 +132,17 @@ class CampaignRecovery
         }
 
         return AutomationStep::act('sell', ['symbol' => $good, 'units' => $units, 'minTotal' => $units * $floor]);
+    }
+
+    private function refuel(AutomationRun $run, int $missing, array $quote, int $ceiling): ?AutomationStep
+    {
+        $units = min($missing, $quote['tradeVolume'] * 100);
+        $ceiling = min($ceiling, $run->plan['max_spend'] - ($run->totals['fuel_cost'] ?? 0));
+        if ($units < 1 || (int) ceil($units / 100) * $quote['purchasePrice'] > $ceiling) {
+            return null;
+        }
+
+        return AutomationStep::act('refuel', ['units' => $units, 'maxTotal' => $ceiling, 'reserve' => $run->plan['reserve']]);
     }
 
     private function floorObserved(AutomationRun $run): void

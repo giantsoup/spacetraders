@@ -2,6 +2,8 @@
 # v2 (2026-11-15): a fresh wipe knows prices only where its two ships sit. v1 left discover after
 # 15 minutes with 2 priced markets and then idled. v2 scouts until 8 markets have prices (or 90
 # minutes) and lets the probe keep scouting in earn whenever no trade is feasible.
+# v3 (2026-11-16): the mining fallback earned nothing and made every other earn tick skip trade, so
+# it is removed. Proofs may spend 60000 (one full buyer batch of the top goods) instead of 10000.
 name: weekly-default
 version: 1
 agent: { symbol: GIANTSOUP, faction: VOID }
@@ -10,7 +12,7 @@ limits:
   fuel_reserve: next_leg
   run_max_minutes: 15
 trade:
-  proof: { max_units_batches: 1, max_credits: 10000, min_realized_ratio: 0.8 }
+  proof: { max_units_batches: 1, max_credits: 60000, min_realized_ratio: 0.8 }
   lot: { max_buyer_batches: 5, first_scaled_max_buyer_batches: 3, default_batch_decay: 0.04 }
   losses: { losing_load: reprove, pause_after_consecutive_losing_loads: 2 }
   switch: { bid_below_first_seen: 0.9, better_pair_ratio: 1.1 }
@@ -24,7 +26,6 @@ phases:
     activities:
       - { role: command, strategy: trade }
       - { role: probe, strategy: scout }
-      - { role: command, strategy: mining, when: { minutes_without_trade_gte: 15 } }
   - id: wind_down
     activities: [ { role: command, strategy: sell_aboard } ]
 predictions:

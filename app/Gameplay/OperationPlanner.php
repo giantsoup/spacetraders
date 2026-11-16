@@ -19,9 +19,21 @@ class OperationPlanner
         }
         $listings = $this->fuel->listings($agent);
         $departureCeiling = 0;
+        $planner = $agent;
+        // Campaign trades and command-ship positioning top up first at a verified fuel seller,
+        // so every leg, the return included, is planned from the refuelled ship.
+        $topUp = ! empty($limits['campaign_trade']) || ! empty($limits['departure_refuel']) ? $this->fuel->departureRefuel($agent, $ship, $listings) : null;
+        if ($topUp) {
+            $departureCeiling = $topUp['ceiling'];
+            $planner = $topUp['agent'];
+            $ship = $topUp['ship'];
+        }
         try {
-            $outbound = $this->fuel->leg($agent, $ship, $destination, $limits['reserve'], listings: $listings);
+            $outbound = $this->fuel->leg($planner, $ship, $destination, $limits['reserve'], listings: $listings);
         } catch (GameException $exception) {
+            if ($topUp) {
+                throw $exception;
+            }
             $listing = $listings->get($home);
             if ($limits['strategy'] !== 'scout' || empty($limits['one_way']) || $ship['fuel']['current'] >= $ship['fuel']['capacity']
                 || ! $listing || ! in_array('FUEL', array_column(array_merge($listing->data['exports'], $listing->data['exchange']), 'symbol'), true)) {
@@ -39,7 +51,7 @@ class OperationPlanner
         $returning['nav']['waypointSymbol'] = $destination;
         $returning['fuel']['current'] -= $outbound['outbound_fuel'];
         $oneWay = $limits['strategy'] === 'scout' && ! empty($limits['one_way']);
-        $return = $oneWay ? null : $this->fuel->leg($agent, $returning, $home, $limits['reserve'], listings: $listings);
+        $return = $oneWay ? null : $this->fuel->leg($planner, $returning, $home, $limits['reserve'], listings: $listings);
         $fuelUnits = $outbound['outbound_fuel'] + ($return['outbound_fuel'] ?? 0);
         $fuelCeiling = ($oneWay ? $outbound['refuel_ceiling'] : $return['refuel_ceiling']) + $departureCeiling;
         if (! $oneWay && $return['continuation'] !== $home) {
@@ -65,7 +77,8 @@ class OperationPlanner
             $ask = $this->quote($agent, $home, $limits['symbol']);
             $bid = $this->quote($agent, $destination, $limits['symbol']);
             $inventory = $limits['units'] * $ask['purchasePrice'];
-            $margin = $limits['units'] * ($bid['sellPrice'] - $ask['purchasePrice']) - $fuelCeiling;
+            // Departure fuel refills the tank for later work, not this trade: it counts toward spending, not margin.
+            $margin = $limits['units'] * ($bid['sellPrice'] - $ask['purchasePrice']) - ($fuelCeiling - $departureCeiling);
             if ($ask['purchasePrice'] < 1 || $bid['sellPrice'] < $limits['min_sell_price'] || $margin < $limits['min_margin'] || $inventory > $limits['max_inventory'] || $inventory + $fuelCeiling > $limits['max_spend'] || $inventory > $limits['max_loss'] || $limits['units'] > $ship['cargo']['capacity']) {
                 throw new GameException('Trade fails the complete-cycle margin, inventory exposure, cargo, spending or cash-loss bounds.');
             }
@@ -100,6 +113,23 @@ class OperationPlanner
             return AutomationStep::blocked('Cargo changed outside the approved operation. Retain cargo and reconcile before continuing.');
         }
         $phase = $totals['phase'];
+        // Departure top-up runs first: before the first buy and before leaving the starting seller.
+        $departure = $plan['route']['departure_refuel_ceiling'] ?? 0;
+        if ($departure > 0 && in_array($phase, ['buy', 'observe'], true) && $ship['nav']['waypointSymbol'] === $plan['site']
+            && ($totals['travel_fuel'] ?? 0) === 0 && array_sum($totals['purchased'] ?? []) === 0 && $ship['fuel']['current'] < $ship['fuel']['capacity']) {
+            $fuel = $this->quote($agent, $plan['site'], 'FUEL');
+            $units = min($ship['fuel']['capacity'] - $ship['fuel']['current'], $fuel['tradeVolume'] * 100);
+            $ceiling = min($departure - ($totals['fuel_cost'] ?? 0), $plan['max_spend'] - ($totals['fuel_cost'] ?? 0) - ($totals['purchase_cost'] ?? 0));
+            if ((int) ceil($units / 100) * $fuel['purchasePrice'] > $ceiling) {
+                // The legs were planned from a full tank; never buy or depart on a partial one.
+                return AutomationStep::blocked('Departure refuel exceeds its approved ceiling. Owned cargo retained; replan before departure.');
+            }
+            if ($ship['nav']['status'] !== 'DOCKED') {
+                return AutomationStep::act('dock');
+            }
+
+            return AutomationStep::act('refuel', ['units' => $units, 'maxTotal' => $ceiling, 'reserve' => $plan['reserve']]);
+        }
         if ($plan['strategy'] === 'scout' && empty($plan['one_way']) && $phase === 'observe' && ($totals['travel_fuel'] ?? 0) === 0 && $ship['nav']['waypointSymbol'] === $plan['site']) {
             $quote = $this->observation($agent, 'market', $plan['market']);
             if ($quote && ! empty($quote->data['tradeGoods']) && $quote->observed_at->gte($now->subSeconds(5))) {
@@ -117,7 +147,10 @@ class OperationPlanner
             $ask = $this->quote($agent, $plan['site'], $plan['symbol']);
             $bid = $this->quote($agent, $plan['market'], $plan['symbol']);
             $spent = $totals['purchase_cost'] ?? 0;
-            $projectedMargin = $plan['units'] * $bid['sellPrice'] - $spent - $remaining * $ask['purchasePrice'] - $plan['route']['fuel_ceiling'];
+            // Once the departure top-up has run, its actual cost is in fuel_cost; count its ceiling only before then.
+            // The margin, like the preview's, excludes departure fuel; spending includes it.
+            $fuelExposure = ($totals['fuel_cost'] ?? 0) + $plan['route']['fuel_ceiling'] - (($totals['fuel_units'] ?? 0) > 0 ? $departure : 0);
+            $projectedMargin = $plan['units'] * $bid['sellPrice'] - $spent - $remaining * $ask['purchasePrice'] - ($plan['route']['fuel_ceiling'] - $departure);
             if ($projectedMargin < $plan['min_margin'] || $ask['purchasePrice'] < 1 || $bid['sellPrice'] <= $ask['purchasePrice']) {
                 return AutomationStep::blocked('Spread deteriorated. Stop purchases. Owned cargo retained; compare local sale and reachable buyers using remaining costs before a new approval.');
             }
@@ -132,7 +165,7 @@ class OperationPlanner
                 $units = min($units, intdiv(max(0, $agent->credits - $reserve), $ask['purchasePrice']));
             }
             $cost = $units * $ask['purchasePrice'];
-            if ($units < 1 || $cost + $spent + $totals['fuel_cost'] + $plan['route']['fuel_ceiling'] > $plan['max_spend']) {
+            if ($units < 1 || $cost + $spent + $fuelExposure > $plan['max_spend']) {
                 return AutomationStep::blocked('Remaining purchase exceeds inventory or spending bounds. Owned cargo retained.');
             }
 
@@ -146,7 +179,7 @@ class OperationPlanner
                 }
                 $fuel = $this->quote($agent, $ship['nav']['waypointSymbol'], 'FUEL');
                 $units = min($ship['fuel']['capacity'] - $ship['fuel']['current'], $fuel['tradeVolume'] * 100);
-                $ceiling = min($plan['route']['departure_refuel_ceiling'], $plan['max_spend'] - $totals['fuel_cost']);
+                $ceiling = min($plan['route']['departure_refuel_ceiling'] - $totals['fuel_cost'], $plan['max_spend'] - $totals['fuel_cost']);
 
                 return AutomationStep::act('refuel', ['units' => $units, 'maxTotal' => $ceiling, 'reserve' => $plan['reserve']]);
             }
@@ -167,7 +200,7 @@ class OperationPlanner
                     }
                     $fuel = $this->quote($agent, $destination, 'FUEL');
                     $units = min($ship['fuel']['capacity'] - $ship['fuel']['current'], $fuel['tradeVolume'] * 100);
-                    $ceiling = min($plan['route']['fuel_ceiling'], $plan['max_spend'] - $totals['fuel_cost']);
+                    $ceiling = min($plan['route']['fuel_ceiling'] - $totals['fuel_cost'], $plan['max_spend'] - $totals['fuel_cost']);
                     if ((int) ceil($units / 100) * $fuel['purchasePrice'] <= $ceiling) {
                         return AutomationStep::act('refuel', ['units' => $units, 'maxTotal' => $ceiling, 'reserve' => $plan['reserve']]);
                     }
@@ -201,7 +234,7 @@ class OperationPlanner
         if ($missing > 0) {
             $quote = $this->quote($agent, $destination, 'FUEL');
             $units = min($missing, $quote['tradeVolume'] * 100);
-            $ceiling = min($plan['route']['fuel_ceiling'], $plan['max_spend'] - $totals['fuel_cost'] - ($totals['purchase_cost'] ?? 0));
+            $ceiling = min($plan['route']['fuel_ceiling'] - $totals['fuel_cost'], $plan['max_spend'] - $totals['fuel_cost'] - ($totals['purchase_cost'] ?? 0));
             if ((int) ceil($units / 100) * $quote['purchasePrice'] > $ceiling) {
                 return AutomationStep::blocked('Return refueling exceeds the remaining approved budget.');
             }

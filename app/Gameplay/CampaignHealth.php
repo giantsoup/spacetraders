@@ -11,6 +11,15 @@ use Carbon\CarbonImmutable;
 
 class CampaignHealth
 {
+    /**
+     * The probe's own runs hide a stranded command ship from the sixty-minute check. The longest
+     * normal command-ship gap observed was about nineteen minutes.
+     */
+    public const COMMAND_STALL_MINUTES = 25;
+
+    /** No command-ship alert while a new episode starts up. */
+    public const COMMAND_STALL_GRACE_MINUTES = 30;
+
     public function problems(): array
     {
         $grant = CampaignGrant::where('slot', 1)->first();
@@ -36,11 +45,35 @@ class CampaignHealth
             if ($episode?->phase !== 'wind_down' && $progress->lte(now()->subMinutes(60))) {
                 $problems['campaign_progress_stalled:'.$grant->id] = 'Campaign has not started a run or recorded a load or recovery result for sixty minutes.';
             }
+            if ($episode && $this->commandStalled($grant, $episode)) {
+                $problems['command_ship_stalled:'.$grant->id] = 'The command ship has not started a run for '.self::COMMAND_STALL_MINUTES.' minutes in earn.';
+            }
         }
         if ($grant->paused_at) {
             $problems['campaign_paused:'.$grant->id.':'.$grant->pause_reason] = 'Campaign '.$grant->id.' is paused: '.$grant->pause_reason.'.';
         }
 
         return $problems;
+    }
+
+    /**
+     * In earn, outside wind-down and reset, the timer runs from the latest of the command ship's
+     * last run start (any strategy), the move into earn, and the last resume, so paused time is
+     * not counted. Runs by the probe or by extra non-role ships do not reset it.
+     */
+    private function commandStalled(CampaignGrant $grant, CampaignEpisode $episode): bool
+    {
+        $command = $episode->state['role_ships']['command'] ?? null;
+        if (! $command || $episode->phase !== 'earn' || app(CampaignSafety::class)->windDown($episode)
+            || $episode->opened_at->gt(now()->subMinutes(self::COMMAND_STALL_GRACE_MINUTES))) {
+            return false;
+        }
+        $started = AutomationRun::where('campaign_episode_id', $episode->id)->where('ship_symbol', $command)->whereNotNull('started_at')->max('started_at');
+        // An episode whose playbook starts in earn has no phase event; it entered earn when it opened.
+        $earn = CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'phase')->where('data->to', 'earn')->latest('id')->value('created_at') ?? $episode->opened_at;
+        $resumed = CampaignEvent::where('campaign_grant_id', $grant->id)->where('kind', 'resume')->latest('id')->value('created_at');
+        $since = collect([$started ? CarbonImmutable::parse($started) : null, $earn, $resumed])->filter()->max();
+
+        return $since->lte(now()->subMinutes(self::COMMAND_STALL_MINUTES));
     }
 }

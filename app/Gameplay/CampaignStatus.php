@@ -137,7 +137,7 @@ class CampaignStatus
                 return ['at' => $event->created_at->toIso8601String(), 'good' => $good, 'buyer' => $data['buyer'] ?? null,
                     'mode' => $event->kind === 'recovery_result' ? 'recovery' : ($run?->plan['campaign_trade']['mode'] ?? (! empty($data['proof']) ? 'proof' : 'scaled')),
                     'units' => $data['units'] ?? $run?->totals['purchased'][$good] ?? $run?->plan['initial_inventory'][$good] ?? $run?->plan['units'] ?? null,
-                    'predicted_margin' => $data['predicted_margin'] ?? null, 'net' => $data['net'] ?? null, 'losing' => $data['losing'] ?? false];
+                    'predicted_margin' => $data['predicted_margin'] ?? null, 'net' => $data['net'] ?? null, 'losing' => isset($data['net']) ? CampaignTrade::losing($data) : ($data['losing'] ?? false)];
             })->all(),
             'credits' => $episode ? CampaignSample::where('campaign_episode_id', $episode->id)->orderByDesc('observed_at')->orderByDesc('id')->limit(24)->get()->reverse()->values()
                 ->map(fn ($sample) => ['at' => $sample->observed_at->toIso8601String(), 'credits' => $sample->credits])->all() : [],
