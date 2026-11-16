@@ -48,7 +48,7 @@ class CampaignControl
         $arm = ['label' => (string) ($arm['label'] ?? ''), 'ship' => (string) ($arm['ship'] ?? ''), 'follow' => ($arm['follow'] ?? null) ?: null,
             'max_net_loss' => (int) ($arm['max_net_loss'] ?? 50000), 'max_load_spend' => isset($arm['max_load_spend']) ? (int) $arm['max_load_spend'] : null,
             'exposure_share' => (float) ($arm['exposure_share'] ?? 0.5)];
-        if (! preg_match('/\A[A-Za-z0-9_-]{1,20}\z/', $arm['label']) || $arm['max_net_loss'] < 0 || ($arm['max_load_spend'] ?? 0) < 0 || $arm['exposure_share'] <= 0 || $arm['exposure_share'] > 1) {
+        if ($arm['label'] === 'C0' || ! preg_match('/\A[A-Za-z0-9_-]{1,20}\z/', $arm['label']) || $arm['max_net_loss'] < 0 || ($arm['max_load_spend'] ?? 0) < 0 || $arm['exposure_share'] <= 0 || $arm['exposure_share'] > 1) {
             throw new GameException('Arm needs a short label, a nonnegative loss stop and load cap, and an exposure share in (0, 1].');
         }
 
@@ -69,7 +69,12 @@ class CampaignControl
                 throw new GameException('Ship '.$arm['ship'].' is not in the agent\'s synced fleet.');
             }
             $c0 = CampaignGrant::where('slot', 1)->first();
-            foreach ($c0 ? CampaignEpisode::where('campaign_grant_id', $c0->id)->whereNull('closed_at')->get() : [] as $episode) {
+            $roles = Ship::where('agent_id', $agent->id)->get()->filter(fn ($ship) => in_array($ship->snapshot['registration']['role'] ?? null, ['COMMAND', 'SATELLITE', 'PROBE'], true)
+                || ($ship->snapshot['frame']['symbol'] ?? null) === 'FRAME_PROBE')->pluck('symbol')->all();
+            if (in_array($arm['ship'], $roles, true)) {
+                throw new GameException('Ship '.$arm['ship'].' is a role ship of the main campaign.');
+            }
+            foreach ($c0 ? CampaignEpisode::where('campaign_grant_id', $c0->id)->latest('id')->limit(1)->get() : [] as $episode) {
                 if (in_array($arm['ship'], app(CampaignFleet::class)->symbols($episode), true)) {
                     throw new GameException('Ship '.$arm['ship'].' is a role ship of the main campaign.');
                 }
@@ -91,6 +96,14 @@ class CampaignControl
             }
             if ($grant->expires_at?->isPast()) {
                 throw new GameException('Arm grant expired. Approve a new arm.');
+            }
+            $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->first();
+            if ($episode) {
+                app(CampaignTrade::class)->recordResults($episode);
+                $net = CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'load_result')->pluck('data')->sum(fn ($data) => $data['net'] ?? 0);
+                if ($net < -($grant->arm()['max_net_loss'] ?? INF)) {
+                    throw new GameException('Arm remains past its loss stop. Approve a new arm after review.');
+                }
             }
             $grant->update(['paused_at' => null, 'pause_reason' => null, 'wait_reason' => null, 'last_directed_at' => null]);
             foreach (CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->get() as $episode) {

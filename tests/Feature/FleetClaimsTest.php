@@ -6,9 +6,12 @@ use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignDirector;
 use App\Gameplay\CampaignPlaybook;
+use App\Gameplay\CampaignSafety;
 use App\Gameplay\CampaignTrade;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\FleetClaims;
+use App\Gameplay\FleetMetrics;
+use App\Gameplay\GameException;
 use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
@@ -232,6 +235,189 @@ class FleetClaimsTest extends TestCase
         $poor = $iron($this->rank($this->grant, $this->episode, null, $agent));
         $this->assertSame('credits', $poor['limiting_factor']);
         $this->assertLessThan($first['units'], $poor['units']);
+    }
+
+    public function test_ranking_counts_preview_commitments_without_double_counting_purchased_cargo(): void
+    {
+        [$otherGrant, $otherEpisode] = $this->arm('T2', 'LOCAL-2');
+        $other = $this->completedLoad($otherEpisode, true, 80, 'FOOD');
+        $other->update(['state' => 'preview', 'started_at' => null, 'ship_symbol' => 'LOCAL-2',
+            'plan' => array_replace($other->plan, ['max_inventory' => 50]), 'totals' => ['purchase_cost' => 0]]);
+        [$grant, $episode] = $this->arm('T1a', 'LOCAL-1', ['exposure_share' => 125 / $this->agent->credits]);
+        $first = collect($this->rank($grant, $episode))->firstWhere('good', 'IRON_ORE');
+        $this->assertSame(2, $first['units']);
+        $this->assertSame('exposure', $first['limiting_factor']);
+        $this->assertEquals(75, app(CampaignTrade::class)->allowance($grant, $this->agent, ship: 'LOCAL-1'));
+        $this->cargoCost('LOCAL-2', 'FOOD', 1, 20);
+        $other->update(['state' => 'running', 'active_agent_id' => $this->agent->id, 'totals' => ['purchase_cost' => 20]]);
+        $this->assertEquals(75, app(CampaignTrade::class)->allowance($grant, $this->agent, ship: 'LOCAL-1'));
+        $other->update(['active_agent_id' => null, 'state' => 'stopped']);
+        $this->assertEquals(105, app(CampaignTrade::class)->allowance($grant, $this->agent, ship: 'LOCAL-1'));
+    }
+
+    public function test_interleaved_buys_recheck_fresh_aggregate_exposure_including_own_cargo(): void
+    {
+        $this->agent->update(['credits' => 200]);
+        [$grant, $episode] = $this->arm('T1a', 'LOCAL-1');
+        [, $otherEpisode] = $this->arm('T1b', 'LOCAL-2');
+        $run = $this->completedLoad($episode, true, 80);
+        $run->update(['state' => 'running', 'active_agent_id' => $this->agent->id, 'plan' => array_replace($run->plan, ['max_inventory' => 60]), 'totals' => []]);
+        $other = $this->completedLoad($otherEpisode, true, 80);
+        $other->update(['state' => 'preview', 'started_at' => null, 'ship_symbol' => 'LOCAL-2', 'plan' => array_replace($other->plan, ['max_inventory' => 60]), 'totals' => []]);
+        $safety = app(CampaignSafety::class);
+        $check = fn (int $max) => $safety->check($run, $this->agent->fresh(), 'buy', ['symbol' => 'IRON_ORE', 'maxTotal' => $max], boundaryOnly: true);
+        $check(40);
+        $this->assertWaiting(fn () => $check(41), 'arm exposure');
+        $this->cargoCost('LOCAL-2', 'IRON_ORE', 1, 30);
+        $other->update(['state' => 'running', 'active_agent_id' => $this->agent->id, 'totals' => ['purchase_cost' => 30]]);
+        $this->agent->update(['credits' => 170]);
+        $check(25);
+        $this->assertWaiting(fn () => $check(26), 'arm exposure');
+        $this->cargoCost('LOCAL-1', 'IRON_ORE', 1, 10);
+        $this->agent->update(['credits' => 160]);
+        $run->update(['totals' => ['purchase_cost' => 10]]);
+        $check(10);
+        $this->assertWaiting(fn () => $check(11), 'arm exposure');
+        $this->assertNull($grant->fresh()->paused_at);
+        $this->assertSame('running', $run->fresh()->state->value);
+    }
+
+    public function test_recovery_protects_the_buyer_while_other_arms_rank_even_without_a_source(): void
+    {
+        [$grant, $episode] = $this->arm('T1a');
+        [, $recovering] = $this->arm('T2', 'LOCAL-2');
+        $recovery = AutomationRun::create(['campaign_episode_id' => $recovering->id, 'agent_id' => $this->agent->id,
+            'reset_id' => $this->agent->reset_id, 'ship_symbol' => 'LOCAL-2', 'strategy' => 'sell_aboard', 'state' => 'preview', 'expires_at' => now()->addMinute(),
+            'plan' => ['market' => 'X1-TEST-PORT', 'initial_inventory' => ['IRON_ORE' => 1]], 'totals' => []]);
+        $this->assertNotContains('IRON_ORE', $this->goods($this->rank($grant, $episode)));
+        $this->assertSame(['IRON_ORE@X1-TEST-PORT' => 'T2'], app(FleetClaims::class)->taken($episode));
+        $recovery->update(['state' => 'running', 'active_agent_id' => $this->agent->id]);
+        $this->assertNotContains('IRON_ORE', $this->goods($this->rank($grant, $episode)));
+        $recovery->update(['state' => 'completed', 'active_agent_id' => null]);
+        $this->assertContains('IRON_ORE', $this->goods($this->rank($grant, $episode)));
+    }
+
+    public function test_inactive_claims_expire_unless_the_ship_still_holds_cargo(): void
+    {
+        [, $episode] = $this->arm('T2', 'LOCAL-2');
+        app(FleetClaims::class)->claim($episode, ['good' => 'IRON_ORE', 'source' => 'X1-TEST-ROCK', 'buyer' => 'X1-TEST-PORT', 'ship' => 'LOCAL-2']);
+        $episode->grant()->update(['paused_at' => now()]);
+        $this->assertSame([], app(FleetClaims::class)->taken($this->episode));
+        $this->cargoCost('LOCAL-2', 'IRON_ORE', 1, 30);
+        $episode->grant()->update(['revoked_at' => now()]);
+        $episode->update(['closed_at' => now()]);
+        $this->travel(31)->minutes();
+        $this->assertArrayHasKey('IRON_ORE@X1-TEST-PORT', app(FleetClaims::class)->taken($this->episode));
+        $ship = Ship::where('symbol', 'LOCAL-2')->firstOrFail();
+        $ship->update(['snapshot' => array_replace($ship->snapshot, ['cargo' => ['capacity' => 10, 'units' => 0, 'inventory' => []]])]);
+        $this->assertSame([], app(FleetClaims::class)->taken($this->episode));
+    }
+
+    public function test_follower_arriving_first_waits_for_each_confirmed_leader_command(): void
+    {
+        [, $leader] = $this->arm('T1a');
+        [, $episode] = $this->arm('T3', 'LOCAL-2', ['follow' => 'T1a']);
+        $this->claim($leader, 'IRON_ORE');
+        $leadRun = $this->completedLoad($leader, true, 80);
+        $run = $this->completedLoad($episode, true, 80);
+        $run->update(['ship_symbol' => 'LOCAL-2', 'totals' => [], 'plan' => array_replace($run->plan, ['campaign_trade' => []])]);
+        $check = fn (string $command) => app(CampaignSafety::class)->check($run, $this->agent, $command, ['symbol' => 'IRON_ORE', 'maxTotal' => 1], boundaryOnly: true);
+        $this->assertWaiting(fn () => $check('buy'), 'leader buy');
+        $this->assertSame(['episode' => $leader->id, 'claim' => $leader->state['claim']], $run->fresh()->plan['campaign_trade']['leader_claim']);
+        $buy = $this->leaderAction($leadRun, 'buy', 'X1-TEST-ROCK', now()->subMinute());
+        $this->assertWaiting(fn () => $check('buy'), 'leader buy');
+        $buy->update(['settled_at' => now(), 'before_state' => ['ship' => ['nav' => ['waypointSymbol' => 'X1-TEST-PORT']]]]);
+        $this->assertWaiting(fn () => $check('buy'), 'leader buy');
+        $buy->update(['before_state' => ['ship' => ['nav' => ['waypointSymbol' => 'X1-TEST-ROCK']]]]);
+        $check('buy');
+        $this->assertWaiting(fn () => $check('sell'), 'leader sell');
+        $sale = $this->leaderAction($leadRun, 'sell', 'X1-TEST-PORT', now());
+        $check('sell');
+        $sale->update(['state' => 'pending']);
+        $this->travel(21)->minutes();
+        $check('sell');
+        $this->assertNull($episode->grant()->paused_at);
+    }
+
+    public function test_follower_proceeds_when_the_leader_claim_changes_or_is_released(): void
+    {
+        [, $leader] = $this->arm('T1a');
+        [, $episode] = $this->arm('T3', 'LOCAL-2', ['follow' => 'T1a']);
+        $this->claim($leader, 'IRON_ORE');
+        $run = $this->completedLoad($episode, true, 80);
+        $run->update(['ship_symbol' => 'LOCAL-2', 'plan' => array_replace($run->plan, ['campaign_trade' => ['leader_claim' => ['episode' => $leader->id, 'claim' => $leader->state['claim']]]])]);
+        $check = fn () => app(CampaignSafety::class)->check($run, $this->agent, 'sell', ['symbol' => 'IRON_ORE'], boundaryOnly: true);
+        $this->assertWaiting($check, 'leader sell');
+        $this->claim($leader, 'COPPER_ORE');
+        $check();
+        app(FleetClaims::class)->release($leader, 'done');
+        $check();
+        $this->assertTrue(true);
+    }
+
+    public function test_paused_and_revoked_arms_harvest_late_results_idempotently(): void
+    {
+        [$grant, $episode] = $this->arm('T1a');
+        app(CampaignControl::class)->pause($grant, 'operator_pause', $episode);
+        $run = $this->completedLoad($episode, true, 80);
+        $this->assertSame(0, CampaignEvent::where('kind', 'load_result')->count());
+        $card = app(FleetMetrics::class)->scorecard();
+        $this->assertSame(1, $card['arms']['T1a']['loads_total']);
+        $this->assertSame($run->id, CampaignEvent::where('kind', 'load_result')->sole()->data['run_id']);
+        app(CampaignDirector::class)->tickArms();
+        $this->assertSame(1, CampaignEvent::where('kind', 'load_result')->count());
+        app(CampaignControl::class)->revokeArm($grant);
+        $late = $this->completedLoad($episode, false, 100);
+        app(CampaignDirector::class)->tickArms();
+        app(FleetMetrics::class)->scorecard();
+        $this->assertSame(2, CampaignEvent::where('kind', 'load_result')->count());
+        $this->assertSame($late->id, CampaignEvent::where('kind', 'load_result')->latest('id')->firstOrFail()->data['run_id']);
+    }
+
+    public function test_follower_recovery_keeps_ordering_but_does_not_wait_on_a_different_pair(): void
+    {
+        [, $leader] = $this->arm('T1a');
+        [, $episode] = $this->arm('T3', 'LOCAL-2', ['follow' => 'T1a']);
+        $this->claim($leader, 'IRON_ORE');
+        $original = $this->completedLoad($episode, true, 80);
+        $original->update(['plan' => array_replace($original->plan, ['campaign_trade' => ['leader_claim' => ['episode' => $leader->id, 'claim' => $leader->state['claim']]]])]);
+        $recovery = AutomationRun::create(['campaign_episode_id' => $episode->id, 'agent_id' => $this->agent->id,
+            'reset_id' => $this->agent->reset_id, 'ship_symbol' => 'LOCAL-2', 'strategy' => 'sell_aboard', 'state' => 'preview', 'expires_at' => now()->addMinute(),
+            'plan' => ['market' => 'X1-TEST-PORT', 'initial_inventory' => ['IRON_ORE' => 1], 'recovery_of' => $original->id], 'totals' => []]);
+        $check = fn () => app(CampaignSafety::class)->check($recovery, $this->agent, 'sell', ['symbol' => 'IRON_ORE'], boundaryOnly: true);
+        $this->assertWaiting($check, 'leader sell');
+        $this->assertSame($original->plan['campaign_trade']['leader_claim'], $recovery->fresh()->plan['campaign_trade']['leader_claim']);
+        $this->claim($leader, 'COPPER_ORE');
+        $check();
+        $this->assertNull($episode->grant()->paused_at);
+    }
+
+    private function cargoCost(string $symbol, string $good, int $units, int $cost): void
+    {
+        $ship = Ship::where('symbol', $symbol)->firstOrFail();
+        $ship->update(['snapshot' => array_replace($ship->snapshot, ['cargo' => ['capacity' => 40, 'units' => $units, 'inventory' => [['symbol' => $good, 'units' => $units]]]])]);
+        ShipAction::create(['agent_id' => $this->agent->id, 'ship_symbol' => $symbol, 'key' => 'cargo-'.$symbol.'-'.$good, 'reset_id' => $this->agent->reset_id,
+            'command' => 'buy', 'state' => 'confirmed', 'origin' => 'automation', 'expires_at' => now()->addMinute(),
+            'arguments' => ['symbol' => $good, 'units' => $units], 'outcome' => ['units' => $units, 'transaction_total' => $cost]]);
+    }
+
+    private function leaderAction(AutomationRun $run, string $command, string $waypoint, $at): ShipAction
+    {
+        return ShipAction::create(['agent_id' => $this->agent->id, 'automation_run_id' => $run->id, 'ship_symbol' => $run->ship_symbol,
+            'key' => 'leader-'.$command, 'reset_id' => $this->agent->reset_id, 'command' => $command, 'state' => 'confirmed', 'origin' => 'automation',
+            'settled_at' => $at, 'expires_at' => now()->addMinute(), 'arguments' => ['symbol' => 'IRON_ORE', 'units' => 1],
+            'before_state' => ['ship' => ['nav' => ['waypointSymbol' => $waypoint]]]]);
+    }
+
+    private function assertWaiting(callable $check, string $message): void
+    {
+        try {
+            $check();
+            $this->fail('The command should wait.');
+        } catch (GameException $exception) {
+            $this->assertStringContainsString($message, $exception->getMessage());
+            $this->assertSame(5, $exception->retryAfter);
+        }
     }
 
     public function test_arm_reads_c0_proof_and_sales_without_writing_c0s_episode(): void

@@ -11,6 +11,7 @@ use App\Models\GameObservation;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 
 class CampaignTrade
 {
@@ -107,12 +108,23 @@ class CampaignTrade
 
     public function recordResults(CampaignEpisode $episode): void
     {
-        $known = array_fill_keys(CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])->pluck('data')->map(fn ($data) => $data['run_id'])->all(), true);
-        foreach ($this->results($episode) as $result) {
-            $kind = ! empty($result['standalone_recovery']) ? 'recovery_result' : 'load_result';
-            if (! isset($known[$result['run_id']])) {
-                app(CampaignControl::class)->event($episode->grant(), $episode, $kind, $result);
+        app(HostLock::class)->retry('campaign-results-'.$episode->id, fn () => DB::transaction(function () use ($episode) {
+            $known = array_fill_keys(CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])->pluck('data')->map(fn ($data) => $data['run_id'])->all(), true);
+            foreach ($this->results($episode) as $result) {
+                $kind = ! empty($result['standalone_recovery']) ? 'recovery_result' : 'load_result';
+                if (! isset($known[$result['run_id']])) {
+                    app(CampaignControl::class)->event($episode->grant(), $episode, $kind, $result);
+                }
             }
+        }));
+    }
+
+    public function harvestArms(?string $reset = null): void
+    {
+        $reset ??= CampaignEpisode::latest('id')->value('reset_id');
+        $grants = CampaignGrant::whereNotNull('limits->arm')->select('id');
+        foreach (CampaignEpisode::where('reset_id', $reset)->whereIn('campaign_grant_id', $grants)->get() as $episode) {
+            $this->recordResults($episode);
         }
     }
 
@@ -288,21 +300,7 @@ class CampaignTrade
             $taken = [];
             $pairs = array_values(array_filter($pairs, fn ($pair) => [$pair['good'], $pair['source'], $pair['market']] === [$lead['good'], $lead['source'], $lead['buyer']]));
         }
-        // An arm caps each load at its own spend limit and its share of credits, less the cost
-        // basis other arm ships already carry.
-        $exposure = INF;
-        if ($arm) {
-            $held = 0;
-            $ships = CampaignGrant::whereNull('revoked_at')->whereNull('superseded_at')->whereKeyNot($grant->id)->get()
-                ->map(fn ($other) => FleetClaims::arm($other)['ship'] ?? null)->filter()->reject(fn ($symbol) => $symbol === $ship['symbol'])->unique();
-            foreach (Ship::where('agent_id', $agent->id)->whereIn('symbol', $ships)->get() as $other) {
-                $costs = $this->averageCosts($agent, $other->symbol);
-                foreach ($other->snapshot['cargo']['inventory'] ?? [] as $item) {
-                    $held += ($costs[$item['symbol']] ?? 0) * $item['units'];
-                }
-            }
-            $exposure = max(0, min($arm['max_load_spend'] ?? INF, ($arm['exposure_share'] ?? 0.5) * $agent->credits - $held));
-        }
+        $exposure = $arm ? $this->allowance($grant, $agent, ship: $ship['symbol']) : INF;
         $available = null;
         $unclaimed = null;
         // Docked at a verified fuel seller, the run tops up first, so legs start from a full tank
@@ -429,5 +427,40 @@ class CampaignTrade
             throw new GameException('Trade preview exceeds immutable campaign terms.');
         }
         $this->quoteLife($agent, $plan, $run->totals);
+        $arm = $episode->grant()->arm();
+        if ($arm && $plan['max_inventory'] > $this->allowance($episode->grant(), $agent, $run)) {
+            throw new GameException('Buy skipped: arm exposure requires a smaller batch.', retryAfter: 5);
+        }
+        if ($arm['follow'] ?? null) {
+            $leader = app(FleetClaims::class)->leader($episode, $arm['follow']);
+            $plan['campaign_trade']['leader_claim'] = $leader ? ['episode' => $leader->id, 'claim' => $leader->state['claim'] ?? null] : null;
+            $run->update(['plan' => $plan]);
+        }
+    }
+
+    public function allowance(CampaignGrant $grant, Agent $agent, ?AutomationRun $run = null, ?string $ship = null): float
+    {
+        $arm = $grant->arm();
+        if (! $arm) {
+            return INF;
+        }
+        $grants = CampaignGrant::whereNotNull('limits->arm')->get()->keyBy('id');
+        $episodes = CampaignEpisode::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereIn('campaign_grant_id', $grants->keys())->get();
+        $ships = $episodes->map(fn ($episode) => $grants[$episode->campaign_grant_id]->arm()['ship'])->unique();
+        $held = 0;
+        foreach (Ship::where('agent_id', $agent->id)->whereIn('symbol', $ships)->get() as $other) {
+            $costs = $this->averageCosts($agent, $other->symbol);
+            foreach ($other->snapshot['cargo']['inventory'] ?? [] as $item) {
+                $held += ($costs[$item['symbol']] ?? 0) * $item['units'];
+            }
+        }
+        $committed = AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereIn('campaign_episode_id', $episodes->pluck('id'))
+            ->where('strategy', 'trade')->when($run, fn ($query) => $query->whereKeyNot($run->id))
+            ->when($ship, fn ($query) => $query->where('ship_symbol', '!=', $ship))
+            ->where(fn ($query) => $query->whereNotNull('active_agent_id')->orWhere(fn ($query) => $query->where('state', 'preview')->where('expires_at', '>', now())))
+            ->get()->sum(fn ($other) => max(0, ($other->plan['max_inventory'] ?? 0) - ($other->totals['purchase_cost'] ?? 0)));
+
+        return max(0, min(($arm['max_load_spend'] ?? INF) - ($run?->totals['purchase_cost'] ?? 0),
+            ($arm['exposure_share'] ?? 0.5) * $agent->credits - $held - $committed));
     }
 }

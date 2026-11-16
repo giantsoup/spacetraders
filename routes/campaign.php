@@ -125,6 +125,7 @@ Artisan::command('campaign:arms', function () {
         return ['label' => $grant->arm()['label'], 'ship' => $grant->arm()['ship'], 'follow' => $grant->arm()['follow'], 'grant' => $grant->id,
             'active' => $grant->available(), 'expires_at' => $grant->expires_at?->toIso8601String(), 'pause_reason' => $grant->pause_reason, 'wait_reason' => $grant->wait_reason,
             'episode' => $episode?->id, 'phase' => $episode?->phase,
+            'minutes_since_decision' => $decision ? round($decision->created_at->diffInMinutes(now()), 1) : null,
             'last_decision' => $decision ? ['at' => $decision->created_at->toIso8601String(), 'choice' => $decision->data['choice'] ?? null, 'run_id' => $decision->data['run_id'] ?? null, 'rejections' => $decision->data['rejections'] ?? []] : null,
             'active_run' => $run ? ['id' => $run->id, 'strategy' => $run->strategy, 'state' => $run->state->value, 'symbol' => $run->plan['symbol'] ?? null, 'market' => $run->plan['market'] ?? null] : null];
     });

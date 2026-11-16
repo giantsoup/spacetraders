@@ -61,6 +61,7 @@ class CampaignDirector
     public function tickArms(): bool
     {
         $this->armGrantId = null;
+        app(CampaignTrade::class)->harvestArms();
         try {
             app(HostLock::class)->run('campaign', function () {
                 $grant = CampaignGrant::liveArms()->whereNull('paused_at')
@@ -195,7 +196,10 @@ class CampaignDirector
         if ($arm) {
             app(FleetMetrics::class)->as($arm['ship'], fn () => $this->episode($grant, $agent, $schedule, $next));
         } else {
-            $this->episode($grant, $agent, $schedule, $next);
+            $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->where('reset_id', $agent->reset_id)->latest('id')->first();
+            $ship = $episode?->state['role_ships']['command'] ?? Ship::where('agent_id', $agent->id)->get()
+                ->first(fn ($ship) => ($ship->snapshot['registration']['role'] ?? null) === 'COMMAND')?->symbol;
+            FleetMetrics::as($ship, fn () => $this->episode($grant, $agent, $schedule, $next));
         }
     }
 
@@ -242,7 +246,9 @@ class CampaignDirector
                         $episode->update(['state' => array_merge($episode->state ?? [], ['probe_position_failed' => now()->toIso8601String()])]);
                     }
                     app(AutomationRunner::class)->stop($run);
-                    app(FleetClaims::class)->release($episode, 'handoff');
+                    if (($cargo['cargo']['units'] ?? 0) === 0) {
+                        app(FleetClaims::class)->release($episode, 'handoff');
+                    }
                     if ($freshness) {
                         app(CampaignControl::class)->event($grant, $episode, 'freshness_hold', ['run_id' => $run->id]);
                     }

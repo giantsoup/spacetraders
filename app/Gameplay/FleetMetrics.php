@@ -27,6 +27,13 @@ class FleetMetrics
 
     private static bool $hooked = false;
 
+    public static function reset(): void
+    {
+        self::$ship = null;
+        self::$pending = [];
+        self::$flushedAt = null;
+    }
+
     public static function as(?string $ship, callable $fn): mixed
     {
         $previous = self::$ship;
@@ -72,9 +79,9 @@ class FleetMetrics
             $ship = self::$ship ?? 'shared';
             self::$pending[$kind][$ship] ??= ['reads' => 0, 'writes' => 0];
             self::$pending[$kind][$ship][$field]++;
+            self::$flushedAt ??= (float) now()->getTimestamp();
             if (! self::$hooked) {
                 self::$hooked = true;
-                self::$flushedAt ??= (float) now()->getTimestamp();
                 register_shutdown_function(fn () => self::flush());
             }
             if ((float) now()->getTimestamp() - self::$flushedAt >= 30) {
@@ -138,6 +145,7 @@ class FleetMetrics
     {
         $reset ??= CampaignEpisode::latest('id')->value('reset_id');
         $until ??= CarbonImmutable::now();
+        app(CampaignTrade::class)->harvestArms($reset);
         $episodes = CampaignEpisode::where('reset_id', $reset)->orderBy('id')->get();
         $grants = CampaignGrant::whereIn('id', $episodes->pluck('campaign_grant_id'))->get()->keyBy('id');
         $arms = [];
@@ -157,7 +165,7 @@ class FleetMetrics
             $arms[$label]['loads'][] = $event->data;
             $arms[$label]['ship'] ??= $event->data['ship'] ?? null;
         }
-        $t0 = $since ?? (collect($arms)->min('opened_at') ?? $until);
+        $t0 = $since ?? (collect($arms)->except('C0')->min('opened_at') ?? collect($arms)->min('opened_at') ?? $until);
         $blocks = [[$t0, $t0->addHours(2)], [$t0->addHours(2), $t0->addHours(4)]];
         $rows = [];
         foreach ($arms as $label => $arm) {
@@ -177,9 +185,9 @@ class FleetMetrics
         $loads = collect($arm['loads'])->map(fn ($load) => $load + ['_at' => CarbonImmutable::parse($load['finished_at'])])
             ->filter(fn ($load) => $load['_at'] <= $until)->sortBy('_at')->values();
         $firstSale = $loads->first()['_at'] ?? null;
-        $start = $firstSale && $firstSale > $t0 ? $firstSale : $t0;
+        $start = max($t0, $firstSale ?? $until, $arm['opened_at']);
         // The window opens at the first sale, so that load's own time is outside it.
-        $steady = $loads->filter(fn ($load, $i) => $load['_at'] >= $start && ($start == $t0 || $i > 0))->values();
+        $steady = $loads->filter(fn ($load, $i) => $load['_at'] >= $start && ($firstSale < $t0 || $i > 0))->values();
         $hours = max(0, $start->diffInSeconds($until, false)) / 3600;
         $nets = $steady->map(fn ($load) => (float) ($load['net'] ?? 0))->all();
         $net = array_sum($nets);
@@ -193,9 +201,11 @@ class FleetMetrics
             ->whereBetween('created_at', [$t0->toDateTimeString(), $until->toDateTimeString()])->sum('value') : 0;
         $holds = $arm['ship'] ? ShipAction::where('ship_symbol', $arm['ship'])->whereBetween('created_at', [$t0, $until])
             ->where(fn ($q) => $q->where('review_required', true)->orWhere('state', 'uncertain'))->count() : 0;
-        $blockRates = array_map(function ($block) use ($loads, $until) {
-            $in = $loads->filter(fn ($load) => $load['_at'] > $block[0] && $load['_at'] <= $block[1]);
-            $span = $block[0]->diffInSeconds(min($block[1], $until), false) / 3600;
+        $blockRates = array_map(function ($block) use ($steady, $start, $until, $t0) {
+            $from = max($block[0], $start);
+            $to = min($block[1], $until);
+            $in = $steady->filter(fn ($load) => $load['_at'] >= $from && ($load['_at'] > $block[0] || $block[0] == $t0) && $load['_at'] <= $to);
+            $span = max(0, $from->diffInSeconds($to, false)) / 3600;
 
             return ['loads' => $in->count(), 'net' => $in->sum(fn ($l) => $l['net'] ?? 0), 'net_per_hour' => $span > 0 ? $in->sum(fn ($l) => $l['net'] ?? 0) / $span : null,
                 'pair_ratio' => self::ratio($in->sum(fn ($l) => $l['net'] ?? 0), $in->sum(fn ($l) => self::number($l['best_unclaimed'] ?? null) ?? 0))];
@@ -273,7 +283,11 @@ class FleetMetrics
         if (! isset($rows['T1a'], $rows['T3'], $rows['T1b'], $rows['T1c'])) {
             return null;
         }
-        $sum = fn (array $labels, ?int $block = null) => array_sum(array_map(fn ($l) => ($block === null ? $rows[$l]['net_per_hour'] : $rows[$l]['blocks'][$block]['net_per_hour']) ?? 0, $labels));
+        $sum = function (array $labels, ?int $block = null) use ($rows) {
+            $values = array_map(fn ($label) => $block === null ? $rows[$label]['net_per_hour'] : $rows[$label]['blocks'][$block]['net_per_hour'], $labels);
+
+            return in_array(null, $values, true) ? null : array_sum($values);
+        };
         $unit = $sum(['T1a', 'T3']);
         $pair = $sum(['T1b', 'T1c']);
 
@@ -304,7 +318,12 @@ class FleetMetrics
                 continue;
             }
             $ref = array_sum($values) / count($values);
-            $blockRefs = array_map(fn ($i) => array_sum(array_map(fn ($row) => $row['blocks'][$i][$metric] ?? 0, $reference)) / count($reference), [0, 1]);
+            $blockRefs = array_map(function ($index) use ($reference, $metric) {
+                $values = array_column(array_column($reference, 'blocks'), $index);
+                $values = array_column($values, $metric);
+
+                return in_array(null, $values, true) ? null : array_sum($values) / count($values);
+            }, [0, 1]);
             foreach ($rows as $label => $row) {
                 if (in_array($label, ['T1a', 'T3', 'T1b', 'T1c'], true) || $row[$metric] === null || $ref == 0) {
                     continue;
@@ -313,9 +332,9 @@ class FleetMetrics
                 $up = $ratio >= 1;
                 $big = $up ? $ratio >= 1.5 : $ratio <= 1 / 1.5;
                 $outside = $row[$metric] < min($range) || $row[$metric] > max($range);
-                $consistent = collect([0, 1])->every(fn ($i) => $row['blocks'][$i][$metric] !== null && ($up ? $row['blocks'][$i][$metric] > $blockRefs[$i] : $row['blocks'][$i][$metric] < $blockRefs[$i]));
+                $consistent = collect([0, 1])->every(fn ($i) => $blockRefs[$i] !== null && $row['blocks'][$i][$metric] !== null && ($up ? $row['blocks'][$i][$metric] > $blockRefs[$i] : $row['blocks'][$i][$metric] < $blockRefs[$i]));
                 $flags[] = ['label' => $label, 'metric' => $metric, 'ratio' => round($ratio, 3), 'at_least_1_5x' => $big, 'outside_t1_range' => $outside,
-                    'same_direction_both_blocks' => $consistent, 'enough_loads' => $row['loads'] >= 12, 'flagged' => $big && $outside && $consistent];
+                    'same_direction_both_blocks' => $consistent, 'enough_loads' => $row['loads'] >= 12, 'flagged' => $row['loads'] >= 12 && $big && $outside && $consistent];
             }
         }
 

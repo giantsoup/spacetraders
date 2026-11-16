@@ -42,6 +42,9 @@ class AdvanceAutomationRun implements ShouldQueue
             } catch (GameException $exception) {
                 // A contending worker owns the agent. The scheduler rediscovers due work.
                 FleetMetrics::observe($exception);
+                if (str_starts_with($exception->getMessage(), 'Another operation owns this command boundary')) {
+                    AutomationRun::whereKey($this->runId)->update(['last_dispatched_at' => null]);
+                }
             }
         });
     }

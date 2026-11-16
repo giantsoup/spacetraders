@@ -322,13 +322,25 @@ class AutomationRunner
     {
         $observer = Ship::where('agent_id', $agent->id)->get()->contains(fn ($ship) => $ship->snapshot['nav']['waypointSymbol'] === $market && $ship->snapshot['nav']['status'] !== 'IN_TRANSIT');
         if ($observer) {
-            $this->sync->observe($agent, 'market', $market, $this->api->market($agent, $market));
+            FleetMetrics::as(null, fn () => $this->sync->observe($agent, 'market', $market, $this->api->market($agent, $market)));
         }
     }
 
     private function enqueue(AutomationRun $run, AutomationStep $step): void
     {
-        app(CampaignSafety::class)->check($run, Agent::findOrFail($run->agent_id), $step->command, $step->arguments);
+        $agent = Agent::findOrFail($run->agent_id);
+        if ($step->command === 'buy' && $run->campaign_episode_id) {
+            $grant = CampaignEpisode::findOrFail($run->campaign_episode_id)->grant();
+            if ($grant->arm()) {
+                $price = (int) ceil($step->arguments['maxTotal'] / $step->arguments['units']);
+                $units = min($step->arguments['units'], (int) floor(app(CampaignTrade::class)->allowance($grant, $agent, $run) / $price));
+                if ($units < 1) {
+                    throw new GameException('Buy skipped: arm exposure requires a smaller batch.', retryAfter: 5);
+                }
+                $step = AutomationStep::act('buy', array_replace($step->arguments, ['units' => $units, 'maxTotal' => $units * $price]));
+            }
+        }
+        app(CampaignSafety::class)->check($run, $agent, $step->command, $step->arguments);
         DB::transaction(function () use ($run, $step) {
             $this->gate->check($run->engine_session_id);
             if (! AutomationRun::whereKey($run->id)->whereNull('stop_requested_at')->whereNotNull('active_agent_id')->where('expires_at', '>', now())->update(['state' => 'running', 'next_action_at' => now()->addSeconds(5)])) {

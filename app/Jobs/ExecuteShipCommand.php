@@ -42,6 +42,9 @@ class ExecuteShipCommand implements ShouldQueue
             } catch (GameException $exception) {
                 // Durable pending intent is rediscovered by the scheduler; no unsafe queue retry.
                 FleetMetrics::observe($exception);
+                if (str_starts_with($exception->getMessage(), 'Another operation owns this command boundary')) {
+                    ShipAction::whereKey($this->actionId)->where('state', 'pending')->update(['last_dispatched_at' => null]);
+                }
             }
         });
     }

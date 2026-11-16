@@ -3,19 +3,26 @@
 namespace Tests\Feature;
 
 use App\Gameplay\AgentSynchronizer;
+use App\Gameplay\AutomationRunner;
 use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignDirector;
 use App\Gameplay\CampaignFleet;
 use App\Gameplay\CampaignPlaybook;
+use App\Gameplay\CampaignTrade;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\GameException;
+use App\Gameplay\HostLock;
+use App\Gameplay\ShipCommandExecutor;
 use App\Gameplay\SpaceTradersApi;
+use App\Jobs\AdvanceAutomationRun;
+use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\LocalEngine;
+use App\Models\ShipAction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -263,6 +270,155 @@ class ArmDirectorTest extends TestCase
         $this->assertNull($grant->fresh()->paused_at);
         $this->artisan('campaign:arm-revoke', ['label' => 'T1b'])->assertSuccessful();
         $this->assertNotNull($grant->fresh()->revoked_at);
+    }
+
+    public function test_arm_approval_reserves_c0_label_and_role_ships_without_an_open_episode(): void
+    {
+        foreach ([['C0', 'LOCAL-3', 'short label'], ['T1a', 'LOCAL-1', 'role ship'], ['T1a', 'LOCAL-2', 'role ship']] as [$label, $ship, $message]) {
+            try {
+                $this->arm($label, $ship);
+                $this->fail('Reserved label or ship was approved.');
+            } catch (GameException $exception) {
+                $this->assertStringContainsString($message, $exception->getMessage());
+            }
+        }
+        $c0 = $this->c0();
+        CampaignEpisode::where('campaign_grant_id', $c0->id)->update(['closed_at' => now()]);
+        $this->expectExceptionMessage('role ship');
+        $this->arm('T1a', 'LOCAL-1');
+    }
+
+    public function test_resume_refuses_an_arm_past_its_loss_stop(): void
+    {
+        $grant = $this->arm('T1a', 'LOCAL-3');
+        app(CampaignDirector::class)->tickArms();
+        $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->firstOrFail();
+        app(CampaignControl::class)->pause($grant, 'arm_loss_stop', $episode);
+        CampaignEvent::create(['campaign_grant_id' => $grant->id, 'campaign_episode_id' => $episode->id, 'kind' => 'load_result',
+            'data' => ['run_id' => PHP_INT_MAX, 'net' => -50001, 'finished_at' => now()->toIso8601String()]]);
+        try {
+            app(CampaignControl::class)->resumeArm($grant);
+            $this->fail('An arm past its loss stop resumed.');
+        } catch (GameException $exception) {
+            $this->assertStringContainsString('past its loss stop', $exception->getMessage());
+        }
+        $this->assertNotNull($grant->fresh()->paused_at);
+        $this->artisan('campaign:arms')->expectsOutputToContain('minutes_since_decision')->assertSuccessful();
+    }
+
+    public function test_handoff_retains_claim_through_recovery_until_liquidation(): void
+    {
+        $grant = $this->arm('T1a', 'LOCAL-3');
+        $director = app(CampaignDirector::class);
+        $director->tickArms();
+        $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->firstOrFail();
+        $claim = $episode->state['claim'];
+        $run = AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('active_agent_id')->firstOrFail();
+        $this->editWorld(function (&$world) {
+            foreach ($world['ships'] as &$ship) {
+                if ($ship['symbol'] === 'LOCAL-3') {
+                    $ship['cargo'] = ['capacity' => 40, 'units' => 1, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 1]]];
+                }
+            }
+        });
+        $run->update(['state' => 'blocked', 'blocked_reason' => 'Quotes stale.']);
+        $grant->refresh()->update(['last_directed_at' => null]);
+        $director->tickArms();
+        $this->assertSame($claim, $episode->fresh()->state['claim']);
+        $recovery = AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertSame('sell_aboard', $recovery->strategy);
+        $this->assertSame(0, CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'claim_release')->count());
+        $this->editWorld(function (&$world) {
+            foreach ($world['ships'] as &$ship) {
+                if ($ship['symbol'] === 'LOCAL-3') {
+                    $ship['cargo'] = ['capacity' => 40, 'units' => 0, 'inventory' => []];
+                }
+            }
+        });
+        $recovery->update(['state' => 'completed', 'active_agent_id' => null]);
+        $grant->refresh()->update(['last_directed_at' => null]);
+        $this->assertTrue($director->tickArms());
+        $this->assertNull($grant->fresh()->paused_at, CampaignEvent::where('campaign_episode_id', $episode->id)->get()->toJson());
+        $this->assertTrue(CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'claim_release')->exists(), CampaignEvent::where('campaign_episode_id', $episode->id)->get()->toJson());
+        $this->assertSame('idle', CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'claim_release')->sole()->data['reason']);
+    }
+
+    public function test_follower_run_pins_leader_claim_and_waits_at_the_real_buy_boundary(): void
+    {
+        $leader = $this->arm('T1a', 'LOCAL-3');
+        app(CampaignDirector::class)->tickArms();
+        $this->editWorld(fn (&$world) => $world['ships'][] = FakeSpaceTraders::ship('LOCAL-4'));
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $follower = $this->arm('T3', 'LOCAL-4', follow: 'T1a');
+        app(CampaignDirector::class)->tickArms();
+        $leaderEpisode = CampaignEpisode::where('campaign_grant_id', $leader->id)->firstOrFail();
+        $episode = CampaignEpisode::where('campaign_grant_id', $follower->id)->firstOrFail();
+        $run = AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertSame(['episode' => $leaderEpisode->id, 'claim' => $leaderEpisode->state['claim']], $run->plan['campaign_trade']['leader_claim']);
+        app(AutomationRunner::class)->advance($run->id);
+        $this->assertSame('waiting', $run->fresh()->state->value);
+        $this->assertSame('Follower waiting for leader buy.', $run->fresh()->blocked_reason);
+        $this->assertFalse(ShipAction::where('automation_run_id', $run->id)->exists());
+        $this->assertNull($follower->fresh()->paused_at);
+    }
+
+    public function test_buys_shrink_at_enqueue_and_wait_if_exposure_changes_before_transport(): void
+    {
+        $grant = app(CampaignControl::class)->approveArm(app(CampaignPlaybook::class)->import($this->armBody()), $this->user,
+            ['label' => 'T1a', 'ship' => 'LOCAL-3', 'exposure_share' => 0.001], CarbonImmutable::now()->addHours(12));
+        app(CampaignDirector::class)->tickArms();
+        $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->firstOrFail();
+        $run = AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('active_agent_id')->firstOrFail();
+        $this->editWorld(fn (&$world) => $world['ships'][] = FakeSpaceTraders::ship('LOCAL-4'));
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $other = $this->arm('T1b', 'LOCAL-4');
+        $otherEpisode = CampaignEpisode::create(['campaign_grant_id' => $other->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
+            'start_credits' => $this->agent->credits, 'phase' => 'earn', 'state' => [], 'opened_at' => now(), 'next_reset_at' => now()->addHours(17)]);
+        $preview = AutomationRun::create(['campaign_episode_id' => $otherEpisode->id, 'agent_id' => $this->agent->id, 'ship_symbol' => 'LOCAL-4',
+            'reset_id' => $this->agent->reset_id, 'strategy' => 'trade', 'state' => 'preview', 'expires_at' => now()->addMinute(),
+            'plan' => ['symbol' => 'FOOD', 'site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-PORT', 'max_inventory' => 40], 'totals' => []]);
+        try {
+            app(CampaignTrade::class)->authorize($this->agent->fresh(), $run, $episode);
+            $this->fail('Commit must recheck other arm reservations.');
+        } catch (GameException $exception) {
+            $this->assertStringContainsString('arm exposure', $exception->getMessage());
+            $this->assertSame(5, $exception->retryAfter);
+        }
+        app(AutomationRunner::class)->advance($run->id);
+        $action = ShipAction::where('automation_run_id', $run->id)->sole();
+        $this->assertSame('buy', $action->command);
+        $this->assertSame(2, $action->arguments['units']);
+        $this->assertSame(60, $action->arguments['maxTotal']);
+        $preview->update(['plan' => array_replace($preview->plan, ['max_inventory' => 50])]);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertSame('pending', $action->fresh()->state->value);
+        $this->assertStringContainsString('arm exposure', $action->fresh()->message);
+        $this->assertSame([], json_decode(file_get_contents($this->file), true)['writes']);
+        $preview->update(['state' => 'stopped']);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertSame('confirmed', $action->fresh()->state->value);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_lock_collisions_are_redispatched_on_the_next_five_second_pass(): void
+    {
+        $grant = $this->arm('T1a', 'LOCAL-3');
+        app(CampaignDirector::class)->tickArms();
+        $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->firstOrFail();
+        $run = AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('active_agent_id')->firstOrFail();
+        $action = ShipAction::create(['agent_id' => $this->agent->id, 'automation_run_id' => $run->id, 'ship_symbol' => 'LOCAL-3',
+            'key' => 'collision', 'reset_id' => $this->agent->reset_id, 'command' => 'dock', 'state' => 'pending', 'origin' => 'automation',
+            'expires_at' => now()->addMinute(), 'arguments' => [], 'last_dispatched_at' => now()]);
+        app(HostLock::class)->run('agent-'.$this->agent->id, function () use ($run, $action) {
+            (new AdvanceAutomationRun($run->id))->handle(app(AutomationRunner::class));
+            (new ExecuteShipCommand($action->id))->handle(app(ShipCommandExecutor::class));
+        });
+        $this->assertNull($run->fresh()->last_dispatched_at);
+        $this->assertNull($action->fresh()->last_dispatched_at);
+        $this->travel(5)->seconds();
+        $this->artisan('spacetraders:dispatch-due')->assertSuccessful();
+        Queue::assertPushed(AdvanceAutomationRun::class, 2);
+        Queue::assertPushed(ExecuteShipCommand::class, 1);
     }
 
     private function body(int $exposure = 100): string

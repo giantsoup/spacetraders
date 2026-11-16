@@ -71,6 +71,12 @@ class CampaignSafety
         if ($this->windDown($episode) && in_array($command, ['buy', 'mine', 'mine_survey'], true)) {
             throw new GameException('Wind-down only permits selling aboard.');
         }
+        if (in_array($command, ['buy', 'sell'], true)) {
+            app(FleetClaims::class)->follow($run, $episode, $command, $arguments);
+        }
+        if ($command === 'buy' && $grant->arm() && ($arguments['maxTotal'] ?? PHP_INT_MAX) > app(CampaignTrade::class)->allowance($grant, $agent, $run)) {
+            throw new GameException('Buy skipped: arm exposure requires a smaller batch.', retryAfter: 5);
+        }
         if ($command === 'buy' && ! $boundaryOnly) {
             if ($run->strategy !== 'trade' || ! empty($run->plan['sell_only'])) {
                 throw new GameException('Recovery blocks new trade buys.');
