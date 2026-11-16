@@ -2,8 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Gameplay\FleetMetrics;
 use App\Gameplay\GameException;
 use App\Gameplay\ShipCommandExecutor;
+use App\Models\ShipAction;
 use App\Queue\RequireEngineWorker;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -34,10 +36,13 @@ class ExecuteShipCommand implements ShouldQueue
     public function handle(ShipCommandExecutor $executor): void
     {
         DB::table('game_runtime')->upsert([['key' => 'worker', 'value' => json_encode(now()->toIso8601String())]], ['key'], ['value']);
-        try {
-            $executor->execute($this->actionId);
-        } catch (GameException) {
-            // Durable pending intent is rediscovered by the scheduler; no unsafe queue retry.
-        }
+        FleetMetrics::as(ShipAction::whereKey($this->actionId)->value('ship_symbol') ?: null, function () use ($executor) {
+            try {
+                $executor->execute($this->actionId);
+            } catch (GameException $exception) {
+                // Durable pending intent is rediscovered by the scheduler; no unsafe queue retry.
+                FleetMetrics::observe($exception);
+            }
+        });
     }
 }

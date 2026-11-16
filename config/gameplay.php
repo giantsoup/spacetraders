@@ -27,4 +27,5 @@ return [
     'opportunity_limit' => 120,
     'evidence_travel_limit' => 2000,
     'evidence_run_limit' => 500,
+    'campaign_claims' => (bool) env('SPACETRADERS_CAMPAIGN_CLAIMS', true),
 ];
