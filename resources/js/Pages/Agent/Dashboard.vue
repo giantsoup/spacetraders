@@ -8,7 +8,8 @@ import FocusSheet from '@/Components/FocusSheet.vue';
 import ShipScene from '@/Components/ShipScene.vue';
 import WaypointSprite from '@/Components/SystemMap/WaypointSprite.vue';
 import ShipReport from '@/Components/ShipReport.vue';
-import { shipPresentation, flightDeckLocation, observedNumber, meterPercent } from '@/shipPresentation.js';
+import { shipPresentation, flightDeckLocation } from '@/shipPresentation.js';
+import { resourceSummary } from '@/shipFacts.js';
 import AutomationConsole from '@/Components/AutomationConsole.vue';
 import AppShell from '@/Layouts/AppShell.vue';
 import { shipSelectionKey } from '@/shipSelection.js';
@@ -87,6 +88,8 @@ onUnmounted(() => {
     document.removeEventListener('visibilitychange', resumeClock);
 });
 const presentation = computed(() => shipPresentation(ship.value, shipRecord.value?.observed_at, props.agent.connection_state, now.value));
+const fuelSummary = computed(() => resourceSummary(ship.value?.fuel?.current, ship.value?.fuel?.capacity, 'No fuel tank'));
+const cargoResourceSummary = computed(() => resourceSummary(ship.value?.cargo?.units, ship.value?.cargo?.capacity, 'No cargo hold'));
 const sceneLocation = computed(() => flightDeckLocation(ship.value, props.sceneLocations));
 const primary = computed(() => archived.value ? { label: 'Review archived activity', view: 'activity' }
     : pending.value ? { label: pending.value.state === 'uncertain' || pending.value.review_required ? 'Review unresolved action' : 'View pending command', view: 'activity' }
@@ -347,8 +350,8 @@ function distance(point) {
                     <p v-if="activeRun">{{ activeRun.stop_requested_at ? 'Stop requested · reserved work may settle' : `Automation · ${readableLabel(runStep)}` }}</p>
                 </div>
                 <div class="resource-list">
-                    <button type="button" class="resource-row" @click="openView('report', 'fuel')"><span>Fuel</span><span class="resource-value">{{ observedNumber(ship?.fuel?.current) }} / {{ observedNumber(ship?.fuel?.capacity) }}<span class="resource-meter" aria-hidden="true"><i :style="{ width: `${meterPercent(ship?.fuel?.current, ship?.fuel?.capacity)}%` }" /></span></span><span aria-hidden="true">›</span></button>
-                    <button type="button" class="resource-row cargo-row" @click="openView('report', 'cargo')"><span>Cargo</span><span class="resource-value">{{ observedNumber(ship?.cargo?.units) }} / {{ observedNumber(ship?.cargo?.capacity) }}<span class="resource-meter" aria-hidden="true"><i :style="{ width: `${meterPercent(ship?.cargo?.units, ship?.cargo?.capacity)}%` }" /></span></span><span aria-hidden="true">›</span></button>
+                    <button type="button" class="resource-row" @click="openView('report', 'fuel')"><span>Fuel</span><span class="resource-value">{{ fuelSummary.text }}<span v-if="fuelSummary.percent !== null" class="resource-meter" aria-hidden="true"><i :style="{ width: `${fuelSummary.percent}%` }" /></span></span><span aria-hidden="true">›</span></button>
+                    <button type="button" class="resource-row cargo-row" @click="openView('report', 'cargo')"><span>Cargo</span><span class="resource-value">{{ cargoResourceSummary.text }}<span v-if="cargoResourceSummary.percent !== null" class="resource-meter" aria-hidden="true"><i :style="{ width: `${cargoResourceSummary.percent}%` }" /></span></span><span aria-hidden="true">›</span></button>
                     <button type="button" class="resource-row systems-row" @click="openView('report', 'systems')"><span>Systems</span><span class="resource-value">{{ presentation.readiness === 'Ready' ? 'Cooldown ready' : presentation.readiness }}</span><span aria-hidden="true">›</span></button>
                 </div>
                 <p class="sr-only">Times shown in {{ localTimeZone }} (your local timezone).</p><div class="observation-line"><span>Observed {{ presentation.age }}<span v-if="synthetic"> · Offline practice</span><span v-else> · Live SpaceTraders API</span></span><button type="button" class="motion-control" :aria-pressed="paused" @click="paused = !paused">{{ paused ? 'Resume motion' : 'Pause motion' }}</button></div>
@@ -378,7 +381,7 @@ function distance(point) {
                     <h2 id="fleet-heading">Fleet</h2>
                     <p v-if="ships.length === 0">{{ archived ? 'No fleet snapshot was saved for this archived agent.' : 'No saved fleet. Synchronize to discover ships and local waypoints.' }}</p>
                     <button v-for="entry in ships" :key="entry.symbol" :data-guide="`ship:${entry.symbol}`" :disabled="guiding && entry.symbol !== guidedSession?.plan?.ship" class="ship-choice" :class="{ selected: selected === entry.symbol }" :aria-pressed="selected === entry.symbol" @click="selected = entry.symbol; destination = ''; commandPreview = null; runPreview = null; if (!guiding) openView('')">
-                        <strong>{{ entry.symbol }}</strong><span>{{ assetName(entry.snapshot.registration?.role || 'SHIP') }}</span><span>{{ entry.snapshot.nav?.waypointSymbol }}</span><span>{{ assetName(entry.snapshot.nav?.status) }} · Cargo {{ observedNumber(entry.snapshot.cargo?.units) }}/{{ observedNumber(entry.snapshot.cargo?.capacity) }}</span>
+                        <strong>{{ entry.symbol }}</strong><span>{{ assetName(entry.snapshot.registration?.role || 'SHIP') }}</span><span>{{ entry.snapshot.nav?.waypointSymbol }}</span><span>{{ assetName(entry.snapshot.nav?.status) }} · Cargo {{ resourceSummary(entry.snapshot.cargo?.units, entry.snapshot.cargo?.capacity, 'No cargo hold').text }}</span>
                     </button>
                 </aside>
 

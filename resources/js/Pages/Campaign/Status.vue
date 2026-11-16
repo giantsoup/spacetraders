@@ -2,10 +2,12 @@
 import DangerButton from '@/Components/DangerButton.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import ShipScene from '@/Components/ShipScene.vue';
+import ShipDetails from '@/Components/ShipDetails.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { formatLocalClock, formatLocalTime } from '@/dateTime.js';
 import { readableLabel, readableText } from '@/dataPresentation.js';
 import { flightDeckLocation, shipPresentation } from '@/shipPresentation.js';
+import { resourceSummary, equipmentSummary } from '@/shipFacts.js';
 import { Head, useForm, usePoll } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 
@@ -30,8 +32,8 @@ onMounted(() => { ticker = setInterval(() => { now.value = Date.now(); }, 1000);
 onUnmounted(() => clearInterval(ticker));
 const shipScenes = computed(() => props.ships.map(ship => ({
     ...ship,
-    presentation: shipPresentation(ship, props.updatedAt, 'connected', now.value),
-    location: flightDeckLocation(ship, ship.locations),
+    presentation: shipPresentation(ship.details ?? ship, ship.observed_at, 'connected', now.value),
+    location: flightDeckLocation(ship.details ?? ship, ship.locations),
 })));
 const form = useForm({});
 const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
@@ -163,12 +165,21 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
                         <h3>{{ ship.symbol }}</h3>
                         <ShipScene :location="ship.location" :reset="episode?.reset_id" :pose="ship.presentation.pose" :transit="ship.presentation.transit" :progress="ship.presentation.progress" compact :interactive="false" />
                         <dl>
-                            <div><dt>Role</dt><dd>{{ label(ship.role) }}</dd></div>
+                            <div><dt>Campaign role</dt><dd>{{ label(ship.role) }}</dd></div>
+                            <div><dt>Registration role</dt><dd>{{ ship.details?.registration?.role ?? 'Not observed' }}</dd></div>
+                            <div><dt>Frame</dt><dd>{{ ship.details?.frame?.name || ship.details?.frame?.symbol || 'Not observed' }}<template v-if="ship.details?.frame?.name && ship.details?.frame?.symbol"> · {{ ship.details.frame.symbol }}</template></dd></div>
                             <div><dt>Waypoint</dt><dd>{{ ship.waypoint || 'Unknown' }}</dd></div>
                             <div><dt>Navigation</dt><dd>{{ label(ship.nav_status) }}</dd></div>
-                            <div><dt>Fuel</dt><dd>{{ count(ship.fuel.current) }} / {{ count(ship.fuel.capacity) }}</dd></div>
-                            <div><dt>Cargo</dt><dd>{{ count(ship.cargo.units) }} / {{ count(ship.cargo.capacity) }}</dd></div>
+                            <div><dt>Fuel</dt><dd>{{ resourceSummary(ship.fuel?.current, ship.fuel?.capacity, 'No fuel tank').text }}</dd></div>
+                            <div><dt>Cargo</dt><dd>{{ resourceSummary(ship.cargo?.units, ship.cargo?.capacity, 'No cargo hold').text }}</dd></div>
+                            <div><dt>Crew aboard / capacity</dt><dd>{{ resourceSummary(ship.details?.crew?.current, ship.details?.crew?.capacity, 'No crew capacity').text }}</dd></div>
+                            <div><dt>Crew required</dt><dd>{{ count(ship.details?.crew?.required) }}</dd></div>
+                            <div><dt>Mounts</dt><dd>{{ equipmentSummary(ship.details?.mounts) }}</dd></div>
+                            <div><dt>Modules</dt><dd>{{ equipmentSummary(ship.details?.modules) }}</dd></div>
+                            <div><dt>Cooldown readiness</dt><dd>{{ ship.presentation.age === 'Unknown' ? 'Not observed' : ship.presentation.stale ? 'Last observed: ' + ship.presentation.readiness : ship.presentation.readiness }}</dd></div>
+                            <div><dt>Ship observed</dt><dd><time v-if="ship.observed_at" :datetime="ship.observed_at">{{ formatLocalTime(ship.observed_at) }}</time><span v-else>Not observed</span><span v-if="ship.observed_at && ship.presentation.stale"> · Last known state</span></dd></div>
                         </dl>
+                        <ShipDetails :ship="ship.details" :unlisted-fields="ship.unlisted_fields" />
                     </li>
                 </ul>
                 <p v-else class="app-muted">No fleet ships saved yet.</p>
@@ -219,7 +230,8 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
 .campaign-status dl { display: grid; gap: 14px; margin: 24px 0; font-size: 13px; }
 .campaign-status dl > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 12px; }
 .campaign-status dt, .records time { color: var(--color-muted); }
-.campaign-status dd { text-align: right; min-width: 0; }
+.campaign-status dd { text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.records > li { min-width: 0; overflow-wrap: anywhere; }
 .positive { color: var(--color-accent); }
 .negative { color: var(--color-fault); }
 .problems { color: #ffe09a; }

@@ -38,7 +38,7 @@ if (PHP_SAPI === 'cli') {
     Artisan::call('migrate:fresh', ['--force' => true]);
     $user = User::factory()->create(['name' => 'Offline campaign operator']);
     if (($argv[1] ?? null) !== '--empty') {
-        CampaignStatusFixture::seed($user);
+        CampaignStatusFixture::seed($user, getenv('CAMPAIGN_SHIP_MATRIX') === '1');
     }
     echo "Seeded isolated browser database.\n";
     exit;

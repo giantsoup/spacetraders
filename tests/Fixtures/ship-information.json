@@ -1,0 +1,3601 @@
+{
+  "provenance": "Synthetic illustrative configurations for presentation QA. ShipType labels are test metadata, not inferred owned-ship types or authoritative shipyard specs. Canonical enum coverage: docs/api/spacetraders-openapi-2.3.0.json; official ShipType blob c188b1017ea2bac6f72ca0171331fba943153e2b verified 2026-11-15.",
+  "scenarios": [
+    {
+      "id": "ship_probe",
+      "ship_type": "SHIP_PROBE",
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-1",
+        "registration": {
+          "name": "CUSTOM_PROBE",
+          "factionSymbol": "COSMIC",
+          "role": "SATELLITE"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "DOCKED",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 0,
+          "required": 0,
+          "capacity": 0,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_PROBE",
+          "name": "Synthetic probe",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 0,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-1",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [],
+        "modules": [],
+        "cargo": {
+          "capacity": 0,
+          "units": 0,
+          "inventory": []
+        },
+        "fuel": {
+          "current": 0,
+          "capacity": 0,
+          "consumed": {
+            "amount": 0,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "ship_mining_drone",
+      "ship_type": "SHIP_MINING_DRONE",
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-2",
+        "registration": {
+          "name": "CUSTOM_MINING_DRONE",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-2",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_GAS_SIPHON_I",
+            "name": "Synthetic MOUNT_GAS_SIPHON_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MOUNT_LASER_CANNON_I",
+            "name": "Synthetic MOUNT_LASER_CANNON_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 2,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_MINERAL_PROCESSOR_I",
+            "name": "Synthetic MODULE_MINERAL_PROCESSOR_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MODULE_JUMP_DRIVE_I",
+            "name": "Synthetic MODULE_JUMP_DRIVE_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "ship_siphon_drone",
+      "ship_type": "SHIP_SIPHON_DRONE",
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-3",
+        "registration": {
+          "name": "CUSTOM_SIPHON_DRONE",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "DOCKED",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-3",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_GAS_SIPHON_II",
+            "name": "Synthetic MOUNT_GAS_SIPHON_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MOUNT_MISSILE_LAUNCHER_I",
+            "name": "Synthetic MOUNT_MISSILE_LAUNCHER_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 2,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_GAS_PROCESSOR_I",
+            "name": "Synthetic MODULE_GAS_PROCESSOR_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MODULE_JUMP_DRIVE_II",
+            "name": "Synthetic MODULE_JUMP_DRIVE_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "ship_interceptor",
+      "ship_type": "SHIP_INTERCEPTOR",
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-4",
+        "registration": {
+          "name": "CUSTOM_INTERCEPTOR",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-4",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_GAS_SIPHON_III",
+            "name": "Synthetic MOUNT_GAS_SIPHON_III",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MOUNT_TURRET_I",
+            "name": "Synthetic MOUNT_TURRET_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 2,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_CARGO_HOLD_I",
+            "name": "Synthetic MODULE_CARGO_HOLD_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MODULE_JUMP_DRIVE_III",
+            "name": "Synthetic MODULE_JUMP_DRIVE_III",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "ship_light_hauler",
+      "ship_type": "SHIP_LIGHT_HAULER",
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-5",
+        "registration": {
+          "name": "CUSTOM_LIGHT_HAULER",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "DOCKED",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-5",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_SURVEYOR_I",
+            "name": "Synthetic MOUNT_SURVEYOR_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_CARGO_HOLD_II",
+            "name": "Synthetic MODULE_CARGO_HOLD_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MODULE_WARP_DRIVE_I",
+            "name": "Synthetic MODULE_WARP_DRIVE_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "ship_command_frigate",
+      "ship_type": "SHIP_COMMAND_FRIGATE",
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-6",
+        "registration": {
+          "name": "CUSTOM_COMMAND_FRIGATE",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-6",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_SURVEYOR_II",
+            "name": "Synthetic MOUNT_SURVEYOR_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_CARGO_HOLD_III",
+            "name": "Synthetic MODULE_CARGO_HOLD_III",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MODULE_WARP_DRIVE_II",
+            "name": "Synthetic MODULE_WARP_DRIVE_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "ship_explorer",
+      "ship_type": "SHIP_EXPLORER",
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-7",
+        "registration": {
+          "name": "CUSTOM_EXPLORER",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "DOCKED",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-7",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_SURVEYOR_III",
+            "name": "Synthetic MOUNT_SURVEYOR_III",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_CREW_QUARTERS_I",
+            "name": "Synthetic MODULE_CREW_QUARTERS_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MODULE_WARP_DRIVE_III",
+            "name": "Synthetic MODULE_WARP_DRIVE_III",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "ship_heavy_freighter",
+      "ship_type": "SHIP_HEAVY_FREIGHTER",
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-8",
+        "registration": {
+          "name": "CUSTOM_HEAVY_FREIGHTER",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-8",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_SENSOR_ARRAY_I",
+            "name": "Synthetic MOUNT_SENSOR_ARRAY_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_ENVOY_QUARTERS_I",
+            "name": "Synthetic MODULE_ENVOY_QUARTERS_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MODULE_SHIELD_GENERATOR_I",
+            "name": "Synthetic MODULE_SHIELD_GENERATOR_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "ship_light_shuttle",
+      "ship_type": "SHIP_LIGHT_SHUTTLE",
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-9",
+        "registration": {
+          "name": "CUSTOM_LIGHT_SHUTTLE",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "DOCKED",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-9",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_SENSOR_ARRAY_II",
+            "name": "Synthetic MOUNT_SENSOR_ARRAY_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_PASSENGER_CABIN_I",
+            "name": "Synthetic MODULE_PASSENGER_CABIN_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MODULE_SHIELD_GENERATOR_II",
+            "name": "Synthetic MODULE_SHIELD_GENERATOR_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "ship_ore_hound",
+      "ship_type": "SHIP_ORE_HOUND",
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-10",
+        "registration": {
+          "name": "CUSTOM_ORE_HOUND",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-10",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_SENSOR_ARRAY_III",
+            "name": "Synthetic MOUNT_SENSOR_ARRAY_III",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_MICRO_REFINERY_I",
+            "name": "Synthetic MODULE_MICRO_REFINERY_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "ship_refining_freighter",
+      "ship_type": "SHIP_REFINING_FREIGHTER",
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-11",
+        "registration": {
+          "name": "CUSTOM_REFINING_FREIGHTER",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "DOCKED",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-11",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_MINING_LASER_I",
+            "name": "Synthetic MOUNT_MINING_LASER_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_ORE_REFINERY_I",
+            "name": "Synthetic MODULE_ORE_REFINERY_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "ship_surveyor",
+      "ship_type": "SHIP_SURVEYOR",
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-12",
+        "registration": {
+          "name": "CUSTOM_SURVEYOR",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-12",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_MINING_LASER_II",
+            "name": "Synthetic MOUNT_MINING_LASER_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_FUEL_REFINERY_I",
+            "name": "Synthetic MODULE_FUEL_REFINERY_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "ship_bulk_freighter",
+      "ship_type": "SHIP_BULK_FREIGHTER",
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-13",
+        "registration": {
+          "name": "CUSTOM_BULK_FREIGHTER",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "DOCKED",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-13",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_MINING_LASER_III",
+            "name": "Synthetic MOUNT_MINING_LASER_III",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_SCIENCE_LAB_I",
+            "name": "Synthetic MODULE_SCIENCE_LAB_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "distinct-duplicates",
+      "ship_type": null,
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-DISTINCT-DUPLICATES",
+        "registration": {
+          "name": "CUSTOM_COMMAND_FRIGATE",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-DISTINCT-DUPLICATES",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_MINING_LASER_I",
+            "name": "Synthetic MOUNT_MINING_LASER_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 2,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MOUNT_MINING_LASER_I",
+            "name": "Synthetic MOUNT_MINING_LASER_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 9,
+            "deposits": [
+              "GOLD_ORE"
+            ],
+            "requirements": {
+              "power": 7,
+              "crew": 3,
+              "slots": 2
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_CARGO_HOLD_I",
+            "name": "Synthetic MODULE_CARGO_HOLD_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MODULE_CARGO_HOLD_I",
+            "name": "Synthetic MODULE_CARGO_HOLD_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 50,
+            "range": 6,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "future-equipment",
+      "ship_type": null,
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-FUTURE-EQUIPMENT",
+        "registration": {
+          "name": "CUSTOM_COMMAND_FRIGATE",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_FUTURE",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-FUTURE-EQUIPMENT",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_FUTURE_TOOL_V",
+            "name": "Synthetic MOUNT_FUTURE_TOOL_V",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 2,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_CUSTOM_ADDON",
+            "name": "Synthetic MODULE_CUSTOM_ADDON",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 30,
+            "range": 4,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "missing-equipment",
+      "ship_type": null,
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-MISSING-EQUIPMENT",
+        "registration": {
+          "name": "CUSTOM_COMMAND_FRIGATE",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cargo": {
+          "capacity": 40,
+          "units": 18
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "empty-equipment",
+      "ship_type": null,
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-EMPTY-EQUIPMENT",
+        "registration": {
+          "name": "CUSTOM_COMMAND_FRIGATE",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-EMPTY-EQUIPMENT",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [],
+        "modules": [],
+        "cargo": {
+          "capacity": 40,
+          "units": 0,
+          "inventory": []
+        },
+        "fuel": {
+          "current": 0,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "unknown-resources",
+      "ship_type": null,
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-UNKNOWN-RESOURCES",
+        "registration": {
+          "name": "CUSTOM_COMMAND_FRIGATE",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-UNKNOWN-RESOURCES",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_SURVEYOR_II",
+            "name": "Synthetic MOUNT_SURVEYOR_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_CARGO_HOLD_III",
+            "name": "Synthetic MODULE_CARGO_HOLD_III",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MODULE_WARP_DRIVE_II",
+            "name": "Synthetic MODULE_WARP_DRIVE_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "units": null,
+          "capacity": null,
+          "inventory": null
+        },
+        "fuel": {
+          "current": null,
+          "capacity": null
+        }
+      }
+    },
+    {
+      "id": "partial-resources",
+      "ship_type": null,
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-PARTIAL-RESOURCES",
+        "registration": {
+          "name": "CUSTOM_COMMAND_FRIGATE",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-PARTIAL-RESOURCES",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_SURVEYOR_II",
+            "name": "Synthetic MOUNT_SURVEYOR_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_CARGO_HOLD_III",
+            "name": "Synthetic MODULE_CARGO_HOLD_III",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MODULE_WARP_DRIVE_II",
+            "name": "Synthetic MODULE_WARP_DRIVE_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "units": null,
+          "capacity": 40,
+          "inventory": []
+        },
+        "fuel": {
+          "current": 12
+        }
+      }
+    },
+    {
+      "id": "full-cargo",
+      "ship_type": null,
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-FULL-CARGO",
+        "registration": {
+          "name": "CUSTOM_COMMAND_FRIGATE",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-FULL-CARGO",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_SURVEYOR_II",
+            "name": "Synthetic MOUNT_SURVEYOR_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_CARGO_HOLD_III",
+            "name": "Synthetic MODULE_CARGO_HOLD_III",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MODULE_WARP_DRIVE_II",
+            "name": "Synthetic MODULE_WARP_DRIVE_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 40,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 40
+            }
+          ]
+        },
+        "fuel": {
+          "current": 400,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "long-values",
+      "ship_type": null,
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-LONG-VALUES",
+        "registration": {
+          "name": "CUSTOM_LONG_NAME_LONG_NAME_LONG_NAME_LONG_NAME_LONG_NAME_LONG_NAME_LONG_NAME_LONG_NAME_LONG_NAME_LONG_NAME_LONG_NAME_LONG_NAME_",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-LONG-VALUES",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_SURVEYOR_I",
+            "name": "Synthetic MOUNT_SURVEYOR_I",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 2,
+            "deposits": [
+              "CUSTOM_DEPOSIT_0",
+              "CUSTOM_DEPOSIT_1",
+              "CUSTOM_DEPOSIT_2",
+              "CUSTOM_DEPOSIT_3",
+              "CUSTOM_DEPOSIT_4",
+              "CUSTOM_DEPOSIT_5",
+              "CUSTOM_DEPOSIT_6",
+              "CUSTOM_DEPOSIT_7",
+              "CUSTOM_DEPOSIT_8",
+              "CUSTOM_DEPOSIT_9",
+              "CUSTOM_DEPOSIT_10",
+              "CUSTOM_DEPOSIT_11",
+              "CUSTOM_DEPOSIT_12",
+              "CUSTOM_DEPOSIT_13",
+              "CUSTOM_DEPOSIT_14",
+              "CUSTOM_DEPOSIT_15",
+              "CUSTOM_DEPOSIT_16",
+              "CUSTOM_DEPOSIT_17"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_CARGO_HOLD_III",
+            "name": "Synthetic MODULE_CARGO_HOLD_III",
+            "description": "A long observed description A long observed description A long observed description A long observed description A long observed description A long observed description A long observed description A long observed description A long observed description A long observed description A long observed description A long observed description A long observed description A long observed description A long observed description A long observed description A long observed description A long observed description A long observed description A long observed description ",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MODULE_WARP_DRIVE_II",
+            "name": "Synthetic MODULE_WARP_DRIVE_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "partial-components",
+      "ship_type": null,
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-PARTIAL-COMPONENTS",
+        "registration": {
+          "name": "CUSTOM_COMMAND_FRIGATE",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_UNKNOWN",
+          "quality": 0
+        },
+        "engine": {
+          "speed": null
+        },
+        "cooldown": {
+          "shipSymbol": "QA-PARTIAL-COMPONENTS",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_SURVEYOR_II",
+            "name": "Synthetic MOUNT_SURVEYOR_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_CARGO_HOLD_III",
+            "name": "Synthetic MODULE_CARGO_HOLD_III",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MODULE_WARP_DRIVE_II",
+            "name": "Synthetic MODULE_WARP_DRIVE_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "cooldown-transit",
+      "ship_type": null,
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-COOLDOWN-TRANSIT",
+        "registration": {
+          "name": "CUSTOM_COMMAND_FRIGATE",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-COOLDOWN-TRANSIT",
+          "totalSeconds": 60,
+          "remainingSeconds": 30,
+          "expiration": "2026-11-15T20:00:30Z",
+          "readyAt": "2026-11-15T20:00:30Z"
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_SURVEYOR_II",
+            "name": "Synthetic MOUNT_SURVEYOR_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_CARGO_HOLD_III",
+            "name": "Synthetic MODULE_CARGO_HOLD_III",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          },
+          {
+            "symbol": "MODULE_WARP_DRIVE_II",
+            "name": "Synthetic MODULE_WARP_DRIVE_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "excluded-fields",
+      "ship_type": null,
+      "synthetic": true,
+      "observed_at": "2026-11-15T20:00:00Z",
+      "ship": {
+        "symbol": "QA-EXCLUDED-FIELDS",
+        "registration": {
+          "name": "CUSTOM_COMMAND_FRIGATE",
+          "factionSymbol": "COSMIC",
+          "role": "HAULER"
+        },
+        "nav": {
+          "systemSymbol": "X1-QA",
+          "waypointSymbol": "X1-QA-ORIGIN",
+          "status": "IN_TRANSIT",
+          "flightMode": "CRUISE",
+          "route": {
+            "origin": {
+              "symbol": "X1-QA-ORIGIN",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 0,
+              "y": 0
+            },
+            "destination": {
+              "symbol": "X1-QA-DEST",
+              "type": "ASTEROID",
+              "systemSymbol": "X1-QA",
+              "x": 10,
+              "y": 20,
+              "secret": "private-destination-secret"
+            },
+            "departureTime": "2026-11-15T19:59:00Z",
+            "arrival": "2026-11-15T20:01:00Z"
+          }
+        },
+        "crew": {
+          "current": 4,
+          "required": 3,
+          "capacity": 8,
+          "rotation": "STRICT",
+          "morale": 95,
+          "wages": 4
+        },
+        "frame": {
+          "symbol": "FRAME_LIGHT_FREIGHTER",
+          "name": "Synthetic custom frame",
+          "description": "Synthetic configuration for UI coverage only.",
+          "condition": 0.991,
+          "integrity": 0.994,
+          "quality": 3,
+          "moduleSlots": 12,
+          "mountingPoints": 6,
+          "fuelCapacity": 400,
+          "requirements": {
+            "power": 1,
+            "crew": 0,
+            "slots": 0
+          },
+          "newStat": "private-frame-value"
+        },
+        "reactor": {
+          "symbol": "REACTOR_SOLAR_I",
+          "name": "Synthetic solar reactor",
+          "description": "QA reactor",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 2,
+          "powerOutput": 20,
+          "requirements": {
+            "power": 0,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "engine": {
+          "symbol": "ENGINE_ION_DRIVE_I",
+          "name": "Synthetic ion engine",
+          "description": "QA engine",
+          "condition": 1,
+          "integrity": 1,
+          "quality": 4,
+          "speed": 30,
+          "requirements": {
+            "power": 2,
+            "crew": 0,
+            "slots": 0
+          }
+        },
+        "cooldown": {
+          "shipSymbol": "QA-EXCLUDED-FIELDS",
+          "totalSeconds": 0,
+          "remainingSeconds": 0
+        },
+        "mounts": [
+          {
+            "symbol": "MOUNT_SURVEYOR_II",
+            "name": "Synthetic MOUNT_SURVEYOR_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "strength": 1,
+            "deposits": [
+              "IRON_ORE",
+              "COPPER_ORE"
+            ],
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1,
+              "secret": "private-mount-secret"
+            }
+          }
+        ],
+        "modules": [
+          {
+            "symbol": "MODULE_CARGO_HOLD_III",
+            "name": "Synthetic MODULE_CARGO_HOLD_III",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 10,
+            "range": 2,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            },
+            "newField": "private-module-value"
+          },
+          {
+            "symbol": "MODULE_WARP_DRIVE_II",
+            "name": "Synthetic MODULE_WARP_DRIVE_II",
+            "description": "Illustrative QA equipment, not a shipyard specification.",
+            "capacity": 20,
+            "range": 3,
+            "requirements": {
+              "power": 2,
+              "crew": 1,
+              "slots": 1
+            }
+          }
+        ],
+        "cargo": {
+          "capacity": 40,
+          "units": 18,
+          "inventory": [
+            {
+              "symbol": "IRON_ORE",
+              "name": "Iron ore",
+              "description": "Synthetic cargo",
+              "units": 18,
+              "secret": "private-cargo-secret"
+            }
+          ]
+        },
+        "fuel": {
+          "current": 356,
+          "capacity": 400,
+          "consumed": {
+            "amount": 12,
+            "timestamp": "2026-11-15T19:59:00Z"
+          }
+        },
+        "token": "private-ship-token-sentinel",
+        "futureField": "private-future-value"
+      }
+    }
+  ]
+}

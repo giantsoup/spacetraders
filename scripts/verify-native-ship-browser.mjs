@@ -179,8 +179,8 @@ try {
     steps.push('Arrival due remains Checking; presentation pause/resume and lifecycle events preserve deadlines and issue no gameplay writes; reduced motion disables animation.');
     await update(initial, 600, 'error'); await page.getByText(/Last known state/).waitFor(); await capture('stale-disconnected');
     const missing = structuredClone(initial); delete missing.nav.flightMode; delete missing.fuel; delete missing.crew; delete missing.cooldown; delete missing.frame.condition; delete missing.cargo.inventory;
-    await update(missing); assert.match(await page.locator('.resource-list').innerText(), /Unknown/); await button('Report').click(); await page.getByText('Crew aboard', { exact: true }).waitFor(); await capture('missing-fields');
-    const zero = structuredClone(initial); zero.fuel = { current: 0, capacity: 0 }; await update(zero); assert.equal(await page.locator('.resource-meter i').first().evaluate(el => el.style.width), '0%');
+    await update(missing); assert.match(await page.locator('.resource-list').innerText(), /Unknown/); await button('Report').click(); await button('Systems').click(); await page.getByText('Crew aboard / capacity', { exact: true }).waitFor(); assert.match(await page.locator('.ship-report').innerText(), /Unknown/); await capture('missing-fields');
+    const zero = structuredClone(initial); zero.fuel = { current: 0, capacity: 0 }; await update(zero); const fuelRow = page.locator('.resource-row').filter({ hasText: 'Fuel' }); assert.match(await fuelRow.innerText(), /No fuel tank/); assert.equal(await fuelRow.locator('.resource-meter').count(), 0);
     await capture('zero-fuel-capacity');
     const long = structuredClone(initial); long.symbol = 'LOCAL_WITH_A_VERY_LONG_SHIP_SYMBOL-123456789'; long.nav.waypointSymbol = 'X1-VERY-LONG-WAYPOINT-SYMBOL-123456789'; await update(long);
     for (const [width,height] of [[844,390],[1440,1000],[320,667]]) {
