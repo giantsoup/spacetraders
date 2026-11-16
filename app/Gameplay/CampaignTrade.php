@@ -21,6 +21,7 @@ class CampaignTrade
         $runs = AutomationRun::where('campaign_episode_id', $episode->id)->whereIn('strategy', ['trade', 'sell_aboard'])
             ->whereNotNull('started_at')->whereNotIn('id', $known)->where(fn ($query) => $query->whereNull('plan->recovery_of')->orWhereNotIn('plan->recovery_of', $known))->orderBy('id')->get();
         $results = $saved;
+        $label = $runs->isEmpty() ? 'C0' : FleetClaims::label($episode);
         foreach ($runs as $run) {
             if ($run->active_agent_id || ! $run->started_at || ! in_array($run->state->value, ['completed', 'stopped', 'blocked'], true)) {
                 continue;
@@ -56,7 +57,12 @@ class CampaignTrade
                 'proof' => $prediction['proof'] ?? false, 'predicted_margin' => $prediction['predicted_margin'] ?? null,
                 'realized_ratio' => ($prediction['predicted_margin'] ?? 0) > 0 ? $net / $prediction['predicted_margin'] : null,
                 'standalone_recovery' => $recovery, 'forced_sale' => $forced, 'losing' => $net < 0,
-                'finished_at' => $parts->max('updated_at')->toIso8601String()];
+                'finished_at' => $parts->max('updated_at')->toIso8601String(),
+                'ship' => $run->ship_symbol, 'arm' => $label, 'source' => $run->plan['site'] ?? null, 'units' => $bought,
+                'purchase_cost' => $cost, 'sale_proceeds' => $parts->sum(fn ($part) => $part->totals['sale_proceeds'] ?? 0), 'fuel_cost' => $fuel['cost'],
+                'started_at' => $parts->min('started_at')->toIso8601String(), 'seconds' => (int) $parts->min('started_at')->diffInSeconds($parts->max('updated_at'), true),
+                'best_available' => $prediction['best_available'] ?? null, 'best_unclaimed' => $prediction['best_unclaimed'] ?? null,
+                'limiting_factor' => $prediction['limiting_factor'] ?? null];
         }
         usort($results, fn ($left, $right) => [$left['finished_at'], $left['run_id']] <=> [$right['finished_at'], $right['run_id']]);
 
@@ -115,7 +121,7 @@ class CampaignTrade
         $proof = null;
         $scaled = false;
         $minimum = $episode->grant()->revision()->body['trade']['proof']['min_realized_ratio'];
-        foreach ($results ?? $this->results($episode) as $result) {
+        foreach ($results ?? $this->learningResults($episode) as $result) {
             // A losing load re-proves only its own good/buyer pair.
             if (! empty($result['standalone_recovery']) || $result['good'] !== $good || $result['buyer'] !== $buyer) {
                 continue;
@@ -132,6 +138,23 @@ class CampaignTrade
         }
 
         return ! $proof ? 'proof' : ($scaled ? 'scaled' : 'first_scaled');
+    }
+
+    /**
+     * Results that teach an episode proof and losses: its own, and for an arm also C0's open
+     * episode of the same reset, read only, merged in finish order. C0 never reads arm results.
+     */
+    public function learningResults(CampaignEpisode $episode): array
+    {
+        $results = $this->results($episode);
+        $reference = FleetClaims::arm($episode->grant()) ? app(FleetClaims::class)->reference($episode) : null;
+        if (! $reference) {
+            return $results;
+        }
+        $results = array_merge($this->results($reference), $results);
+        usort($results, fn ($left, $right) => [$left['finished_at'], $left['run_id']] <=> [$right['finished_at'], $right['run_id']]);
+
+        return $results;
     }
 
     /**
@@ -214,7 +237,11 @@ class CampaignTrade
 
     public function decay(CampaignEpisode $episode, string $good, string $buyer): float
     {
-        $sales = ShipAction::whereIn('automation_run_id', AutomationRun::where('campaign_episode_id', $episode->id)->select('id'))->where('command', 'sell')->where('state', 'confirmed')->orderBy('id')->get();
+        $episodes = [$episode->id];
+        if (FleetClaims::arm($episode->grant()) && $reference = app(FleetClaims::class)->reference($episode)) {
+            $episodes[] = $reference->id;
+        }
+        $sales = ShipAction::whereIn('automation_run_id', AutomationRun::whereIn('campaign_episode_id', $episodes)->select('id'))->where('command', 'sell')->where('state', 'confirmed')->orderBy('id')->get();
         $previous = null;
         $drops = [];
         foreach ($sales as $sale) {
@@ -244,8 +271,40 @@ class CampaignTrade
         $pairs = app(OpportunityAssessor::class)->report($agent, 'trade', $ship['symbol'], true)['opportunities'];
         $state = $episode->state ?? [];
         $ranked = [];
-        $results = $this->results($episode);
+        $results = $this->learningResults($episode);
         $learning = [];
+        $claims = app(FleetClaims::class);
+        $arm = FleetClaims::arm($grant);
+        $taken = $arm || config('gameplay.campaign_claims', true) ? $claims->taken($episode) : [];
+        // A follower works only its leader's current pair, claims aside, and waits without one.
+        if ($arm['follow'] ?? null) {
+            $leader = $claims->leader($episode, $arm['follow']);
+            $lead = $leader ? ($claims->pairs($leader)[0] ?? null) : null;
+            if (! $lead) {
+                $considered[] = ['strategy' => 'trade', 'rejected' => 'Follower waiting for leader claim.'];
+
+                return [];
+            }
+            $taken = [];
+            $pairs = array_values(array_filter($pairs, fn ($pair) => [$pair['good'], $pair['source'], $pair['market']] === [$lead['good'], $lead['source'], $lead['buyer']]));
+        }
+        // An arm caps each load at its own spend limit and its share of credits, less the cost
+        // basis other arm ships already carry.
+        $exposure = INF;
+        if ($arm) {
+            $held = 0;
+            $ships = CampaignGrant::whereNull('revoked_at')->whereNull('superseded_at')->whereKeyNot($grant->id)->get()
+                ->map(fn ($other) => FleetClaims::arm($other)['ship'] ?? null)->filter()->reject(fn ($symbol) => $symbol === $ship['symbol'])->unique();
+            foreach (Ship::where('agent_id', $agent->id)->whereIn('symbol', $ships)->get() as $other) {
+                $costs = $this->averageCosts($agent, $other->symbol);
+                foreach ($other->snapshot['cargo']['inventory'] ?? [] as $item) {
+                    $held += ($costs[$item['symbol']] ?? 0) * $item['units'];
+                }
+            }
+            $exposure = max(0, min($arm['max_load_spend'] ?? INF, ($arm['exposure_share'] ?? 0.5) * $agent->credits - $held));
+        }
+        $available = null;
+        $unclaimed = null;
         // Docked at a verified fuel seller, the run tops up first, so legs start from a full tank
         // and the refuel ceiling comes out of the credits available for cargo.
         $departure = app(FuelPlanner::class)->departureRefuel($agent, $ship);
@@ -278,10 +337,16 @@ class CampaignTrade
                 $mode = $learning[$key]['mode'];
                 $batches = $mode === 'first_scaled' ? $rules['lot']['first_scaled_max_buyer_batches'] : $rules['lot']['max_buyer_batches'];
                 $ceiling = max(0, $agent->credits - $refuel - max($outbound['refuel_ceiling'], $fuel));
+                $bound = 'credits';
                 $units = min($ship['cargo']['capacity'], $batches * $bid['tradeVolume']);
+                $limit = $ship['cargo']['capacity'] < $batches * $bid['tradeVolume'] ? 'hold' : 'lot';
                 if ($mode === 'proof') {
-                    $units = min($units, $rules['proof']['max_units_batches'] * min($ask['tradeVolume'], $bid['tradeVolume']));
-                    $ceiling = min($ceiling, $rules['proof']['max_credits']);
+                    $proofUnits = $rules['proof']['max_units_batches'] * min($ask['tradeVolume'], $bid['tradeVolume']);
+                    [$units, $limit] = $proofUnits < $units ? [$proofUnits, 'proof'] : [$units, $limit];
+                    [$ceiling, $bound] = $rules['proof']['max_credits'] < $ceiling ? [$rules['proof']['max_credits'], 'proof'] : [$ceiling, $bound];
+                }
+                if ($exposure < $ceiling) {
+                    [$ceiling, $bound] = [(int) floor($exposure), 'exposure'];
                 }
                 $decay = $learning[$key]['decay'];
                 $low = 0;
@@ -294,7 +359,7 @@ class CampaignTrade
                         $high = $middle - 1;
                     }
                 }
-                $units = $low;
+                [$units, $limit] = $low < $units ? [$low, $bound] : [$units, $limit];
                 $prediction = $this->prediction($units, $ask, $bid, $decay, $fuel);
                 $seconds = ($position['estimated_seconds'] ?? 0) + ($outbound['estimated_seconds'] ?? 0) + ($return['estimated_seconds'] ?? 0)
                     + (ceil($units / $ask['tradeVolume']) + ceil($units / $bid['tradeVolume'])) * 10 + 120;
@@ -303,8 +368,19 @@ class CampaignTrade
                 }
                 $candidate = ['key' => $key, 'source' => $pair['source'], 'buyer' => $pair['market'], 'good' => $pair['good'], 'units' => $units,
                     'mode' => $mode, 'proof' => $mode === 'proof', 'decay' => $decay, 'bid' => $bid['sellPrice'], 'fuel' => $fuel, 'departure_refuel' => $refuel,
-                    'fuel_reserve' => $outbound['refuel_ceiling'], 'max_inventory' => $ceiling, 'seconds' => $seconds,
+                    'fuel_reserve' => $outbound['refuel_ceiling'], 'max_inventory' => $ceiling, 'seconds' => $seconds, 'limiting_factor' => $limit, 'ship' => $ship['symbol'],
                     'score' => $prediction['predicted_margin'] / max(1, $seconds / 60)] + $prediction;
+                if (! $available || $candidate['predicted_margin'] > $available['predicted_margin']) {
+                    $available = $candidate;
+                }
+                if (isset($taken[$pair['good'].'@'.$pair['source']]) || isset($taken[$pair['good'].'@'.$pair['market']])) {
+                    $considered[] = $candidate + ['rejected' => 'Claimed by another ship.', 'claimed_by' => $taken[$pair['good'].'@'.$pair['source']] ?? $taken[$pair['good'].'@'.$pair['market']]];
+
+                    continue;
+                }
+                if (! $unclaimed || $candidate['predicted_margin'] > $unclaimed['predicted_margin']) {
+                    $unclaimed = $candidate;
+                }
                 if (($state['current_pair'] ?? null) === $key && $bid['sellPrice'] <= $state['first_seen'][$key] * $rules['switch']['bid_below_first_seen']) {
                     $considered[] = $candidate + ['rejected' => 'Switch: buyer bid at or below first-seen threshold.'];
 
@@ -324,6 +400,9 @@ class CampaignTrade
             }
         }
         $episode->update(['state' => $state]);
+        $best = ['best_available' => $available['predicted_margin'] ?? null, 'best_available_key' => $available['key'] ?? null,
+            'best_unclaimed' => $unclaimed['predicted_margin'] ?? null, 'best_unclaimed_key' => $unclaimed['key'] ?? null];
+        $ranked = array_map(fn ($candidate) => $candidate + $best, $ranked);
         foreach ($ranked as $candidate) {
             $considered[] = $candidate;
         }
