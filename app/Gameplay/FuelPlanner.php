@@ -89,6 +89,52 @@ class FuelPlanner
             'configuration' => self::configuration($ship), 'alternatives' => array_slice($candidates, 1, 3)]);
     }
 
+    /**
+     * A stationary ship at a verified fuel seller (FUEL listed and freshly priced there) tops up
+     * to full before it leaves. Returns the ship as planned after that top-up, the agent funded
+     * after its spending ceiling, and the ceiling itself; null when no top-up applies.
+     *
+     * @param  Collection<string, GameObservation>|null  $listings
+     */
+    public function departureRefuel(Agent $agent, array $ship, ?Collection $listings = null): ?array
+    {
+        if ($ship['nav']['status'] === 'IN_TRANSIT' || $ship['fuel']['capacity'] < 1 || $ship['fuel']['current'] >= $ship['fuel']['capacity']) {
+            return null;
+        }
+        $quote = $this->sellerQuote($agent, $ship['nav']['waypointSymbol'], $listings);
+        if (! $quote) {
+            return null;
+        }
+        $ceiling = (int) ceil($ship['fuel']['capacity'] / 100) * $quote['purchasePrice'] * 2;
+        $funded = clone $agent;
+        $funded->credits -= $ceiling;
+        $refueled = $ship;
+        $refueled['fuel']['current'] = $ship['fuel']['capacity'];
+
+        return ['ceiling' => $ceiling, 'ship' => $refueled, 'agent' => $funded, 'quote' => $quote];
+    }
+
+    /**
+     * The fresh FUEL quote at a waypoint whose market listing exports or exchanges FUEL.
+     *
+     * @param  Collection<string, GameObservation>|null  $listings
+     */
+    public function sellerQuote(Agent $agent, string $waypoint, ?Collection $listings = null): ?array
+    {
+        $listing = ($listings ?? $this->listings($agent))->get($waypoint);
+        if (! $listing || ! in_array('FUEL', array_column(array_merge($listing->data['exports'] ?? [], $listing->data['exchange'] ?? []), 'symbol'), true)) {
+            return null;
+        }
+        $market = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $waypoint)->first();
+        $fuel = collect($market?->data['tradeGoods'] ?? [])->firstWhere('symbol', 'FUEL');
+        if (! $market || ! $fuel || ! empty($market->data['invalidated_by_action']) || $fuel['purchasePrice'] < 1 || $fuel['tradeVolume'] < 1
+            || $market->observed_at->lt(now()->subSeconds(config('gameplay.snapshot_seconds')))) {
+            return null;
+        }
+
+        return $fuel;
+    }
+
     public function recoveryLeg(Agent $agent, array $ship, string $destination, int $creditReserve = 0): array
     {
         try {

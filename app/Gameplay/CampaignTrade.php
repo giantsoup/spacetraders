@@ -54,7 +54,7 @@ class CampaignTrade
                 'cash_net' => $cashNet, 'unrefilled_fuel_allowance' => $fuelAllowance, 'proof_eligible' => $proofEligible,
                 'proof' => $prediction['proof'] ?? false, 'predicted_margin' => $prediction['predicted_margin'] ?? null,
                 'realized_ratio' => ($prediction['predicted_margin'] ?? 0) > 0 ? $net / $prediction['predicted_margin'] : null,
-                'standalone_recovery' => $recovery, 'forced_sale' => $forced, 'losing' => $net < 0 || $forced,
+                'standalone_recovery' => $recovery, 'forced_sale' => $forced, 'losing' => $net < 0,
                 'finished_at' => $parts->max('updated_at')->toIso8601String()];
         }
         usort($results, fn ($left, $right) => [$left['finished_at'], $left['run_id']] <=> [$right['finished_at'], $right['run_id']]);
@@ -79,23 +79,32 @@ class CampaignTrade
         $scaled = false;
         $minimum = $episode->grant()->revision()->body['trade']['proof']['min_realized_ratio'];
         foreach ($results ?? $this->results($episode) as $result) {
-            if (! empty($result['standalone_recovery'])) {
+            // A losing load re-proves only its own good/buyer pair.
+            if (! empty($result['standalone_recovery']) || $result['good'] !== $good || $result['buyer'] !== $buyer) {
                 continue;
             }
-            if ($result['losing']) {
+            if (self::losing($result)) {
                 $proof = null;
                 $scaled = false;
-            } elseif ($result['good'] === $good && $result['buyer'] === $buyer) {
-                if ($result['proof']) {
-                    $proof = $result['proof_eligible'] && $result['realized_ratio'] >= $minimum;
-                    $scaled = false;
-                } elseif ($proof) {
-                    $scaled = true;
-                }
+            } elseif ($result['proof']) {
+                $proof = $result['proof_eligible'] && $result['realized_ratio'] >= $minimum;
+                $scaled = false;
+            } elseif ($proof) {
+                $scaled = true;
             }
         }
 
         return ! $proof ? 'proof' : ($scaled ? 'scaled' : 'first_scaled');
+    }
+
+    /**
+     * A load loses only when its net, unrefilled fuel allowance included, is negative. A forced
+     * sale that still covered its costs is not a loss. Saved results recorded before this rule
+     * flagged every forced sale, so the stored flag is re-derived from net.
+     */
+    public static function losing(array $result): bool
+    {
+        return ($result['net'] ?? 0) < 0;
     }
 
     public function averageCosts(Agent $agent, string $ship): array
@@ -200,6 +209,12 @@ class CampaignTrade
         $ranked = [];
         $results = $this->results($episode);
         $learning = [];
+        // Docked at a verified fuel seller, the run tops up first, so legs start from a full tank
+        // and the refuel ceiling comes out of the credits available for cargo.
+        $departure = app(FuelPlanner::class)->departureRefuel($agent, $ship);
+        $planned = $departure['ship'] ?? $ship;
+        $funded = $departure['agent'] ?? $agent;
+        $refuel = $departure['ceiling'] ?? 0;
         foreach ($pairs as $pair) {
             $key = $pair['good'].'@'.$pair['market'];
             $ask = collect($markets->get($pair['source'])?->data['tradeGoods'] ?? [])->firstWhere('symbol', $pair['good']);
@@ -211,21 +226,21 @@ class CampaignTrade
             }
             $state['first_seen'][$key] ??= $bid['sellPrice'];
             try {
-                $atSource = $ship;
-                $position = app(FuelPlanner::class)->leg($agent, $ship, $pair['source'], 0);
+                $atSource = $planned;
+                $position = app(FuelPlanner::class)->leg($funded, $planned, $pair['source'], 0);
                 $atSource['nav']['waypointSymbol'] = $pair['source'];
                 $atSource['fuel']['current'] -= $position['outbound_fuel'];
-                $outbound = app(FuelPlanner::class)->leg($agent, $atSource, $pair['market'], 0);
+                $outbound = app(FuelPlanner::class)->leg($funded, $atSource, $pair['market'], 0);
                 $atBuyer = $atSource;
                 $atBuyer['nav']['waypointSymbol'] = $pair['market'];
                 $atBuyer['fuel']['current'] -= $outbound['outbound_fuel'];
-                $return = app(FuelPlanner::class)->leg($agent, $atBuyer, $pair['source'], 0);
+                $return = app(FuelPlanner::class)->leg($funded, $atBuyer, $pair['source'], 0);
                 $fuel = $return['refuel_ceiling'];
                 $learning[$key] ??= ['mode' => $this->mode($episode, $pair['good'], $pair['market'], $results),
                     'decay' => $this->decay($episode, $pair['good'], $pair['market'])];
                 $mode = $learning[$key]['mode'];
                 $batches = $mode === 'first_scaled' ? $rules['lot']['first_scaled_max_buyer_batches'] : $rules['lot']['max_buyer_batches'];
-                $ceiling = max(0, $agent->credits - max($outbound['refuel_ceiling'], $fuel));
+                $ceiling = max(0, $agent->credits - $refuel - max($outbound['refuel_ceiling'], $fuel));
                 $units = min($ship['cargo']['capacity'], $batches * $bid['tradeVolume']);
                 if ($mode === 'proof') {
                     $units = min($units, $rules['proof']['max_units_batches'] * min($ask['tradeVolume'], $bid['tradeVolume']));
@@ -250,7 +265,7 @@ class CampaignTrade
                     throw new GameException('No profitable lot fits cargo, fuel, proof and duration bounds.');
                 }
                 $candidate = ['key' => $key, 'source' => $pair['source'], 'buyer' => $pair['market'], 'good' => $pair['good'], 'units' => $units,
-                    'mode' => $mode, 'proof' => $mode === 'proof', 'decay' => $decay, 'bid' => $bid['sellPrice'], 'fuel' => $fuel,
+                    'mode' => $mode, 'proof' => $mode === 'proof', 'decay' => $decay, 'bid' => $bid['sellPrice'], 'fuel' => $fuel, 'departure_refuel' => $refuel,
                     'fuel_reserve' => $outbound['refuel_ceiling'], 'max_inventory' => $ceiling, 'seconds' => $seconds,
                     'score' => $prediction['predicted_margin'] / max(1, $seconds / 60)] + $prediction;
                 if (($state['current_pair'] ?? null) === $key && $bid['sellPrice'] <= $state['first_seen'][$key] * $rules['switch']['bid_below_first_seen']) {

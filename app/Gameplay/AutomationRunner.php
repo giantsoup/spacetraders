@@ -230,6 +230,9 @@ class AutomationRunner
                     $step = $this->contracts->next($ship, $run->plan, $run->totals, now()->toImmutable());
                 } elseif (! empty($run->plan['sell_only'])) {
                     $this->refreshBuyer($agent, $run->plan['market']);
+                    if (($run->plan['route']['departure_refuel_ceiling'] ?? 0) > 0 && ($run->totals['travel_fuel'] ?? 0) === 0 && $run->plan['site'] !== $run->plan['market']) {
+                        $this->refreshBuyer($agent, $run->plan['site']);
+                    }
                     $step = app(CampaignRecovery::class)->next($agent, $ship, $run);
                 } else {
                     $this->refreshBuyer($agent, $run->plan['market']);
