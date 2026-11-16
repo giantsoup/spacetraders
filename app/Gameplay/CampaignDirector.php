@@ -20,6 +20,14 @@ use Illuminate\Validation\ValidationException;
 
 class CampaignDirector
 {
+    /**
+     * Wall-clock budget for one decision's SpaceTraders requests. The shared request budget paces
+     * calls about one per second, and a trade or cargo-recovery decision re-syncs the agent and ships
+     * and then reads several markets. At 12 seconds those decisions ran out of time on every tick,
+     * so the campaign waited forever without starting a run.
+     */
+    public const DEADLINE_SECONDS = 45;
+
     public function tick(): bool
     {
         $attempted = false;
@@ -56,7 +64,7 @@ class CampaignDirector
                     return;
                 }
                 try {
-                    app(SpaceTradersClient::class)->scope(fn () => $this->direct($grant), deadline: microtime(true) + 12);
+                    app(SpaceTradersClient::class)->scope(fn () => $this->direct($grant), deadline: microtime(true) + self::DEADLINE_SECONDS);
                 } catch (ValidationException) {
                     $control->pause($grant, 'registration_requires_review');
                 } catch (GameException $exception) {
