@@ -79,6 +79,8 @@ class DispatchDueSpaceTraders extends Command
             } catch (\Throwable) {
             }
         }
+        // A campaign decision can take most of a minute. Give dispatch its own budget after it.
+        $deadline = hrtime(true) + 15_000_000_000;
         if (app(EngineGate::class)->enabled()) {
             try {
                 app(EngineGate::class)->session();
