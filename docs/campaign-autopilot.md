@@ -77,7 +77,8 @@ Trade settings govern proofs, lot sizes, switching, losses, and quote age:
   first scaled load uses first_scaled_max_buyer_batches (three by default), later loads
   max_buyer_batches (five), always within hold capacity and fuel-funded affordability.
 - A negative load, posted fuel included, requires another proof of that good/buyer pair only;
-  other pairs keep their proof. A forced fallback sale counts as losing only when its net is
+  other pairs keep their proof. A load is charged for fuel bought after it departs, up to what
+  its own travel burned; a departure top-up refills earlier loads and is not charged again. A forced fallback sale counts as losing only when its net is
   negative. Two consecutive losing loads trigger sell-aboard followed by a pause.
 - Selection ranks every observed source/buyer/good combination deterministically by
   predicted margin per travel/trade minute. Bid predictions decay by buyer batch; source
@@ -94,8 +95,11 @@ Trade settings govern proofs, lot sizes, switching, losses, and quote age:
   tops up to full as the first step of a trade, a command-ship positioning run or a sell-aboard
   recovery: before the first buy or the first navigate. Ranking and previews plan every leg
   from that full tank and reserve the refuel ceiling (twice the fresh fuel price per 100 units
-  of capacity) out of the credits available for cargo. Recovery tops up again after its final
-  sale when the ship is then docked at a verified fuel seller.
+  of capacity) out of the credits available for cargo. That ceiling counts toward spending
+  limits but not toward a trade's margin. If the top-up would exceed its ceiling, the run
+  blocks instead of buying or departing on a partial tank. Recovery reads its own market first
+  when that fuel quote is stale, and tops up again after its final sale when the ship is then
+  docked at a verified fuel seller, except in wind_down.
 - The probe is not sent to a buyer where any of our ships is already stationary. Extra ships
   bought manually are not campaign roles and are never driven, but each tick in earn reads one
   market where such a ship is parked, in rotation, skipping markets read within the quote age.
@@ -149,6 +153,8 @@ twenty-five minutes in earn (CampaignHealth::COMMAND_STALL_MINUTES). Its timer r
 latest command-ship run start, the move into earn, or the last resume, so paused time does
 not count; probe and extra-ship runs do not reset it. It is silent while paused, with a stale
 engine heartbeat, outside earn, in wind_down, and for the first thirty minutes of an episode.
+A deploy or engine outage records no resume event, so it can fire on the first healthy check
+afterwards; it clears once the command ship starts a run.
 These stall alerts do not pause execution. No approved campaign means there is nothing to
 monitor.
 

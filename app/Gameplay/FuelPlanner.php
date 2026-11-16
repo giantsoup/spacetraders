@@ -121,8 +121,7 @@ class FuelPlanner
      */
     public function sellerQuote(Agent $agent, string $waypoint, ?Collection $listings = null): ?array
     {
-        $listing = ($listings ?? $this->listings($agent))->get($waypoint);
-        if (! $listing || ! in_array('FUEL', array_column(array_merge($listing->data['exports'] ?? [], $listing->data['exchange'] ?? []), 'symbol'), true)) {
+        if (! $this->listsFuel($agent, $waypoint, $listings)) {
             return null;
         }
         $market = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $waypoint)->first();
@@ -133,6 +132,14 @@ class FuelPlanner
         }
 
         return $fuel;
+    }
+
+    /** @param  Collection<string, GameObservation>|null  $listings */
+    public function listsFuel(Agent $agent, string $waypoint, ?Collection $listings = null): bool
+    {
+        $listing = ($listings ?? $this->listings($agent))->get($waypoint);
+
+        return $listing && in_array('FUEL', array_column(array_merge($listing->data['exports'] ?? [], $listing->data['exchange'] ?? []), 'symbol'), true);
     }
 
     public function recoveryLeg(Agent $agent, array $ship, string $destination, int $creditReserve = 0): array

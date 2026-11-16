@@ -39,8 +39,9 @@ class CampaignTrade
                 continue;
             }
             $cost = $recovery ? ($run->plan['cargo_cost'] ?? 0) : ($run->totals['purchase_cost'] ?? 0);
-            $cashNet = $parts->sum(fn ($part) => ($part->totals['sale_proceeds'] ?? 0) - ($part->totals['fuel_cost'] ?? 0)) - $cost;
-            $unrefilled = max(0, $parts->sum(fn ($part) => $part->totals['travel_fuel'] ?? 0) - $parts->sum(fn ($part) => $part->totals['fuel_units'] ?? 0));
+            $fuel = $this->loadFuel($parts);
+            $cashNet = $parts->sum(fn ($part) => $part->totals['sale_proceeds'] ?? 0) - $fuel['cost'] - $cost;
+            $unrefilled = max(0, $fuel['travel'] - $fuel['units']);
             $fuelPrice = GameObservation::where('agent_id', $episode->agent_id)->where('reset_id', $episode->reset_id)->where('kind', 'market')
                 ->whereIn('symbol', [$run->plan['site'], $run->plan['market']])->get()
                 ->flatMap(fn ($row) => $row->data['tradeGoods'] ?? [])->where('symbol', 'FUEL')->max('purchasePrice');
@@ -60,6 +61,42 @@ class CampaignTrade
         usort($results, fn ($left, $right) => [$left['finished_at'], $left['run_id']] <=> [$right['finished_at'], $right['run_id']]);
 
         return $results;
+    }
+
+    /**
+     * Fuel a load is charged for: bills after each part's first navigate, capped at the fuel that
+     * the load's own travel burned. A top-up before departure, or past the load's own burn, refills
+     * fuel earlier loads used and already recorded as their unrefilled allowance, so charging it
+     * here would count it twice. Run totals and credit accounting still carry every bill.
+     *
+     * @return array{cost: int, units: int, travel: int}
+     */
+    private function loadFuel($parts): array
+    {
+        $actions = ShipAction::whereIn('automation_run_id', $parts->pluck('id'))->whereIn('command', ['navigate', 'refuel'])
+            ->where('state', 'confirmed')->orderBy('id')->get()->groupBy('automation_run_id');
+        $travel = $parts->sum(fn ($part) => $part->totals['travel_fuel'] ?? 0);
+        $cost = 0;
+        $units = 0;
+        foreach ($parts as $part) {
+            $departureCost = 0;
+            $departureUnits = 0;
+            foreach ($actions->get($part->id, collect()) as $action) {
+                if ($action->command === 'navigate') {
+                    break;
+                }
+                $departureCost += $action->outcome['transaction_total'] ?? 0;
+                $departureUnits += $action->arguments['units'] ?? 0;
+            }
+            $cost += max(0, ($part->totals['fuel_cost'] ?? 0) - $departureCost);
+            $units += max(0, ($part->totals['fuel_units'] ?? 0) - $departureUnits);
+        }
+        if ($units > $travel && $units > 0) {
+            $cost = (int) round($cost * $travel / $units);
+            $units = $travel;
+        }
+
+        return ['cost' => $cost, 'units' => $units, 'travel' => $travel];
     }
 
     public function recordResults(CampaignEpisode $episode): void

@@ -2653,4 +2653,234 @@ class CampaignAutopilotTest extends TestCase
         $after = count(array_filter(json_decode(file_get_contents($this->file), true)['calls'], fn ($call) => str_ends_with($call['path'], 'X1-TEST-YAK/market')));
         $this->assertSame($calls, $after);
     }
+
+    private function lowFuelWorld(array $ship = [], ?callable $edit = null): void
+    {
+        $this->tradeWorld();
+        $this->editWorld(function (&$world) use ($ship, $edit) {
+            $world['ships'][0] = array_replace_recursive($world['ships'][0], ['fuel' => ['current' => 5]], $ship);
+            if ($edit) {
+                $edit($world);
+            }
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+    }
+
+    private function startEarnTrade(int $exposure = 1000): AutomationRun
+    {
+        $this->approve(str_replace('max_credits: 60000', 'max_credits: '.$exposure, $this->body()));
+        $this->tick();
+        CampaignEpisode::firstOrFail()->update(['phase' => 'earn']);
+        $this->tick();
+
+        return AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+    }
+
+    public function test_departure_fuel_is_spending_not_margin_and_is_not_charged_to_the_load(): void
+    {
+        // 4 units at 30 sell for 33: the 12 CR spread covers the 10 CR return-fuel ceiling but not
+        // the 10 CR departure ceiling as well.
+        $this->lowFuelWorld(edit: function (&$world) {
+            $world['market_goods']['X1-TEST-PORT'][0]['sellPrice'] = 33;
+        });
+        $run = $this->startEarnTrade();
+        $this->assertSame('trade', $run->strategy);
+        $route = $run->plan['route'];
+        $this->assertGreaterThan(0, $route['departure_refuel_ceiling']);
+        $this->assertSame($run->plan['units'] * 3 - ($route['fuel_ceiling'] - $route['departure_refuel_ceiling']), $route['estimated_cash_margin']);
+        $this->assertLessThan(1, $route['estimated_cash_margin'] - $route['departure_refuel_ceiling'], 'The old margin check would have rejected this pair.');
+        $run = $this->driveRun($run);
+        $this->assertSame('completed', $run->state->value, $run->blocked_reason ?? json_encode($run->totals));
+        $refuels = ShipAction::where('automation_run_id', $run->id)->where('command', 'refuel')->where('state', 'confirmed')->orderBy('id')->get();
+        $this->assertCount(2, $refuels);
+        $this->assertSame($refuels->sum(fn ($action) => $action->outcome['transaction_total']), $run->totals['fuel_cost'], 'Run totals keep every fuel bill.');
+        $result = app(CampaignTrade::class)->results(CampaignEpisode::firstOrFail())[0];
+        $returnFuel = $refuels->last()->outcome['transaction_total'];
+        $this->assertSame($run->totals['sale_proceeds'] - $run->totals['purchase_cost'] - $returnFuel, $result['cash_net']);
+        $this->assertSame($result['cash_net'] - $result['unrefilled_fuel_allowance'], $result['net']);
+        $this->assertFalse($result['losing']);
+    }
+
+    public function test_a_post_sale_top_up_beyond_the_loads_own_travel_is_not_charged_to_it(): void
+    {
+        $this->tradeWorld();
+        $this->editWorld(function (&$world) {
+            $world['ships'][0]['nav']['waypointSymbol'] = 'X1-TEST-PORT';
+            $world['ships'][0]['fuel']['current'] = 5;
+            $world['ships'][0]['cargo'] = ['capacity' => 40, 'units' => 3, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 3]]];
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $this->approve();
+        $this->tick();
+        $run = $this->driveRun(AutomationRun::whereNotNull('active_agent_id')->firstOrFail());
+        $this->assertSame('completed', $run->state->value, $run->blocked_reason ?? json_encode($run->totals));
+        $this->assertSame(['sell', 'refuel'], $this->confirmedCommands($run));
+        $this->assertGreaterThan(0, $run->totals['fuel_cost']);
+        $result = collect(app(CampaignTrade::class)->results(CampaignEpisode::firstOrFail()))->firstWhere('run_id', $run->id);
+        $this->assertSame($run->totals['sale_proceeds'], $result['net'], 'No travel, so the earlier loads\' fuel is not charged here.');
+    }
+
+    public function test_recovery_reads_its_own_stale_market_before_planning_the_departure_top_up(): void
+    {
+        $this->lowFuelWorld(['cargo' => ['capacity' => 40, 'units' => 3, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 3]]]]);
+        GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-ROCK')->update(['observed_at' => now()->subHour()]);
+        $this->assertNull(app(FuelPlanner::class)->sellerQuote($this->agent, 'X1-TEST-ROCK'));
+        $plan = app(CampaignRecovery::class)->compose($this->agent, 'LOCAL-1', 'X1-TEST-PORT',
+            ['reserve' => 0, 'max_spend' => 100000, 'max_loss' => PHP_INT_MAX, 'minutes' => 15, 'cycles' => 1])['plan'];
+        $this->assertGreaterThan(0, $plan['route']['departure_refuel_ceiling']);
+        $this->assertTrue(GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-ROCK')->firstOrFail()->observed_at->gt(now()->subMinute()));
+    }
+
+    public function test_a_trade_blocks_instead_of_buying_when_the_departure_top_up_exceeds_its_ceiling(): void
+    {
+        $this->lowFuelWorld();
+        $run = $this->startEarnTrade();
+        $this->assertGreaterThan(0, $run->plan['route']['departure_refuel_ceiling']);
+        $this->editWorld(function (&$world) {
+            $world['goods'][2]['purchasePrice'] = 500;
+        });
+        $run = $this->driveRun($run, 3);
+        $this->assertSame('blocked', $run->state->value);
+        $this->assertStringContainsString('Departure refuel exceeds', $run->blocked_reason);
+        $this->assertSame(0, ShipAction::where('automation_run_id', $run->id)->count());
+        $this->assertSame([], json_decode(file_get_contents($this->file), true)['writes']);
+    }
+
+    public function test_recovery_blocks_instead_of_departing_when_the_departure_top_up_exceeds_its_ceiling(): void
+    {
+        $this->lowFuelWorld(['cargo' => ['capacity' => 40, 'units' => 3, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 3]]]]);
+        $grant = $this->approve();
+        $this->tick();
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertSame('sell_aboard', $run->strategy);
+        $this->editWorld(function (&$world) {
+            $world['goods'][2]['purchasePrice'] = 500;
+        });
+        $run = $this->driveRun($run, 3);
+        $this->assertSame('blocked', $run->state->value);
+        $this->assertStringContainsString('Departure refuel exceeds', $run->blocked_reason);
+        $this->assertFalse(ShipAction::where('automation_run_id', $run->id)->whereIn('command', ['orbit', 'navigate', 'refuel'])->exists());
+        $this->assertSame('X1-TEST-ROCK', Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot['nav']['waypointSymbol']);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_one_way_arrival_refuel_caps_at_the_unspent_fuel_ceiling(): void
+    {
+        $this->tradeWorld();
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $planner = app(OperationPlanner::class);
+        $ship = Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot;
+        $ship['fuel']['current'] = 12;
+        $listing = GameObservation::where('kind', 'market_listing')->where('symbol', 'X1-TEST-ROCK')->firstOrFail();
+        $data = $listing->data;
+        $data['exchange'] = array_values(array_filter($data['exchange'], fn ($good) => $good['symbol'] !== 'FUEL'));
+        $listing->update(['data' => $data]);
+        $plan = $planner->preview($this->agent, $ship, ['strategy' => 'scout', 'destination' => 'X1-TEST-PORT', 'reserve' => 0, 'max_fuel' => 100, 'max_spend' => 100, 'max_loss' => 100, 'one_way' => true]);
+        $ceiling = $plan['route']['fuel_ceiling'];
+        $ship['nav']['waypointSymbol'] = 'X1-TEST-PORT';
+        $ship['fuel']['current'] = 5;
+        $step = $planner->next($this->agent, $ship, $plan, ['phase' => 'observe', 'fuel_cost' => 3], now()->toImmutable());
+        $this->assertSame('refuel', $step->command);
+        $this->assertSame($ceiling - 3, $step->arguments['maxTotal']);
+    }
+
+    public function test_return_refuel_caps_at_the_unspent_fuel_ceiling(): void
+    {
+        $planner = app(OperationPlanner::class);
+        $grant = $this->tradeGrant(1000);
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $home = Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot;
+        $home['fuel']['current'] = 90;
+        $totals = array_replace($run->totals, ['phase' => 'return', 'fuel_cost' => 3, 'purchased' => [], 'sold' => []]);
+        $step = $planner->next($this->agent->fresh(), $home, $run->plan, $totals, now()->toImmutable());
+        $this->assertSame('refuel', $step->command);
+        $this->assertSame($run->plan['route']['fuel_ceiling'] - 3, $step->arguments['maxTotal']);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_wind_down_recovery_skips_the_post_sale_top_up(): void
+    {
+        $this->lowFuelWorld(['cargo' => ['capacity' => 40, 'units' => 3, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 3]]]]);
+        $this->approve();
+        $this->tick();
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertGreaterThan(0, $run->plan['route']['post_sale_refuel_ceiling']);
+        CampaignEpisode::firstOrFail()->update(['next_reset_at' => now()->addMinutes(50)]);
+        $run = $this->driveRun($run);
+        $this->assertSame('completed', $run->state->value, $run->blocked_reason ?? json_encode($run->totals));
+        $commands = $this->confirmedCommands($run);
+        $this->assertSame('sell', end($commands), json_encode($commands));
+        $this->assertCount(1, array_keys($commands, 'refuel', true), 'Only the departure top-up.');
+    }
+
+    public function test_recovery_starting_in_orbit_docks_then_refuels_before_departing(): void
+    {
+        $this->lowFuelWorld(['nav' => ['status' => 'IN_ORBIT'], 'cargo' => ['capacity' => 40, 'units' => 3, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 3]]]]);
+        $this->approve();
+        $this->tick();
+        $run = $this->driveRun(AutomationRun::whereNotNull('active_agent_id')->firstOrFail());
+        $this->assertSame('completed', $run->state->value, $run->blocked_reason ?? json_encode($run->totals));
+        $this->assertSame(['dock', 'refuel', 'orbit', 'navigate'], array_slice($this->confirmedCommands($run), 0, 4));
+    }
+
+    public function test_command_positioning_from_a_fuel_seller_refuels_before_departing(): void
+    {
+        $this->tradeWorld();
+        $this->editWorld(function (&$world) {
+            $world['market_goods']['X1-TEST-ZED'] = [['symbol' => 'FUEL', 'tradeVolume' => 10, 'purchasePrice' => 5, 'sellPrice' => 3]];
+        });
+        $this->addMarket('X1-TEST-ZED', 40);
+        $this->editWorld(function (&$world) {
+            $world['ships'][0]['nav']['waypointSymbol'] = 'X1-TEST-ZED';
+            $world['ships'][0]['fuel']['current'] = 5;
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $run = $this->startEarnTrade();
+        $this->assertSame('scout', $run->strategy);
+        $this->assertSame('LOCAL-1', $run->ship_symbol);
+        $this->assertSame('X1-TEST-ROCK', $run->plan['destination']);
+        $this->assertGreaterThan(0, $run->plan['route']['departure_refuel_ceiling']);
+        $run = $this->driveRun($run);
+        $this->assertSame('completed', $run->state->value, $run->blocked_reason ?? json_encode($run->totals));
+        $this->assertSame(['refuel', 'orbit', 'navigate'], array_slice($this->confirmedCommands($run), 0, 3));
+    }
+
+    public function test_idle_ticks_refresh_a_parked_market_and_a_failed_read_does_not_block_the_trade(): void
+    {
+        $this->tradeWorld();
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $this->addMarket('X1-TEST-YAK', 30);
+        $this->addMarket('X1-TEST-ZED', 40);
+        $this->editWorld(function (&$world) {
+            $world['ships'][] = $this->extraProbe('LOCAL-3', 'X1-TEST-YAK');
+            $world['ships'][] = $this->extraProbe('LOCAL-4', 'X1-TEST-ZED');
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $grant = $this->approve(str_replace('max_credits: 60000', 'max_credits: 1000', $this->body()));
+        $this->tick();
+        $episode = CampaignEpisode::firstOrFail();
+        $state = $episode->state;
+        unset($state['discovery']);
+        $episode->update(['phase' => 'earn', 'state' => array_merge($state, ['last_discovery_at' => now()->addHour()->toIso8601String()])]);
+        GameObservation::where('kind', 'market')->whereIn('symbol', ['X1-TEST-YAK', 'X1-TEST-ZED'])->update(['observed_at' => now()->subHour()]);
+        $api = app(SpaceTradersApi::class);
+        $mock = \Mockery::mock(SpaceTradersApi::class, [app(SpaceTradersClient::class)])->makePartial();
+        $mock->shouldReceive('market')->andReturnUsing(function ($agent, $symbol) use ($api) {
+            if ($symbol === 'X1-TEST-YAK') {
+                throw new GameException('Synthetic parked-market refusal.');
+            }
+
+            return $api->market($agent, $symbol);
+        });
+        $this->app->instance(SpaceTradersApi::class, $mock);
+        $this->tick();
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertSame('trade', $run->strategy, 'A failed parked read does not block the decision.');
+        $this->assertNull($grant->fresh()->paused_at);
+        $this->assertSame('X1-TEST-YAK', $episode->fresh()->state['parked_refresh']);
+        $this->assertTrue(GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-YAK')->firstOrFail()->observed_at->lt(now()->subMinutes(30)));
+        app(AutomationRunner::class)->finishStop($run, 'Synthetic completed trade.');
+        $this->tick();
+        $this->assertTrue(GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-ZED')->firstOrFail()->observed_at->gt(now()->subMinute()), 'The next idle tick reads the next parked market.');
+    }
 }

@@ -29,6 +29,12 @@ class CampaignRecovery
         $cost = app(CampaignTrade::class)->averageCosts($agent, $symbol)[$good] ?? 0;
         $fuel = app(FuelPlanner::class);
         $atBuyer = $ship['nav']['waypointSymbol'] === $buyer;
+        // recover() runs before the director's role-market refresh, so this ship's own fuel quote may
+        // be stale. One read at a FUEL listing lets a part-empty tank top up before departure.
+        $here = $ship['nav']['waypointSymbol'];
+        if (! $atBuyer && $ship['fuel']['current'] < $ship['fuel']['capacity'] && $fuel->listsFuel($agent, $here) && ! $fuel->sellerQuote($agent, $here)) {
+            app(AgentSynchronizer::class)->observe($agent, 'market', $here, app(SpaceTradersApi::class)->market($agent, $here));
+        }
         // Docked at a verified fuel seller, the run tops up before it leaves, so the leg is planned from a full tank.
         $departure = $atBuyer ? null : $fuel->departureRefuel($agent, $ship);
         $leg = $atBuyer
@@ -60,7 +66,8 @@ class CampaignRecovery
         $fuelCost = $run->totals['fuel_cost'] ?? 0;
         $missing = $ship['fuel']['capacity'] - $ship['fuel']['current'];
         if ((MiningPlanner::inventory($ship)[$run->plan['recovery_good']] ?? 0) === 0) {
-            $quote = $ship['nav']['status'] === 'DOCKED' && $missing > 0 ? app(FuelPlanner::class)->sellerQuote($agent, $ship['nav']['waypointSymbol']) : null;
+            $windDown = app(CampaignSafety::class)->windDown(CampaignEpisode::findOrFail($run->campaign_episode_id));
+            $quote = ! $windDown && $ship['nav']['status'] === 'DOCKED' && $missing > 0 ? app(FuelPlanner::class)->sellerQuote($agent, $ship['nav']['waypointSymbol']) : null;
             if ($quote) {
                 $step = $this->refuel($run, $missing, $quote, ($run->plan['route']['fuel_ceiling'] ?? 0) - $fuelCost);
                 if ($step) {
@@ -74,9 +81,12 @@ class CampaignRecovery
             $departure = $run->plan['route']['departure_refuel_ceiling'] ?? 0;
             if ($departure > 0 && $missing > 0 && $ship['nav']['waypointSymbol'] === $run->plan['site'] && ($run->totals['travel_fuel'] ?? 0) === 0) {
                 $step = $this->refuel($run, $missing, app(OperationPlanner::class)->quote($agent, $run->plan['site'], 'FUEL'), $departure - $fuelCost);
-                if ($step) {
-                    return $ship['nav']['status'] === 'DOCKED' ? $step : AutomationStep::act('dock');
+                if (! $step) {
+                    // The leg was planned from a full tank; never depart on a partial one.
+                    return AutomationStep::blocked('Departure refuel exceeds its approved ceiling. Cargo retained; replan recovery.');
                 }
+
+                return $ship['nav']['status'] === 'DOCKED' ? $step : AutomationStep::act('dock');
             }
 
             return $ship['nav']['status'] === 'DOCKED' ? AutomationStep::act('orbit') : AutomationStep::act('navigate', ['waypointSymbol' => $run->plan['market']]);
