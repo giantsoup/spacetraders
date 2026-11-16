@@ -13,6 +13,9 @@ use Illuminate\Support\Facades\DB;
 
 class CampaignControl
 {
+    /** Decision events keep at most this many duration-only rejections, highest predicted margin first. */
+    public const LONG_RUN_REJECTIONS = 5;
+
     public function approve(CampaignRevision $revision, User $user, ?CarbonImmutable $expires = null): CampaignGrant
     {
         if ($expires && $expires->isPast()) {
@@ -137,8 +140,16 @@ class CampaignControl
             ksort($summary);
             $data['rejections'] = $summary;
             $candidates = $data['candidates'] ?? [];
+            // Shadow data: pairs ruled out only by run_max_minutes, kept apart and capped so events stay small.
+            $long = collect($candidates)->filter(fn ($candidate) => ! empty($candidate['long_run']))
+                ->unique(fn ($candidate) => $candidate['good'].'@'.$candidate['source'].'>'.$candidate['buyer'])
+                ->sortByDesc('predicted_margin')->take(self::LONG_RUN_REJECTIONS)->values()->all();
+            $candidates = array_values(array_filter($candidates, fn ($candidate) => empty($candidate['long_run'])));
             usort($candidates, fn ($left, $right) => ($right['score'] ?? -PHP_FLOAT_MAX) <=> ($left['score'] ?? -PHP_FLOAT_MAX));
             $data['candidates'] = array_slice($candidates, 0, 10);
+            if ($long) {
+                $data['long_run_rejections'] = $long;
+            }
         }
         if (in_array($kind, ['wait', 'decision'], true)) {
             $previous = CampaignEvent::where('campaign_grant_id', $grant->id)->whereIn('kind', ['wait', 'decision'])->latest('id')->first();
