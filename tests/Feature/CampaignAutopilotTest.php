@@ -24,6 +24,7 @@ use App\Gameplay\FuelPlanner;
 use App\Gameplay\GameException;
 use App\Gameplay\MiningPlanner;
 use App\Gameplay\OperationPlanner;
+use App\Gameplay\OpportunityAssessor;
 use App\Gameplay\ReadStateUnavailable;
 use App\Gameplay\RequestBudget;
 use App\Gameplay\RequestDeferred;
@@ -3010,22 +3011,83 @@ class CampaignAutopilotTest extends TestCase
         $this->assertNull($first['trailing_median_cr_per_minute']);
     }
 
-    public function test_discover_leaves_on_the_first_positive_spread_and_computes_it_only_when_gated(): void
+    public static function spreadExits(): array
+    {
+        // ROCK sells IRON_ORE at 30; PORT's bid sets the spread of one four-unit proof batch.
+        return ['a +50 CR pair stays in discover' => [45, 'discover', 0], 'a pair at or above the value floor leaves' => [2000, 'earn', 1]];
+    }
+
+    #[DataProvider('spreadExits')]
+    public function test_discover_leaves_only_on_a_spread_scoring_at_or_above_the_value_floor(int $bid, string $phase, int $spreads): void
     {
         $this->tradeWorld();
+        $this->editWorld(function (&$world) use ($bid) {
+            $world['market_goods']['X1-TEST-PORT'][0]['sellPrice'] = $bid;
+        });
         app(AgentSynchronizer::class)->sync($this->agent);
         $grant = $this->approve();
         $this->tick();
         $episode = CampaignEpisode::firstOrFail();
-        $this->assertSame('earn', $episode->phase);
-        $this->assertTrue(CampaignEvent::where('kind', 'phase')->get()->contains(fn ($event) => $event->data === ['from' => 'discover', 'to' => 'earn']));
-        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
-        $this->assertSame(['trade', 'LOCAL-1'], [$run->strategy, $run->ship_symbol]);
-        $safety = app(CampaignSafety::class);
-        $this->assertSame(1, $safety->metrics($episode, $this->agent->fresh())['positive_spread_gte']);
-        $this->assertSame(1, $safety->metrics($episode, $this->agent->fresh(), ['any' => [['minutes_elapsed_gte' => 90], ['positive_spread_gte' => 1]]])['positive_spread_gte']);
-        $this->assertNull($safety->metrics($episode, $this->agent->fresh(), ['hours_to_reset_lte' => 1])['positive_spread_gte']);
+        $this->assertSame($phase, $episode->phase);
+        $considered = [];
+        $candidate = app(CampaignTrade::class)->rank($grant, $episode, $this->agent->fresh(), Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot, $considered)[0];
+        $this->assertGreaterThan(0, $candidate['predicted_margin']);
+        if ($spreads === 0) {
+            $this->assertSame(50, $candidate['predicted_margin']);
+            $this->assertLessThan(CampaignTrade::FLOOR_CR_PER_MINUTE, $candidate['score']);
+            $this->assertFalse(AutomationRun::where('strategy', 'trade')->exists());
+            $this->assertFalse(CampaignEvent::where('kind', 'phase')->exists());
+        } else {
+            $this->assertGreaterThanOrEqual(CampaignTrade::FLOOR_CR_PER_MINUTE, $candidate['score']);
+            $this->assertTrue(CampaignEvent::where('kind', 'phase')->get()->contains(fn ($event) => $event->data === ['from' => 'discover', 'to' => 'earn']));
+            $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+            $this->assertSame(['trade', 'LOCAL-1'], [$run->strategy, $run->ship_symbol]);
+        }
+        $this->assertSame($spreads, app(CampaignSafety::class)->metrics($episode, $this->agent->fresh(), ['positive_spread_gte' => 1])['positive_spread_gte']);
         $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_the_spread_metric_ranks_only_when_a_gate_asks_for_it(): void
+    {
+        // Ranking records first-seen bids, so metrics() without a gate (or with a gate that does not
+        // use the metric) must not rank.
+        $this->tradeWorld();
+        $this->approve($this->slowStartBody());
+        $this->tick();
+        $episode = CampaignEpisode::firstOrFail();
+        $this->assertSame('discover', $episode->phase);
+        $this->assertArrayNotHasKey('first_seen', $episode->state ?? []);
+        $safety = app(CampaignSafety::class);
+        $this->assertNull($safety->metrics($episode, $this->agent->fresh())['positive_spread_gte']);
+        $this->assertNull($safety->metrics($episode, $this->agent->fresh(), ['hours_to_reset_lte' => 1])['positive_spread_gte']);
+        $this->assertArrayNotHasKey('first_seen', $episode->fresh()->state ?? []);
+        $gated = $safety->metrics($episode, $this->agent->fresh(), ['any' => [['minutes_elapsed_gte' => 90], ['positive_spread_gte' => 1]]]);
+        $this->assertSame(0, $gated['positive_spread_gte'], 'A 200 CR bid scores below the value floor.');
+        $this->assertSame(['IRON_ORE@X1-TEST-PORT' => 200], $episode->fresh()->state['first_seen']);
+    }
+
+    public function test_a_spread_metric_error_counts_no_spread_and_never_pauses_the_campaign(): void
+    {
+        $this->tradeWorld();
+        $grant = $this->approve();
+        $failure = new GameException('Synthetic ranking failure.');
+        $trades = \Mockery::mock(CampaignTrade::class)->makePartial();
+        $trades->shouldReceive('rank')->andReturnUsing(function () use (&$failure) {
+            throw $failure;
+        });
+        $this->app->instance(CampaignTrade::class, $trades);
+        $this->tick();
+        $episode = CampaignEpisode::firstOrFail();
+        $this->assertSame('discover', $episode->phase);
+        $this->assertNull($grant->fresh()->paused_at);
+        $this->assertNull($grant->fresh()->wait_reason);
+        $this->assertSame(0, app(CampaignSafety::class)->metrics($episode, $this->agent->fresh(), ['positive_spread_gte' => 1])['positive_spread_gte']);
+        // A refusal that asks to retry later still waits instead of counting zero.
+        $failure = new RequestDeferred('Synthetic ranking deferral.', 5);
+        $this->tick();
+        $this->assertSame('awaiting_fresh_state', $grant->fresh()->wait_reason);
+        $this->assertNull($grant->fresh()->paused_at);
+        $this->assertSame('discover', $episode->fresh()->phase);
     }
 
     /** A world with no positive spread (discover stays open), an unpriced market at the command ship's coordinates and a far one. */
@@ -3243,5 +3305,107 @@ class CampaignAutopilotTest extends TestCase
         $this->assertSame($expected, $actual);
         $this->assertSame($trade->id, $results[0]['run_id']);
         $this->assertFalse($results[0]['losing']);
+    }
+
+    public function test_recovery_caps_its_departure_top_up_at_the_credits_it_has(): void
+    {
+        // Filling 50 units costs 60,000 at ROCK and the 2x ceiling is 120,000, above the 100,000 held:
+        // plan the top-up with the 100,000 the agent has rather than dropping it.
+        $this->lowFuelWorld(['fuel' => ['current' => 50], 'cargo' => ['capacity' => 40, 'units' => 3, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 3]]]], function (&$world) {
+            $world['goods'][2]['purchasePrice'] = 60000;
+        });
+        $this->assertSame(100000, $this->agent->fresh()->credits);
+        $grant = $this->approve();
+        $this->tick();
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertSame(['sell_aboard', 'X1-TEST-PORT'], [$run->strategy, $run->plan['market']]);
+        $this->assertSame(100000, $run->plan['route']['departure_refuel_ceiling']);
+        $run = $this->driveRun($run);
+        $this->assertSame('completed', $run->state->value, $run->blocked_reason ?? json_encode($run->totals));
+        $commands = $this->confirmedCommands($run);
+        $this->assertSame(['refuel', 'orbit', 'navigate'], array_slice($commands, 0, 3), json_encode($commands));
+        $this->assertSame(60000, ShipAction::where('automation_run_id', $run->id)->where('command', 'refuel')->orderBy('id')->firstOrFail()->outcome['transaction_total']);
+        $this->assertContains('sell', $commands);
+        $this->assertSame(0, Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot['cargo']['units']);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_long_run_rejections_keep_each_pairs_best_row(): void
+    {
+        $this->tradeWorld();
+        $grant = $this->approve($this->slowStartBody());
+        $this->tick();
+        $row = fn (string $good, int $margin) => ['good' => $good, 'source' => 'X1-TEST-A', 'buyer' => 'X1-TEST-B', 'units' => 4, 'predicted_margin' => $margin,
+            'planned_minutes' => 20.5, 'long_run' => true, 'rejected' => 'Planned run exceeds run_max_minutes.'];
+        // The weaker duplicate comes first; sorting before deduplication keeps the stronger one.
+        $event = app(CampaignControl::class)->event($grant, CampaignEpisode::firstOrFail(), 'decision', ['candidates' => [$row('GOOD_A', 100), $row('GOOD_B', 300), $row('GOOD_A', 500)],
+            'choice' => 'synthetic_duplicate_check', 'run_id' => null]);
+        $this->assertSame([['GOOD_A', 500], ['GOOD_B', 300]], array_map(fn ($kept) => [$kept['good'], $kept['predicted_margin']], $event->data['long_run_rejections']));
+        $this->assertSame(3, $event->data['rejections']['Planned run exceeds run_max_minutes.']);
+    }
+
+    public function test_the_command_scout_reads_a_colocated_market_with_no_goods_directory(): void
+    {
+        $this->fastStartWorld();
+        GameObservation::where('kind', 'market_listing')->where('symbol', 'X1-TEST-NEAR')->delete();
+        $task = collect(app(OpportunityAssessor::class)->report($this->agent->fresh())['observation_tasks'])
+            ->first(fn ($task) => $task['ship'] === 'LOCAL-1' && $task['destination'] === 'X1-TEST-NEAR');
+        $this->assertSame(['Missing goods directory', false], [$task['fact'], $task['ready_for_bounded_preview']]);
+        $grant = $this->approve();
+        $local = $this->nextCampaignRun();
+        $this->assertNotNull($local);
+        $this->assertSame(['scout', 'LOCAL-1', 'X1-TEST-NEAR'], [$local->strategy, $local->ship_symbol, $local->plan['destination']]);
+        $this->assertTrue(GameObservation::where('kind', 'market_listing')->where('symbol', 'X1-TEST-NEAR')->exists(), 'The preview read the directory remotely.');
+        $local = $this->driveRun($local);
+        $this->assertSame('completed', $local->state->value, $local->blocked_reason ?? json_encode($local->totals));
+        $this->assertNotEmpty(GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-NEAR')->firstOrFail()->data['tradeGoods'] ?? []);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_fast_start_scouts_locally_then_leaves_discover_and_trades_with_the_default_playbook(): void
+    {
+        // Nothing priced trades at first. The unpriced market at the command ship's coordinates bids
+        // 2,000 for IRON_ORE, which ROCK sells at 30: once the command ship reads it, that pair scores
+        // above the value floor, discover ends and the command ship trades it.
+        $this->fastStartWorld(true, function (&$world) {
+            $world['market_goods']['X1-TEST-NEAR'] = $world['goods'];
+            $world['market_goods']['X1-TEST-NEAR'][0] = ['symbol' => 'IRON_ORE', 'tradeVolume' => 4, 'purchasePrice' => 2100, 'sellPrice' => 2000];
+        });
+        $this->assertStringContainsString('positive_spread_gte: 1', $this->body(), 'The shipped default playbook.');
+        $grant = $this->approve();
+        $runs = [];
+        for ($tick = 0; $tick < 12; $tick++) {
+            $this->tick();
+            $run = AutomationRun::whereNotNull('active_agent_id')->first();
+            if (! $run) {
+                continue;
+            }
+            $runs[] = [$run->strategy, $run->ship_symbol, $run->plan['destination'] ?? $run->plan['market'], CampaignEpisode::firstOrFail()->phase];
+            if ($run->strategy === 'trade') {
+                break;
+            }
+            $run = $this->driveRun($run);
+            $this->assertSame('completed', $run->state->value, $run->blocked_reason ?? json_encode($run->totals));
+        }
+        $this->assertSame(['scout', 'LOCAL-1', 'X1-TEST-NEAR', 'discover'], $runs[0], json_encode($runs));
+        $this->assertSame(['trade', 'LOCAL-1', 'X1-TEST-NEAR', 'earn'], end($runs), json_encode($runs));
+        $this->assertNotContains('X1-TEST-FAR', array_column($runs, 2), 'Discover ended before the probe scouted the far market.');
+        $this->assertSame([['from' => 'discover', 'to' => 'earn']], CampaignEvent::where('kind', 'phase')->pluck('data')->all());
+        $trade = AutomationRun::where('strategy', 'trade')->firstOrFail();
+        $this->assertSame('X1-TEST-ROCK', $trade->plan['site']);
+        $key = $trade->plan['campaign_trade']['key'];
+        $this->assertSame('IRON_ORE@X1-TEST-NEAR', $key);
+        $this->assertGreaterThanOrEqual(CampaignTrade::FLOOR_CR_PER_MINUTE, $trade->plan['campaign_trade']['score']);
+        // The exit check ranked first and recorded first_seen. The bid it recorded is the one the
+        // trade saw, so no switch rule fired and the current pair still ranks first.
+        $episode = CampaignEpisode::firstOrFail();
+        $this->assertSame(2000, $episode->state['first_seen'][$key]);
+        $this->assertSame(2000, $trade->plan['campaign_trade']['bid']);
+        $this->assertSame($key, $episode->state['current_pair']);
+        $this->assertFalse(CampaignEvent::where('kind', 'decision')->get()->contains(fn ($event) => collect(array_keys($event->data['rejections'] ?? []))->contains(fn ($reason) => str_starts_with($reason, 'Switch:'))));
+        $considered = [];
+        $ranked = app(CampaignTrade::class)->rank($grant, $episode, $this->agent->fresh(), Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot, $considered);
+        $this->assertSame($key, $ranked[0]['key'] ?? null, json_encode($considered));
+        $this->assertNull($grant->fresh()->paused_at);
     }
 }

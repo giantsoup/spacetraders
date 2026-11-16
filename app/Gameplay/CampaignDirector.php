@@ -563,27 +563,31 @@ class CampaignDirector
     }
 
     /**
-     * A local scout (the command ship's) only reads never-priced markets at its own coordinates
-     * (distance 0), and skips any market the role probe is heading to or has a run for. It never
-     * crosses the system, and never hops between nearby stations just to refresh stale prices: with
-     * no such market it yields nothing.
+     * A local scout (the command ship's) only reads never-priced markets (unknown prices, or no goods
+     * directory yet) at its own coordinates (distance 0), and skips any market the role probe is
+     * heading to or has a run for. It never crosses the system, and never hops between nearby
+     * stations just to refresh stale prices: with no such market it yields nothing.
      */
     private function scout(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array &$considered, bool $local = false): ?AutomationRun
     {
         $report = app(OpportunityAssessor::class)->report($agent);
-        $tasks = self::scoutOrder(collect($report['observation_tasks'])->where('ship', $ship['symbol'])->where('ready_for_bounded_preview', true), collect($report['markets']));
+        $tasks = collect($report['observation_tasks'])->where('ship', $ship['symbol']);
         if ($local) {
+            // A market with no goods directory is never priced either. The scout preview reads the
+            // directory remotely before planning, so it needs only a verified route, not a ready task.
             $nearby = $this->colocated($agent, $ship);
             $claimed = $this->probeTargets($episode);
-            $tasks = $tasks->filter(fn ($task) => $task['fact'] === 'Unknown prices' && in_array($task['destination'], $nearby, true)
-                && ! in_array($task['destination'], $claimed, true))->values();
+            $tasks = $tasks->filter(fn ($task) => in_array($task['destination'], $nearby, true) && ! in_array($task['destination'], $claimed, true)
+                && (($task['fact'] === 'Unknown prices' && $task['ready_for_bounded_preview']) || ($task['fact'] === 'Missing goods directory' && $task['route_options'] !== [])));
             if ($tasks->isEmpty()) {
                 $considered[] = ['strategy' => 'scout', 'role' => 'command', 'rejected' => 'No unclaimed market at the command ship\'s coordinates needs a read.'];
 
                 return null;
             }
+        } else {
+            $tasks = $tasks->where('ready_for_bounded_preview', true);
         }
-        foreach ($tasks as $task) {
+        foreach (self::scoutOrder($tasks, collect($report['markets'])) as $task) {
             if ($task['destination'] === $ship['nav']['waypointSymbol']) {
                 continue;
             }

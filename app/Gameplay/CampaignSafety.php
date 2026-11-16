@@ -75,7 +75,10 @@ class CampaignSafety
         }
     }
 
-    /** @param  array|null  $gate  When given, the costly positive_spread_gte metric is computed only if the gate uses it. */
+    /**
+     * @param  array|null  $gate  The costly positive_spread_gte metric is computed only when this gate uses it. It
+     *                            ranks trades, which records first-seen bids in episode state, so with no gate it is null.
+     */
     public function metrics(CampaignEpisode $episode, Agent $agent, ?array $gate = null): array
     {
         $lastTrade = AutomationRun::where('campaign_episode_id', $episode->id)->where('strategy', 'trade')->whereNotNull('started_at')->latest('id')->first();
@@ -86,10 +89,14 @@ class CampaignSafety
             'hours_to_reset_lte' => now()->diffInHours($episode->next_reset_at, false), 'credits_gte' => $agent->credits,
             'markets_observed_gte' => GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'market')->get()->filter(fn ($row) => ! empty($row->data['tradeGoods']))->count(),
             'cycles_completed_gte' => AutomationRun::where('campaign_episode_id', $episode->id)->get()->sum(fn ($run) => $run->totals['cycles'] ?? 0),
-            'positive_spread_gte' => $gate === null || in_array('positive_spread_gte', CampaignPlaybook::gateMetrics($gate), true) ? $this->positiveSpreads($episode, $agent) : null];
+            'positive_spread_gte' => $gate !== null && in_array('positive_spread_gte', CampaignPlaybook::gateMetrics($gate), true) ? $this->positiveSpreads($episode, $agent) : null];
     }
 
-    /** Trade candidates the command ship could run now with a predicted margin above zero. */
+    /**
+     * Trade candidates the command ship could run now whose score (predicted margin per planned
+     * minute) reaches the value floor, so a tiny margin never ends discover. A ranking error
+     * counts none rather than pausing the campaign; only a retryable refusal is rethrown.
+     */
     private function positiveSpreads(CampaignEpisode $episode, Agent $agent): int
     {
         $ship = app(CampaignFleet::class)->role($episode, 'command');
@@ -97,8 +104,17 @@ class CampaignSafety
             return 0;
         }
         $considered = [];
+        try {
+            $ranked = app(CampaignTrade::class)->rank($episode->grant(), $episode, $agent, $ship, $considered);
+        } catch (GameException $exception) {
+            if ($exception->retryAfter > 0) {
+                throw $exception;
+            }
 
-        return count(array_filter(app(CampaignTrade::class)->rank($episode->grant(), $episode, $agent, $ship, $considered), fn ($candidate) => $candidate['predicted_margin'] > 0));
+            return 0;
+        }
+
+        return count(array_filter($ranked, fn ($candidate) => $candidate['score'] >= CampaignTrade::FLOOR_CR_PER_MINUTE));
     }
 
     public function windDown(CampaignEpisode $episode): bool
