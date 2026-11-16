@@ -247,6 +247,7 @@ class AutomationRunner
                         $market = $this->api->market($agent, $run->plan['market']);
                         $this->sync->observe($agent, 'market', $run->plan['market'], $market);
                     }
+                    app(CampaignTrade::class)->finishLoading($agent, $run);
                     $step = ($run->plan['strategy'] ?? 'mining') === 'mining'
                         ? $this->planner->next($ship, $run->plan, $run->totals, $market, now()->toImmutable())
                         : app(OperationPlanner::class)->next($agent, $ship, $run->plan, $run->totals, now()->toImmutable());
@@ -335,7 +336,12 @@ class AutomationRunner
                 $price = (int) ceil($step->arguments['maxTotal'] / $step->arguments['units']);
                 $units = min($step->arguments['units'], (int) floor(app(CampaignTrade::class)->allowance($grant, $agent, $run) / $price));
                 if ($units < 1) {
-                    throw new GameException('Buy skipped: arm exposure requires a smaller batch.', retryAfter: 5);
+                    throw new GameException('Buy skipped: arm exposure requires a smaller batch.', retryAfter: 30);
+                }
+                if ($units < $step->arguments['units']) {
+                    $bought = $run->totals['purchased'][$run->plan['symbol']] ?? 0;
+                    $run->update(['plan' => array_replace($run->plan, ['units' => $bought + $units,
+                        'max_inventory' => ($run->totals['purchase_cost'] ?? 0) + $units * $price])]);
                 }
                 $step = AutomationStep::act('buy', array_replace($step->arguments, ['units' => $units, 'maxTotal' => $units * $price]));
             }

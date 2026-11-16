@@ -75,7 +75,7 @@ class CampaignSafety
             app(FleetClaims::class)->follow($run, $episode, $command, $arguments);
         }
         if ($command === 'buy' && $grant->arm() && ($arguments['maxTotal'] ?? PHP_INT_MAX) > app(CampaignTrade::class)->allowance($grant, $agent, $run)) {
-            throw new GameException('Buy skipped: arm exposure requires a smaller batch.', retryAfter: 5);
+            throw new GameException('Buy skipped: arm exposure requires a smaller batch.', retryAfter: 30);
         }
         if ($command === 'buy' && ! $boundaryOnly) {
             if ($run->strategy !== 'trade' || ! empty($run->plan['sell_only'])) {

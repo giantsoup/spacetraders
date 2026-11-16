@@ -207,7 +207,7 @@ class FleetClaimsTest extends TestCase
             'command' => 'buy', 'state' => 'confirmed', 'origin' => 'automation', 'expires_at' => now()->addMinute(),
             'arguments' => ['symbol' => 'IRON_ORE', 'units' => 1], 'outcome' => ['units' => 1, 'transaction_total' => 50]]);
         $this->arm('T2', 'LOCAL-2');
-        [$armGrant, $armEpisode] = $this->arm('T1a', 'LOCAL-1', ['exposure_share' => 125 / $credits]);
+        [$armGrant, $armEpisode] = $this->arm('T1a', 'LOCAL-1', ['exposure_share' => 125 / ($credits + 50)]);
         $iron = collect($this->rank($armGrant, $armEpisode))->firstWhere('good', 'IRON_ORE');
         $this->assertSame(2, $iron['units']);
         $this->assertSame('exposure', $iron['limiting_factor']);
@@ -249,6 +249,7 @@ class FleetClaimsTest extends TestCase
         $this->assertSame('exposure', $first['limiting_factor']);
         $this->assertEquals(75, app(CampaignTrade::class)->allowance($grant, $this->agent, ship: 'LOCAL-1'));
         $this->cargoCost('LOCAL-2', 'FOOD', 1, 20);
+        $this->agent->update(['credits' => $this->agent->credits - 20]);
         $other->update(['state' => 'running', 'active_agent_id' => $this->agent->id, 'totals' => ['purchase_cost' => 20]]);
         $this->assertEquals(75, app(CampaignTrade::class)->allowance($grant, $this->agent, ship: 'LOCAL-1'));
         $other->update(['active_agent_id' => null, 'state' => 'stopped']);
@@ -271,13 +272,13 @@ class FleetClaimsTest extends TestCase
         $this->cargoCost('LOCAL-2', 'IRON_ORE', 1, 30);
         $other->update(['state' => 'running', 'active_agent_id' => $this->agent->id, 'totals' => ['purchase_cost' => 30]]);
         $this->agent->update(['credits' => 170]);
-        $check(25);
-        $this->assertWaiting(fn () => $check(26), 'arm exposure');
+        $check(40);
+        $this->assertWaiting(fn () => $check(41), 'arm exposure');
         $this->cargoCost('LOCAL-1', 'IRON_ORE', 1, 10);
         $this->agent->update(['credits' => 160]);
         $run->update(['totals' => ['purchase_cost' => 10]]);
-        $check(10);
-        $this->assertWaiting(fn () => $check(11), 'arm exposure');
+        $check(30);
+        $this->assertWaiting(fn () => $check(31), 'arm exposure');
         $this->assertNull($grant->fresh()->paused_at);
         $this->assertSame('running', $run->fresh()->state->value);
     }
@@ -416,7 +417,7 @@ class FleetClaimsTest extends TestCase
             $this->fail('The command should wait.');
         } catch (GameException $exception) {
             $this->assertStringContainsString($message, $exception->getMessage());
-            $this->assertSame(5, $exception->retryAfter);
+            $this->assertSame(30, $exception->retryAfter);
         }
     }
 

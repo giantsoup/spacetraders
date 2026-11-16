@@ -429,7 +429,7 @@ class CampaignTrade
         $this->quoteLife($agent, $plan, $run->totals);
         $arm = $episode->grant()->arm();
         if ($arm && $plan['max_inventory'] > $this->allowance($episode->grant(), $agent, $run)) {
-            throw new GameException('Buy skipped: arm exposure requires a smaller batch.', retryAfter: 5);
+            throw new GameException('Buy skipped: arm exposure requires a smaller batch.', retryAfter: 30);
         }
         if ($arm['follow'] ?? null) {
             $leader = app(FleetClaims::class)->leader($episode, $arm['follow']);
@@ -460,7 +460,32 @@ class CampaignTrade
             ->where(fn ($query) => $query->whereNotNull('active_agent_id')->orWhere(fn ($query) => $query->where('state', 'preview')->where('expires_at', '>', now())))
             ->get()->sum(fn ($other) => max(0, ($other->plan['max_inventory'] ?? 0) - ($other->totals['purchase_cost'] ?? 0)));
 
+        // Buying moves cash into cargo without changing this basis. Exclude this run's commitment:
+        // projected cargo plus other arms' unspent commitments plus this buy must fit the cap.
         return max(0, min(($arm['max_load_spend'] ?? INF) - ($run?->totals['purchase_cost'] ?? 0),
-            ($arm['exposure_share'] ?? 0.5) * $agent->credits - $held - $committed));
+            ($arm['exposure_share'] ?? 0.5) * ($agent->credits + $held) - $held - $committed));
+    }
+
+    public function finishLoading(Agent $agent, AutomationRun $run): bool
+    {
+        $bought = $run->totals['purchased'][$run->plan['symbol'] ?? ''] ?? 0;
+        if ($run->strategy !== 'trade' || ! $run->campaign_episode_id || ($run->totals['phase'] ?? null) !== 'buy'
+            || $bought < 1 || $bought >= $run->plan['units']) {
+            return false;
+        }
+        $grant = CampaignEpisode::findOrFail($run->campaign_episode_id)->grant();
+        if (! $grant->arm()) {
+            return false;
+        }
+        $price = app(OperationPlanner::class)->quote($agent, $run->plan['site'], $run->plan['symbol'])['purchasePrice'];
+        $lastBuy = ShipAction::where('automation_run_id', $run->id)->where('command', 'buy')->where('state', 'confirmed')->latest('id')->first();
+        if ($this->allowance($grant, $agent, $run) >= $price && ($lastBuy?->settled_at ?? $run->started_at)->gt(now()->subMinutes(2))) {
+            return false;
+        }
+        // A partial arm load never waits over two minutes for another buy; release its unused reservation.
+        $run->update(['plan' => array_replace($run->plan, ['units' => $bought, 'max_inventory' => $run->totals['purchase_cost']]),
+            'totals' => array_merge($run->totals, ['phase' => 'sell']), 'next_action_at' => now(), 'blocked_reason' => null]);
+
+        return true;
     }
 }

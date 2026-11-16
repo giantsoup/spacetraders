@@ -61,9 +61,9 @@ class CampaignDirector
     public function tickArms(): bool
     {
         $this->armGrantId = null;
-        app(CampaignTrade::class)->harvestArms();
         try {
             app(HostLock::class)->run('campaign', function () {
+                app(CampaignTrade::class)->harvestArms();
                 $grant = CampaignGrant::liveArms()->whereNull('paused_at')
                     ->where(fn ($query) => $query->whereNull('last_directed_at')->orWhere('last_directed_at', '<=', now()->subSeconds(30)))
                     ->orderByRaw('last_directed_at is not null')->orderBy('last_directed_at')->orderBy('id')->first();

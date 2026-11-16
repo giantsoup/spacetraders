@@ -22,6 +22,7 @@ use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\LocalEngine;
+use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -382,13 +383,15 @@ class ArmDirectorTest extends TestCase
             $this->fail('Commit must recheck other arm reservations.');
         } catch (GameException $exception) {
             $this->assertStringContainsString('arm exposure', $exception->getMessage());
-            $this->assertSame(5, $exception->retryAfter);
+            $this->assertSame(30, $exception->retryAfter);
         }
         app(AutomationRunner::class)->advance($run->id);
         $action = ShipAction::where('automation_run_id', $run->id)->sole();
         $this->assertSame('buy', $action->command);
         $this->assertSame(2, $action->arguments['units']);
         $this->assertSame(60, $action->arguments['maxTotal']);
+        $this->assertSame(2, $run->fresh()->plan['units']);
+        $this->assertSame(60, $run->fresh()->plan['max_inventory']);
         $preview->update(['plan' => array_replace($preview->plan, ['max_inventory' => 50])]);
         app(ShipCommandExecutor::class)->execute($action->id);
         $this->assertSame('pending', $action->fresh()->state->value);
@@ -397,7 +400,157 @@ class ArmDirectorTest extends TestCase
         $preview->update(['state' => 'stopped']);
         app(ShipCommandExecutor::class)->execute($action->id);
         $this->assertSame('confirmed', $action->fresh()->state->value);
+        $this->completeRuns([$run]);
+        $this->assertSame(2, $run->totals['purchased']['IRON_ORE']);
+        $this->assertSame(2, $run->totals['sold']['IRON_ORE']);
         $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_confirmed_purchase_keeps_the_cash_plus_cargo_exposure_invariant(): void
+    {
+        $this->editWorld(function (&$world) {
+            $world['credits'] = 200;
+            $world['goods'][0]['purchasePrice'] = 100;
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $grant = $this->arm('T1a', 'LOCAL-3');
+        DB::table('agent_credit_baselines')->where('agent_id', $this->agent->id)->update(['credits' => 200]);
+        app(CampaignDirector::class)->tickArms();
+        $run = AutomationRun::where('ship_symbol', 'LOCAL-3')->whereNotNull('active_agent_id')->sole();
+        app(AutomationRunner::class)->advance($run->id);
+        $action = ShipAction::where('automation_run_id', $run->id)->sole();
+        $this->assertSame(100, $action->arguments['maxTotal']);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertSame('confirmed', $action->fresh()->state->value);
+        $this->assertSame(100, $this->agent->fresh()->credits);
+        $this->assertArmExposure(0.5);
+        $this->completeRuns([$run]);
+        $this->assertSame(1, $run->totals['sold']['IRON_ORE']);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_two_arms_finish_interleaved_multibatch_loads_at_the_exposure_cap(): void
+    {
+        $this->editWorld(function (&$world) {
+            $world['credits'] = 400;
+            $world['goods'][0]['tradeVolume'] = 2;
+            $world['ships'][] = FakeSpaceTraders::ship('LOCAL-4');
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $revision = app(CampaignPlaybook::class)->import(str_replace('max_units_batches: 1', 'max_units_batches: 3', $this->armBody()));
+        DB::table('agent_credit_baselines')->where('agent_id', $this->agent->id)->update(['credits' => 400]);
+        $leader = app(CampaignControl::class)->approveArm($revision, $this->user,
+            ['label' => 'T1a', 'ship' => 'LOCAL-3'], CarbonImmutable::now()->addHours(12));
+        app(CampaignDirector::class)->tickArms();
+        $follower = app(CampaignControl::class)->approveArm($revision, $this->user,
+            ['label' => 'T3', 'ship' => 'LOCAL-4', 'follow' => 'T1a'], CarbonImmutable::now()->addHours(12));
+        app(CampaignDirector::class)->tickArms();
+        $runs = AutomationRun::whereNotNull('active_agent_id')->orderBy('id')->get()->all();
+        $this->assertCount(2, $runs);
+        foreach ($runs as $run) {
+            $this->assertSame(3, $run->plan['units']);
+        }
+        $this->completeRuns($runs, 0.5);
+        foreach ($runs as $run) {
+            $this->assertSame(3, $run->totals['purchased']['IRON_ORE']);
+            $this->assertSame(3, $run->totals['sold']['IRON_ORE']);
+            $this->assertSame([2, 1], ShipAction::where('automation_run_id', $run->id)->where('command', 'buy')->where('state', 'confirmed')->get()->pluck('arguments.units')->all());
+        }
+        $this->assertNull($leader->fresh()->paused_at);
+        $this->assertNull($follower->fresh()->paused_at);
+    }
+
+    #[DataProvider('partialLoads')]
+    public function test_partial_load_releases_commitment_and_sells_without_expiring(bool $pending, bool $timeout): void
+    {
+        $this->editWorld(function (&$world) {
+            $world['goods'][0]['tradeVolume'] = 1;
+            $world['ships'][] = FakeSpaceTraders::ship('LOCAL-4');
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $revision = app(CampaignPlaybook::class)->import(str_replace('max_units_batches: 1', 'max_units_batches: 3', $this->armBody()));
+        $grant = app(CampaignControl::class)->approveArm($revision, $this->user,
+            ['label' => 'T1a', 'ship' => 'LOCAL-3', 'exposure_share' => 0.001], CarbonImmutable::now()->addHours(12));
+        app(CampaignDirector::class)->tickArms();
+        $run = AutomationRun::whereNotNull('active_agent_id')->sole();
+        $runner = app(AutomationRunner::class);
+        $runner->advance($run->id);
+        $first = ShipAction::where('automation_run_id', $run->id)->sole();
+        app(ShipCommandExecutor::class)->execute($first->id);
+        $this->assertSame(1, $run->fresh()->totals['purchased']['IRON_ORE']);
+        $this->assertSame(3, $run->fresh()->plan['units']);
+        $queued = null;
+        if ($pending) {
+            $runner->advance($run->id);
+            $queued = ShipAction::where('automation_run_id', $run->id)->where('state', 'pending')->sole();
+        }
+        if ($timeout) {
+            $this->travel(120)->seconds();
+            LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+        } else {
+            $other = $this->arm('T1b', 'LOCAL-4');
+            $episode = CampaignEpisode::create(['campaign_grant_id' => $other->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
+                'start_credits' => $this->agent->fresh()->credits, 'phase' => 'earn', 'state' => [], 'opened_at' => now(), 'next_reset_at' => now()->addHours(17)]);
+            AutomationRun::create(['campaign_episode_id' => $episode->id, 'agent_id' => $this->agent->id, 'ship_symbol' => 'LOCAL-4',
+                'reset_id' => $this->agent->reset_id, 'strategy' => 'trade', 'state' => 'preview', 'expires_at' => now()->addMinutes(5),
+                'plan' => ['max_inventory' => 80], 'totals' => []]);
+        }
+        if ($queued) {
+            app(ShipCommandExecutor::class)->execute($queued->id);
+            $this->assertSame('rejected', $queued->fresh()->state->value);
+        } else {
+            $run->update(['next_action_at' => now()]);
+            $runner->advance($run->id);
+        }
+        $this->assertSame(1, $run->fresh()->plan['units']);
+        $this->assertSame(30, $run->fresh()->plan['max_inventory']);
+        $this->assertNotSame('blocked', $run->fresh()->state->value);
+        $this->completeRuns([$run]);
+        $this->assertSame(1, $run->totals['sold']['IRON_ORE']);
+        $this->assertSame(1, ShipAction::where('automation_run_id', $run->id)->where('command', 'buy')->where('state', 'confirmed')->count());
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public static function partialLoads(): array
+    {
+        return ['advance cap' => [false, false], 'transport cap' => [true, false],
+            'advance timeout' => [false, true], 'transport timeout' => [true, true]];
+    }
+
+    private function assertArmExposure(float $share): void
+    {
+        $held = 0;
+        foreach (Ship::where('agent_id', $this->agent->id)->get() as $ship) {
+            $costs = app(CampaignTrade::class)->averageCosts($this->agent, $ship->symbol);
+            foreach ($ship->snapshot['cargo']['inventory'] as $item) {
+                $held += ($costs[$item['symbol']] ?? 0) * $item['units'];
+            }
+        }
+        $committed = AutomationRun::whereNotNull('active_agent_id')->where('strategy', 'trade')->get()
+            ->sum(fn ($run) => max(0, $run->plan['max_inventory'] - ($run->totals['purchase_cost'] ?? 0)));
+        $this->assertLessThanOrEqual($share * ($this->agent->fresh()->credits + $held), $held + $committed);
+    }
+
+    private function completeRuns(array $runs, ?float $share = null): void
+    {
+        for ($step = 0; $step < 60 && collect($runs)->contains(fn ($run) => $run->active_agent_id); $step++) {
+            foreach ($runs as $run) {
+                app(AutomationRunner::class)->advance($run->id);
+                foreach (ShipAction::where('state', 'pending')->orderBy('id')->get() as $action) {
+                    app(ShipCommandExecutor::class)->execute($action->id);
+                    if ($share && $action->command === 'buy' && $action->fresh()->state->value === 'confirmed') {
+                        $this->assertArmExposure($share);
+                    }
+                }
+                $run->refresh();
+            }
+            $this->travel(5)->seconds();
+            LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+        }
+        foreach ($runs as $run) {
+            $this->assertSame('completed', $run->fresh()->state->value, $run->blocked_reason ?? '');
+            $this->assertTrue($run->expires_at->isFuture());
+        }
     }
 
     public function test_lock_collisions_are_redispatched_on_the_next_five_second_pass(): void

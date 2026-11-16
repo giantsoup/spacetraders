@@ -161,7 +161,7 @@ class FleetClaims
             ->where('state', 'confirmed')->where('command', $command)->where('arguments->symbol', $arguments['symbol'] ?? null)
             ->where('before_state->ship->nav->waypointSymbol', $waypoint)->where('settled_at', '>=', CarbonImmutable::parse($claim['at']))->exists();
         if (! $confirmed) {
-            throw new GameException('Follower waiting for leader '.$command.'.', retryAfter: 5);
+            throw new GameException('Follower waiting for leader '.$command.'.', retryAfter: 30);
         }
     }
 

@@ -192,6 +192,19 @@ class ShipCommandExecutor
                     throw new GameException('Intent expired, reset or stopped before execution.');
                 }
                 $before = $this->rules->inspect($agent, $action->ship_symbol, $action->command, $action->arguments, $run);
+                if ($run && $action->command === 'buy') {
+                    $finished = DB::transaction(function () use ($agent, $run, $action) {
+                        if (! app(CampaignTrade::class)->finishLoading($agent, $run)) {
+                            return false;
+                        }
+                        $action->update(['state' => ActionState::Rejected, 'message' => 'Partial arm load complete; unsent buy released.', 'settled_at' => now()]);
+
+                        return true;
+                    });
+                    if ($finished) {
+                        return;
+                    }
+                }
                 if ($run) {
                     app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments);
                 }
