@@ -1,0 +1,23 @@
+# Arm playbook for multi-ship round 1: one test ship trades under its own arm grant and episode.
+# The main campaign (C0) owns discovery, probes and registration; an arm only trades and, near the
+# reset, sells what it holds. Trade rules match weekly-default so arms and C0 are comparable.
+name: arm-trade
+version: 1
+agent: { symbol: GIANTSOUP, faction: VOID }
+limits:
+  reserve_credits: 0
+  fuel_reserve: next_leg
+  run_max_minutes: 15
+trade:
+  proof: { max_units_batches: 1, max_credits: 60000, min_realized_ratio: 0.8 }
+  lot: { max_buyer_batches: 5, first_scaled_max_buyer_batches: 3, default_batch_decay: 0.04 }
+  losses: { losing_load: reprove, pause_after_consecutive_losing_loads: 2 }
+  switch: { bid_below_first_seen: 0.9, better_pair_ratio: 1.1 }
+  quote_max_age_seconds: 180
+phases:
+  - id: earn
+    exit: { hours_to_reset_lte: 1 }
+    activities: [ { role: command, strategy: trade } ]
+  - id: wind_down
+    activities: [ { role: command, strategy: sell_aboard } ]
+predictions: []

@@ -7,7 +7,9 @@ use App\Gameplay\CampaignStatus;
 use App\Gameplay\CampaignWatchdog;
 use App\Gameplay\GameException;
 use App\Gameplay\HostLock;
+use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
+use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\CampaignRevision;
 use App\Models\User;
@@ -85,3 +87,71 @@ Artisan::command('campaign:report {episode?} {--output=}', function (CampaignRep
     $this->line('Markdown: '.$base.'.md');
     $this->line('JSON: '.$base.'.json');
 })->purpose('Write the campaign episode report as Markdown and JSON');
+
+/** Live arm grants matching a label, or all of them with --all. */
+$arms = function ($command) {
+    $label = $command->argument('label');
+    if (! $label && ! $command->option('all')) {
+        throw new GameException('Name an arm label or pass --all.');
+    }
+    $grants = CampaignGrant::liveArms()->orderBy('id')->get()->filter(fn ($grant) => $command->option('all') || $grant->arm()['label'] === $label)->values();
+    if ($grants->isEmpty()) {
+        throw new GameException('No live arm matches.');
+    }
+
+    return $grants;
+};
+
+Artisan::command('campaign:arm {revision} {ship} {label} {--follow=} {--hours=12} {--max-loss=50000} {--max-load=} {--user=}', function (CampaignControl $control) {
+    $value = (string) $this->argument('revision');
+    $revision = ctype_digit($value) ? CampaignRevision::findOrFail($value) : CampaignRevision::where('content_hash', $value)->firstOrFail();
+    $userId = $this->option('user') ?: config('gameplay.operator_id');
+    if (! $userId && User::count() !== 1) {
+        throw new GameException('Select the operator with --user=<id>.');
+    }
+    $user = $userId ? User::findOrFail($userId) : User::firstOrFail();
+    $grant = $control->approveArm($revision, $user, ['label' => $this->argument('label'), 'ship' => $this->argument('ship'), 'follow' => $this->option('follow'),
+        'max_net_loss' => (int) $this->option('max-loss'), 'max_load_spend' => $this->option('max-load') !== null ? (int) $this->option('max-load') : null],
+        CarbonImmutable::now()->addMinutes((int) round(60 * (float) $this->option('hours'))));
+    $this->info('Arm grant: '.$grant->id.' '.$grant->arm()['label'].' on '.$grant->arm()['ship'].' until '.$grant->expires_at->toIso8601String());
+})->purpose('Approve one arm ship under its own campaign grant and episode');
+
+Artisan::command('campaign:arms', function () {
+    $rows = CampaignGrant::liveArms()->orderBy('id')->get()->map(function ($grant) {
+        $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->latest('id')->first();
+        $decision = CampaignEvent::where('campaign_grant_id', $grant->id)->where('kind', 'decision')->latest('id')->first();
+        $run = $episode ? AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('active_agent_id')->first() : null;
+
+        return ['label' => $grant->arm()['label'], 'ship' => $grant->arm()['ship'], 'follow' => $grant->arm()['follow'], 'grant' => $grant->id,
+            'active' => $grant->available(), 'expires_at' => $grant->expires_at?->toIso8601String(), 'pause_reason' => $grant->pause_reason, 'wait_reason' => $grant->wait_reason,
+            'episode' => $episode?->id, 'phase' => $episode?->phase,
+            'last_decision' => $decision ? ['at' => $decision->created_at->toIso8601String(), 'choice' => $decision->data['choice'] ?? null, 'run_id' => $decision->data['run_id'] ?? null, 'rejections' => $decision->data['rejections'] ?? []] : null,
+            'active_run' => $run ? ['id' => $run->id, 'strategy' => $run->strategy, 'state' => $run->state->value, 'symbol' => $run->plan['symbol'] ?? null, 'market' => $run->plan['market'] ?? null] : null];
+    });
+    $this->line(json_encode($rows->values()->all(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+})->purpose('List live arm grants without contacting SpaceTraders');
+
+Artisan::command('campaign:arm-pause {label?} {--all}', function (CampaignControl $control, HostLock $lock) use ($arms) {
+    foreach ($arms($this) as $grant) {
+        $lock->retry('campaign', fn () => $control->pause($grant, 'operator_pause'));
+        $this->info('Arm '.$grant->arm()['label'].' paused.');
+    }
+})->purpose('Pause arm authority and stop its runs');
+
+Artisan::command('campaign:arm-resume {label?} {--all}', function (CampaignControl $control) use ($arms) {
+    foreach ($arms($this) as $grant) {
+        try {
+            $control->resumeArm($grant);
+            $this->info('Arm '.$grant->arm()['label'].' resumed.');
+        } catch (GameException $exception) {
+            $this->error('Arm '.$grant->arm()['label'].': '.$exception->getMessage());
+        }
+    }
+})->purpose('Resume paused arms after operator review');
+
+Artisan::command('campaign:arm-revoke {label?} {--all}', function (CampaignControl $control) use ($arms) {
+    foreach ($arms($this) as $grant) {
+        $control->revokeArm($grant);
+        $this->info('Arm '.$grant->arm()['label'].' revoked.');
+    }
+})->purpose('Revoke arm authority, stop its runs and close its episode');
