@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use LogicException;
 
@@ -24,8 +25,20 @@ class CampaignGrant extends Model
 
     public function available(): bool
     {
-        return $this->slot === 1 && ! $this->paused_at && ! $this->revoked_at && ! $this->superseded_at
+        return ($this->slot === 1 || ($this->slot === null && $this->arm())) && ! $this->paused_at && ! $this->revoked_at && ! $this->superseded_at
             && (! $this->expires_at || $this->expires_at->isFuture());
+    }
+
+    /** An arm grant directs one test ship under its own episode: ['label', 'ship', 'follow', 'max_net_loss', 'max_load_spend', 'exposure_share']. */
+    public function arm(): ?array
+    {
+        return $this->limits['arm'] ?? null;
+    }
+
+    /** Arm grants that are neither revoked nor superseded (paused or expired ones included). */
+    public static function liveArms(): Builder
+    {
+        return static::whereNull('slot')->whereNotNull('limits->arm')->whereNull('revoked_at')->whereNull('superseded_at');
     }
 
     public function revision(): CampaignRevision
