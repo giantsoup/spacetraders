@@ -44,9 +44,17 @@ class CampaignRecovery
         }
         // Docked at a verified fuel seller, the run tops up before it leaves, so the leg is planned from a full tank.
         $departure = $atBuyer ? null : $fuel->departureRefuel($agent, $ship);
-        if ($departure && $departure['agent']->credits < $limits['reserve']) {
-            // Credits can't cover the top-up ceiling: plan from onboard fuel instead of blocking at departure.
-            $departure = null;
+        if ($departure) {
+            // The top-up ceiling is capped at the credits above the reserve. Only when even that can't fill
+            // the tank at the quoted price is the leg planned from onboard fuel, instead of blocking at departure.
+            $ceiling = min($departure['ceiling'], $agent->credits - $limits['reserve']);
+            $fill = (int) ceil(($ship['fuel']['capacity'] - $ship['fuel']['current']) / 100) * $departure['quote']['purchasePrice'];
+            if ($ceiling < $fill) {
+                $departure = null;
+            } else {
+                $departure['ceiling'] = $ceiling;
+                $departure['agent']->credits = $agent->credits - $ceiling;
+            }
         }
         $leg = $atBuyer
             ? ['destination' => $buyer, 'outbound_fuel' => 0, 'required_fuel' => 0, 'refuel_ceiling' => 0]

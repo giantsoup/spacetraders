@@ -141,9 +141,10 @@ class CampaignControl
             $data['rejections'] = $summary;
             $candidates = $data['candidates'] ?? [];
             // Shadow data: pairs ruled out only by run_max_minutes, kept apart and capped so events stay small.
-            $long = collect($candidates)->filter(fn ($candidate) => ! empty($candidate['long_run']))
+            // Sorted before deduplication, so each pair keeps its best row.
+            $long = collect($candidates)->filter(fn ($candidate) => ! empty($candidate['long_run']))->sortByDesc('predicted_margin')
                 ->unique(fn ($candidate) => $candidate['good'].'@'.$candidate['source'].'>'.$candidate['buyer'])
-                ->sortByDesc('predicted_margin')->take(self::LONG_RUN_REJECTIONS)->values()->all();
+                ->take(self::LONG_RUN_REJECTIONS)->values()->all();
             $candidates = array_values(array_filter($candidates, fn ($candidate) => empty($candidate['long_run'])));
             usort($candidates, fn ($left, $right) => ($right['score'] ?? -PHP_FLOAT_MAX) <=> ($left['score'] ?? -PHP_FLOAT_MAX));
             $data['candidates'] = array_slice($candidates, 0, 10);
