@@ -104,9 +104,15 @@ class CampaignPlaybook
         }
     }
 
+    /** @return list<string> The metric keys a gate reads, including those inside any. */
+    public static function gateMetrics(array $gate): array
+    {
+        return isset($gate['any']) ? array_merge(...array_map(fn ($child) => self::gateMetrics($child), $gate['any'])) : array_keys($gate);
+    }
+
     private function validateGate(mixed $gate, bool $allowAny = true): void
     {
-        $metrics = ['minutes_elapsed_gte', 'hours_to_reset_lte', 'credits_gte', 'markets_observed_gte', 'cycles_completed_gte', 'minutes_without_trade_gte'];
+        $metrics = ['minutes_elapsed_gte', 'hours_to_reset_lte', 'credits_gte', 'markets_observed_gte', 'cycles_completed_gte', 'minutes_without_trade_gte', 'positive_spread_gte'];
         $this->keys($gate, $allowAny ? [...$metrics, 'any'] : $metrics);
         if (count($gate) !== 1) {
             throw new GameException('Each phase gate must contain exactly one metric or any.');

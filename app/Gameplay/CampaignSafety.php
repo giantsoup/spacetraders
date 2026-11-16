@@ -75,7 +75,8 @@ class CampaignSafety
         }
     }
 
-    public function metrics(CampaignEpisode $episode, Agent $agent): array
+    /** @param  array|null  $gate  When given, the costly positive_spread_gte metric is computed only if the gate uses it. */
+    public function metrics(CampaignEpisode $episode, Agent $agent, ?array $gate = null): array
     {
         $lastTrade = AutomationRun::where('campaign_episode_id', $episode->id)->where('strategy', 'trade')->whereNotNull('started_at')->latest('id')->first();
         $tradeAt = $lastTrade ? ($lastTrade->active_agent_id ? now() : $lastTrade->updated_at) : $episode->opened_at;
@@ -84,7 +85,20 @@ class CampaignSafety
             'minutes_without_trade_gte' => $tradeAt->diffInMinutes(now()),
             'hours_to_reset_lte' => now()->diffInHours($episode->next_reset_at, false), 'credits_gte' => $agent->credits,
             'markets_observed_gte' => GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'market')->get()->filter(fn ($row) => ! empty($row->data['tradeGoods']))->count(),
-            'cycles_completed_gte' => AutomationRun::where('campaign_episode_id', $episode->id)->get()->sum(fn ($run) => $run->totals['cycles'] ?? 0)];
+            'cycles_completed_gte' => AutomationRun::where('campaign_episode_id', $episode->id)->get()->sum(fn ($run) => $run->totals['cycles'] ?? 0),
+            'positive_spread_gte' => $gate === null || in_array('positive_spread_gte', CampaignPlaybook::gateMetrics($gate), true) ? $this->positiveSpreads($episode, $agent) : null];
+    }
+
+    /** Trade candidates the command ship could run now with a predicted margin above zero. */
+    private function positiveSpreads(CampaignEpisode $episode, Agent $agent): int
+    {
+        $ship = app(CampaignFleet::class)->role($episode, 'command');
+        if (! $ship) {
+            return 0;
+        }
+        $considered = [];
+
+        return count(array_filter(app(CampaignTrade::class)->rank($episode->grant(), $episode, $agent, $ship, $considered), fn ($candidate) => $candidate['predicted_margin'] > 0));
     }
 
     public function windDown(CampaignEpisode $episode): bool

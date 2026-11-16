@@ -33,10 +33,21 @@ class CampaignRecovery
         // be stale. One read at a FUEL listing lets a part-empty tank top up before departure.
         $here = $ship['nav']['waypointSymbol'];
         if (! $atBuyer && $ship['fuel']['current'] < $ship['fuel']['capacity'] && $fuel->listsFuel($agent, $here) && ! $fuel->sellerQuote($agent, $here)) {
-            app(AgentSynchronizer::class)->observe($agent, 'market', $here, app(SpaceTradersApi::class)->market($agent, $here));
+            try {
+                app(AgentSynchronizer::class)->observe($agent, 'market', $here, app(SpaceTradersApi::class)->market($agent, $here));
+            } catch (GameException $exception) {
+                // Without the read the quote stays stale and the leg is planned from onboard fuel.
+                if ($exception->retryAfter > 0) {
+                    throw $exception;
+                }
+            }
         }
         // Docked at a verified fuel seller, the run tops up before it leaves, so the leg is planned from a full tank.
         $departure = $atBuyer ? null : $fuel->departureRefuel($agent, $ship);
+        if ($departure && $departure['agent']->credits < $limits['reserve']) {
+            // Credits can't cover the top-up ceiling: plan from onboard fuel instead of blocking at departure.
+            $departure = null;
+        }
         $leg = $atBuyer
             ? ['destination' => $buyer, 'outbound_fuel' => 0, 'required_fuel' => 0, 'refuel_ceiling' => 0]
             : $fuel->recoveryLeg($departure['agent'] ?? $agent, $departure['ship'] ?? $ship, $buyer, $limits['reserve']);

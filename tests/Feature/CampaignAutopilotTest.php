@@ -417,7 +417,7 @@ class CampaignAutopilotTest extends TestCase
     {
         $this->tradeWorld();
         app(AgentSynchronizer::class)->sync($this->agent);
-        $grant = $this->approve();
+        $grant = $this->approve($this->slowStartBody());
         $this->tick();
         $episode = CampaignEpisode::firstOrFail();
         $episode->update(['phase' => 'earn', 'opened_at' => now()->subMinutes(16)]);
@@ -457,7 +457,7 @@ class CampaignAutopilotTest extends TestCase
     {
         $this->tradeWorld();
         app(AgentSynchronizer::class)->sync($this->agent);
-        $this->approve();
+        $this->approve($this->slowStartBody());
         $this->tick();
         $episode = CampaignEpisode::firstOrFail();
         $preview = app(AutomationRunner::class)->preview($this->agent, 'LOCAL-1', ['strategy' => 'scout', 'destination' => 'X1-TEST-PORT',
@@ -683,7 +683,7 @@ class CampaignAutopilotTest extends TestCase
     {
         $this->tradeWorld();
         app(AgentSynchronizer::class)->sync($this->agent);
-        $grant = $this->approve();
+        $grant = $this->approve($this->slowStartBody());
         $this->tick();
         GameObservation::where('kind', 'market')->update(['observed_at' => now()->subHour()]);
         $this->editWorld(function (&$world) {
@@ -709,7 +709,7 @@ class CampaignAutopilotTest extends TestCase
     {
         $this->tradeWorld();
         app(AgentSynchronizer::class)->sync($this->agent);
-        $grant = $this->approve();
+        $grant = $this->approve($this->slowStartBody());
         $this->tick();
         GameObservation::where('kind', 'market')->update(['observed_at' => now()->subHour()]);
         $this->editWorld(function (&$world) {
@@ -757,7 +757,7 @@ class CampaignAutopilotTest extends TestCase
     {
         $this->tradeWorld();
         app(AgentSynchronizer::class)->sync($this->agent);
-        $grant = $this->approve();
+        $grant = $this->approve($this->slowStartBody());
         $this->tick();
         if ($windDown) {
             CampaignEpisode::firstOrFail()->update(['phase' => 'wind_down', 'next_reset_at' => now()->addMinutes(30)]);
@@ -821,7 +821,7 @@ class CampaignAutopilotTest extends TestCase
     {
         $this->tradeWorld();
         app(AgentSynchronizer::class)->sync($this->agent);
-        $grant = $this->approve();
+        $grant = $this->approve($this->slowStartBody());
         $this->tick();
         $episode = CampaignEpisode::firstOrFail();
         $quote = GameObservation::where('kind', 'market')->firstOrFail();
@@ -1196,7 +1196,7 @@ class CampaignAutopilotTest extends TestCase
         $sync->observe($this->agent, 'market_listing', 'X1-TEST-ZULU', ['symbol' => 'X1-TEST-ZULU'] + $directory);
         $this->travel(10)->minutes();
         LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
-        $this->approve();
+        $this->approve($this->slowStartBody());
         for ($step = 0; $step < 5 && ! AutomationRun::whereNotNull('active_agent_id')->exists(); $step++) {
             $this->tick();
         }
@@ -1259,6 +1259,12 @@ class CampaignAutopilotTest extends TestCase
     private function body(): string
     {
         return str_replace('GIANTSOUP', 'LOCAL', file_get_contents(base_path('campaigns/weekly-default.yaml')));
+    }
+
+    /** Discover without the positive-spread exit, for tests whose first ticks must stay in discover. */
+    private function slowStartBody(): string
+    {
+        return str_replace(', { positive_spread_gte: 1 }', '', $this->body());
     }
 
     /** The default playbook no longer has the mining fallback; mining tests restore it. */
@@ -1670,7 +1676,8 @@ class CampaignAutopilotTest extends TestCase
             ['hours_to_reset_lte: 1', 'unknown_gate: 1'], ['faction: VOID', 'faction: NOT_REAL'],
             ['version: 1', "version: 1\nunknown: true"],
             ['reserve_credits: 0', "reserve_credits: 0\n  ship_purchase: true"],
-            ['minutes_without_trade_gte: 15', 'conservative_margin_gte: 1'], ['first_scaled_max_buyer_batches: 3', 'adverse_drop: 0.3']];
+            ['minutes_without_trade_gte: 15', 'conservative_margin_gte: 1'], ['first_scaled_max_buyer_batches: 3', 'adverse_drop: 0.3'],
+            ['positive_spread_gte: 1', 'positive_spread_gte: -1']];
     }
 
     #[DataProvider('invalidPlaybooks')]
@@ -2181,7 +2188,8 @@ class CampaignAutopilotTest extends TestCase
     public static function gateMetrics(): array
     {
         return [['minutes_elapsed_gte', 30, 31, 29], ['hours_to_reset_lte', 12, 11, 13],
-            ['credits_gte', 100000, 100001, 99999], ['markets_observed_gte', 6, 6, 5], ['cycles_completed_gte', 10, 11, 9]];
+            ['credits_gte', 100000, 100001, 99999], ['markets_observed_gte', 6, 6, 5], ['cycles_completed_gte', 10, 11, 9],
+            ['positive_spread_gte', 1, 1, 0]];
     }
 
     #[DataProvider('gateMetrics')]
@@ -2530,7 +2538,7 @@ class CampaignAutopilotTest extends TestCase
         });
         app(AgentSynchronizer::class)->sync($this->agent);
         $this->addMarket('X1-TEST-ZED', 40);
-        $grant = $this->approve();
+        $grant = $this->approve($this->slowStartBody());
         $this->tick();
         $episode = CampaignEpisode::firstOrFail();
         $this->assertSame('LOCAL-2', $episode->fresh()->state['role_ships']['probe']);
@@ -2564,7 +2572,7 @@ class CampaignAutopilotTest extends TestCase
         });
         app(AgentSynchronizer::class)->sync($this->agent);
         $this->addMarket('X1-TEST-ZED', 40);
-        $grant = $this->approve();
+        $grant = $this->approve($this->slowStartBody());
         $this->tick();
         $episode = CampaignEpisode::firstOrFail();
         $this->editWorld(function (&$world) {
@@ -2882,5 +2890,358 @@ class CampaignAutopilotTest extends TestCase
         app(AutomationRunner::class)->finishStop($run, 'Synthetic completed trade.');
         $this->tick();
         $this->assertTrue(GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-ZED')->firstOrFail()->observed_at->gt(now()->subMinute()), 'The next idle tick reads the next parked market.');
+    }
+
+    public function test_shadow_lot_sizing_records_the_profit_optimal_lot_without_changing_the_purchase(): void
+    {
+        // A steep decay makes the third buyer batch lose money: eight units earn more per minute than
+        // the twelve that three first-scaled batches buy, and the twelve are still bought.
+        $this->tradeWorld();
+        $this->approve(str_replace('default_batch_decay: 0.04', 'default_batch_decay: 0.45', $this->slowStartBody()));
+        $this->tick();
+        $episode = CampaignEpisode::firstOrFail();
+        $this->completedLoad($episode, true, 80);
+        $this->assertSame('first_scaled', app(CampaignTrade::class)->mode($episode, 'IRON_ORE', 'X1-TEST-PORT'));
+        $episode->update(['phase' => 'earn']);
+        $this->tick();
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertSame('trade', $run->strategy);
+        $trade = $run->plan['campaign_trade'];
+        $this->assertSame(12, $run->plan['units']);
+        $this->assertSame(12, $trade['units']);
+        $this->assertSame('buyer_batches', $trade['lot_bound']);
+        $this->assertSame(8, $trade['optimal_units']);
+        $this->assertSame('optimal_size', $trade['shadow_lot_bound']);
+        $expected = app(CampaignTrade::class)->prediction(8, ['purchasePrice' => 30, 'tradeVolume' => 4], ['sellPrice' => 200, 'tradeVolume' => 4], 0.45, $trade['fuel']);
+        $this->assertSame($expected['predicted_margin'], $trade['optimal_margin']);
+        $this->assertGreaterThan(0, $trade['predicted_margin'], 'The bought lot still predicts a positive margin.');
+        $this->assertGreaterThan($trade['predicted_margin'], $trade['optimal_margin']);
+        $this->assertGreaterThan($trade['score'], $trade['optimal_score']);
+        $this->assertSame(round($trade['score'], 2), $trade['value_floor']['planned_cr_per_minute']);
+        $this->assertIsBool($trade['value_floor']['below_floor']);
+        $decision = CampaignEvent::where('kind', 'decision')->latest('id')->firstOrFail()->data;
+        $this->assertSame($run->id, $decision['run_id']);
+        $this->assertSame($trade['value_floor'], $decision['value_floor']);
+        $chosen = collect($decision['candidates'])->firstWhere('key', $trade['key']);
+        $this->assertSame([12, 8], [$chosen['units'], $chosen['optimal_units']]);
+        $run = $this->driveRun($run);
+        $this->assertSame('completed', $run->state->value, $run->blocked_reason ?? json_encode($run->totals));
+        $this->assertSame(12, $run->totals['purchased']['IRON_ORE']);
+        $result = collect(app(CampaignTrade::class)->results($episode->fresh()))->firstWhere('run_id', $run->id);
+        $this->assertSame(['units' => 12, 'lot_bound' => 'buyer_batches', 'shadow_lot_bound' => 'optimal_size', 'optimal_units' => 8, 'optimal_margin' => $trade['optimal_margin']],
+            array_intersect_key($result, array_flip(['units', 'lot_bound', 'shadow_lot_bound', 'optimal_units', 'optimal_margin'])));
+        $this->assertGreaterThan(0, $result['elapsed_seconds']);
+        $this->assertNotNull($result['realized_cr_per_minute']);
+        $this->assertSame($trade['value_floor']['below_floor'], $result['below_value_floor']);
+    }
+
+    public static function lotBounds(): array
+    {
+        return ['proof unit cap' => ['proof_units', 4, 1000, null, null], 'proof credit cap' => ['proof_credits', 3, 95, null, null],
+            'hold' => ['hold', 3, 1000, 3, null], 'cash credits' => ['credits', 3, 1000, null, 100]];
+    }
+
+    #[DataProvider('lotBounds')]
+    public function test_rank_records_which_cap_bound_the_lot(string $bound, int $units, int $exposure, ?int $hold, ?int $credits): void
+    {
+        $this->tradeWorld();
+        $grant = $this->approve(str_replace('max_credits: 60000', 'max_credits: '.$exposure, $this->slowStartBody()));
+        $this->tick();
+        $ship = Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot;
+        if ($hold !== null) {
+            $ship['cargo']['capacity'] = $hold;
+        }
+        $agent = $this->agent->fresh();
+        if ($credits !== null) {
+            $agent->credits = $credits;
+        }
+        $considered = [];
+        $candidate = app(CampaignTrade::class)->rank($grant, CampaignEpisode::firstOrFail(), $agent, $ship, $considered)[0];
+        $this->assertSame([$units, $bound], [$candidate['units'], $candidate['lot_bound']]);
+        $this->assertSame($units, $candidate['optimal_units'], 'One proof batch has no cheaper optimum.');
+        $this->assertSame($bound, $candidate['shadow_lot_bound']);
+    }
+
+    public function test_pairs_ruled_out_only_by_run_duration_are_logged_and_bounded(): void
+    {
+        $this->tradeWorld();
+        $grant = $this->approve(str_replace('run_max_minutes: 15', 'run_max_minutes: 2', $this->slowStartBody()));
+        $this->tick();
+        $episode = CampaignEpisode::firstOrFail();
+        $considered = [];
+        $this->assertSame([], app(CampaignTrade::class)->rank($grant, $episode, $this->agent->fresh(), Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot, $considered));
+        $long = collect($considered)->where('long_run', true)->values();
+        $this->assertCount(1, $long);
+        $this->assertSame(['IRON_ORE', 'X1-TEST-ROCK', 'X1-TEST-PORT'], [$long[0]['good'], $long[0]['source'], $long[0]['buyer']]);
+        $this->assertGreaterThan(0, $long[0]['predicted_margin']);
+        $this->assertGreaterThan(2, $long[0]['planned_minutes']);
+        // Decision events keep them apart from ranked candidates, deduplicated and capped by predicted margin.
+        $rows = array_map(fn ($index) => ['good' => 'GOOD_'.$index, 'source' => 'X1-TEST-A', 'buyer' => 'X1-TEST-B', 'units' => 4, 'predicted_margin' => $index * 100,
+            'planned_minutes' => 20.5, 'long_run' => true, 'rejected' => 'Planned run exceeds run_max_minutes.'], range(1, 8));
+        $rows[] = $rows[7];
+        $event = app(CampaignControl::class)->event($grant, $episode, 'decision', ['candidates' => [...$rows, ['key' => 'IRON_ORE@X1-TEST-PORT', 'score' => 2.5]],
+            'choice' => 'synthetic_duration_check', 'run_id' => null]);
+        $this->assertSame(['GOOD_8', 'GOOD_7', 'GOOD_6', 'GOOD_5', 'GOOD_4'], array_column($event->data['long_run_rejections'], 'good'));
+        $this->assertCount(CampaignControl::LONG_RUN_REJECTIONS, $event->data['long_run_rejections']);
+        $this->assertSame([['key' => 'IRON_ORE@X1-TEST-PORT', 'score' => 2.5]], $event->data['candidates']);
+        $this->assertSame(9, $event->data['rejections']['Planned run exceeds run_max_minutes.']);
+    }
+
+    public function test_value_floor_flags_low_value_choices_without_enforcing_them(): void
+    {
+        $this->approve();
+        $this->tick();
+        $episode = CampaignEpisode::firstOrFail();
+        $trades = app(CampaignTrade::class);
+        // Only the last ten load results count: the two oldest outliers drop out, recoveries never count.
+        $results = array_map(fn ($rate) => ['realized_cr_per_minute' => $rate], [100000, 100000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12000, 13000, 14000]);
+        $results[] = ['standalone_recovery' => true, 'realized_cr_per_minute' => 1];
+        $results[] = ['net' => 5];
+        $floor = fn (int $margin, array $history) => $trades->valueFloor($episode, ['predicted_margin' => $margin, 'seconds' => 60], $history);
+        $both = $floor(1000, $results);
+        $this->assertSame(9500.0, $both['trailing_median_cr_per_minute']);
+        $this->assertSame(10, $both['trailing_loads']);
+        $this->assertSame(['below_absolute_floor', 'below_trailing_median_share'], $both['reasons']);
+        $this->assertTrue($both['below_floor']);
+        $this->assertSame(['below_trailing_median_share'], $floor(2000, $results)['reasons']);
+        $this->assertFalse($floor(3000, $results)['below_floor']);
+        $first = $floor(1000, []);
+        $this->assertSame(['below_absolute_floor'], $first['reasons']);
+        $this->assertNull($first['trailing_median_cr_per_minute']);
+    }
+
+    public function test_discover_leaves_on_the_first_positive_spread_and_computes_it_only_when_gated(): void
+    {
+        $this->tradeWorld();
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $grant = $this->approve();
+        $this->tick();
+        $episode = CampaignEpisode::firstOrFail();
+        $this->assertSame('earn', $episode->phase);
+        $this->assertTrue(CampaignEvent::where('kind', 'phase')->get()->contains(fn ($event) => $event->data === ['from' => 'discover', 'to' => 'earn']));
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertSame(['trade', 'LOCAL-1'], [$run->strategy, $run->ship_symbol]);
+        $safety = app(CampaignSafety::class);
+        $this->assertSame(1, $safety->metrics($episode, $this->agent->fresh())['positive_spread_gte']);
+        $this->assertSame(1, $safety->metrics($episode, $this->agent->fresh(), ['any' => [['minutes_elapsed_gte' => 90], ['positive_spread_gte' => 1]]])['positive_spread_gte']);
+        $this->assertNull($safety->metrics($episode, $this->agent->fresh(), ['hours_to_reset_lte' => 1])['positive_spread_gte']);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    /** A world with no positive spread (discover stays open), an unpriced market at the command ship's coordinates and a far one. */
+    private function fastStartWorld(bool $near = true, ?callable $edit = null): void
+    {
+        $this->tradeWorld();
+        $markets = array_merge($near ? [['X1-TEST-NEAR', 0, 0]] : [], [['X1-TEST-FAR', 40, 0]]);
+        $this->editWorld(function (&$world) use ($markets, $edit) {
+            $world['market_goods']['X1-TEST-PORT'][0]['sellPrice'] = 20;
+            $world['fuel_consumption'] = 1;
+            foreach ($markets as [$symbol, $x, $y]) {
+                $world['waypoints'][] = ['symbol' => $symbol, 'systemSymbol' => 'X1-TEST', 'type' => 'PLANET', 'x' => $x, 'y' => $y, 'traits' => [['symbol' => 'MARKETPLACE']]];
+            }
+            if ($edit) {
+                $edit($world);
+            }
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        foreach (array_column($markets, 0) as $symbol) {
+            app(AgentSynchronizer::class)->observe($this->agent, 'market_listing', $symbol, ['symbol' => $symbol, 'imports' => [['symbol' => 'IRON_ORE']], 'exports' => [], 'exchange' => [['symbol' => 'FUEL']]]);
+        }
+    }
+
+    private function nextCampaignRun(int $ticks = 8): ?AutomationRun
+    {
+        for ($tick = 0; $tick < $ticks && ! AutomationRun::whereNotNull('active_agent_id')->exists(); $tick++) {
+            $this->tick();
+        }
+
+        return AutomationRun::whereNotNull('active_agent_id')->first();
+    }
+
+    private function commandScoutRejected(): bool
+    {
+        return CampaignEvent::where('kind', 'decision')->get()->contains(fn ($event) => array_key_exists('No unclaimed market at the command ship\'s coordinates needs a read.', $event->data['rejections'] ?? []));
+    }
+
+    public function test_the_command_ship_scouts_only_unpriced_markets_at_its_own_coordinates(): void
+    {
+        $this->fastStartWorld();
+        $grant = $this->approve();
+        $local = $this->nextCampaignRun();
+        $this->assertNotNull($local);
+        $this->assertSame(['scout', 'LOCAL-1', 'X1-TEST-NEAR'], [$local->strategy, $local->ship_symbol, $local->plan['destination']]);
+        $this->assertTrue($local->plan['one_way']);
+        $local = $this->driveRun($local);
+        $this->assertSame('completed', $local->state->value, $local->blocked_reason ?? json_encode($local->totals));
+        $this->assertNotEmpty(GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-NEAR')->firstOrFail()->data['tradeGoods'] ?? []);
+        // The far market is the probe's: the command ship never leaves distance 0 to scout, and does not
+        // hop back to the stale (but already priced) station it left.
+        GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-ROCK')->update(['observed_at' => now()->subHour()]);
+        $probe = $this->nextCampaignRun();
+        $this->assertNotNull($probe);
+        $this->assertSame(['scout', 'LOCAL-2', 'X1-TEST-FAR'], [$probe->strategy, $probe->ship_symbol, $probe->plan['destination']]);
+        $this->assertSame(['X1-TEST-NEAR'], AutomationRun::where('ship_symbol', 'LOCAL-1')->get()->map(fn ($run) => $run->plan['destination'] ?? $run->plan['market'])->unique()->values()->all());
+        $this->assertSame('discover', CampaignEpisode::firstOrFail()->phase);
+        $this->assertTrue($this->commandScoutRejected());
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public static function claimedLocalMarkets(): array
+    {
+        return ['probe flying to the local market' => [true], 'only a far market is unpriced' => [false]];
+    }
+
+    #[DataProvider('claimedLocalMarkets')]
+    public function test_the_command_scout_yields_nothing_without_an_unclaimed_local_market(bool $near): void
+    {
+        $this->fastStartWorld($near, function (&$world) {
+            $world['ships'][1]['nav']['status'] = 'IN_TRANSIT';
+            $world['ships'][1]['nav']['waypointSymbol'] = 'X1-TEST-NEAR';
+            $world['ships'][1]['nav']['route']['arrival'] = now()->addHour()->toIso8601String();
+        });
+        $grant = $this->approve();
+        $this->assertNull($this->nextCampaignRun(4));
+        $this->assertFalse(AutomationRun::where('ship_symbol', 'LOCAL-1')->exists(), 'The command ship stays put.');
+        $this->assertSame('X1-TEST-ROCK', Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot['nav']['waypointSymbol']);
+        $this->assertTrue($this->commandScoutRejected());
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_recovery_that_cannot_afford_the_departure_top_up_plans_from_onboard_fuel(): void
+    {
+        // The top-up would cost more than the agent holds: plan the leg from the 50 units aboard, as before
+        // the departure top-up existed, instead of planning from a full tank and blocking at departure.
+        $this->lowFuelWorld(['fuel' => ['current' => 50], 'cargo' => ['capacity' => 40, 'units' => 3, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 3]]]], function (&$world) {
+            $world['goods'][2]['purchasePrice'] = 150000;
+        });
+        $grant = $this->approve();
+        $this->tick();
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertSame(['sell_aboard', 'X1-TEST-PORT'], [$run->strategy, $run->plan['market']]);
+        $this->assertSame(0, $run->plan['route']['departure_refuel_ceiling']);
+        $run = $this->driveRun($run);
+        $this->assertSame('completed', $run->state->value, $run->blocked_reason ?? json_encode($run->totals));
+        $commands = $this->confirmedCommands($run);
+        $this->assertSame(['orbit', 'navigate'], array_slice($commands, 0, 2), json_encode($commands));
+        $this->assertContains('sell', $commands);
+        $this->assertSame(0, Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot['cargo']['units']);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_recovery_continues_without_its_own_market_read_unless_the_refusal_is_retryable(): void
+    {
+        $this->lowFuelWorld(['fuel' => ['current' => 50], 'cargo' => ['capacity' => 40, 'units' => 3, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 3]]]]);
+        GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-ROCK')->update(['observed_at' => now()->subHour()]);
+        $api = app(SpaceTradersApi::class);
+        $failure = new GameException('Synthetic own-market refusal.');
+        $mock = \Mockery::mock(SpaceTradersApi::class, [app(SpaceTradersClient::class)])->makePartial();
+        $mock->shouldReceive('market')->andReturnUsing(function ($agent, $symbol) use ($api, &$failure) {
+            if ($symbol === 'X1-TEST-ROCK') {
+                throw $failure;
+            }
+
+            return $api->market($agent, $symbol);
+        });
+        $this->app->instance(SpaceTradersApi::class, $mock);
+        $limits = ['reserve' => 0, 'max_spend' => 100000, 'max_loss' => PHP_INT_MAX, 'minutes' => 15, 'cycles' => 1];
+        $plan = app(CampaignRecovery::class)->compose($this->agent, 'LOCAL-1', 'X1-TEST-PORT', $limits)['plan'];
+        $this->assertSame(0, $plan['route']['departure_refuel_ceiling'], 'Without a fresh quote there is no top-up; onboard fuel covers the leg.');
+        $this->assertSame('X1-TEST-PORT', $plan['market']);
+        $failure = new RequestDeferred('Synthetic own-market deferral.', 5);
+        $this->expectException(RequestDeferred::class);
+        app(CampaignRecovery::class)->compose($this->agent, 'LOCAL-1', 'X1-TEST-PORT', $limits);
+    }
+
+    public function test_recovery_stops_reading_its_departure_market_once_the_tank_is_full(): void
+    {
+        $this->lowFuelWorld(['cargo' => ['capacity' => 40, 'units' => 3, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 3]]]]);
+        $this->approve();
+        $this->tick();
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertGreaterThan(0, $run->plan['route']['departure_refuel_ceiling']);
+        $reads = fn () => count(array_filter(json_decode(file_get_contents($this->file), true)['calls'], fn ($call) => str_ends_with($call['path'], 'X1-TEST-ROCK/market')));
+        $step = function () use ($run) {
+            LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+            app(AutomationRunner::class)->advance($run->id);
+            foreach (ShipAction::where('automation_run_id', $run->id)->where('state', 'pending')->get() as $action) {
+                app(ShipCommandExecutor::class)->execute($action->id);
+            }
+            $this->travel(6)->seconds();
+        };
+        for ($index = 0; $index < 5 && ! ShipAction::where('automation_run_id', $run->id)->where('command', 'refuel')->where('state', 'confirmed')->exists(); $index++) {
+            $step();
+        }
+        $this->assertSame(100, Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot['fuel']['current']);
+        // The runner's own advances, up to queueing the navigate (whose command preflight reads its origin anyway).
+        $before = $reads();
+        $step();
+        LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+        app(AutomationRunner::class)->advance($run->id);
+        $this->assertSame(['refuel', 'orbit'], $this->confirmedCommands($run));
+        $this->assertTrue(ShipAction::where('automation_run_id', $run->id)->where('command', 'navigate')->where('state', 'pending')->exists());
+        $this->assertSame($before, $reads(), 'A full tank needs no fresh fuel quote at the departure market.');
+        $this->assertSame('completed', $this->driveRun($run)->state->value);
+    }
+
+    /**
+     * @param  list<array{0: string, 1: array, 2: int, 3: string, 4: array}>  $actions  command, arguments, fuel before, waypoint, outcome
+     */
+    private function loadPart(CampaignEpisode $episode, string $strategy, array $plan, array $totals, array $actions): AutomationRun
+    {
+        $run = AutomationRun::create(['campaign_episode_id' => $episode->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
+            'ship_symbol' => 'LOCAL-1', 'strategy' => $strategy, 'plan_version' => $strategy === 'trade' ? 3 : 4, 'state' => 'completed',
+            'started_at' => now()->subMinutes(5), 'expires_at' => now()->addMinute(), 'plan' => $plan, 'totals' => $totals]);
+        foreach ($actions as $index => [$command, $arguments, $fuel, $waypoint, $outcome]) {
+            ShipAction::create(['agent_id' => $this->agent->id, 'automation_run_id' => $run->id, 'ship_symbol' => 'LOCAL-1', 'key' => 'load-part-'.$run->id.'-'.$index,
+                'reset_id' => $this->agent->reset_id, 'command' => $command, 'state' => 'confirmed', 'origin' => 'automation', 'expires_at' => now()->addMinute(),
+                'arguments' => $arguments, 'before_state' => ['ship' => ['nav' => ['waypointSymbol' => $waypoint], 'fuel' => ['current' => $fuel]]], 'outcome' => $outcome]);
+        }
+
+        return $run;
+    }
+
+    public static function handoffRecoveries(): array
+    {
+        // The trade part burns 150 of 400 units flying ROCK to PORT and sells 2 of 5 there. The
+        // recovery part's first top-up at PORT refills exactly that burn. Its request asks for 400
+        // units, but the tank took 150: only the tank change counts as pre-departure fuel.
+        return [
+            'recovery departs to another buyer' => [true, ['cash_net' => 840, 'fuel_cost' => 10, 'departure_fuel_cost' => 10, 'unrefilled_fuel_allowance' => 10, 'net' => 830]],
+            'recovery sells at the buyer, then refuels without a navigate' => [false, ['cash_net' => 850, 'fuel_cost' => 0, 'departure_fuel_cost' => 10, 'unrefilled_fuel_allowance' => 10, 'net' => 840]],
+        ];
+    }
+
+    #[DataProvider('handoffRecoveries')]
+    public function test_a_handoff_loads_trade_burn_stays_in_its_allowance_when_the_recovery_part_refuels_it(bool $departs, array $expected): void
+    {
+        $this->tradeWorld();
+        $this->approve($this->slowStartBody());
+        $this->tick();
+        $episode = CampaignEpisode::firstOrFail();
+        $trade = $this->loadPart($episode, 'trade', ['symbol' => 'IRON_ORE', 'site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-PORT', 'campaign_trade' => ['proof' => true, 'predicted_margin' => 500]],
+            ['purchased' => ['IRON_ORE' => 5], 'sold' => ['IRON_ORE' => 2], 'purchase_cost' => 150, 'sale_proceeds' => 400, 'fuel_cost' => 0, 'fuel_units' => 0, 'travel_fuel' => 150, 'unsold' => ['IRON_ORE' => 3]],
+            [['buy', ['symbol' => 'IRON_ORE', 'units' => 5], 400, 'X1-TEST-ROCK', ['units' => 5, 'transaction_total' => 150]],
+                ['navigate', ['waypointSymbol' => 'X1-TEST-PORT'], 400, 'X1-TEST-ROCK', ['travel' => ['actual_fuel' => 150]]],
+                ['sell', ['symbol' => 'IRON_ORE', 'units' => 2], 250, 'X1-TEST-PORT', ['units' => 2, 'transaction_total' => 400]]]);
+        $buyer = $departs ? 'X1-TEST-ZED' : 'X1-TEST-PORT';
+        $actions = $departs
+            ? [['refuel', ['units' => 400], 250, 'X1-TEST-PORT', ['transaction_total' => 10]],
+                ['navigate', ['waypointSymbol' => $buyer], 400, 'X1-TEST-PORT', ['travel' => ['actual_fuel' => 120]]],
+                ['sell', ['symbol' => 'IRON_ORE', 'units' => 3], 280, $buyer, ['units' => 3, 'transaction_total' => 600]],
+                ['refuel', ['units' => 120], 280, $buyer, ['transaction_total' => 10]]]
+            : [['sell', ['symbol' => 'IRON_ORE', 'units' => 3], 250, $buyer, ['units' => 3, 'transaction_total' => 600]],
+                ['refuel', ['units' => 400], 250, $buyer, ['transaction_total' => 10]]];
+        $this->loadPart($episode, 'sell_aboard', ['strategy' => 'sell_aboard', 'sell_only' => true, 'recovery_of' => $trade->id, 'site' => 'X1-TEST-PORT', 'market' => $buyer,
+            'recovery_good' => 'IRON_ORE', 'initial_inventory' => ['IRON_ORE' => 3]],
+            ['sold' => ['IRON_ORE' => 3], 'sale_proceeds' => 600, 'fuel_cost' => $departs ? 20 : 10, 'fuel_units' => $departs ? 270 : 150, 'travel_fuel' => $departs ? 120 : 0, 'unsold' => []],
+            $actions);
+        $results = app(CampaignTrade::class)->results($episode->fresh());
+        $this->assertCount(1, $results, 'The two parts are one load.');
+        $actual = array_intersect_key($results[0], $expected);
+        ksort($actual);
+        ksort($expected);
+        $this->assertSame($expected, $actual);
+        $this->assertSame($trade->id, $results[0]['run_id']);
+        $this->assertFalse($results[0]['losing']);
     }
 }
