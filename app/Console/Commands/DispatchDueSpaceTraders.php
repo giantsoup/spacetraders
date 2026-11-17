@@ -59,39 +59,18 @@ class DispatchDueSpaceTraders extends Command
                 // The sender still holds its OS lock. Do not steal command ownership.
             }
         }
-        $timing = ['lags' => []];
-        $started = microtime(true);
+        $timing = ['lags' => [], 'director' => 0, 'arms' => 0];
         $director = app(CampaignDirector::class);
-        // A throwing C0 tick counts as attempted: arms wait for the next pass.
-        $attempted = true;
-        try {
-            $attempted = $director->tick();
+        $turns = DB::table('game_runtime')->where('key', 'director_turn')->value('value') === 'arms' ? ['arms', 'director'] : ['director', 'arms'];
+        foreach ($turns as $turn) {
+            $started = microtime(true);
+            $attempted = $turn === 'arms' ? $this->tickArms($director) : $this->tickDirector($director);
+            $timing[$turn] = microtime(true) - $started;
             if ($attempted) {
-                DB::table('game_runtime')->upsert([['key' => 'campaign_director_failures', 'value' => '0']], ['key'], ['value']);
-            }
-        } catch (\Throwable $exception) {
-            $message = 'Campaign director failed; exception details redacted.';
-            Log::error($message, ['exception_class' => get_class($exception)]);
-            try {
-                $failures = (int) DB::table('game_runtime')->where('key', 'campaign_director_failures')->value('value') + 1;
-                DB::table('game_runtime')->upsert([['key' => 'campaign_director_failures', 'value' => (string) $failures]], ['key'], ['value']);
-                $grant = CampaignGrant::where('slot', 1)->first();
-                if ($grant) {
-                    $control = app(CampaignControl::class);
-                    $control->event($grant, null, 'director_error', ['exception_class' => get_class($exception), 'message' => $message, 'consecutive' => $failures]);
-                    if ($failures >= 5) {
-                        $control->pause($grant, 'director_error');
-                    }
-                }
-            } catch (\Throwable) {
+                DB::table('game_runtime')->upsert([['key' => 'director_turn', 'value' => $turn === 'arms' ? 'director' : 'arms']], ['key'], ['value']);
+                break;
             }
         }
-        $timing['director'] = microtime(true) - $started;
-        $started = microtime(true);
-        if (! $attempted) {
-            $this->tickArms($director);
-        }
-        $timing['arms'] = microtime(true) - $started;
         $started = microtime(true);
         // A campaign decision can take most of a minute. Give dispatch its own budget after it.
         $deadline = hrtime(true) + 15_000_000_000;
@@ -136,16 +115,50 @@ class DispatchDueSpaceTraders extends Command
         return self::SUCCESS;
     }
 
+    private function tickDirector(CampaignDirector $director): bool
+    {
+        try {
+            $attempted = $director->tick();
+            if ($attempted) {
+                DB::table('game_runtime')->upsert([['key' => 'campaign_director_failures', 'value' => '0']], ['key'], ['value']);
+            }
+
+            return $attempted;
+        } catch (\Throwable $exception) {
+            $message = 'Campaign director failed; exception details redacted.';
+            Log::error($message, ['exception_class' => get_class($exception)]);
+            try {
+                $failures = (int) DB::table('game_runtime')->where('key', 'campaign_director_failures')->value('value') + 1;
+                DB::table('game_runtime')->upsert([['key' => 'campaign_director_failures', 'value' => (string) $failures]], ['key'], ['value']);
+                $grant = CampaignGrant::where('slot', 1)->first();
+                if ($grant) {
+                    $control = app(CampaignControl::class);
+                    $control->event($grant, null, 'director_error', ['exception_class' => get_class($exception), 'message' => $message, 'consecutive' => $failures]);
+                    if ($failures >= 5) {
+                        $control->pause($grant, 'director_error');
+                    }
+                }
+            } catch (\Throwable) {
+            }
+
+            return true;
+        }
+    }
+
     /**
      * Arms get their own failure streak per grant: five consecutive failures pause that arm only,
      * never the main campaign, and never touch the main campaign's streak.
      */
-    private function tickArms(CampaignDirector $director): void
+    private function tickArms(CampaignDirector $director): bool
     {
         try {
             if ($director->tickArms()) {
                 DB::table('game_runtime')->upsert([['key' => 'arm_director_failures:'.$director->armGrantId, 'value' => '0']], ['key'], ['value']);
+
+                return true;
             }
+
+            return false;
         } catch (\Throwable $exception) {
             $message = 'Arm director failed; exception details redacted.';
             Log::error($message, ['exception_class' => get_class($exception), 'grant' => $director->armGrantId]);
@@ -163,6 +176,8 @@ class DispatchDueSpaceTraders extends Command
                 }
             } catch (\Throwable) {
             }
+
+            return true;
         }
     }
 

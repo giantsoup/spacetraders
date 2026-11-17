@@ -12,8 +12,11 @@ use App\Gameplay\CampaignReport;
 use App\Gameplay\CampaignSafety;
 use App\Gameplay\CampaignTrade;
 use App\Gameplay\Engine\EngineHost;
+use App\Gameplay\FleetMetrics;
 use App\Gameplay\GameException;
 use App\Gameplay\HostLock;
+use App\Gameplay\RequestBudget;
+use App\Gameplay\RequestDeferred;
 use App\Gameplay\ShipCommandExecutor;
 use App\Gameplay\SpaceTradersApi;
 use App\Jobs\AdvanceAutomationRun;
@@ -27,6 +30,7 @@ use App\Models\LocalEngine;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
+use App\Services\SpaceTradersClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -192,6 +196,101 @@ class ArmDirectorTest extends TestCase
         $mock->shouldReceive('tick')->once()->andReturn(false);
         $mock->shouldReceive('tickArms')->once()->andReturn(false);
         $this->artisan('spacetraders:dispatch-due')->assertSuccessful();
+    }
+
+    #[DataProvider('dispatcherIntervals')]
+    public function test_slow_c0_and_arms_alternate_when_both_are_due(int $interval): void
+    {
+        $grant = $this->c0();
+        $arm = $this->arm('T1b', 'LOCAL-3');
+        $schedule = app(SpaceTradersApi::class)->resetSchedule();
+        $api = \Mockery::mock(SpaceTradersApi::class, [app(SpaceTradersClient::class)])->makePartial();
+        $this->app->instance(SpaceTradersApi::class, $api);
+        $api->shouldReceive('resetSchedule')->times(4)->andReturnUsing(function () use ($schedule) {
+            $this->travel(31)->seconds();
+            LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+
+            return $schedule;
+        });
+        foreach ([$grant, $arm, $grant, $arm] as $directed) {
+            $before = $directed->fresh()->last_directed_at;
+            $other = $directed->id === $grant->id ? $arm : $grant;
+            $otherBefore = $other->fresh()->last_directed_at;
+            $this->artisan('spacetraders:dispatch-due')->assertSuccessful();
+            $directed->refresh();
+            $this->assertNotEquals($before, $directed->last_directed_at);
+            $this->assertSame(now()->toDateTimeString(), $directed->last_directed_at->toDateTimeString());
+            $this->assertEquals($otherBefore, $other->fresh()->last_directed_at);
+            $this->assertNull($directed->paused_at);
+            $this->travel($interval)->seconds();
+            LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+        }
+        $this->assertSame(0, CampaignEvent::where('kind', 'director_error')->count());
+        $this->assertSame(1, CampaignEpisode::where('campaign_grant_id', $arm->id)->count());
+    }
+
+    public static function dispatcherIntervals(): array
+    {
+        return ['review probe cadence' => [5], 'both due each pass' => [31]];
+    }
+
+    #[DataProvider('directorCompletions')]
+    public function test_c0_throttles_from_completion_even_after_waits_and_failures(bool $failure): void
+    {
+        $grant = $this->c0();
+        $api = \Mockery::mock(SpaceTradersApi::class, [app(SpaceTradersClient::class)])->makePartial();
+        $this->app->instance(SpaceTradersApi::class, $api);
+        $api->shouldReceive('resetSchedule')->once()->andReturnUsing(function () use ($failure) {
+            $this->travel(31)->seconds();
+            LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+            throw $failure ? new \TypeError('Synthetic director failure.') : new RequestDeferred('Budget deferred.', 3);
+        });
+        $this->artisan('spacetraders:dispatch-due')->assertSuccessful();
+        $this->assertSame(now()->toDateTimeString(), $grant->fresh()->last_directed_at->toDateTimeString());
+        $this->travel(5)->seconds();
+        LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+        $this->assertFalse(app(CampaignDirector::class)->tick());
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public static function directorCompletions(): array
+    {
+        return ['wait' => [false], 'failure' => [true]];
+    }
+
+    #[DataProvider('deferralPaths')]
+    public function test_real_runner_and_executor_count_each_ship_budget_deferral_once(bool $pending, bool $retryable): void
+    {
+        $this->arm('T1b', 'LOCAL-3');
+        app(CampaignDirector::class)->tickArms();
+        $run = AutomationRun::whereNotNull('active_agent_id')->sole();
+        if ($pending) {
+            app(AutomationRunner::class)->advance($run->id);
+        }
+        $this->mock(RequestBudget::class)->shouldReceive('reserve')->once()->andThrow(
+            $retryable ? new GameException('Budget deferred.', retryAfter: 3) : new RequestDeferred('Budget deferred.', 3)
+        );
+        FleetMetrics::reset();
+        if ($pending) {
+            $action = ShipAction::where('automation_run_id', $run->id)->sole();
+            (new ExecuteShipCommand($action->id))->handle(app(ShipCommandExecutor::class));
+            $this->assertSame('pending', $action->fresh()->state->value);
+            $this->assertSame('Budget deferred.', $action->fresh()->message);
+        } else {
+            (new AdvanceAutomationRun($run->id))->handle(app(AutomationRunner::class));
+            $this->assertSame('waiting', $run->fresh()->state->value);
+            $this->assertSame('Budget deferred.', $run->fresh()->blocked_reason);
+        }
+        FleetMetrics::flush();
+        $this->assertEquals(1, DB::table('fleet_metrics')->where(['kind' => 'deferral', 'ship' => 'LOCAL-3'])->sum('value'));
+        $this->assertEquals(1, DB::table('fleet_metrics')->where('kind', 'deferral')->sum('value'));
+        $this->assertNull(FleetMetrics::current());
+    }
+
+    public static function deferralPaths(): array
+    {
+        return ['runner budget' => [false, false], 'executor budget' => [true, false],
+            'runner retryable' => [false, true], 'executor retryable' => [true, true]];
     }
 
     public function test_arms_rotate_least_recently_directed_first(): void
@@ -532,7 +631,7 @@ class ArmDirectorTest extends TestCase
         app(AgentSynchronizer::class)->sync($this->agent);
         $revision = app(CampaignPlaybook::class)->import(str_replace('max_units_batches: 1', 'max_units_batches: 3', $this->armBody()));
         $grant = app(CampaignControl::class)->approveArm($revision, $this->user,
-            ['label' => 'T1a', 'ship' => 'LOCAL-3', 'exposure_share' => $change === 'inventory' ? 0.5 : 0.001], CarbonImmutable::now()->addHours(12));
+            ['label' => 'T1a', 'ship' => 'LOCAL-3', 'exposure_share' => in_array($change, ['inventory', 'price_only'], true) ? 0.5 : 0.001], CarbonImmutable::now()->addHours(12));
         app(CampaignDirector::class)->tickArms();
         $run = AutomationRun::whereNotNull('active_agent_id')->sole();
         $runner = app(AutomationRunner::class);
@@ -553,14 +652,14 @@ class ArmDirectorTest extends TestCase
         if ($change) {
             $this->editWorld(function (&$world) use ($change) {
                 $world['goods'][0][$change === 'volume' ? 'tradeVolume' : 'purchasePrice'] = match ($change) {
-                    'price' => 31, 'inventory' => 80, default => 1,
+                    'price', 'price_only' => 31, 'inventory' => 80, default => 1,
                 };
             });
         }
         if ($timeout) {
             $this->travel(120)->seconds();
             LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
-        } elseif ($change !== 'inventory') {
+        } elseif (! in_array($change, ['inventory', 'price_only'], true)) {
             $other = $this->arm('T1b', 'LOCAL-4');
             $episode = CampaignEpisode::create(['campaign_grant_id' => $other->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
                 'start_credits' => $this->agent->fresh()->credits, 'phase' => 'earn', 'state' => [], 'opened_at' => now(), 'next_reset_at' => now()->addHours(17)]);
@@ -605,12 +704,14 @@ class ArmDirectorTest extends TestCase
         $this->assertSame(30, $run->plan['max_inventory']);
         $this->assertSame(3, $run->plan['original_units']);
         $this->assertSame($run->plan['campaign_trade']['predicted_margin'], $run->plan['original_predicted_margin']);
-        $reason = $timeout ? 'timeout' : ($change === 'inventory' ? 'inventory' : 'exposure');
+        $reason = $timeout ? 'timeout' : match ($change) {
+            'inventory' => 'inventory', 'price_only' => 'price', default => 'exposure',
+        };
         $this->assertSame($reason, $run->plan['shortened_reason']);
         $this->assertSame('sell', $run->totals['phase']);
         $this->assertNotSame('blocked', $run->fresh()->state->value);
         $this->assertNull($run->blocked_reason);
-        $this->assertSame($change === 'inventory' ? 49970.0 : ($timeout ? 70.0 : 0.0), app(CampaignTrade::class)->allowance($grant, $this->agent->fresh(), ship: 'LOCAL-5'));
+        $this->assertSame(in_array($change, ['inventory', 'price_only'], true) ? 49970.0 : ($timeout ? 70.0 : 0.0), app(CampaignTrade::class)->allowance($grant, $this->agent->fresh(), ship: 'LOCAL-5'));
         if ($change === 'inventory') {
             $this->assertEqualsWithDelta(80 / ($run->plan['campaign_trade']['predicted_cost'] / 3), $run->plan['ask_over_prediction'], 0.00001);
         }
@@ -634,6 +735,8 @@ class ArmDirectorTest extends TestCase
     {
         return ['advance cap' => [false, false], 'transport cap' => [true, false],
             'advance inventory' => [false, false, 'inventory'], 'transport inventory' => [true, false, 'inventory'],
+            'advance timeout inventory' => [false, true, 'inventory'], 'transport timeout inventory' => [true, true, 'inventory'],
+            'transport price, no cap or timeout' => [true, false, 'price_only'],
             'advance timeout' => [false, true], 'transport timeout' => [true, true],
             'transport cap price' => [true, false, 'price'], 'transport cap volume' => [true, false, 'volume'],
             'transport timeout price' => [true, true, 'price'], 'transport timeout volume' => [true, true, 'volume'],

@@ -195,7 +195,7 @@ class ShipCommandExecutor
                 if ($run && $action->command === 'buy') {
                     app(CampaignSafety::class)->check($run, $agent);
                     $finished = DB::transaction(function () use ($agent, $run, $action) {
-                        if (! app(CampaignTrade::class)->finishLoading($agent, $run)) {
+                        if (! app(CampaignTrade::class)->finishLoading($agent, $run, $action->arguments)) {
                             return false;
                         }
                         $action->update(['state' => ActionState::Rejected, 'message' => 'Partial arm load complete; unsent buy released.', 'settled_at' => now()]);
@@ -236,6 +236,7 @@ class ShipCommandExecutor
                 $action->update(['outcome' => array_merge($action->fresh()->outcome ?? [], ['response' => $data, 'response_validated' => true, 'response_received_at' => now()->utc()->toIso8601String()])]);
                 $this->confirm($agent, $action, $data, $before, $run);
             } catch (RequestDeferred $e) {
+                FleetMetrics::as($action->ship_symbol ?: null, fn () => FleetMetrics::observe($e));
                 $action->refresh();
                 if ($received) {
                     $action->update(['state' => ActionState::Uncertain, 'message' => 'Write response retained; post-write refresh was deferred by the request budget. Reconcile without replay.', 'settled_at' => now()]);
@@ -255,6 +256,7 @@ class ShipCommandExecutor
                     }
                 }
             } catch (GameException $e) {
+                FleetMetrics::as($action->ship_symbol ?: null, fn () => FleetMetrics::observe($e));
                 $action->refresh();
                 if (in_array($action->command, ['mine', 'mine_survey'], true) && isset($action->arguments['surveySignature']) && in_array($e->apiCode, [4221, 4224], true)) {
                     app(SurveyPool::class)->invalidate($agent, $action->arguments['surveySignature'], $e->apiCode === 4224);

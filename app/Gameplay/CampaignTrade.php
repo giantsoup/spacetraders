@@ -469,7 +469,7 @@ class CampaignTrade
             ($arm['exposure_share'] ?? 0.5) * ($agent->credits + $held) - $held - $committed));
     }
 
-    public function finishLoading(Agent $agent, AutomationRun $run): bool
+    public function finishLoading(Agent $agent, AutomationRun $run, ?array $buy = null): bool
     {
         $bought = $run->totals['purchased'][$run->plan['symbol'] ?? ''] ?? 0;
         if ($run->strategy !== 'trade' || ! $run->campaign_episode_id || ($run->totals['phase'] ?? null) !== 'buy'
@@ -484,15 +484,19 @@ class CampaignTrade
         $lastBuy = ShipAction::where('automation_run_id', $run->id)->where('command', 'buy')->where('state', 'confirmed')->latest('id')->first();
         $timeout = ($lastBuy?->settled_at ?? $run->started_at)->lte(now()->subMinutes(2));
         $inventory = $price > $run->plan['max_inventory'] - $run->totals['purchase_cost'];
-        if ($this->allowance($grant, $agent, $run) >= $price && ! $timeout && ! $inventory) {
+        $exposure = $this->allowance($grant, $agent, $run) < $price;
+        $priceChanged = $buy && $price * $buy['units'] > $buy['maxTotal'];
+        if (! $exposure && ! $timeout && ! $inventory && ! $priceChanged) {
             return false;
         }
-        $reason = $timeout ? 'timeout' : ($inventory ? 'inventory' : 'exposure');
+        $reason = match (true) {
+            $timeout => 'timeout', $inventory => 'inventory', $exposure => 'exposure', default => 'price',
+        };
         $predictedAsk = ($run->plan['campaign_trade']['predicted_cost'] ?? 0) / ($run->plan['original_units'] ?? $run->plan['units']);
-        DB::transaction(function () use ($run, $bought, $reason, $price, $predictedAsk) {
+        DB::transaction(function () use ($run, $bought, $reason, $price, $predictedAsk, $inventory) {
             $this->shortenLoad($run, $bought, $run->totals['purchase_cost'], $reason);
             $plan = $run->plan;
-            if ($reason === 'inventory') {
+            if ($inventory) {
                 $plan['ask_over_prediction'] = $predictedAsk > 0 ? $price / $predictedAsk : null;
             }
             $run->update(['plan' => $plan, 'totals' => array_merge($run->totals, ['phase' => 'sell']), 'next_action_at' => now(), 'blocked_reason' => null]);

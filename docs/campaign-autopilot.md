@@ -1,6 +1,9 @@
 # Operate the campaign autopilot
 
-The campaign director runs inside the existing dispatcher, at most once per 30 seconds.
+The campaign director runs inside the existing dispatcher, waiting 30 seconds after each
+decision completes, including waits and failures. The dispatcher persists alternating C0
+and arm priority and runs at most one decision per pass; when the preferred side is not
+due, the other side can run. Slow C0 decisions cannot starve the arms.
 It works with an already-running engine and resumes after a healthy restart. No LLM is
 in the execution path. These commands do not start the engine.
 
@@ -122,8 +125,10 @@ one more unit, or two minutes pass since its last confirmed buy. Fresh balance, 
 integrity, and campaign authority checks precede cancellation of an obsolete queued buy,
 including when its price or volume changes.
 The shortened plan retains `original_units` and `original_predicted_margin`, and records
-`shortened_reason` as `exposure`, `timeout`, or `inventory`. Load results expose `shortened`
-and `shortened_reason`. For inventory exits, the plan and load result also record
+`shortened_reason` as `exposure`, `timeout`, `inventory`, or `price` (a queued buy's fresh ask
+exceeds its approved spending ceiling). Load results expose `shortened`
+and `shortened_reason`. When inventory headroom is exhausted, including when timeout also
+applies, the plan and load result also record
 `ask_over_prediction`: the current ask divided by the original predicted cost per unit
 (including predicted source-batch inflation). This lets the scorecard assess the 5% allowance.
 Profitable shortened loads do not change proof-learning decisions; actual losses still require

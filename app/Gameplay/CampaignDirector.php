@@ -46,7 +46,11 @@ class CampaignDirector
                     return;
                 }
                 $attempted = true;
-                $this->directGrant($grant);
+                try {
+                    $this->directGrant($grant);
+                } finally {
+                    $grant->update(['last_directed_at' => now()]);
+                }
             });
         } catch (GameException) {
         }
@@ -71,7 +75,11 @@ class CampaignDirector
                     return;
                 }
                 $this->armGrantId = $grant->id;
-                $this->directGrant($grant);
+                try {
+                    $this->directGrant($grant);
+                } finally {
+                    $grant->update(['last_directed_at' => now()]);
+                }
             });
         } catch (GameException) {
         }

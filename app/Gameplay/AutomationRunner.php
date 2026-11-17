@@ -269,6 +269,7 @@ class AutomationRunner
                     'act' => $this->enqueue($run, $step),
                 };
             } catch (GameException $e) {
+                FleetMetrics::as($run->ship_symbol, fn () => FleetMetrics::observe($e));
                 if ($e->retryAfter > 0 && $e->apiCode === null && $agent->connection_state === 'connected' && (! $e instanceof ReadStateUnavailable || $run->campaign_episode_id)) {
                     $run->update(['state' => RunState::Waiting, 'next_action_at' => now()->addSeconds(min(180, $e->retryAfter)), 'blocked_reason' => $e->getMessage()]);
                 } else {
