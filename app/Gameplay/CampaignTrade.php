@@ -251,11 +251,14 @@ class CampaignTrade
         if ($remaining <= 0) {
             return;
         }
+        $buyerAge = OperationPlanner::buyerAge($plan);
         $ask = app(OperationPlanner::class)->quote($agent, $plan['site'], $plan['symbol']);
-        $bid = app(OperationPlanner::class)->quote($agent, $plan['market'], $plan['symbol']);
+        $bid = app(OperationPlanner::class)->quote($agent, $plan['market'], $plan['symbol'], $buyerAge);
         $seconds = (int) ceil($remaining / max(1, $ask['tradeVolume'])) * 10 + 10;
-        foreach ([$ask, $bid] as $quote) {
-            if (CarbonImmutable::parse($quote['observed_at'])->addSeconds($plan['campaign_trade']['quote_max_age_seconds'])->lte(now()->addSeconds($seconds))) {
+        // A committed arm trade may load against an older buyer quote, up to its bounded age; the
+        // source quote, read where the ship stands, keeps the playbook's age.
+        foreach ([[$ask, $plan['campaign_trade']['quote_max_age_seconds']], [$bid, $buyerAge ?? $plan['campaign_trade']['quote_max_age_seconds']]] as [$quote, $age]) {
+            if (CarbonImmutable::parse($quote['observed_at'])->addSeconds($age)->lte(now()->addSeconds($seconds))) {
                 throw new GameException('Freshness hold: quotes would expire during planned loading.');
             }
         }
@@ -507,7 +510,7 @@ class CampaignTrade
         $rules = $episode->grant()->revision()->body['trade'];
         $plan = $run->plan;
         $ask = app(OperationPlanner::class)->quote($agent, $plan['site'], $plan['symbol']);
-        $bid = app(OperationPlanner::class)->quote($agent, $plan['market'], $plan['symbol']);
+        $bid = app(OperationPlanner::class)->quote($agent, $plan['market'], $plan['symbol'], OperationPlanner::buyerAge($plan));
         $mode = $this->mode($episode, $plan['symbol'], $plan['market']);
         $batches = $mode === 'first_scaled' ? $rules['lot']['first_scaled_max_buyer_batches'] : $rules['lot']['max_buyer_batches'];
         $cap = $batches * $bid['tradeVolume'];

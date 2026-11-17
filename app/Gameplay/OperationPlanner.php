@@ -75,7 +75,7 @@ class OperationPlanner
             $route['information_benefit'] = 'Unknown. No chart reward or displaced earnings are assumed.';
         } else {
             $ask = $this->quote($agent, $home, $limits['symbol']);
-            $bid = $this->quote($agent, $destination, $limits['symbol']);
+            $bid = $this->quote($agent, $destination, $limits['symbol'], self::buyerAge($limits));
             $inventory = $limits['units'] * $ask['purchasePrice'];
             // Departure fuel refills the tank for later work, not this trade: it counts toward spending, not margin.
             $margin = $limits['units'] * ($bid['sellPrice'] - $ask['purchasePrice']) - ($fuelCeiling - $departureCeiling);
@@ -145,7 +145,7 @@ class OperationPlanner
                 return $this->travel($ship, $plan['market']);
             }
             $ask = $this->quote($agent, $plan['site'], $plan['symbol']);
-            $bid = $this->quote($agent, $plan['market'], $plan['symbol']);
+            $bid = $this->quote($agent, $plan['market'], $plan['symbol'], self::buyerAge($plan));
             $spent = $totals['purchase_cost'] ?? 0;
             // Once the departure top-up has run, its actual cost is in fuel_cost; count its ceiling only before then.
             // The margin, like the preview's, excludes departure fuel; spending includes it.
@@ -245,15 +245,27 @@ class OperationPlanner
         return AutomationStep::trip();
     }
 
-    public function quote(Agent $agent, string $market, string $symbol): array
+    /**
+     * A detailed quote no older than the snapshot age. An arm's committed trade may accept an older
+     * buyer quote ($maxAge, from its plan's campaign_trade.buyer_quote_max_age_seconds); nothing else does.
+     */
+    public function quote(Agent $agent, string $market, string $symbol, ?int $maxAge = null): array
     {
         $quote = $this->observation($agent, 'market', $market);
         $good = collect($quote?->data['tradeGoods'] ?? [])->firstWhere('symbol', $symbol);
-        if (! $quote || ! $good || ! empty($quote->data['invalidated_by_action']) || $quote->observed_at->lt(now()->subSeconds(config('gameplay.snapshot_seconds')))) {
+        if (! $quote || ! $good || ! empty($quote->data['invalidated_by_action']) || $quote->observed_at->lt(now()->subSeconds(max((int) config('gameplay.snapshot_seconds'), $maxAge ?? 0)))) {
             throw new GameException('Detailed prices at '.$market.' for '.$symbol.' are unknown or stale. Stop and retain any owned cargo.');
         }
 
         return $good + ['observed_at' => $quote->observed_at->toIso8601String()];
+    }
+
+    /** The older buyer quote age a committed arm trade plan accepts, or null for the snapshot age. */
+    public static function buyerAge(array $plan): ?int
+    {
+        $age = $plan['campaign_trade']['buyer_quote_max_age_seconds'] ?? null;
+
+        return is_int($age) && $age > 0 ? $age : null;
     }
 
     private function observation(Agent $agent, string $kind, string $symbol): ?GameObservation
