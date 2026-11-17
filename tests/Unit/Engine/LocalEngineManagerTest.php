@@ -114,7 +114,7 @@ class LocalEngineManagerTest extends TestCase
 
     public function test_missing_engine_is_off_and_liveness_is_false_without_a_host_probe(): void
     {
-        $this->assertSame(['state' => 'off', 'gate_open' => false, 'message' => 'Local engine is off.'], $this->manager->status());
+        $this->assertSame(['state' => 'off', 'gate_open' => false, 'message' => 'Local engine is off.', 'shutdown_allowance_seconds' => 180], $this->manager->status());
         $this->assertFalse($this->manager->alive(null, 'supervisor'));
     }
 
@@ -204,13 +204,13 @@ class LocalEngineManagerTest extends TestCase
             $this->engine(['state' => $state, 'stop_requested_at' => $seconds === null ? null : now()->subSeconds($seconds)]);
         }
         $this->expectException(GameException::class);
-        $this->expectExceptionMessage('Force stop is available only after the 150-second graceful shutdown allowance.');
+        $this->expectExceptionMessage('Force stop is available only after the 180-second graceful shutdown allowance.');
         $this->manager->forceStop();
     }
 
     public static function forceStopRefusals(): array
     {
-        return ['missing' => [null, null], 'not faulted' => ['stopping', 160], 'no request' => ['faulted', null], 'too soon' => ['faulted', 149], 'old 40-second allowance' => ['faulted', 40]];
+        return ['missing' => [null, null], 'not faulted' => ['stopping', 200], 'no request' => ['faulted', null], 'too soon' => ['faulted', 179], 'job watchdog' => ['faulted', 150], 'old 40-second allowance' => ['faulted', 40]];
     }
 
     public function test_force_stop_allowance_follows_the_configured_shutdown_seconds(): void
@@ -222,9 +222,27 @@ class LocalEngineManagerTest extends TestCase
         $this->manager->forceStop();
     }
 
-    public function test_force_stop_closes_admission_before_delegating_at_the_150_second_boundary(): void
+    #[DataProvider('allowanceSettings')]
+    public function test_shutdown_allowance_falls_back_for_invalid_and_floors_small_values(mixed $setting, int $expected): void
     {
-        $engine = $this->engine(['state' => 'faulted', 'stop_requested_at' => now()->subSeconds(150)]);
+        config(['gameplay.engine_shutdown_seconds' => $setting]);
+        $this->assertSame($expected, LocalEngineManager::shutdownAllowanceSeconds());
+    }
+
+    public static function allowanceSettings(): array
+    {
+        return ['default' => [180, 180], 'zero' => [0, 180], 'negative' => [-5, 180], 'not a number' => ['abc', 180], 'below floor' => [1, 30], 'custom' => [240, 240]];
+    }
+
+    public function test_status_exposes_the_shutdown_allowance_for_the_page(): void
+    {
+        config(['gameplay.engine_shutdown_seconds' => 200]);
+        $this->assertSame(200, $this->manager->status()['shutdown_allowance_seconds']);
+    }
+
+    public function test_force_stop_closes_admission_before_delegating_at_the_180_second_boundary(): void
+    {
+        $engine = $this->engine(['state' => 'faulted', 'stop_requested_at' => now()->subSeconds(180)]);
         $this->host->shouldReceive('forceStop')->once()->with(Mockery::on(function ($snapshot) use ($engine) {
             $this->assertSame($engine->session_id, $snapshot->session_id);
             $this->assertFalse($engine->fresh()->gate_open);
