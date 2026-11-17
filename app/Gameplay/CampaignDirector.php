@@ -31,6 +31,9 @@ class CampaignDirector
     /** The arm grant tickArms() picked this pass, for the scheduler's per-arm failure counter. */
     public ?int $armGrantId = null;
 
+    /** Outcome of the pass in progress; see directGrant(). */
+    private string $passOutcome = 'waiting';
+
     /** The ranked candidate behind the run trade() returned, claimed once that run starts. */
     private ?array $candidate = null;
 
@@ -87,7 +90,27 @@ class CampaignDirector
         return $this->armGrantId !== null;
     }
 
+    /**
+     * One director pass. Outcome mapping: started = a run was started (decision with a run); awaiting_run = an active run
+     * exists (decision awaiting_run); waiting = everything else (wait reasons, pauses, busy or idle decisions).
+     */
     private function directGrant(CampaignGrant $grant): void
+    {
+        $this->passOutcome = 'waiting';
+        $before = FleetMetrics::requestTotal();
+        try {
+            $this->runDirectGrant($grant);
+        } finally {
+            try {
+                $ship = $grant->arm()['ship'] ?? 'director';
+            } catch (\Throwable) {
+                $ship = 'director';
+            }
+            FleetMetrics::directorPass($ship, $this->passOutcome, FleetMetrics::requestTotal() - $before);
+        }
+    }
+
+    private function runDirectGrant(CampaignGrant $grant): void
     {
         $control = app(CampaignControl::class);
         $grant->update(['last_directed_at' => now()]);
@@ -128,13 +151,15 @@ class CampaignDirector
 
     private function wait(CampaignGrant $grant, string $reason): void
     {
+        $this->passOutcome = 'waiting';
         $grant->update(['wait_reason' => $reason]);
         app(CampaignControl::class)->event($grant, null, 'wait', ['reason' => $reason]);
     }
 
     private function direct(CampaignGrant $grant): void
     {
-        $schedule = app(SpaceTradersApi::class)->resetSchedule();
+        // The reset read belongs to the grant's arm ship, or to the director when the grant has no ship.
+        $schedule = FleetMetrics::as($grant->arm()['ship'] ?? 'director', fn () => app(SpaceTradersApi::class)->resetSchedule());
         $previous = CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->first();
         try {
             $next = is_string($schedule['next_reset']) ? CarbonImmutable::parse($schedule['next_reset']) : null;
@@ -473,6 +498,7 @@ class CampaignDirector
 
     private function decision(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $considered, string $choice, ?int $run = null, array $extra = []): void
     {
+        $this->passOutcome = $run !== null ? 'started' : ($choice === 'awaiting_run' ? 'awaiting_run' : 'waiting');
         app(CampaignControl::class)->event($grant, $episode, 'decision', ['credits' => $agent->credits, 'phase' => $episode->phase, 'candidates' => $considered, 'choice' => $choice, 'run_id' => $run] + $extra);
     }
 

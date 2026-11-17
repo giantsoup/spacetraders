@@ -131,12 +131,12 @@ class BudgetResponseTest extends TestCase
         {
             public function __construct(private \stdClass $state) {}
 
-            public function observe(Response $response, ?string $token = null, ?string $account = null): void
+            public function observe(Response $response, ?string $token = null, ?string $account = null, ?string $category = null): void
             {
                 if ($this->state->post) {
                     throw new \RuntimeException('never-log-this-budget-exception');
                 }
-                parent::observe($response, $token, $account);
+                parent::observe($response, $token, $account, $category);
             }
         });
         $executor = app(ShipCommandExecutor::class);
@@ -183,12 +183,12 @@ class BudgetResponseTest extends TestCase
         {
             public function __construct(private \stdClass $state, private \Closure $contend) {}
 
-            public function observe(Response $response, ?string $token = null, ?string $account = null): void
+            public function observe(Response $response, ?string $token = null, ?string $account = null, ?string $category = null): void
             {
                 if ($this->state->post) {
-                    ($this->contend)(fn () => parent::observe($response, $token, $account));
+                    ($this->contend)(fn () => parent::observe($response, $token, $account, $category));
                 } else {
-                    parent::observe($response, $token, $account);
+                    parent::observe($response, $token, $account, $category);
                 }
             }
         });

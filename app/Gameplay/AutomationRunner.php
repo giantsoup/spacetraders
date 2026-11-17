@@ -179,7 +179,14 @@ class AutomationRunner
             return;
         }
         $agent = Agent::find($run->agent_id);
-        $this->executor->locked($agent, function () use ($run, $agent) {
+        // Outcome mapping (recorded once per advance that took the agent lock, with the requests it used):
+        // wrote = a write was enqueued; waited = planner wait, trip/depart bookkeeping or an action still settling;
+        // held = freshness/price/follower/exposure hold; deferred = RequestDeferred or another retryAfter re-queue;
+        // blocked = uncertain action, planner block or fatal error; idle = nothing due (inactive, stopping, blocked, not yet due).
+        $outcome = null;
+        $requestsBefore = FleetMetrics::requestTotal();
+        $this->executor->locked($agent, function () use ($run, $agent, &$outcome) {
+            $outcome = 'idle';
             $run->refresh();
             if (! $run->active_agent_id) {
                 return;
@@ -191,11 +198,13 @@ class AutomationRunner
                     app(CampaignControl::class)->pause($episode->grant(), 'uncertain_action', $episode);
                 }
                 $this->executor->block($run, 'An action is uncertain or requires price review. Reconcile before takeover.');
+                $outcome = 'blocked';
 
                 return;
             }
             if (ShipAction::where('agent_id', $agent->id)->whereIn('state', ['pending', 'sending'])->exists()) {
                 $run->update(['next_action_at' => now()->addSeconds(5)]);
+                $outcome = 'waited';
 
                 return;
             }
@@ -229,16 +238,16 @@ class AutomationRunner
                     $this->assertContractState($agent, $run, $ship);
                     $step = $this->contracts->next($ship, $run->plan, $run->totals, now()->toImmutable());
                 } elseif (! empty($run->plan['sell_only'])) {
-                    $this->refreshBuyer($agent, $run->plan['market']);
+                    $this->refreshBuyer($agent, $run->plan['market'], $run->ship_symbol);
                     if (($run->plan['route']['departure_refuel_ceiling'] ?? 0) > 0 && ($run->totals['travel_fuel'] ?? 0) === 0 && $run->plan['site'] !== $run->plan['market']
                         && $ship['fuel']['current'] < $ship['fuel']['capacity']) {
-                        $this->refreshBuyer($agent, $run->plan['site']);
+                        $this->refreshBuyer($agent, $run->plan['site'], $run->ship_symbol);
                     }
                     $step = app(CampaignRecovery::class)->next($agent, $ship, $run);
                 } else {
-                    $this->refreshBuyer($agent, $run->plan['market']);
+                    $this->refreshBuyer($agent, $run->plan['market'], $run->ship_symbol);
                     if (($run->plan['strategy'] ?? 'mining') !== 'mining') {
-                        $this->refreshBuyer($agent, $run->plan['site']);
+                        $this->refreshBuyer($agent, $run->plan['site'], $run->ship_symbol);
                     }
                     $market = [];
                     if (($run->plan['strategy'] ?? 'mining') === 'scout' && $run->totals['phase'] === 'observe' && ($run->totals['travel_fuel'] ?? 0) === 0 && $ship['nav']['status'] !== 'IN_TRANSIT') {
@@ -269,16 +278,32 @@ class AutomationRunner
                     'depart' => $run->update(['totals' => array_merge($run->totals, ['phase' => 'sell']), 'next_action_at' => now(), 'state' => RunState::Running]),
                     'act' => $this->enqueue($run, $step),
                 };
+                $outcome = match ($step->kind) {
+                    'blocked' => self::isHold($step->reason) ? 'held' : 'blocked',
+                    'act' => 'wrote',
+                    default => 'waited',
+                };
             } catch (GameException $e) {
                 FleetMetrics::as($run->ship_symbol, fn () => FleetMetrics::observe($e));
                 if ($e->retryAfter > 0 && $e->apiCode === null && $agent->connection_state === 'connected' && (! $e instanceof ReadStateUnavailable || $run->campaign_episode_id)) {
                     $run->update(['state' => RunState::Waiting, 'next_action_at' => now()->addSeconds(min(180, $e->retryAfter)), 'blocked_reason' => $e->getMessage()]);
+                    $outcome = self::isHold($e->getMessage()) ? 'held' : 'deferred';
                 } else {
                     $this->executor->block($run, $e->getMessage());
+                    $outcome = self::isHold($e->getMessage()) ? 'held' : 'blocked';
                 }
             }
             app(CycleAccounting::class)->record($run, $ship ?? null);
         });
+        if ($outcome !== null) {
+            FleetMetrics::advance($run->ship_symbol, $outcome, FleetMetrics::requestTotal() - $requestsBefore);
+        }
+    }
+
+    /** Freshness or price holds, follower waits and exposure shortening: planned pauses, not failures. */
+    private static function isHold(?string $message): bool
+    {
+        return $message !== null && (bool) preg_match('/freshness hold|unknown or stale|arm exposure|follower waiting/i', $message);
     }
 
     private function prepare(Agent $agent, array $ship, array $limits): array
@@ -330,11 +355,13 @@ class AutomationRunner
             ->get()->sum(fn ($action) => $action->outcome['credit_delta'] ?? 0);
     }
 
-    private function refreshBuyer(Agent $agent, string $market): void
+    private function refreshBuyer(Agent $agent, string $market, ?string $ship = null): void
     {
         $observer = Ship::where('agent_id', $agent->id)->get()->contains(fn ($ship) => $ship->snapshot['nav']['waypointSymbol'] === $market && $ship->snapshot['nav']['status'] !== 'IN_TRANSIT');
         if ($observer) {
-            FleetMetrics::as(null, fn () => $this->sync->observe($agent, 'market', $market, $this->api->market($agent, $market)));
+            // Attributed to the run's ship; without one (previews) the caller's current attribution applies.
+            $read = fn () => $this->sync->observe($agent, 'market', $market, $this->api->market($agent, $market));
+            $ship === null ? $read() : FleetMetrics::as($ship, $read);
         }
     }
 

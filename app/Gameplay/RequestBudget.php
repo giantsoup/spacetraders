@@ -71,9 +71,9 @@ class RequestBudget
         } while (true);
     }
 
-    public function observe(Response $response, ?string $token = null, ?string $account = null): void
+    public function observe(Response $response, ?string $token = null, ?string $account = null, ?string $category = null): void
     {
-        $this->change(function (&$state) use ($response, $token, $account) {
+        $this->change(function (&$state) use ($response, $token, $account, $category) {
             $now = $this->now();
             $keys = $this->keys($token, $account);
             foreach ($keys as $key) {
@@ -86,6 +86,11 @@ class RequestBudget
             $type = strtolower(trim($response->header('X-RateLimit-Type') ?? ''));
             $scope = $type === 'account' && count($keys) > 1 ? $keys[1] : 'host';
             $bucket = &$state['buckets'][$scope];
+            if ($category !== null) {
+                // Headers are only visible here: count each X-RateLimit-Type seen per endpoint category.
+                $label = $type === '' ? 'unspecified' : $type;
+                $bucket['usage']['rate_limit_types'][$category][$label] = ($bucket['usage']['rate_limit_types'][$category][$label] ?? 0) + 1;
+            }
             $rate = $response->header('X-RateLimit-Limit-Per-Second');
             $burst = $response->header('X-RateLimit-Limit-Burst');
             if (is_numeric($rate) && (float) $rate > 0) {
