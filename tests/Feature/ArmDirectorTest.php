@@ -8,6 +8,8 @@ use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignDirector;
 use App\Gameplay\CampaignFleet;
 use App\Gameplay\CampaignPlaybook;
+use App\Gameplay\CampaignReport;
+use App\Gameplay\CampaignSafety;
 use App\Gameplay\CampaignTrade;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\GameException;
@@ -385,6 +387,17 @@ class ArmDirectorTest extends TestCase
             $this->assertStringContainsString('arm exposure', $exception->getMessage());
             $this->assertSame(30, $exception->retryAfter);
         }
+        $plan = $run->plan;
+        $safety = $this->partialMock(CampaignSafety::class);
+        $safety->shouldReceive('check')->passthru()->byDefault();
+        $safety->shouldReceive('check')->withArgs(fn ($run, $agent, $command = null) => $command === 'buy')->once()
+            ->andThrow(new GameException('Follower waiting for leader buy.', retryAfter: 30));
+        app(AutomationRunner::class)->advance($run->id);
+        $this->assertSame('waiting', $run->fresh()->state->value);
+        $this->assertSame($plan, $run->fresh()->plan);
+        $this->assertFalse(ShipAction::where('automation_run_id', $run->id)->exists());
+        $this->app->forgetInstance(CampaignSafety::class);
+        $run->refresh()->update(['next_action_at' => now()]);
         app(AutomationRunner::class)->advance($run->id);
         $action = ShipAction::where('automation_run_id', $run->id)->sole();
         $this->assertSame('buy', $action->command);
@@ -519,7 +532,7 @@ class ArmDirectorTest extends TestCase
         app(AgentSynchronizer::class)->sync($this->agent);
         $revision = app(CampaignPlaybook::class)->import(str_replace('max_units_batches: 1', 'max_units_batches: 3', $this->armBody()));
         $grant = app(CampaignControl::class)->approveArm($revision, $this->user,
-            ['label' => 'T1a', 'ship' => 'LOCAL-3', 'exposure_share' => 0.001], CarbonImmutable::now()->addHours(12));
+            ['label' => 'T1a', 'ship' => 'LOCAL-3', 'exposure_share' => $change === 'inventory' ? 0.5 : 0.001], CarbonImmutable::now()->addHours(12));
         app(CampaignDirector::class)->tickArms();
         $run = AutomationRun::whereNotNull('active_agent_id')->sole();
         $runner = app(AutomationRunner::class);
@@ -539,13 +552,15 @@ class ArmDirectorTest extends TestCase
         }
         if ($change) {
             $this->editWorld(function (&$world) use ($change) {
-                $world['goods'][0][$change === 'price' ? 'purchasePrice' : 'tradeVolume'] = $change === 'price' ? 31 : 1;
+                $world['goods'][0][$change === 'volume' ? 'tradeVolume' : 'purchasePrice'] = match ($change) {
+                    'price' => 31, 'inventory' => 80, default => 1,
+                };
             });
         }
         if ($timeout) {
             $this->travel(120)->seconds();
             LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
-        } else {
+        } elseif ($change !== 'inventory') {
             $other = $this->arm('T1b', 'LOCAL-4');
             $episode = CampaignEpisode::create(['campaign_grant_id' => $other->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
                 'start_credits' => $this->agent->fresh()->credits, 'phase' => 'earn', 'state' => [], 'opened_at' => now(), 'next_reset_at' => now()->addHours(17)]);
@@ -590,11 +605,15 @@ class ArmDirectorTest extends TestCase
         $this->assertSame(30, $run->plan['max_inventory']);
         $this->assertSame(3, $run->plan['original_units']);
         $this->assertSame($run->plan['campaign_trade']['predicted_margin'], $run->plan['original_predicted_margin']);
-        $this->assertSame($timeout ? 'timeout' : 'exposure', $run->plan['shortened_reason']);
+        $reason = $timeout ? 'timeout' : ($change === 'inventory' ? 'inventory' : 'exposure');
+        $this->assertSame($reason, $run->plan['shortened_reason']);
         $this->assertSame('sell', $run->totals['phase']);
         $this->assertNotSame('blocked', $run->fresh()->state->value);
         $this->assertNull($run->blocked_reason);
-        $this->assertSame($timeout ? 70.0 : 0.0, app(CampaignTrade::class)->allowance($grant, $this->agent->fresh(), ship: 'LOCAL-5'));
+        $this->assertSame($change === 'inventory' ? 49970.0 : ($timeout ? 70.0 : 0.0), app(CampaignTrade::class)->allowance($grant, $this->agent->fresh(), ship: 'LOCAL-5'));
+        if ($change === 'inventory') {
+            $this->assertEqualsWithDelta(80 / ($run->plan['campaign_trade']['predicted_cost'] / 3), $run->plan['ask_over_prediction'], 0.00001);
+        }
         $this->completeRuns([$run]);
         $this->assertSame(1, $run->totals['sold']['IRON_ORE']);
         $this->assertSame(1, ShipAction::where('automation_run_id', $run->id)->where('command', 'buy')->where('state', 'confirmed')->count());
@@ -602,7 +621,10 @@ class ArmDirectorTest extends TestCase
         $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
         $result = app(CampaignTrade::class)->results($episode)[0];
         $this->assertTrue($result['shortened']);
-        $this->assertSame($timeout ? 'timeout' : 'exposure', $result['shortened_reason']);
+        $this->assertSame($reason, $result['shortened_reason']);
+        $this->assertSame($run->plan['ask_over_prediction'] ?? null, $result['ask_over_prediction']);
+        $this->assertGreaterThan(0, $result['net']);
+        $this->assertNull(app(CampaignReport::class)->build($episode)['json']['learning_metrics']['proof_realized_ratio']);
         $passing = array_replace($result, ['shortened' => false, 'realized_ratio' => 1, 'net' => 100]);
         $this->assertSame('first_scaled', app(CampaignTrade::class)->mode($episode, $run->plan['symbol'], $run->plan['market'], [$passing, $result]));
         $this->assertSame('proof', app(CampaignTrade::class)->mode($episode, $run->plan['symbol'], $run->plan['market'], [$passing, array_replace($result, ['net' => -1])]));
@@ -611,6 +633,7 @@ class ArmDirectorTest extends TestCase
     public static function partialLoads(): array
     {
         return ['advance cap' => [false, false], 'transport cap' => [true, false],
+            'advance inventory' => [false, false, 'inventory'], 'transport inventory' => [true, false, 'inventory'],
             'advance timeout' => [false, true], 'transport timeout' => [true, true],
             'transport cap price' => [true, false, 'price'], 'transport cap volume' => [true, false, 'volume'],
             'transport timeout price' => [true, true, 'price'], 'transport timeout volume' => [true, true, 'volume'],

@@ -215,6 +215,23 @@ class FleetMetricsTest extends TestCase
         $this->assertNull($card['shared_pair']['blocks'][0]['ratio']);
     }
 
+    public function test_ship_price_uses_the_episode_agent_and_reset_for_a_reused_symbol(): void
+    {
+        $episode = $this->metricEpisode('S1', CarbonImmutable::now());
+        $other = $this->user->agents()->create(['name' => 'OTHER', 'token' => 'synthetic-only', 'faction' => 'VOID',
+            'reset_id' => 'R1', 'canonical_identity' => AgentSynchronizer::identity('R1', 'OTHER')]);
+        foreach ([[$this->agent->id, 'R0', 1000], [$other->id, 'R1', 2000], [$this->agent->id, 'R1', 3000]] as [$agent, $reset, $price]) {
+            ShipAction::forceCreate(['agent_id' => $agent, 'key' => 'buy-'.$price, 'reset_id' => $reset, 'ship_symbol' => 'LOCAL-1',
+                'origin' => 'manual', 'command' => 'buy_ship', 'state' => 'confirmed', 'arguments' => [],
+                'outcome' => ['delivered_ship' => 'LOCAL-S1', 'transaction_total' => $price], 'expires_at' => now()]);
+        }
+        $this->metricLoad($episode, CarbonImmutable::now()->addMinutes(15), 100);
+        $this->metricLoad($episode, CarbonImmutable::now()->addMinutes(30), 100);
+        $row = app(FleetMetrics::class)->scorecard(until: CarbonImmutable::now()->addHour(), reset: 'R1')['arms']['S1'];
+        $this->assertSame(3000, $row['ship_price']);
+        $this->assertEqualsWithDelta(3000 / $row['net_per_hour'], $row['payback_hours'], 0.00001);
+    }
+
     private function metricEpisode(string $label, CarbonImmutable $opened): CampaignEpisode
     {
         $revision = CampaignRevision::firstOrCreate(['content_hash' => str_repeat('a', 64)], ['name' => 'arm', 'source' => '', 'body' => []]);

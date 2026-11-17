@@ -339,6 +339,7 @@ class AutomationRunner
     private function enqueue(AutomationRun $run, AutomationStep $step): void
     {
         $agent = Agent::findOrFail($run->agent_id);
+        $shortened = null;
         if ($step->command === 'buy' && $run->campaign_episode_id) {
             $grant = CampaignEpisode::findOrFail($run->campaign_episode_id)->grant();
             if ($grant->arm()) {
@@ -349,16 +350,19 @@ class AutomationRunner
                 }
                 if ($units < $step->arguments['units']) {
                     $bought = $run->totals['purchased'][$run->plan['symbol']] ?? 0;
-                    app(CampaignTrade::class)->shortenLoad($run, $bought + $units, ($run->totals['purchase_cost'] ?? 0) + $units * $price, 'exposure');
+                    $shortened = [$bought + $units, ($run->totals['purchase_cost'] ?? 0) + $units * $price];
                 }
                 $step = AutomationStep::act('buy', array_replace($step->arguments, ['units' => $units, 'maxTotal' => $units * $price]));
             }
         }
         app(CampaignSafety::class)->check($run, $agent, $step->command, $step->arguments);
-        DB::transaction(function () use ($run, $step) {
+        DB::transaction(function () use ($run, $step, $shortened) {
             $this->gate->check($run->engine_session_id);
             if (! AutomationRun::whereKey($run->id)->whereNull('stop_requested_at')->whereNotNull('active_agent_id')->where('expires_at', '>', now())->update(['state' => 'running', 'next_action_at' => now()->addSeconds(5)])) {
                 return;
+            }
+            if ($shortened) {
+                app(CampaignTrade::class)->shortenLoad($run, $shortened[0], $shortened[1], 'exposure');
             }
             $action = ShipAction::create([
                 'engine_session_id' => $run->engine_session_id,

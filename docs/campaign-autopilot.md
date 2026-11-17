@@ -117,11 +117,15 @@ plus unspent commitments from runs in the buy phase must fit the arm's exposure 
 A buy excludes its own run's commitment before testing the projected purchase. Departure
 releases unused commitment; cargo remains exposed until sold.
 
-A partial arm load departs when exposure cannot fund one more unit or two minutes pass
-since its last confirmed buy. Fresh balance, cargo integrity, and campaign authority checks
-precede cancellation of an obsolete queued buy, including when its price or volume changes.
+A partial arm load departs when exposure or its own remaining inventory budget cannot fund
+one more unit, or two minutes pass since its last confirmed buy. Fresh balance, cargo
+integrity, and campaign authority checks precede cancellation of an obsolete queued buy,
+including when its price or volume changes.
 The shortened plan retains `original_units` and `original_predicted_margin`, and records
-`shortened_reason` as `exposure` or `timeout`. Load results expose `shortened` and `shortened_reason`.
+`shortened_reason` as `exposure`, `timeout`, or `inventory`. Load results expose `shortened`
+and `shortened_reason`. For inventory exits, the plan and load result also record
+`ask_over_prediction`: the current ask divided by the original predicted cost per unit
+(including predicted source-batch inflation). This lets the scorecard assess the 5% allowance.
 Profitable shortened loads do not change proof-learning decisions; actual losses still require
 a new proof. Actual cash and net accounting remain unchanged.
 

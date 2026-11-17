@@ -64,7 +64,7 @@ class CampaignTrade
                 'started_at' => $parts->min('started_at')->toIso8601String(), 'seconds' => (int) $parts->min('started_at')->diffInSeconds($parts->max('updated_at'), true),
                 'best_available' => $prediction['best_available'] ?? null, 'best_unclaimed' => $prediction['best_unclaimed'] ?? null,
                 'limiting_factor' => $prediction['limiting_factor'] ?? null, 'shortened' => isset($run->plan['original_units']),
-                'shortened_reason' => $run->plan['shortened_reason'] ?? null];
+                'shortened_reason' => $run->plan['shortened_reason'] ?? null, 'ask_over_prediction' => $run->plan['ask_over_prediction'] ?? null];
         }
         usort($results, fn ($left, $right) => [$left['finished_at'], $left['run_id']] <=> [$right['finished_at'], $right['run_id']]);
 
@@ -483,13 +483,19 @@ class CampaignTrade
         $price = app(OperationPlanner::class)->quote($agent, $run->plan['site'], $run->plan['symbol'])['purchasePrice'];
         $lastBuy = ShipAction::where('automation_run_id', $run->id)->where('command', 'buy')->where('state', 'confirmed')->latest('id')->first();
         $timeout = ($lastBuy?->settled_at ?? $run->started_at)->lte(now()->subMinutes(2));
-        if ($this->allowance($grant, $agent, $run) >= $price && ! $timeout) {
+        $inventory = $price > $run->plan['max_inventory'] - $run->totals['purchase_cost'];
+        if ($this->allowance($grant, $agent, $run) >= $price && ! $timeout && ! $inventory) {
             return false;
         }
-        // A partial arm load never waits over two minutes for another buy; release its unused reservation.
-        DB::transaction(function () use ($run, $bought, $timeout) {
-            $this->shortenLoad($run, $bought, $run->totals['purchase_cost'], $timeout ? 'timeout' : 'exposure');
-            $run->update(['totals' => array_merge($run->totals, ['phase' => 'sell']), 'next_action_at' => now(), 'blocked_reason' => null]);
+        $reason = $timeout ? 'timeout' : ($inventory ? 'inventory' : 'exposure');
+        $predictedAsk = ($run->plan['campaign_trade']['predicted_cost'] ?? 0) / ($run->plan['original_units'] ?? $run->plan['units']);
+        DB::transaction(function () use ($run, $bought, $reason, $price, $predictedAsk) {
+            $this->shortenLoad($run, $bought, $run->totals['purchase_cost'], $reason);
+            $plan = $run->plan;
+            if ($reason === 'inventory') {
+                $plan['ask_over_prediction'] = $predictedAsk > 0 ? $price / $predictedAsk : null;
+            }
+            $run->update(['plan' => $plan, 'totals' => array_merge($run->totals, ['phase' => 'sell']), 'next_action_at' => now(), 'blocked_reason' => null]);
         });
 
         return true;

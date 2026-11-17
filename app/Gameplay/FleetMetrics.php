@@ -153,7 +153,7 @@ class FleetMetrics
             $arm = $grants[$episode->campaign_grant_id]->limits['arm'] ?? null;
             $label = $arm['label'] ?? 'C0';
             $arms[$label] ??= ['label' => $label, 'ship' => $arm['ship'] ?? ($episode->state['role_ships']['command'] ?? null), 'episodes' => [],
-                'opened_at' => CarbonImmutable::parse($episode->opened_at), 'loads' => []];
+                'agent_id' => $episode->agent_id, 'reset_id' => $episode->reset_id, 'opened_at' => CarbonImmutable::parse($episode->opened_at), 'loads' => []];
             $arms[$label]['episodes'][] = $episode->id;
             $arms[$label]['opened_at'] = min($arms[$label]['opened_at'], CarbonImmutable::parse($episode->opened_at));
         }
@@ -193,7 +193,7 @@ class FleetMetrics
         $net = array_sum($nets);
         $perHour = $hours > 0 ? $net / $hours : null;
         $best = $steady->map(fn ($load) => self::number($load['best_unclaimed'] ?? null))->filter(fn ($v) => $v !== null);
-        $price = $arm['ship'] ? ShipAction::where('command', 'buy_ship')->where('state', 'confirmed')->get()
+        $price = $arm['ship'] ? ShipAction::where('agent_id', $arm['agent_id'])->where('reset_id', $arm['reset_id'])->where('command', 'buy_ship')->where('state', 'confirmed')->get()
             ->first(fn ($action) => ($action->outcome['delivered_ship'] ?? null) === $arm['ship'])?->outcome['transaction_total'] : null;
         $requests = $arm['ship'] ? DB::table('fleet_metrics')->where('kind', 'requests')->where('ship', $arm['ship'])
             ->whereBetween('created_at', [$start->toDateTimeString(), $until->toDateTimeString()])->sum('value') : 0;
