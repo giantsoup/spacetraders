@@ -191,8 +191,9 @@ class ShipCommandExecutor
                 if ($action->reset_id !== $agent->reset_id || $action->expires_at->isPast() || ($run && ($run->stop_requested_at || $run->expires_at->isPast() || ! $run->active_agent_id))) {
                     throw new GameException('Intent expired, reset or stopped before execution.');
                 }
-                $before = $this->rules->inspect($agent, $action->ship_symbol, $action->command, $action->arguments, $run);
+                $fresh = $this->rules->refresh($agent, $action->ship_symbol, $action->command, $action->arguments, $run);
                 if ($run && $action->command === 'buy') {
+                    app(CampaignSafety::class)->check($run, $agent);
                     $finished = DB::transaction(function () use ($agent, $run, $action) {
                         if (! app(CampaignTrade::class)->finishLoading($agent, $run)) {
                             return false;
@@ -205,6 +206,7 @@ class ShipCommandExecutor
                         return;
                     }
                 }
+                $before = $this->rules->validate($agent, $action->ship_symbol, $action->command, $action->arguments, $fresh, $run);
                 if ($run) {
                     app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments);
                 }

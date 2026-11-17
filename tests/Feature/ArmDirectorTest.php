@@ -377,7 +377,7 @@ class ArmDirectorTest extends TestCase
             'start_credits' => $this->agent->credits, 'phase' => 'earn', 'state' => [], 'opened_at' => now(), 'next_reset_at' => now()->addHours(17)]);
         $preview = AutomationRun::create(['campaign_episode_id' => $otherEpisode->id, 'agent_id' => $this->agent->id, 'ship_symbol' => 'LOCAL-4',
             'reset_id' => $this->agent->reset_id, 'strategy' => 'trade', 'state' => 'preview', 'expires_at' => now()->addMinute(),
-            'plan' => ['symbol' => 'FOOD', 'site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-PORT', 'max_inventory' => 40], 'totals' => []]);
+            'plan' => ['symbol' => 'FOOD', 'site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-PORT', 'max_inventory' => 40], 'totals' => ['phase' => 'buy']]);
         try {
             app(CampaignTrade::class)->authorize($this->agent->fresh(), $run, $episode);
             $this->fail('Commit must recheck other arm reservations.');
@@ -460,8 +460,57 @@ class ArmDirectorTest extends TestCase
         $this->assertNull($follower->fresh()->paused_at);
     }
 
+    #[DataProvider('concurrentArms')]
+    public function test_small_loads_reserve_only_their_cost_under_a_large_proof_ceiling(?string $follow): void
+    {
+        $this->editWorld(function (&$world) {
+            $world['credits'] = 4000;
+            $world['ships'][] = FakeSpaceTraders::ship('LOCAL-4');
+            $world['market_goods']['X1-TEST-PORT'][1]['sellPrice'] = 180;
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        DB::table('agent_credit_baselines')->where('agent_id', $this->agent->id)->update(['credits' => 4000]);
+        $revision = app(CampaignPlaybook::class)->import($this->armBody(100000));
+        app(CampaignControl::class)->approveArm($revision, $this->user,
+            ['label' => 'T1a', 'ship' => 'LOCAL-3'], CarbonImmutable::now()->addHours(12));
+        app(CampaignDirector::class)->tickArms();
+        app(CampaignControl::class)->approveArm($revision, $this->user,
+            ['label' => $follow ? 'T3' : 'T1b', 'ship' => 'LOCAL-4', 'follow' => $follow], CarbonImmutable::now()->addHours(12));
+        app(CampaignDirector::class)->tickArms();
+        $runs = AutomationRun::whereNotNull('active_agent_id')->orderBy('id')->get()->all();
+        $this->assertCount(2, $runs);
+        foreach ($runs as $run) {
+            $this->assertSame(4, $run->plan['units']);
+            $this->assertLessThanOrEqual((int) ceil($run->plan['campaign_trade']['predicted_cost'] * 1.05), $run->plan['max_inventory']);
+        }
+        $this->assertArmExposure(0.5);
+        $this->completeRuns($runs, 0.5);
+        foreach ($runs as $run) {
+            $this->assertSame(4, $run->totals['sold'][$run->plan['symbol']]);
+        }
+    }
+
+    public static function concurrentArms(): array
+    {
+        return ['independent' => [null], 'leader and follower' => ['T1a']];
+    }
+
+    public function test_departed_load_releases_unspent_commitment_but_keeps_cargo_exposure(): void
+    {
+        $grant = $this->arm('T1a', 'LOCAL-3');
+        app(CampaignDirector::class)->tickArms();
+        $run = AutomationRun::whereNotNull('active_agent_id')->sole();
+        app(AutomationRunner::class)->advance($run->id);
+        app(ShipCommandExecutor::class)->execute(ShipAction::where('automation_run_id', $run->id)->sole()->id);
+        $run->refresh();
+        $cost = $run->totals['purchase_cost'];
+        $run->update(['plan' => array_replace($run->plan, ['max_inventory' => $cost + 100]),
+            'totals' => array_replace($run->totals, ['phase' => 'sell'])]);
+        $this->assertSame((float) (50000 - $cost), app(CampaignTrade::class)->allowance($grant, $this->agent->fresh(), ship: 'LOCAL-4'));
+    }
+
     #[DataProvider('partialLoads')]
-    public function test_partial_load_releases_commitment_and_sells_without_expiring(bool $pending, bool $timeout): void
+    public function test_partial_load_releases_commitment_and_sells_without_expiring(bool $pending, bool $timeout, ?string $change = null, ?string $guard = null): void
     {
         $this->editWorld(function (&$world) {
             $world['goods'][0]['tradeVolume'] = 1;
@@ -481,8 +530,17 @@ class ArmDirectorTest extends TestCase
         $this->assertSame(3, $run->fresh()->plan['units']);
         $queued = null;
         if ($pending) {
+            if ($change === 'volume') {
+                $this->editWorld(fn (&$world) => $world['goods'][0]['tradeVolume'] = 2);
+            }
             $runner->advance($run->id);
             $queued = ShipAction::where('automation_run_id', $run->id)->where('state', 'pending')->sole();
+            $this->assertSame($change === 'volume' ? 2 : 1, $queued->arguments['units']);
+        }
+        if ($change) {
+            $this->editWorld(function (&$world) use ($change) {
+                $world['goods'][0][$change === 'price' ? 'purchasePrice' : 'tradeVolume'] = $change === 'price' ? 31 : 1;
+            });
         }
         if ($timeout) {
             $this->travel(120)->seconds();
@@ -493,7 +551,23 @@ class ArmDirectorTest extends TestCase
                 'start_credits' => $this->agent->fresh()->credits, 'phase' => 'earn', 'state' => [], 'opened_at' => now(), 'next_reset_at' => now()->addHours(17)]);
             AutomationRun::create(['campaign_episode_id' => $episode->id, 'agent_id' => $this->agent->id, 'ship_symbol' => 'LOCAL-4',
                 'reset_id' => $this->agent->reset_id, 'strategy' => 'trade', 'state' => 'preview', 'expires_at' => now()->addMinutes(5),
-                'plan' => ['max_inventory' => 80], 'totals' => []]);
+                'plan' => ['max_inventory' => 80], 'totals' => ['phase' => 'buy']]);
+        }
+        if ($guard === 'authority') {
+            $grant->update(['paused_at' => now(), 'pause_reason' => 'operator_pause']);
+        } elseif ($guard) {
+            $this->editWorld(function (&$world) use ($guard) {
+                if ($guard === 'credits') {
+                    $world['credits']++;
+                } else {
+                    foreach ($world['ships'] as &$ship) {
+                        if ($ship['symbol'] === 'LOCAL-3') {
+                            $ship['cargo']['units']++;
+                            $ship['cargo']['inventory'][0]['units']++;
+                        }
+                    }
+                }
+            });
         }
         if ($queued) {
             app(ShipCommandExecutor::class)->execute($queued->id);
@@ -502,19 +576,46 @@ class ArmDirectorTest extends TestCase
             $run->update(['next_action_at' => now()]);
             $runner->advance($run->id);
         }
-        $this->assertSame(1, $run->fresh()->plan['units']);
-        $this->assertSame(30, $run->fresh()->plan['max_inventory']);
+        $run->refresh();
+        if ($guard) {
+            $this->assertSame('blocked', $run->state->value);
+            $this->assertSame('buy', $run->totals['phase']);
+            $this->assertSame(3, $run->plan['units']);
+            $this->assertArrayNotHasKey('original_units', $run->plan);
+            $this->assertCount(1, json_decode(file_get_contents($this->file), true)['writes']);
+
+            return;
+        }
+        $this->assertSame(1, $run->plan['units']);
+        $this->assertSame(30, $run->plan['max_inventory']);
+        $this->assertSame(3, $run->plan['original_units']);
+        $this->assertSame($run->plan['campaign_trade']['predicted_margin'], $run->plan['original_predicted_margin']);
+        $this->assertSame($timeout ? 'timeout' : 'exposure', $run->plan['shortened_reason']);
+        $this->assertSame('sell', $run->totals['phase']);
         $this->assertNotSame('blocked', $run->fresh()->state->value);
+        $this->assertNull($run->blocked_reason);
+        $this->assertSame($timeout ? 70.0 : 0.0, app(CampaignTrade::class)->allowance($grant, $this->agent->fresh(), ship: 'LOCAL-5'));
         $this->completeRuns([$run]);
         $this->assertSame(1, $run->totals['sold']['IRON_ORE']);
         $this->assertSame(1, ShipAction::where('automation_run_id', $run->id)->where('command', 'buy')->where('state', 'confirmed')->count());
         $this->assertNull($grant->fresh()->paused_at);
+        $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
+        $result = app(CampaignTrade::class)->results($episode)[0];
+        $this->assertTrue($result['shortened']);
+        $this->assertSame($timeout ? 'timeout' : 'exposure', $result['shortened_reason']);
+        $passing = array_replace($result, ['shortened' => false, 'realized_ratio' => 1, 'net' => 100]);
+        $this->assertSame('first_scaled', app(CampaignTrade::class)->mode($episode, $run->plan['symbol'], $run->plan['market'], [$passing, $result]));
+        $this->assertSame('proof', app(CampaignTrade::class)->mode($episode, $run->plan['symbol'], $run->plan['market'], [$passing, array_replace($result, ['net' => -1])]));
     }
 
     public static function partialLoads(): array
     {
         return ['advance cap' => [false, false], 'transport cap' => [true, false],
-            'advance timeout' => [false, true], 'transport timeout' => [true, true]];
+            'advance timeout' => [false, true], 'transport timeout' => [true, true],
+            'transport cap price' => [true, false, 'price'], 'transport cap volume' => [true, false, 'volume'],
+            'transport timeout price' => [true, true, 'price'], 'transport timeout volume' => [true, true, 'volume'],
+            'transport cargo guard' => [true, true, 'price', 'cargo'], 'transport balance guard' => [true, true, 'price', 'credits'],
+            'transport authority guard' => [true, true, 'price', 'authority'], 'advance cargo guard' => [false, true, null, 'cargo']];
     }
 
     private function assertArmExposure(float $share): void
@@ -526,7 +627,7 @@ class ArmDirectorTest extends TestCase
                 $held += ($costs[$item['symbol']] ?? 0) * $item['units'];
             }
         }
-        $committed = AutomationRun::whereNotNull('active_agent_id')->where('strategy', 'trade')->get()
+        $committed = AutomationRun::whereNotNull('active_agent_id')->where('strategy', 'trade')->where('totals->phase', 'buy')->get()
             ->sum(fn ($run) => max(0, $run->plan['max_inventory'] - ($run->totals['purchase_cost'] ?? 0)));
         $this->assertLessThanOrEqual($share * ($this->agent->fresh()->credits + $held), $held + $committed);
     }

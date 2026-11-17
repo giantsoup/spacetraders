@@ -247,6 +247,15 @@ class AutomationRunner
                         $market = $this->api->market($agent, $run->plan['market']);
                         $this->sync->observe($agent, 'market', $run->plan['market'], $market);
                     }
+                    if ($run->strategy === 'trade') {
+                        $expected = $run->totals['unsold'] ?? $run->plan['initial_inventory'];
+                        $actual = MiningPlanner::inventory($ship);
+                        ksort($expected);
+                        ksort($actual);
+                        if ($expected !== $actual) {
+                            throw new GameException('Cargo changed outside the approved operation. Retain cargo and reconcile before continuing.');
+                        }
+                    }
                     app(CampaignTrade::class)->finishLoading($agent, $run);
                     $step = ($run->plan['strategy'] ?? 'mining') === 'mining'
                         ? $this->planner->next($ship, $run->plan, $run->totals, $market, now()->toImmutable())
@@ -340,8 +349,7 @@ class AutomationRunner
                 }
                 if ($units < $step->arguments['units']) {
                     $bought = $run->totals['purchased'][$run->plan['symbol']] ?? 0;
-                    $run->update(['plan' => array_replace($run->plan, ['units' => $bought + $units,
-                        'max_inventory' => ($run->totals['purchase_cost'] ?? 0) + $units * $price])]);
+                    app(CampaignTrade::class)->shortenLoad($run, $bought + $units, ($run->totals['purchase_cost'] ?? 0) + $units * $price, 'exposure');
                 }
                 $step = AutomationStep::act('buy', array_replace($step->arguments, ['units' => $units, 'maxTotal' => $units * $price]));
             }

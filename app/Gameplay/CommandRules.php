@@ -14,6 +14,11 @@ class CommandRules
 
     public function inspect(Agent $agent, string $symbol, string $command, array $arguments, ?AutomationRun $run = null): array
     {
+        return $this->validate($agent, $symbol, $command, $arguments, $this->refresh($agent, $symbol, $command, $arguments, $run), $run);
+    }
+
+    public function refresh(Agent $agent, string $symbol, string $command, array $arguments, ?AutomationRun $run = null): array
+    {
         $fleetPurchase = $command === 'buy_ship' && ! isset($arguments['site'], $arguments['market']);
         $agentCommand = ! $run && in_array($command, ['contract_accept', 'contract_fulfill'], true);
         if (! $agentCommand && ! Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->exists()) {
@@ -61,6 +66,20 @@ class CommandRules
                 throw new GameException('Unexplained balance change before reservation. Review before a fresh approval.');
             }
         }
+        $market = null;
+        if ($run?->strategy === 'trade' && $command === 'buy') {
+            $market = $this->api->market($agent, $ship['nav']['waypointSymbol']);
+            $this->sync->observe($agent, 'market', $ship['nav']['waypointSymbol'], $market);
+        }
+
+        return ['ship' => $ship, 'active' => $active, 'market' => $market];
+    }
+
+    public function validate(Agent $agent, string $symbol, string $command, array $arguments, array $fresh, ?AutomationRun $run = null): array
+    {
+        $ship = $fresh['ship'];
+        $active = $fresh['active'];
+        $fleetPurchase = $command === 'buy_ship' && ! isset($arguments['site'], $arguments['market']);
         $spending = in_array($command, ['buy', 'buy_ship', 'repair', 'install_mount', 'remove_mount', 'install_module', 'remove_module', 'jump', 'refuel'], true);
         $floor = max($arguments['reserve'] ?? 0, $run?->plan['reserve'] ?? 0, ! $run && $spending && ! $fleetPurchase ? max(1, (int) config('gameplay.manual_reserve_floor')) : 0);
         $protected = 0;
@@ -468,7 +487,7 @@ class CommandRules
                 if ($ship['nav']['status'] !== 'DOCKED') {
                     throw new GameException('Dock before trading or refueling.');
                 }
-                $market = $this->api->market($agent, $ship['nav']['waypointSymbol']);
+                $market = $fresh['market'] ?? $this->api->market($agent, $ship['nav']['waypointSymbol']);
                 $this->sync->observe($agent, 'market', $ship['nav']['waypointSymbol'], $market);
                 $good = collect($market['tradeGoods'] ?? [])->firstWhere('symbol', $command === 'refuel' ? 'FUEL' : $arguments['symbol']);
                 if (! $good) {

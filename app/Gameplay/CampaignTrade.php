@@ -63,7 +63,8 @@ class CampaignTrade
                 'purchase_cost' => $cost, 'sale_proceeds' => $parts->sum(fn ($part) => $part->totals['sale_proceeds'] ?? 0), 'fuel_cost' => $fuel['cost'],
                 'started_at' => $parts->min('started_at')->toIso8601String(), 'seconds' => (int) $parts->min('started_at')->diffInSeconds($parts->max('updated_at'), true),
                 'best_available' => $prediction['best_available'] ?? null, 'best_unclaimed' => $prediction['best_unclaimed'] ?? null,
-                'limiting_factor' => $prediction['limiting_factor'] ?? null];
+                'limiting_factor' => $prediction['limiting_factor'] ?? null, 'shortened' => isset($run->plan['original_units']),
+                'shortened_reason' => $run->plan['shortened_reason'] ?? null];
         }
         usort($results, fn ($left, $right) => [$left['finished_at'], $left['run_id']] <=> [$right['finished_at'], $right['run_id']]);
 
@@ -135,7 +136,8 @@ class CampaignTrade
         $minimum = $episode->grant()->revision()->body['trade']['proof']['min_realized_ratio'];
         foreach ($results ?? $this->learningResults($episode) as $result) {
             // A losing load re-proves only its own good/buyer pair.
-            if (! empty($result['standalone_recovery']) || $result['good'] !== $good || $result['buyer'] !== $buyer) {
+            if (! empty($result['standalone_recovery']) || $result['good'] !== $good || $result['buyer'] !== $buyer
+                || (! empty($result['shortened']) && ! self::losing($result))) {
                 continue;
             }
             if (self::losing($result)) {
@@ -366,7 +368,8 @@ class CampaignTrade
                 }
                 $candidate = ['key' => $key, 'source' => $pair['source'], 'buyer' => $pair['market'], 'good' => $pair['good'], 'units' => $units,
                     'mode' => $mode, 'proof' => $mode === 'proof', 'decay' => $decay, 'bid' => $bid['sellPrice'], 'fuel' => $fuel, 'departure_refuel' => $refuel,
-                    'fuel_reserve' => $outbound['refuel_ceiling'], 'max_inventory' => $ceiling, 'seconds' => $seconds, 'limiting_factor' => $limit, 'ship' => $ship['symbol'],
+                    'fuel_reserve' => $outbound['refuel_ceiling'], 'max_inventory' => $arm ? min($ceiling, (int) ceil($prediction['predicted_cost'] * 1.05)) : $ceiling,
+                    'seconds' => $seconds, 'limiting_factor' => $limit, 'ship' => $ship['symbol'],
                     'score' => $prediction['predicted_margin'] / max(1, $seconds / 60)] + $prediction;
                 if (! $available || $candidate['predicted_margin'] > $available['predicted_margin']) {
                     $available = $candidate;
@@ -455,7 +458,7 @@ class CampaignTrade
             }
         }
         $committed = AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereIn('campaign_episode_id', $episodes->pluck('id'))
-            ->where('strategy', 'trade')->when($run, fn ($query) => $query->whereKeyNot($run->id))
+            ->where('strategy', 'trade')->where('totals->phase', 'buy')->when($run, fn ($query) => $query->whereKeyNot($run->id))
             ->when($ship, fn ($query) => $query->where('ship_symbol', '!=', $ship))
             ->where(fn ($query) => $query->whereNotNull('active_agent_id')->orWhere(fn ($query) => $query->where('state', 'preview')->where('expires_at', '>', now())))
             ->get()->sum(fn ($other) => max(0, ($other->plan['max_inventory'] ?? 0) - ($other->totals['purchase_cost'] ?? 0)));
@@ -479,13 +482,24 @@ class CampaignTrade
         }
         $price = app(OperationPlanner::class)->quote($agent, $run->plan['site'], $run->plan['symbol'])['purchasePrice'];
         $lastBuy = ShipAction::where('automation_run_id', $run->id)->where('command', 'buy')->where('state', 'confirmed')->latest('id')->first();
-        if ($this->allowance($grant, $agent, $run) >= $price && ($lastBuy?->settled_at ?? $run->started_at)->gt(now()->subMinutes(2))) {
+        $timeout = ($lastBuy?->settled_at ?? $run->started_at)->lte(now()->subMinutes(2));
+        if ($this->allowance($grant, $agent, $run) >= $price && ! $timeout) {
             return false;
         }
         // A partial arm load never waits over two minutes for another buy; release its unused reservation.
-        $run->update(['plan' => array_replace($run->plan, ['units' => $bought, 'max_inventory' => $run->totals['purchase_cost']]),
-            'totals' => array_merge($run->totals, ['phase' => 'sell']), 'next_action_at' => now(), 'blocked_reason' => null]);
+        DB::transaction(function () use ($run, $bought, $timeout) {
+            $this->shortenLoad($run, $bought, $run->totals['purchase_cost'], $timeout ? 'timeout' : 'exposure');
+            $run->update(['totals' => array_merge($run->totals, ['phase' => 'sell']), 'next_action_at' => now(), 'blocked_reason' => null]);
+        });
 
         return true;
+    }
+
+    public function shortenLoad(AutomationRun $run, int $units, int $inventory, string $reason): void
+    {
+        $run->update(['plan' => array_replace($run->plan, ['units' => $units, 'max_inventory' => $inventory,
+            'original_units' => $run->plan['original_units'] ?? $run->plan['units'],
+            'original_predicted_margin' => $run->plan['original_predicted_margin'] ?? $run->plan['campaign_trade']['predicted_margin'] ?? null,
+            'shortened_reason' => $reason])]);
     }
 }

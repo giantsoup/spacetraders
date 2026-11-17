@@ -105,6 +105,28 @@ Trade settings govern proofs, lot sizes, switching, losses, and quote age:
   market where such a ship is parked, in rotation, skipping markets read within the quote age.
   Recovery reads a stale buyer or fuel seller directly when one of our ships sits there.
 
+### Arm load exposure
+
+Arms reserve predicted cargo cost plus 5% slippage, rounded up to whole credits and bounded
+by the existing proof, cash, and exposure ceilings. Prediction already includes conservative
+source-batch inflation. This extra allowance covers small price moves without reserving the
+whole exposure cap for a small load. C0 keeps its existing inventory ceiling.
+
+The exposure basis is current cash plus the cost basis of cargo aboard arm ships. Held cargo
+plus unspent commitments from runs in the buy phase must fit the arm's exposure share.
+A buy excludes its own run's commitment before testing the projected purchase. Departure
+releases unused commitment; cargo remains exposed until sold.
+
+A partial arm load departs when exposure cannot fund one more unit or two minutes pass
+since its last confirmed buy. Fresh balance, cargo integrity, and campaign authority checks
+precede cancellation of an obsolete queued buy, including when its price or volume changes.
+The shortened plan retains `original_units` and `original_predicted_margin`, and records
+`shortened_reason` as `exposure` or `timeout`. Load results expose `shortened` and `shortened_reason`.
+Profitable shortened loads do not change proof-learning decisions; actual losses still require
+a new proof. Actual cash and net accounting remain unchanged.
+
+### Discovery and recovery
+
 Discovery is a separate bounded decision, refreshed more often in discover than earn;
 large directory sweeps cannot consume every trade-planning tick. Every decision records
 its candidates, rejected choices, and selection. Existing preview fingerprints, engine

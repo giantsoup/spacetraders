@@ -242,7 +242,7 @@ class FleetClaimsTest extends TestCase
         [$otherGrant, $otherEpisode] = $this->arm('T2', 'LOCAL-2');
         $other = $this->completedLoad($otherEpisode, true, 80, 'FOOD');
         $other->update(['state' => 'preview', 'started_at' => null, 'ship_symbol' => 'LOCAL-2',
-            'plan' => array_replace($other->plan, ['max_inventory' => 50]), 'totals' => ['purchase_cost' => 0]]);
+            'plan' => array_replace($other->plan, ['max_inventory' => 50]), 'totals' => ['phase' => 'buy', 'purchase_cost' => 0]]);
         [$grant, $episode] = $this->arm('T1a', 'LOCAL-1', ['exposure_share' => 125 / $this->agent->credits]);
         $first = collect($this->rank($grant, $episode))->firstWhere('good', 'IRON_ORE');
         $this->assertSame(2, $first['units']);
@@ -250,7 +250,7 @@ class FleetClaimsTest extends TestCase
         $this->assertEquals(75, app(CampaignTrade::class)->allowance($grant, $this->agent, ship: 'LOCAL-1'));
         $this->cargoCost('LOCAL-2', 'FOOD', 1, 20);
         $this->agent->update(['credits' => $this->agent->credits - 20]);
-        $other->update(['state' => 'running', 'active_agent_id' => $this->agent->id, 'totals' => ['purchase_cost' => 20]]);
+        $other->update(['state' => 'running', 'active_agent_id' => $this->agent->id, 'totals' => ['phase' => 'buy', 'purchase_cost' => 20]]);
         $this->assertEquals(75, app(CampaignTrade::class)->allowance($grant, $this->agent, ship: 'LOCAL-1'));
         $other->update(['active_agent_id' => null, 'state' => 'stopped']);
         $this->assertEquals(105, app(CampaignTrade::class)->allowance($grant, $this->agent, ship: 'LOCAL-1'));
@@ -262,21 +262,21 @@ class FleetClaimsTest extends TestCase
         [$grant, $episode] = $this->arm('T1a', 'LOCAL-1');
         [, $otherEpisode] = $this->arm('T1b', 'LOCAL-2');
         $run = $this->completedLoad($episode, true, 80);
-        $run->update(['state' => 'running', 'active_agent_id' => $this->agent->id, 'plan' => array_replace($run->plan, ['max_inventory' => 60]), 'totals' => []]);
+        $run->update(['state' => 'running', 'active_agent_id' => $this->agent->id, 'plan' => array_replace($run->plan, ['max_inventory' => 60]), 'totals' => ['phase' => 'buy']]);
         $other = $this->completedLoad($otherEpisode, true, 80);
-        $other->update(['state' => 'preview', 'started_at' => null, 'ship_symbol' => 'LOCAL-2', 'plan' => array_replace($other->plan, ['max_inventory' => 60]), 'totals' => []]);
+        $other->update(['state' => 'preview', 'started_at' => null, 'ship_symbol' => 'LOCAL-2', 'plan' => array_replace($other->plan, ['max_inventory' => 60]), 'totals' => ['phase' => 'buy']]);
         $safety = app(CampaignSafety::class);
         $check = fn (int $max) => $safety->check($run, $this->agent->fresh(), 'buy', ['symbol' => 'IRON_ORE', 'maxTotal' => $max], boundaryOnly: true);
         $check(40);
         $this->assertWaiting(fn () => $check(41), 'arm exposure');
         $this->cargoCost('LOCAL-2', 'IRON_ORE', 1, 30);
-        $other->update(['state' => 'running', 'active_agent_id' => $this->agent->id, 'totals' => ['purchase_cost' => 30]]);
+        $other->update(['state' => 'running', 'active_agent_id' => $this->agent->id, 'totals' => ['phase' => 'buy', 'purchase_cost' => 30]]);
         $this->agent->update(['credits' => 170]);
         $check(40);
         $this->assertWaiting(fn () => $check(41), 'arm exposure');
         $this->cargoCost('LOCAL-1', 'IRON_ORE', 1, 10);
         $this->agent->update(['credits' => 160]);
-        $run->update(['totals' => ['purchase_cost' => 10]]);
+        $run->update(['totals' => ['phase' => 'buy', 'purchase_cost' => 10]]);
         $check(30);
         $this->assertWaiting(fn () => $check(31), 'arm exposure');
         $this->assertNull($grant->fresh()->paused_at);
