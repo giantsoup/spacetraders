@@ -27,7 +27,7 @@ class AutomationRunner
         }
 
         return $this->executor->locked($agent, function () use ($agent, $symbol, $limits) {
-            $this->executor->clear($agent, defer: true);
+            $this->executor->clear($agent, defer: true, ship: $symbol);
             if (ShipAction::where('agent_id', $agent->id)->where('command', 'buy_ship')->get()->contains(fn ($a) => ! empty($a->outcome['configuration_mismatch']))) {
                 throw new GameException('Delivered miner configuration differs from its approval. Inspect the setup purchase before automation.');
             }
@@ -73,7 +73,7 @@ class AutomationRunner
                 throw new GameException('Automation is disabled. Enable it only after local migration, backup and credential checks.');
             }
             $this->gate->check($run->engine_session_id);
-            $this->executor->clear($agent, defer: true);
+            $this->executor->clear($agent, defer: true, ship: $run->ship_symbol);
             if ($run->expires_at->isPast() || $run->reset_id !== $agent->reset_id || AutomationRun::where('active_agent_id', $agent->id)->where('ship_symbol', $run->ship_symbol)->exists()) {
                 $this->rejectPreview($run, 'Preview expired, reset or another run already owns this ship.');
             }
@@ -160,7 +160,7 @@ class AutomationRunner
     public function previewRecovery(Agent $agent, string $symbol, string $buyer, array $limits, CampaignEpisode $episode): AutomationRun
     {
         return $this->executor->locked($agent, function () use ($agent, $symbol, $buyer, $limits, $episode) {
-            $this->executor->clear($agent, defer: true);
+            $this->executor->clear($agent, defer: true, ship: $symbol);
             $fresh = app(CampaignRecovery::class)->compose($agent, $symbol, $buyer, $limits);
 
             return AutomationRun::create(['agent_id' => $agent->id, 'campaign_episode_id' => $episode->id, 'reset_id' => $agent->reset_id,
@@ -185,7 +185,7 @@ class AutomationRunner
                 return;
             }
             $run->update(['heartbeat_at' => now()]);
-            if (ShipAction::where('agent_id', $agent->id)->where(fn ($q) => $q->where('state', 'uncertain')->orWhere('review_required', true))->exists()) {
+            if (ShipAction::where('agent_id', $agent->id)->where(fn ($q) => $q->where('state', 'uncertain')->orWhere(fn ($q) => ShipCommandExecutor::reviewFor($q, $run->ship_symbol)))->exists()) {
                 if ($run->campaign_episode_id && ShipAction::where('agent_id', $agent->id)->where('state', 'uncertain')->exists()) {
                     $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
                     app(CampaignControl::class)->pause($episode->grant(), 'uncertain_action', $episode);
@@ -248,6 +248,16 @@ class AutomationRunner
                         $market = $this->api->market($agent, $run->plan['market']);
                         $this->sync->observe($agent, 'market', $run->plan['market'], $market);
                     }
+                    if ($run->strategy === 'trade') {
+                        $expected = $run->totals['unsold'] ?? $run->plan['initial_inventory'];
+                        $actual = MiningPlanner::inventory($ship);
+                        ksort($expected);
+                        ksort($actual);
+                        if ($expected !== $actual) {
+                            throw new GameException('Cargo changed outside the approved operation. Retain cargo and reconcile before continuing.');
+                        }
+                    }
+                    app(CampaignTrade::class)->finishLoading($agent, $run);
                     $step = ($run->plan['strategy'] ?? 'mining') === 'mining'
                         ? $this->planner->next($ship, $run->plan, $run->totals, $market, now()->toImmutable())
                         : app(OperationPlanner::class)->next($agent, $ship, $run->plan, $run->totals, now()->toImmutable());
@@ -260,6 +270,7 @@ class AutomationRunner
                     'act' => $this->enqueue($run, $step),
                 };
             } catch (GameException $e) {
+                FleetMetrics::as($run->ship_symbol, fn () => FleetMetrics::observe($e));
                 if ($e->retryAfter > 0 && $e->apiCode === null && $agent->connection_state === 'connected' && (! $e instanceof ReadStateUnavailable || $run->campaign_episode_id)) {
                     $run->update(['state' => RunState::Waiting, 'next_action_at' => now()->addSeconds(min(180, $e->retryAfter)), 'blocked_reason' => $e->getMessage()]);
                 } else {
@@ -323,17 +334,37 @@ class AutomationRunner
     {
         $observer = Ship::where('agent_id', $agent->id)->get()->contains(fn ($ship) => $ship->snapshot['nav']['waypointSymbol'] === $market && $ship->snapshot['nav']['status'] !== 'IN_TRANSIT');
         if ($observer) {
-            $this->sync->observe($agent, 'market', $market, $this->api->market($agent, $market));
+            FleetMetrics::as(null, fn () => $this->sync->observe($agent, 'market', $market, $this->api->market($agent, $market)));
         }
     }
 
     private function enqueue(AutomationRun $run, AutomationStep $step): void
     {
-        app(CampaignSafety::class)->check($run, Agent::findOrFail($run->agent_id), $step->command, $step->arguments);
-        DB::transaction(function () use ($run, $step) {
+        $agent = Agent::findOrFail($run->agent_id);
+        $shortened = null;
+        if ($step->command === 'buy' && $run->campaign_episode_id) {
+            $grant = CampaignEpisode::findOrFail($run->campaign_episode_id)->grant();
+            if ($grant->arm()) {
+                $price = (int) ceil($step->arguments['maxTotal'] / $step->arguments['units']);
+                $units = min($step->arguments['units'], (int) floor(app(CampaignTrade::class)->allowance($grant, $agent, $run) / $price));
+                if ($units < 1) {
+                    throw new GameException('Buy skipped: arm exposure requires a smaller batch.', retryAfter: 30);
+                }
+                if ($units < $step->arguments['units']) {
+                    $bought = $run->totals['purchased'][$run->plan['symbol']] ?? 0;
+                    $shortened = [$bought + $units, ($run->totals['purchase_cost'] ?? 0) + $units * $price];
+                }
+                $step = AutomationStep::act('buy', array_replace($step->arguments, ['units' => $units, 'maxTotal' => $units * $price]));
+            }
+        }
+        app(CampaignSafety::class)->check($run, $agent, $step->command, $step->arguments);
+        DB::transaction(function () use ($run, $step, $shortened) {
             $this->gate->check($run->engine_session_id);
             if (! AutomationRun::whereKey($run->id)->whereNull('stop_requested_at')->whereNotNull('active_agent_id')->where('expires_at', '>', now())->update(['state' => 'running', 'next_action_at' => now()->addSeconds(5)])) {
                 return;
+            }
+            if ($shortened) {
+                app(CampaignTrade::class)->shortenLoad($run, $shortened[0], $shortened[1], 'exposure');
             }
             $action = ShipAction::create([
                 'engine_session_id' => $run->engine_session_id,
@@ -384,7 +415,7 @@ class AutomationRunner
     public function previewDraft(Agent $agent, AutomationDraft $draft): AutomationRun
     {
         return $this->executor->locked($agent, function () use ($agent, $draft) {
-            $this->executor->clear($agent, defer: true);
+            $this->executor->clear($agent, defer: true, ship: $draft->candidate['ship_symbol'] ?? null);
             $draft->refresh();
             $composed = $this->compose($agent, $draft);
             $plan = $composed['plan'];

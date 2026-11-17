@@ -40,7 +40,8 @@ class CampaignReport
         $allResults = app(CampaignTrade::class)->results($episode);
         $recoveries = array_values(array_filter($allResults, fn ($result) => ! empty($result['standalone_recovery'])));
         $results = array_values(array_filter($allResults, fn ($result) => empty($result['standalone_recovery'])));
-        $proofs = collect($results)->where('proof', true)->pluck('realized_ratio')->filter(fn ($ratio) => $ratio !== null);
+        $proofs = collect($results)->where('proof', true)->filter(fn ($result) => empty($result['shortened']) || CampaignTrade::losing($result))
+            ->pluck('realized_ratio')->filter(fn ($ratio) => $ratio !== null);
         $firstProfit = collect($results)->first(fn ($result) => $result['net'] > 0);
         $metrics = ['proof_realized_ratio' => $proofs->isEmpty() ? null : $proofs->min(),
             'minutes_to_first_profit' => $firstProfit ? $episode->opened_at->diffInSeconds(CarbonImmutable::parse($firstProfit['finished_at'])) / 60 : null,

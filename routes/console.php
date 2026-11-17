@@ -4,6 +4,7 @@ use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 
 require __DIR__.'/campaign.php';
+require __DIR__.'/fleet.php';
 
 /*
 |--------------------------------------------------------------------------

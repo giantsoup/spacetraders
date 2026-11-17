@@ -140,10 +140,10 @@ class ShipCommandExecutor
         return $action->refresh();
     }
 
-    public function clear(Agent $agent, ?int $except = null, bool $defer = false): void
+    public function clear(Agent $agent, ?int $except = null, bool $defer = false, ?string $ship = null): void
     {
         $others = ShipAction::where('agent_id', $agent->id)->when($except, fn ($q) => $q->whereKeyNot($except));
-        if ((clone $others)->where(fn ($q) => $q->where('state', 'uncertain')->orWhere('review_required', true))->exists()) {
+        if ((clone $others)->where(fn ($q) => $q->where('state', 'uncertain')->orWhere(fn ($q) => self::reviewFor($q, $ship)))->exists()) {
             throw new GameException('An action is pending, uncertain or requires review. Settle it before another command.');
         }
         if ((clone $others)->whereIn('state', ['pending', 'sending'])->exists()) {
@@ -152,6 +152,12 @@ class ShipCommandExecutor
         if (! $agent->canonical_identity || Agent::where('name', $agent->name)->where('reset_id', $agent->reset_id)->whereKeyNot($agent->id)->exists()) {
             throw new GameException('Agent identity is not unique. Synchronize or resolve duplicate imports first.');
         }
+    }
+
+    // A price review holds only its own ship for automation; a review without a ship (contracts) or a manual command holds the agent.
+    public static function reviewFor($query, ?string $ship): void
+    {
+        $query->where('review_required', true)->when($ship !== null, fn ($q) => $q->where(fn ($q) => $q->where('ship_symbol', $ship)->orWhereNull('ship_symbol')->orWhere('ship_symbol', '')));
     }
 
     public function execute(int $id): void
@@ -181,11 +187,26 @@ class ShipCommandExecutor
             $received = false;
             try {
                 $this->gate->check($action->engine_session_id);
-                $this->clear($agent, $action->id, defer: $run !== null);
+                $this->clear($agent, $action->id, defer: $run !== null, ship: $run ? $action->ship_symbol : null);
                 if ($action->reset_id !== $agent->reset_id || $action->expires_at->isPast() || ($run && ($run->stop_requested_at || $run->expires_at->isPast() || ! $run->active_agent_id))) {
                     throw new GameException('Intent expired, reset or stopped before execution.');
                 }
-                $before = $this->rules->inspect($agent, $action->ship_symbol, $action->command, $action->arguments, $run);
+                $fresh = $this->rules->refresh($agent, $action->ship_symbol, $action->command, $action->arguments, $run);
+                if ($run && $action->command === 'buy') {
+                    app(CampaignSafety::class)->check($run, $agent);
+                    $finished = DB::transaction(function () use ($agent, $run, $action) {
+                        if (! app(CampaignTrade::class)->finishLoading($agent, $run, $action->arguments)) {
+                            return false;
+                        }
+                        $action->update(['state' => ActionState::Rejected, 'message' => 'Partial arm load complete; unsent buy released.', 'settled_at' => now()]);
+
+                        return true;
+                    });
+                    if ($finished) {
+                        return;
+                    }
+                }
+                $before = $this->rules->validate($agent, $action->ship_symbol, $action->command, $action->arguments, $fresh, $run);
                 if ($run) {
                     app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments);
                 }
@@ -215,6 +236,7 @@ class ShipCommandExecutor
                 $action->update(['outcome' => array_merge($action->fresh()->outcome ?? [], ['response' => $data, 'response_validated' => true, 'response_received_at' => now()->utc()->toIso8601String()])]);
                 $this->confirm($agent, $action, $data, $before, $run);
             } catch (RequestDeferred $e) {
+                FleetMetrics::as($action->ship_symbol ?: null, fn () => FleetMetrics::observe($e));
                 $action->refresh();
                 if ($received) {
                     $action->update(['state' => ActionState::Uncertain, 'message' => 'Write response retained; post-write refresh was deferred by the request budget. Reconcile without replay.', 'settled_at' => now()]);
@@ -234,6 +256,7 @@ class ShipCommandExecutor
                     }
                 }
             } catch (GameException $e) {
+                FleetMetrics::as($action->ship_symbol ?: null, fn () => FleetMetrics::observe($e));
                 $action->refresh();
                 if (in_array($action->command, ['mine', 'mine_survey'], true) && isset($action->arguments['surveySignature']) && in_array($e->apiCode, [4221, 4224], true)) {
                     app(SurveyPool::class)->invalidate($agent, $action->arguments['surveySignature'], $e->apiCode === 4224);

@@ -1,6 +1,9 @@
 # Operate the campaign autopilot
 
-The campaign director runs inside the existing dispatcher, at most once per 30 seconds.
+The campaign director runs inside the existing dispatcher, waiting 30 seconds after each
+decision completes, including waits and failures. The dispatcher persists alternating C0
+and arm priority and runs at most one decision per pass; when the preferred side is not
+due, the other side can run. Slow C0 decisions cannot starve the arms.
 It works with an already-running engine and resumes after a healthy restart. No LLM is
 in the execution path. These commands do not start the engine.
 
@@ -144,6 +147,34 @@ Trade settings govern proofs, lot sizes, switching, losses, and quote age:
   bought manually are not campaign roles and are never driven, but each tick in earn reads one
   market where such a ship is parked, in rotation, skipping markets read within the quote age.
   Recovery reads a stale buyer or fuel seller directly when one of our ships sits there.
+
+### Arm load exposure
+
+Arms reserve predicted cargo cost plus 5% slippage, rounded up to whole credits and bounded
+by the existing proof, cash, and exposure ceilings. Prediction already includes conservative
+source-batch inflation. This extra allowance covers small price moves without reserving the
+whole exposure cap for a small load. C0 keeps its existing inventory ceiling.
+
+The exposure basis is current cash plus the cost basis of cargo aboard arm ships. Held cargo
+plus unspent commitments from runs in the buy phase must fit the arm's exposure share.
+A buy excludes its own run's commitment before testing the projected purchase. Departure
+releases unused commitment; cargo remains exposed until sold.
+
+A partial arm load departs when exposure or its own remaining inventory budget cannot fund
+one more unit, or two minutes pass since its last confirmed buy. Fresh balance, cargo
+integrity, and campaign authority checks precede cancellation of an obsolete queued buy,
+including when its price or volume changes.
+The shortened plan retains `original_units` and `original_predicted_margin`, and records
+`shortened_reason` as `exposure`, `timeout`, `inventory`, or `price` (a queued buy's fresh ask
+exceeds its approved spending ceiling). Load results expose `shortened`
+and `shortened_reason`. When inventory headroom is exhausted, including when timeout also
+applies, the plan and load result also record
+`ask_over_prediction`: the current ask divided by the original predicted cost per unit
+(including predicted source-batch inflation). This lets the scorecard assess the 5% allowance.
+Profitable shortened loads do not change proof-learning decisions; actual losses still require
+a new proof. Actual cash and net accounting remain unchanged.
+
+### Discovery and recovery
 
 Discovery is a separate bounded decision, refreshed more often in discover than earn;
 large directory sweeps cannot consume every trade-planning tick. Every decision records

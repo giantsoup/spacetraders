@@ -14,7 +14,11 @@ class CampaignSafety
 {
     public function reason(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent): ?string
     {
-        if (ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where(fn ($query) => $query->where('state', 'uncertain')->orWhere('review_required', true))->exists()) {
+        // Uncertain outcomes put the shared balance in doubt; a price review holds only this campaign's own ships.
+        $fleet = app(CampaignFleet::class)->symbols($episode);
+        if (ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where(fn ($query) => $query->where('state', 'uncertain')
+            ->orWhere(fn ($query) => $query->where('review_required', true)->where(fn ($query) => $query->whereIn('ship_symbol', $fleet)->orWhereNull('ship_symbol')->orWhere('ship_symbol', '')
+                ->orWhereIn('automation_run_id', AutomationRun::where('campaign_episode_id', $episode->id)->select('id')))))->exists()) {
             return 'uncertain_action';
         }
         if (! ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereIn('state', ['pending', 'sending'])->exists()
@@ -23,6 +27,10 @@ class CampaignSafety
         }
         if (! empty($episode->state['pending_pause'])) {
             return $episode->state['pending_pause'];
+        }
+        $arm = $grant->limits['arm'] ?? null;
+        if ($arm && isset($arm['max_net_loss']) && CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'load_result')->pluck('data')->sum(fn ($data) => $data['net'] ?? 0) < -$arm['max_net_loss']) {
+            return 'arm_loss_stop';
         }
         $limit = $grant->revision()->body['trade']['losses']['pause_after_consecutive_losing_loads'];
         $results = CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'load_result')
@@ -62,6 +70,12 @@ class CampaignSafety
         }
         if ($this->windDown($episode) && in_array($command, ['buy', 'mine', 'mine_survey'], true)) {
             throw new GameException('Wind-down only permits selling aboard.');
+        }
+        if (in_array($command, ['buy', 'sell'], true)) {
+            app(FleetClaims::class)->follow($run, $episode, $command, $arguments);
+        }
+        if ($command === 'buy' && $grant->arm() && ($arguments['maxTotal'] ?? PHP_INT_MAX) > app(CampaignTrade::class)->allowance($grant, $agent, $run)) {
+            throw new GameException('Buy skipped: arm exposure requires a smaller batch.', retryAfter: 30);
         }
         if ($command === 'buy' && ! $boundaryOnly) {
             if ($run->strategy !== 'trade' || ! empty($run->plan['sell_only'])) {

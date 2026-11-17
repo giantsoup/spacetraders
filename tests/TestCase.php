@@ -2,6 +2,7 @@
 
 namespace Tests;
 
+use App\Gameplay\FleetMetrics;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 
@@ -14,6 +15,7 @@ abstract class TestCase extends BaseTestCase
     protected function setUp(): void
     {
         parent::setUp();
+        FleetMetrics::reset();
         $this->gameLockDirectory = sys_get_temp_dir().'/st-test-locks-'.bin2hex(random_bytes(8));
         config(['gameplay.request_budget_enabled' => false, 'gameplay.request_budget_path' => $this->gameLockDirectory.'/budget', 'gameplay.lock_path' => $this->gameLockDirectory]);
         config(['deployment.path' => $this->gameLockDirectory.'/deployment']);
@@ -21,6 +23,7 @@ abstract class TestCase extends BaseTestCase
 
     protected function tearDown(): void
     {
+        FleetMetrics::reset();
         $this->beforeApplicationDestroyed(function () {
             foreach ($this->app['log']->getChannels() as $channel) {
                 $channel->getLogger()->close();
