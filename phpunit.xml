@@ -24,6 +24,7 @@
         </include>
     </source>
     <php>
+        <ini name="memory_limit" value="512M"/>
         <env name="APP_ENV" value="testing" force="true"/>
         <env name="APP_CONFIG_CACHE" value="storage/framework/testing-config.php" force="true"/>
         <env name="APP_ROUTES_CACHE" value="storage/framework/testing-routes.php" force="true"/>
