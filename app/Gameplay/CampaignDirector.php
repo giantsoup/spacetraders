@@ -37,6 +37,9 @@ class CampaignDirector
     /** The ranked candidate behind the run trade() returned, claimed once that run starts. */
     private ?array $candidate = null;
 
+    /** Set when an arm's committed pair waits for a usable buyer quote this pass. */
+    private bool $awaitingQuote = false;
+
     public function tick(): bool
     {
         $attempted = false;
@@ -315,8 +318,13 @@ class CampaignDirector
             if ($this->recover($grant, $episode, $agent)) {
                 return;
             }
-            // No active run and empty role ships: drop this episode's claim before re-ranking.
-            if (! empty($episode->refresh()->state['claim'])) {
+            // No active run and empty role ships: drop this episode's claim before re-ranking, unless an
+            // arm has just positioned at its claimed source; then trade() tries the committed pair first.
+            $commit = $arm && ! $reason && ! app(CampaignSafety::class)->windDown($episode) ? $this->commitment($grant, $episode) : null;
+            if (! $commit && ! empty($episode->refresh()->state['commit'])) {
+                $this->endCommit($grant, $episode, $reason ? 'paused' : 'wind_down');
+            }
+            if (! $commit && ! empty($episode->refresh()->state['claim'])) {
                 app(FleetClaims::class)->release($episode, 'idle');
             }
             if ($reason) {
@@ -361,6 +369,7 @@ class CampaignDirector
                 }
             }
             $tradeAttempted = false;
+            $this->awaitingQuote = false;
             $miningTurn = ! empty($episode->state['mining_deferred']);
             if ($miningTurn) {
                 $state = $episode->state;
@@ -412,6 +421,11 @@ class CampaignDirector
                         }
                         if ($activity['strategy'] === 'trade' && $this->candidate) {
                             app(FleetClaims::class)->claim($episode->refresh(), $this->candidate);
+                            if ($arm && $run->strategy === 'scout') {
+                                $this->commit($grant, $episode, $this->candidate, $run);
+                            } elseif ($arm && ! empty($episode->refresh()->state['commit'])) {
+                                $this->endCommit($grant, $episode, 'trade_started', ['run_id' => $run->id]);
+                            }
                         }
                         if ($run->strategy === 'trade') {
                             $episode->refresh();
@@ -434,8 +448,128 @@ class CampaignDirector
             if (! $arm && $episode->phase === 'earn' && ! app(CampaignSafety::class)->windDown($episode)) {
                 $this->discoverIfDue($episode, $agent);
             }
-            $this->decision($grant, $episode, $agent, $considered, 'idle');
+            $this->decision($grant, $episode, $agent, $considered, $this->awaitingQuote ? 'awaiting_buyer_quote' : 'idle');
         });
+    }
+
+    /**
+     * Records that an arm flies a one-way positioning run to the source of its claimed pair. The
+     * commitment keeps the claim through arrival, so trade() tries that pair before re-ranking.
+     */
+    private function commit(CampaignGrant $grant, CampaignEpisode $episode, array $candidate, AutomationRun $run): void
+    {
+        if ((int) config('gameplay.campaign_commit_minutes', 10) < 1) {
+            return;
+        }
+        $commit = ['key' => $candidate['key'], 'good' => $candidate['good'], 'source' => $candidate['source'], 'buyer' => $candidate['buyer'],
+            'ship' => $run->ship_symbol, 'score' => $candidate['score'] ?? null, 'run_id' => $run->id, 'at' => now()->toIso8601String()];
+        $episode->refresh();
+        $episode->update(['state' => array_merge($episode->state ?? [], ['commit' => $commit])]);
+        app(CampaignControl::class)->event($grant, $episode, 'commit', $commit);
+    }
+
+    /**
+     * The arm's commitment while it holds: its claim is unchanged, its ship stands empty at the
+     * committed source, and it arrived at most campaign_commit_minutes ago (a ship that never arrives
+     * lets go after run_max_minutes plus that). Otherwise it ends and normal ranking resumes.
+     */
+    private function commitment(CampaignGrant $grant, CampaignEpisode $episode): ?array
+    {
+        $state = $episode->refresh()->state ?? [];
+        $commit = $state['commit'] ?? null;
+        if (! $commit) {
+            return null;
+        }
+        $claim = $state['claim'] ?? null;
+        $ship = $this->role($episode, 'command');
+        $minutes = (int) config('gameplay.campaign_commit_minutes', 10);
+        $reason = match (true) {
+            $minutes < 1 => 'disabled',
+            ! $claim || [$claim['good'], $claim['source'], $claim['buyer']] !== [$commit['good'], $commit['source'], $commit['buyer']] => 'claim_changed',
+            isset($commit['arrived_at']) && CarbonImmutable::parse($commit['arrived_at'])->addMinutes($minutes)->isPast() => 'expired',
+            ! isset($commit['arrived_at']) && CarbonImmutable::parse($commit['at'])->addMinutes($grant->limits['run_max_minutes'] + $minutes)->isPast() => 'expired',
+            ! $ship || $ship['symbol'] !== $commit['ship'] || $ship['nav']['status'] === 'IN_TRANSIT' || $ship['nav']['waypointSymbol'] !== $commit['source'] => 'not_at_source',
+            ($ship['cargo']['units'] ?? 0) !== 0 => 'cargo_aboard',
+            default => null,
+        };
+        if ($reason) {
+            $this->endCommit($grant, $episode, $reason);
+
+            return null;
+        }
+        if (! isset($commit['arrived_at'])) {
+            $commit['arrived_at'] = now()->toIso8601String();
+            $episode->update(['state' => array_merge($state, ['commit' => $commit])]);
+        }
+
+        return $commit;
+    }
+
+    private function endCommit(CampaignGrant $grant, CampaignEpisode $episode, string $reason, array $extra = []): void
+    {
+        $state = $episode->refresh()->state ?? [];
+        $commit = $state['commit'] ?? null;
+        if (! $commit) {
+            return;
+        }
+        unset($state['commit']);
+        $episode->update(['state' => $state]);
+        app(CampaignControl::class)->event($grant, $episode, 'commit_end', $commit + ['reason' => $reason] + $extra);
+    }
+
+    /**
+     * Puts the committed pair first unless it no longer ranks (unprofitable, out of bounds or claimed)
+     * or another pair scores at least better_pair_ratio times it. Scores include each pair's
+     * positioning leg from where the ship stands, so a switch pays for its repositioning.
+     */
+    private function preferCommitted(CampaignGrant $grant, CampaignEpisode $episode, array $ranked): array
+    {
+        $commit = $episode->state['commit'] ?? null;
+        if (! $commit) {
+            return $ranked;
+        }
+        $same = fn (array $row) => $row['key'] === $commit['key'] && $row['source'] === $commit['source'];
+        $committed = collect($ranked)->first($same);
+        if (! $committed) {
+            $this->endCommit($grant, $episode, 'pair_not_ranked');
+
+            return $ranked;
+        }
+        $best = $ranked[0];
+        $ratio = $grant->revision()->body['trade']['switch']['better_pair_ratio'];
+        if (! $same($best) && $best['score'] >= $committed['score'] * $ratio) {
+            $this->endCommit($grant, $episode, 'better_pair', ['better_key' => $best['key'], 'better_source' => $best['source'],
+                'better_score' => $best['score'], 'committed_score' => $committed['score'], 'ratio' => $ratio]);
+
+            return $ranked;
+        }
+
+        return [$committed, ...array_values(array_filter($ranked, fn ($row) => ! $same($row)))];
+    }
+
+    /** The oldest buyer quote a committed arm buy accepts; never below the snapshot age. */
+    private function commitQuoteLimit(): int
+    {
+        return max((int) config('gameplay.snapshot_seconds'), (int) config('gameplay.campaign_commit_quote_max_age_seconds', 900));
+    }
+
+    /** One of our ships is at the buyer (not in transit) or flying to it, so the buyer quote can be refreshed. */
+    private function buyerObservable(Agent $agent, string $buyer): bool
+    {
+        return Ship::where('agent_id', $agent->id)->get()->contains(fn ($ship) => ($ship->snapshot['nav']['status'] ?? null) === 'IN_TRANSIT'
+            ? ($ship->snapshot['nav']['route']['destination']['symbol'] ?? $ship->snapshot['nav']['waypointSymbol'] ?? null) === $buyer
+            : ($ship->snapshot['nav']['waypointSymbol'] ?? null) === $buyer);
+    }
+
+    /** Seconds since the buyer's detailed quote for the good, or null when it is missing or invalidated. */
+    private function buyerQuoteAge(Agent $agent, string $buyer, string $good): ?int
+    {
+        $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $buyer)->first();
+        if (! $quote || ! empty($quote->data['invalidated_by_action']) || ! collect($quote->data['tradeGoods'] ?? [])->contains('symbol', $good)) {
+            return null;
+        }
+
+        return max(0, (int) $quote->observed_at->diffInSeconds(now(), true));
     }
 
     private function startRetainedPreview(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent): bool
@@ -524,10 +658,28 @@ class CampaignDirector
         if (! $ranked) {
             $considered[] = ['strategy' => 'trade', 'rejected' => 'No profitable observed pair fits the playbook and verified route bounds.'];
         }
+        $arm = (bool) FleetClaims::arm($grant);
+        if ($arm) {
+            $ranked = $this->preferCommitted($grant, $episode, $ranked);
+        }
         foreach ($ranked as $candidate) {
             $this->candidate = $candidate;
+            $commit = $arm ? ($episode->state['commit'] ?? null) : null;
+            $committed = $commit && $candidate['key'] === $commit['key'] && $candidate['source'] === $commit['source'] && $candidate['source'] === $ship['nav']['waypointSymbol'];
             try {
                 if ($candidate['source'] !== $ship['nav']['waypointSymbol']) {
+                    // An arm flies to a source only if it can buy there: the buyer quote will still be
+                    // within the commitment bound on arrival, or one of our ships can read the buyer.
+                    if ($arm && ! $this->buyerObservable($agent, $candidate['buyer'])) {
+                        $age = $this->buyerQuoteAge($agent, $candidate['buyer'], $candidate['good']);
+                        if ($age === null || $age + ($candidate['position_seconds'] ?? 0) > $this->commitQuoteLimit()) {
+                            $considered[] = $candidate + ['rejected' => 'Buyer quote at '.$candidate['buyer'].' would be past the '.$this->commitQuoteLimit()
+                                .' s commitment bound on arrival, and no ship of ours can read it.', 'buyer_quote_age' => $age];
+
+                            continue;
+                        }
+                    }
+
                     return $this->position($grant, $episode, $agent, $ship, $candidate['source']);
                 }
                 $probe = $this->role($episode, 'probe');
@@ -556,11 +708,39 @@ class CampaignDirector
                     $sync->observe($agent, 'market', $market, $api->market($agent, $market));
                 }
                 $refreshed = $trades->rank($grant, $episode, $agent, $ship, $considered);
+                if ($committed) {
+                    // Refreshed quotes end a commitment only when its pair stops ranking or another clears the switch ratio.
+                    $refreshed = $this->preferCommitted($grant, $episode, $refreshed);
+                }
                 $fresh = $refreshed[0] ?? null;
                 if (! $fresh || $fresh['key'] !== $candidate['key'] || $fresh['source'] !== $candidate['source']) {
                     $considered[] = $candidate + ['rejected' => 'Refreshed quotes changed the preferred pair; replan next tick.'];
 
                     return null;
+                }
+                $buyerAge = null;
+                if ($committed) {
+                    // The buyer was just read (fresh if any of our ships is parked there). Otherwise a
+                    // committed buy may use a buyer quote up to the commitment bound. Past it, the arm
+                    // waits only while one of our ships is at or flying to the buyer; else it lets go now.
+                    $age = $this->buyerQuoteAge($agent, $fresh['buyer'], $fresh['good']);
+                    $limit = $this->commitQuoteLimit();
+                    if ($age === null || $age > $limit) {
+                        $message = 'Committed pair: buyer quote at '.$fresh['buyer'].' is '.($age === null ? 'missing' : $age.' s old').', past the '.$limit.' s commitment bound.';
+                        if (! $this->buyerObservable($agent, $fresh['buyer'])) {
+                            $this->endCommit($grant, $episode, 'buyer_quote_unavailable', ['buyer_quote_age' => $age]);
+                            $considered[] = $fresh + ['rejected' => $message.' No ship of ours can read it.'];
+
+                            continue;
+                        }
+                        $this->awaitingQuote = true;
+                        $this->candidate = null;
+                        $considered[] = $fresh + ['rejected' => $message.' Awaiting a buyer quote.'];
+
+                        return null;
+                    }
+                    // Every committed plan carries the bound, so a quote crossing the snapshot age mid-pass still buys.
+                    $buyerAge = $limit;
                 }
                 // Shadow only: flag a low value-per-minute choice without changing it.
                 $candidate = $fresh + ['value_floor' => $trades->valueFloor($episode, $fresh)];
@@ -570,7 +750,8 @@ class CampaignDirector
                 $plan = $limits + ['strategy' => 'trade', 'market' => $candidate['buyer'], 'symbol' => $candidate['good'], 'units' => $candidate['units'],
                     'min_sell_price' => (int) ceil($candidate['predicted_cost'] / $candidate['units']), 'min_margin' => 1,
                     'max_inventory' => $candidate['max_inventory'], 'max_fuel' => $ship['fuel']['capacity'],
-                    'campaign_trade' => $candidate + ['quote_max_age_seconds' => $grant->revision()->body['trade']['quote_max_age_seconds']]];
+                    'campaign_trade' => $candidate + ['quote_max_age_seconds' => $grant->revision()->body['trade']['quote_max_age_seconds']]
+                        + ($buyerAge ? ['buyer_quote_max_age_seconds' => $buyerAge] : [])];
                 $plan['site'] = $candidate['source'];
                 $trades->quoteLife($agent, $plan, []);
 
@@ -580,6 +761,17 @@ class CampaignDirector
                     throw $exception;
                 }
                 $considered[] = $candidate + ['rejected' => $exception->getMessage()];
+                if ($committed && ! empty($episode->refresh()->state['commit'])) {
+                    // A stale-quote failure waits on the committed pair while a ship can read the buyer;
+                    // any other failure ends the commitment and the next candidate is tried.
+                    if ($exception instanceof StaleQuote && $this->buyerObservable($agent, $candidate['buyer'])) {
+                        $this->awaitingQuote = true;
+                        $this->candidate = null;
+
+                        return null;
+                    }
+                    $this->endCommit($grant, $episode, $exception instanceof StaleQuote ? 'buyer_quote_unavailable' : 'rejected', ['message' => $exception->getMessage()]);
+                }
             }
         }
         $this->candidate = null;

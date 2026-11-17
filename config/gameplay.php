@@ -22,6 +22,11 @@ return [
     'snapshot_seconds' => 180,
     'fuel_quote_max_seconds' => 21600,
     'campaign_recovery_attempts' => 5,
+    // An arm that positioned at its claimed source commits to that pair: it may buy against a buyer
+    // quote up to this old (the sell floor stays the cost basis), and the commitment lasts at most
+    // this many minutes after the ship arrives. Set the minutes to 0 to turn route commitment off.
+    'campaign_commit_quote_max_age_seconds' => (int) env('SPACETRADERS_CAMPAIGN_COMMIT_QUOTE_MAX_AGE', 900),
+    'campaign_commit_minutes' => (int) env('SPACETRADERS_CAMPAIGN_COMMIT_MINUTES', 10),
     'route_evidence' => env('SPACETRADERS_ROUTE_EVIDENCE', 'conservative'),
     'fuel_reserve_units' => 2,
     'opportunity_limit' => 120,
