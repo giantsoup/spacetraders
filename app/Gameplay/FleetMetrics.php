@@ -20,8 +20,23 @@ class FleetMetrics
 {
     private static ?string $ship = null;
 
-    /** @var array<string, array<string, array{reads: int, writes: int}>> kind => ship => counts */
+    /** @var array<string, array<string, array{reads: int, writes: int, categories?: array<string, int>}>> kind => ship => counts */
     private static array $pending = [];
+
+    /** @var list<array{kind: string, ship: string, value: float, data: string, created_at: string}> advance and director-pass outcome rows */
+    private static array $events = [];
+
+    /** Requests counted by this process so far; callers diff it to learn what one unit of work used. */
+    private static int $total = 0;
+
+    /**
+     * Endpoint categories, derived from method and path only. GET: status (/), agent (/my/agent), ship (/my/ships/{s}),
+     * ships_page (/my/ships), market, shipyard, waypoint (a waypoint or a system's waypoint list), system (/systems and
+     * /systems/{s}), other_read for any other GET. Writes are write:<command> from the path's last segment (the names
+     * below), write:flight_mode (PATCH nav), write:buy_ship (POST /my/ships), else write:other.
+     */
+    private const WRITE_COMMANDS = ['navigate', 'dock', 'orbit', 'purchase', 'sell', 'refuel', 'extract', 'survey', 'siphon', 'jettison', 'transfer', 'jump', 'warp',
+        'refine', 'repair', 'scrap', 'accept', 'deliver', 'fulfill', 'supply', 'install', 'remove', 'contract', 'register'];
 
     private static ?float $flushedAt = null;
 
@@ -31,7 +46,71 @@ class FleetMetrics
     {
         self::$ship = null;
         self::$pending = [];
+        self::$events = [];
+        self::$total = 0;
         self::$flushedAt = null;
+    }
+
+    public static function category(string $method, string $path): string
+    {
+        $segments = array_values(array_filter(explode('/', strtok($path, '?') ?: ''), fn ($part) => $part !== ''));
+        $count = count($segments);
+        $last = $segments[$count - 1] ?? '';
+        if (strtolower($method) === 'get') {
+            $systems = ($segments[0] ?? null) === 'systems';
+
+            return match (true) {
+                $count === 0 => 'status',
+                $segments === ['my', 'agent'] => 'agent',
+                $segments === ['my', 'ships'] => 'ships_page',
+                $count === 3 && $segments[0] === 'my' && $segments[1] === 'ships' => 'ship',
+                $systems && $last === 'market' => 'market',
+                $systems && $last === 'shipyard' => 'shipyard',
+                $systems && ($count === 4 || ($count === 3 && $last === 'waypoints')) => 'waypoint',
+                $systems && $count <= 2 => 'system',
+                default => 'other_read',
+            };
+        }
+        if (strtolower($method) === 'patch' && $last === 'nav') {
+            return 'write:flight_mode';
+        }
+        if ($segments === ['my', 'ships']) {
+            return 'write:buy_ship';
+        }
+
+        return 'write:'.(in_array($last, self::WRITE_COMMANDS, true) ? $last : 'other');
+    }
+
+    public static function requestTotal(): int
+    {
+        return self::$total;
+    }
+
+    /**
+     * One AutomationRunner::advance. Outcomes: wrote (enqueued a write), waited (planner wait, trip or depart bookkeeping,
+     * or an action still settling), held (freshness, price, follower or exposure hold), deferred (RequestDeferred or another
+     * retryAfter that re-queues the run), blocked (run blocked: uncertain action, planner or fatal error), idle (nothing due:
+     * stopped, inactive, blocked earlier or next_action_at in the future).
+     */
+    public static function advance(?string $ship, string $outcome, int $requests): void
+    {
+        self::event('advance', $ship, $outcome, $requests);
+    }
+
+    /** One director pass. Outcomes: started (a run was started), awaiting_run (a run is active), waiting (anything else: wait, pause, idle). */
+    public static function directorPass(?string $ship, string $outcome, int $requests): void
+    {
+        self::event('director_pass', $ship, $outcome, $requests);
+    }
+
+    private static function event(string $kind, ?string $ship, string $outcome, int $requests): void
+    {
+        try {
+            self::$events[] = ['kind' => $kind, 'ship' => $ship ?? 'shared', 'value' => $requests,
+                'data' => json_encode(['outcome' => $outcome, 'requests' => $requests]), 'created_at' => now()->toDateTimeString()];
+            self::touch();
+        } catch (\Throwable) {
+        }
     }
 
     public static function as(?string $ship, callable $fn): mixed
@@ -50,9 +129,15 @@ class FleetMetrics
         return self::$ship;
     }
 
-    public static function count(string $method, string $path = ''): void
+    public static function count(string $method, string $path = '', ?string $category = null): void
     {
-        self::tally('requests', strtolower($method) === 'get' ? 'reads' : 'writes');
+        self::$total++;
+        try {
+            $category ??= self::category($method, $path);
+        } catch (\Throwable) {
+            $category = null;
+        }
+        self::tally('requests', strtolower($method) === 'get' ? 'reads' : 'writes', $category);
     }
 
     /** Counts a non-request occurrence (lock_collision, deferral) against the current ship. */
@@ -73,37 +158,48 @@ class FleetMetrics
         }
     }
 
-    private static function tally(string $kind, string $field): void
+    private static function tally(string $kind, string $field, ?string $category = null): void
     {
         try {
             $ship = self::$ship ?? 'shared';
             self::$pending[$kind][$ship] ??= ['reads' => 0, 'writes' => 0];
             self::$pending[$kind][$ship][$field]++;
-            self::$flushedAt ??= (float) now()->getTimestamp();
-            if (! self::$hooked) {
-                self::$hooked = true;
-                register_shutdown_function(fn () => self::flush());
+            if ($category !== null) {
+                self::$pending[$kind][$ship]['categories'][$category] = (self::$pending[$kind][$ship]['categories'][$category] ?? 0) + 1;
             }
-            if ((float) now()->getTimestamp() - self::$flushedAt >= 30) {
-                self::flush();
-            }
+            self::touch();
         } catch (\Throwable) {
+        }
+    }
+
+    private static function touch(): void
+    {
+        self::$flushedAt ??= (float) now()->getTimestamp();
+        if (! self::$hooked) {
+            self::$hooked = true;
+            register_shutdown_function(fn () => self::flush());
+        }
+        if ((float) now()->getTimestamp() - self::$flushedAt >= 30) {
+            self::flush();
         }
     }
 
     public static function flush(): void
     {
         $pending = self::$pending;
+        $events = self::$events;
         self::$pending = [];
+        self::$events = [];
         self::$flushedAt = (float) now()->getTimestamp();
-        if ($pending === []) {
+        if ($pending === [] && $events === []) {
             return;
         }
         try {
-            $rows = [];
+            $rows = $events;
             $now = now()->toDateTimeString();
             foreach ($pending as $kind => $ships) {
                 foreach ($ships as $ship => $counts) {
+                    // data.categories holds per-category counts; older readers use only value, reads and writes.
                     $rows[] = ['kind' => $kind, 'ship' => $ship, 'value' => $counts['reads'] + $counts['writes'],
                         'data' => $kind === 'requests' ? json_encode($counts) : null, 'created_at' => $now];
                 }
@@ -174,10 +270,59 @@ class FleetMetrics
         $card = ['reset' => $reset, 'since' => $t0->toIso8601String(), 'until' => $until->toIso8601String(), 'arms' => $rows,
             'blocks' => array_map(fn ($b) => ['from' => $b[0]->toIso8601String(), 'to' => $b[1]->toIso8601String()], $blocks),
             'scheduler' => $this->scheduler($t0, $until)];
+        $card['budget'] = $this->budget($rows, $t0, $until);
         $card['shared_pair'] = $this->sharedPair($rows);
         $card['flags'] = $this->flags($rows);
 
         return $card;
+    }
+
+    /** SpaceTraders allows 2 requests per second per IP; the fleet may use 90% of that hour. */
+    public const HOURLY_BUDGET = 7200;
+
+    /**
+     * Request budget view over fleet_metrics only (no API calls). All-in counts every request in the window from the
+     * earliest arm window start (all ships, including shared and director rows), divided by the arms' summed active
+     * hours. Max useful fleet = 0.9 x 7,200 / all-in requests per active ship-hour.
+     */
+    private function budget(array $rows, CarbonImmutable $t0, CarbonImmutable $until): array
+    {
+        $active = array_filter($rows, fn ($row) => $row['hours'] > 0);
+        $from = $active ? min(array_map(fn ($row) => CarbonImmutable::parse($row['window_start']), $active)) : $t0;
+        $between = [$from->toDateTimeString(), $until->toDateTimeString()];
+        $hours = array_sum(array_column($active, 'hours'));
+        $loads = array_sum(array_column($rows, 'loads'));
+        $total = 0;
+        $unattributed = 0;
+        $categories = [];
+        foreach (DB::table('fleet_metrics')->where('kind', 'requests')->whereBetween('created_at', $between)->get(['ship', 'value', 'data']) as $row) {
+            $total += (int) $row->value;
+            $unattributed += in_array($row->ship, ['shared', 'director'], true) ? (int) $row->value : 0;
+            foreach ((json_decode($row->data ?? '', true)['categories'] ?? []) as $category => $count) {
+                $categories[$category] = ($categories[$category] ?? 0) + (int) $count;
+            }
+        }
+        ksort($categories);
+        $outcomes = [];
+        foreach (['advance', 'director_pass'] as $kind) {
+            $outcomes[$kind] = [];
+            foreach (DB::table('fleet_metrics')->where('kind', $kind)->whereBetween('created_at', $between)->pluck('data') as $data) {
+                $data = json_decode($data ?? '', true) ?: [];
+                $outcome = $data['outcome'] ?? 'unknown';
+                $outcomes[$kind][$outcome] ??= ['count' => 0, 'requests' => 0];
+                $outcomes[$kind][$outcome]['count']++;
+                $outcomes[$kind][$outcome]['requests'] += (int) ($data['requests'] ?? 0);
+            }
+            ksort($outcomes[$kind]);
+        }
+        $perHour = $hours > 0 ? $total / $hours : null;
+        $advances = array_sum(array_column($outcomes['advance'], 'count'));
+
+        return ['window_from' => $from->toIso8601String(), 'requests' => $total, 'unattributed_requests' => $unattributed,
+            'active_ship_hours' => round($hours, 3), 'requests_per_ship_hour' => $perHour, 'loads' => $loads,
+            'requests_per_load' => $loads > 0 ? $total / $loads : null, 'by_category' => $categories, 'by_outcome' => $outcomes,
+            'advances' => $advances, 'advances_without_write' => $advances - ($outcomes['advance']['wrote']['count'] ?? 0),
+            'max_useful_fleet' => $perHour > 0 ? 0.9 * self::HOURLY_BUDGET / $perHour : null];
     }
 
     private function arm(array $arm, CarbonImmutable $t0, CarbonImmutable $until, array $blocks): array

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\AutomationRunner;
+use App\Gameplay\EngineGate;
 use App\Gameplay\FleetMetrics;
 use App\Gameplay\GameException;
 use App\Gameplay\RequestDeferred;
@@ -16,12 +17,14 @@ use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\CampaignRevision;
+use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
 use App\Services\SpaceTradersClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\FakeSpaceTraders;
 use Tests\TestCase;
 
@@ -71,7 +74,7 @@ class FleetMetricsTest extends TestCase
         FleetMetrics::flush();
         $rows = DB::table('fleet_metrics')->where('kind', 'requests')->get()->keyBy('ship');
         $this->assertEquals(2, $rows['LOCAL-1']->value);
-        $this->assertSame(['reads' => 1, 'writes' => 1], json_decode($rows['LOCAL-1']->data, true));
+        $this->assertSame(['reads' => 1, 'writes' => 1, 'categories' => ['agent' => 1, 'write:dock' => 1]], json_decode($rows['LOCAL-1']->data, true));
         $this->assertEquals(1, $rows['LOCAL-2']->value);
         $this->assertEquals(1, $rows['shared']->value);
     }
@@ -326,5 +329,129 @@ class FleetMetricsTest extends TestCase
         $this->artisan('fleet:scorecard', ['--since' => $t0->toIso8601String(), '--until' => $t0->addHours(4)->toIso8601String(), '--reset' => 'R1'])
             ->expectsOutputToContain('Shared-pair unit')->assertSuccessful();
         $this->artisan('fleet:scorecard', ['--reset' => 'R1', '--json' => true])->assertSuccessful();
+    }
+
+    #[DataProvider('categories')]
+    public function test_endpoint_category_is_derived_from_method_and_path(string $method, string $path, string $category): void
+    {
+        $this->assertSame($category, FleetMetrics::category($method, $path));
+    }
+
+    public static function categories(): array
+    {
+        $market = '/systems/X1-A/waypoints/X1-A-B';
+
+        return [
+            'status' => ['get', '/', 'status'], 'agent' => ['get', '/my/agent', 'agent'], 'agent with query' => ['get', '/my/agent?x=1', 'agent'],
+            'ships page' => ['GET', '/my/ships', 'ships_page'], 'ship' => ['get', '/my/ships/LOCAL-1', 'ship'], 'ship cargo' => ['get', '/my/ships/LOCAL-1/cargo', 'other_read'],
+            'systems' => ['get', '/systems', 'system'], 'system' => ['get', '/systems/X1-A', 'system'], 'waypoint list' => ['get', '/systems/X1-A/waypoints', 'waypoint'],
+            'waypoint' => ['get', $market, 'waypoint'], 'market' => ['get', $market.'/market', 'market'], 'shipyard' => ['get', $market.'/shipyard', 'shipyard'],
+            'jump gate' => ['get', $market.'/jump-gate', 'other_read'], 'contracts' => ['get', '/my/contracts', 'other_read'], 'factions' => ['get', '/factions', 'other_read'],
+            'navigate' => ['post', '/my/ships/L/navigate', 'write:navigate'], 'dock' => ['post', '/my/ships/L/dock', 'write:dock'], 'orbit' => ['post', '/my/ships/L/orbit', 'write:orbit'],
+            'purchase' => ['post', '/my/ships/L/purchase', 'write:purchase'], 'sell' => ['post', '/my/ships/L/sell', 'write:sell'], 'refuel' => ['post', '/my/ships/L/refuel', 'write:refuel'],
+            'extract' => ['post', '/my/ships/L/extract', 'write:extract'], 'flight mode' => ['patch', '/my/ships/L/nav', 'write:flight_mode'], 'ship purchase' => ['post', '/my/ships', 'write:buy_ship'],
+            'contract accept' => ['post', '/my/contracts/C/accept', 'write:accept'], 'mount install' => ['post', '/my/ships/L/mounts/install', 'write:install'],
+            'negotiate' => ['post', '/my/ships/L/negotiate/contract', 'write:contract'], 'register' => ['post', '/register', 'write:register'], 'unknown write' => ['post', '/my/ships/L/weird', 'write:other'],
+        ];
+    }
+
+    public function test_client_passes_the_category_to_the_counter(): void
+    {
+        $client = app(SpaceTradersClient::class);
+        $client->request('get', '/my/ships/LOCAL-1', [], 'synthetic-only');
+        $client->request('get', '/my/ships/LOCAL-1', [], 'synthetic-only');
+        FleetMetrics::flush();
+        $this->assertSame(['ship' => 2], json_decode(DB::table('fleet_metrics')->where('kind', 'requests')->value('data'), true)['categories']);
+    }
+
+    public function test_advance_records_one_outcome_with_the_requests_it_used(): void
+    {
+        config(['gameplay.enabled' => true]);
+        $this->agent->update(['connection_state' => 'connected']);
+        $run = DB::table('automation_runs')->insertGetId(['agent_id' => $this->agent->id, 'active_agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id, 'ship_symbol' => 'LOCAL-3',
+            'state' => 'running', 'plan' => '{}', 'totals' => '{}', 'expires_at' => now()->addHour(), 'strategy' => 'trade', 'created_at' => now(), 'updated_at' => now()]);
+        $expected = [];
+
+        // Nothing due: the run is not yet due, so it makes no request.
+        AutomationRun::whereKey($run)->update(['next_action_at' => now()->addMinute()]);
+        app(AutomationRunner::class)->advance($run);
+        $expected[] = ['idle', 0];
+        AutomationRun::whereKey($run)->update(['next_action_at' => null]);
+
+        // The first read (the engine gate) fails in each of these ways.
+        $holdText = 'Freshness hold: quotes would expire during planned loading.';
+        foreach ([['deferred', new RequestDeferred('Budget.', 3)], ['held', new GameException($holdText, retryAfter: 30)],
+            ['held', new GameException($holdText)], ['blocked', new GameException('Plan is broken.')]] as [$outcome, $throw]) {
+            AutomationRun::whereKey($run)->update(['state' => 'running', 'next_action_at' => null, 'blocked_reason' => null]);
+            $this->partialMock(EngineGate::class, fn ($mock) => $mock->shouldReceive('check')->andReturnUsing(function () use ($throw) {
+                FleetMetrics::count('get', '/');
+                throw $throw;
+            }));
+            $this->app->forgetInstance(AutomationRunner::class);
+            app(AutomationRunner::class)->advance($run);
+            $expected[] = [$outcome, 1];
+        }
+
+        // An uncertain action blocks the run before any read.
+        ShipAction::create(['agent_id' => $this->agent->id, 'ship_symbol' => 'LOCAL-3', 'key' => 'u', 'reset_id' => $this->agent->reset_id, 'command' => 'sell',
+            'state' => 'uncertain', 'origin' => 'automation', 'expires_at' => now()->addMinute(), 'arguments' => []]);
+        AutomationRun::whereKey($run)->update(['state' => 'running', 'next_action_at' => null]);
+        app(AutomationRunner::class)->advance($run);
+        $expected[] = ['blocked', 0];
+        FleetMetrics::flush();
+
+        $rows = DB::table('fleet_metrics')->where('kind', 'advance')->orderBy('id')->get();
+        $this->assertSame($expected, $rows->map(fn ($row) => [json_decode($row->data, true)['outcome'], json_decode($row->data, true)['requests']])->all());
+        $this->assertSame(['LOCAL-3'], $rows->pluck('ship')->unique()->values()->all());
+        $this->assertEquals(4, $rows->sum('value'));
+    }
+
+    public function test_refresh_buyer_reads_are_attributed_to_the_run_ship(): void
+    {
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $market = Ship::where('agent_id', $this->agent->id)->first()->snapshot['nav']['waypointSymbol'];
+        $refresh = new \ReflectionMethod(AutomationRunner::class, 'refreshBuyer');
+        FleetMetrics::reset();
+        $refresh->invoke(app(AutomationRunner::class), $this->agent, $market, 'LOCAL-3');
+        $refresh->invoke(app(AutomationRunner::class), $this->agent, $market);
+        FleetMetrics::flush();
+        $this->assertEquals(['LOCAL-3' => 1, 'shared' => 1], DB::table('fleet_metrics')->where('kind', 'requests')->pluck('value', 'ship')->all());
+    }
+
+    public function test_scorecard_reports_all_in_requests_categories_outcomes_and_max_useful_fleet(): void
+    {
+        $t0 = CarbonImmutable::now();
+        $episode = $this->metricEpisode('T1b', $t0);
+        foreach ([30, 60, 90, 120] as $minute) {
+            $this->metricLoad($episode, $t0->addMinutes($minute), 100);
+        }
+        $at = $t0->addHour()->toDateTimeString();
+        $row = fn (string $kind, string $ship, int $value, array $data) => ['kind' => $kind, 'ship' => $ship, 'value' => $value, 'data' => json_encode($data), 'created_at' => $at];
+        DB::table('fleet_metrics')->insert(array_merge([
+            $row('requests', 'LOCAL-T1b', 300, ['reads' => 200, 'writes' => 100, 'categories' => ['market' => 200, 'write:sell' => 100]]),
+            $row('requests', 'shared', 60, ['reads' => 60, 'writes' => 0, 'categories' => ['market' => 60]]),
+            $row('requests', 'director', 30, ['reads' => 30, 'writes' => 0, 'categories' => ['status' => 30]]),
+            $row('requests', 'LOCAL-OLD', 10, ['reads' => 10, 'writes' => 0]),
+            ['kind' => 'requests', 'ship' => 'shared', 'value' => 999, 'data' => null, 'created_at' => $t0->subHour()->toDateTimeString()],
+        ], array_map(fn ($outcome) => $row('advance', 'LOCAL-T1b', 5, ['outcome' => $outcome, 'requests' => 5]), ['wrote', 'wrote', 'waited', 'waited', 'waited', 'held']),
+            array_map(fn ($outcome) => $row('director_pass', 'LOCAL-T1b', 3, ['outcome' => $outcome, 'requests' => 3]), ['started', 'waiting', 'waiting'])));
+
+        $card = app(FleetMetrics::class)->scorecard(until: $t0->addHours(2), reset: 'R1');
+        $budget = $card['budget'];
+
+        // The window opens at the first sale (+30 min): 1.5 active hours, 3 steady loads; 300 + 60 + 30 + 10 requests all in.
+        $this->assertSame(400, $budget['requests']);
+        $this->assertSame(90, $budget['unattributed_requests']);
+        $this->assertEqualsWithDelta(1.5, $budget['active_ship_hours'], 0.0001);
+        $this->assertEqualsWithDelta(400 / 1.5, $budget['requests_per_ship_hour'], 0.001);
+        $this->assertEqualsWithDelta(400 / 3, $budget['requests_per_load'], 0.001);
+        $this->assertSame(['market' => 260, 'status' => 30, 'write:sell' => 100], $budget['by_category']);
+        $this->assertSame(['held' => ['count' => 1, 'requests' => 5], 'waited' => ['count' => 3, 'requests' => 15], 'wrote' => ['count' => 2, 'requests' => 10]], $budget['by_outcome']['advance']);
+        $this->assertSame(['started' => ['count' => 1, 'requests' => 3], 'waiting' => ['count' => 2, 'requests' => 6]], $budget['by_outcome']['director_pass']);
+        $this->assertSame(6, $budget['advances']);
+        $this->assertSame(4, $budget['advances_without_write']);
+        $this->assertEqualsWithDelta(0.9 * 7200 / (400 / 1.5), $budget['max_useful_fleet'], 0.001);
+
+        $this->artisan('fleet:scorecard', ['--reset' => 'R1', '--until' => $t0->addHours(2)->toIso8601String()])->expectsOutputToContain('max useful fleet 24.3 ships')->assertSuccessful();
     }
 }

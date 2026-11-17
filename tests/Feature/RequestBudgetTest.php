@@ -402,6 +402,23 @@ class RequestBudgetTest extends TestCase
         Http::assertSentCount(2);
     }
 
+    public function test_observe_counts_rate_limit_types_per_endpoint_category(): void
+    {
+        $budget = $this->budget();
+        $budget->observe($this->response(200, ['X-RateLimit-Type' => 'IP Address']), 'token-a', 'account-a', 'market');
+        $budget->observe($this->response(200, ['X-RateLimit-Type' => 'IP Address']), 'token-a', 'account-a', 'market');
+        $budget->observe($this->response(200, ['X-RateLimit-Type' => 'IP Address']), 'token-a', 'account-a', 'write:sell');
+        $budget->observe($this->response(200, []), 'token-a', 'account-a', 'agent');
+        $budget->observe($this->response(200, ['X-RateLimit-Type' => 'Account']), 'token-a', 'account-a', 'agent');
+        // An older caller without a category still works and adds nothing.
+        $budget->observe($this->response(200, ['X-RateLimit-Type' => 'IP Address']), 'token-a', 'account-a');
+
+        $usage = $budget->usage('token-a', 'account-a');
+        $this->assertSame(['market' => ['ip address' => 2], 'write:sell' => ['ip address' => 1], 'agent' => ['unspecified' => 1]], $usage['host']['rate_limit_types']);
+        $this->assertSame(['agent' => ['account' => 1]], $usage['account']['rate_limit_types']);
+        $this->assertSame(6, $usage['host']['responses']);
+    }
+
     private function response(int $status, array $headers): \Illuminate\Http\Client\Response
     {
         return new \Illuminate\Http\Client\Response(new Response($status, $headers, '{}'));

@@ -93,11 +93,12 @@ class SpaceTradersClient
             }
             $options['query'] = implode('&', $pairs);
         }
-        FleetMetrics::count($method, $path);
+        $category = FleetMetrics::category($method, $path);
+        FleetMetrics::count($method, $path, $category);
         $response = $request->send(strtoupper($method), $path, $options);
         $budget = app(RequestBudget::class);
         try {
-            $budget->observe($response, $token, $account);
+            $budget->observe($response, $token, $account, $category);
         } catch (\Throwable) {
             $budget->recordingFailed($response);
             if ($response->status() === 429 || $response->serverError()) {

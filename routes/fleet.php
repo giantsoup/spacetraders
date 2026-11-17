@@ -32,6 +32,14 @@ Artisan::command('fleet:scorecard {--since=} {--until=} {--reset=} {--json}', fu
             $flag['at_least_1_5x'] ? 'yes' : 'no', $flag['outside_t1_range'] ? 'yes' : 'no', $flag['same_direction_both_blocks'] ? 'yes' : 'no', $flag['enough_loads'] ? 'yes' : 'no',
             $flag['flagged'] ? 'FLAGGED' : 'not flagged'));
     }
+    $b = $card['budget'];
+    $this->line('Request budget (all ships, incl. shared/director, from '.$b['window_from'].'): '.number_format($b['requests']).' requests ('.number_format($b['unattributed_requests']).' unattributed) over '
+        .$n($b['active_ship_hours'], 2).' active ship-hours = '.$n($b['requests_per_ship_hour']).' per ship-hour, '.$n($b['requests_per_load']).' per load; max useful fleet '.$n($b['max_useful_fleet'], 1)
+        .' ships (0.9 x '.number_format(FleetMetrics::HOURLY_BUDGET).' / rate); '.$b['advances_without_write'].' of '.$b['advances'].' advances sent no write');
+    $this->table(['Category', 'Requests', 'Share'], array_map(fn ($k, $v) => [$k, $v, $b['requests'] > 0 ? number_format(100 * $v / $b['requests'], 1).'%' : '-'], array_keys($b['by_category']), $b['by_category']));
+    foreach ($b['by_outcome'] as $kind => $outcomes) {
+        $this->table([$kind.' outcome', 'Count', 'Requests'], array_map(fn ($k, $v) => [$k, $v['count'], $v['requests']], array_keys($outcomes), $outcomes));
+    }
     $s = $card['scheduler'];
     $this->line('Scheduler: '.$s['passes'].' passes, median dispatch lag '.$n($s['median_dispatch_lag'], 2).' s, median director '.$n($s['median_director'], 2)
         .' s, median arms '.$n($s['median_arms'], 2).' s, max queue depth '.($s['max_queue_depth'] ?? '-').', shared requests '.$s['shared_requests']);
