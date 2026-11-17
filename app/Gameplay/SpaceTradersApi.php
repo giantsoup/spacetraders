@@ -176,6 +176,39 @@ class SpaceTradersApi
         return ['reset_id' => $body['resetDate'], 'next_reset' => $body['serverResets']['next'] ?? null];
     }
 
+    /** Anonymous server status with validated leaderboards, for leaderboard history. */
+    public function publicStatus(): array
+    {
+        $body = $this->call('get', '/');
+        $this->validate($body, [
+            'resetDate' => 'required|string|max:80',
+            'leaderboards.mostCredits' => 'present|array',
+            'leaderboards.mostCredits.*.agentSymbol' => 'required|string|max:80',
+            'leaderboards.mostCredits.*.credits' => 'required|integer',
+            'leaderboards.mostSubmittedCharts' => 'present|array',
+            'leaderboards.mostSubmittedCharts.*.agentSymbol' => 'required|string|max:80',
+            'leaderboards.mostSubmittedCharts.*.chartCount' => 'required|integer',
+            'serverResets.next' => 'nullable|date',
+            'stats' => 'nullable|array',
+        ]);
+
+        return $body;
+    }
+
+    /** One anonymous page of the public agent directory: ['agents' => [...], 'total' => int]. */
+    public function publicAgentsPage(int $page, int $limit = 20): array
+    {
+        $body = $this->call('get', '/agents', ['page' => $page, 'limit' => $limit]);
+        $this->validate($body, [
+            'data' => 'present|array',
+            'data.*.symbol' => 'required|string|max:80',
+            'data.*.credits' => 'required|integer',
+            'meta.total' => 'required|integer|min:0',
+        ]);
+
+        return ['agents' => array_map(fn ($a) => Arr::only($a, ['symbol', 'credits', 'shipCount', 'headquarters', 'startingFaction']), $body['data']), 'total' => $body['meta']['total']];
+    }
+
     public function agent(Agent $agent): array
     {
         $data = $this->payload($this->call('get', '/my/agent', [], $agent));
