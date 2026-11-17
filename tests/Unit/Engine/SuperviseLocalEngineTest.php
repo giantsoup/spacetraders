@@ -258,12 +258,12 @@ class SuperviseLocalEngineTest extends TestCase
         $seconds = 0.0;
         $observed = false;
         $this->assertSame(0, $this->supervise(function () use (&$seconds, &$observed) {
-            $this->assertLessThan(45, $seconds, 'The supervisor must expose force stop without waiting in real time.');
+            $this->assertLessThan(155, $seconds, 'The supervisor must expose force stop without waiting in real time.');
             $engine = LocalEngine::find(1);
             if ($engine->state === 'faulted') {
                 $observed = true;
-                $this->assertStringContainsString('Force stop may interrupt', $engine->message);
-                $this->assertGreaterThan(40, $seconds);
+                $this->assertSame('Graceful shutdown exceeded 150 seconds. Force stop may interrupt an upstream request.', $engine->message);
+                $this->assertGreaterThan(150, $seconds);
                 foreach ($this->host->children as $child) {
                     $this->assertTrue($child->running);
                 }

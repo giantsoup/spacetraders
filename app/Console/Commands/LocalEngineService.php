@@ -96,7 +96,8 @@ class LocalEngineService extends Command
         }
 
         $engine = LocalEngine::find(1);
-        $deadline = now()->addSeconds(60);
+        $wait = LocalEngineManager::shutdownAllowanceSeconds() + 30;
+        $deadline = now()->addSeconds($wait);
         $manager->end();
         do {
             $status = $manager->status();
@@ -114,6 +115,6 @@ class LocalEngineService extends Command
 
         $this->line('Engine state: '.$status['state']);
         $this->line('Engine message: '.($status['message'] ?? ''));
-        throw new GameException('Engine did not finish ending within 60 seconds. Review Force stop on spacetraders.test.');
+        throw new GameException("Engine did not finish ending within {$wait} seconds. Review Force stop on spacetraders.test.");
     }
 }

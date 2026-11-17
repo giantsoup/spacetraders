@@ -204,18 +204,27 @@ class LocalEngineManagerTest extends TestCase
             $this->engine(['state' => $state, 'stop_requested_at' => $seconds === null ? null : now()->subSeconds($seconds)]);
         }
         $this->expectException(GameException::class);
-        $this->expectExceptionMessage('Force stop is available only after the 40-second graceful shutdown allowance.');
+        $this->expectExceptionMessage('Force stop is available only after the 150-second graceful shutdown allowance.');
         $this->manager->forceStop();
     }
 
     public static function forceStopRefusals(): array
     {
-        return ['missing' => [null, null], 'not faulted' => ['stopping', 50], 'no request' => ['faulted', null], 'too soon' => ['faulted', 39]];
+        return ['missing' => [null, null], 'not faulted' => ['stopping', 160], 'no request' => ['faulted', null], 'too soon' => ['faulted', 149], 'old 40-second allowance' => ['faulted', 40]];
     }
 
-    public function test_force_stop_closes_admission_before_delegating_at_the_40_second_boundary(): void
+    public function test_force_stop_allowance_follows_the_configured_shutdown_seconds(): void
     {
-        $engine = $this->engine(['state' => 'faulted', 'stop_requested_at' => now()->subSeconds(40)]);
+        config(['gameplay.engine_shutdown_seconds' => 60]);
+        $this->engine(['state' => 'faulted', 'stop_requested_at' => now()->subSeconds(59)]);
+        $this->expectException(GameException::class);
+        $this->expectExceptionMessage('Force stop is available only after the 60-second graceful shutdown allowance.');
+        $this->manager->forceStop();
+    }
+
+    public function test_force_stop_closes_admission_before_delegating_at_the_150_second_boundary(): void
+    {
+        $engine = $this->engine(['state' => 'faulted', 'stop_requested_at' => now()->subSeconds(150)]);
         $this->host->shouldReceive('forceStop')->once()->with(Mockery::on(function ($snapshot) use ($engine) {
             $this->assertSame($engine->session_id, $snapshot->session_id);
             $this->assertFalse($engine->fresh()->gate_open);

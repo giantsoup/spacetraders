@@ -8,6 +8,7 @@ use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\Engine\EngineLease;
 use App\Gameplay\EngineGate;
 use App\Gameplay\HostLock;
+use App\Gameplay\LocalEngineManager;
 use App\Models\AutomationRun;
 use App\Models\LocalEngine;
 use App\Models\ShipAction;
@@ -57,6 +58,7 @@ class SuperviseLocalEngine extends Command
                 $last = $this->wallTime();
                 $lastMonotonic = hrtime(true);
                 $shutdown = null;
+                $allowance = LocalEngineManager::shutdownAllowanceSeconds();
                 $signalled = false;
                 while (true) {
                     $wall = $this->wallTime();
@@ -99,8 +101,8 @@ class SuperviseLocalEngine extends Command
                             $engine->update(['state' => $engine->state === 'faulted' ? 'faulted' : 'off', 'gate_open' => false, 'message' => 'Owned processes exited. Any uncertain action still requires reconciliation.']);
                             break;
                         }
-                        if ($this->wallTime() - $shutdown > 40) {
-                            $engine->update(['state' => 'faulted', 'gate_open' => false, 'message' => 'Graceful shutdown exceeded 40 seconds. Force stop may interrupt an upstream request.']);
+                        if ($this->wallTime() - $shutdown > $allowance) {
+                            $engine->update(['state' => 'faulted', 'gate_open' => false, 'message' => "Graceful shutdown exceeded {$allowance} seconds. Force stop may interrupt an upstream request."]);
                         }
                     }
                     $this->waitForNextTick();

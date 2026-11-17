@@ -218,7 +218,7 @@ try {
     $force = LocalEngine::findOrFail(1);
     $resume = suspendOwned($force);
     $manager->end();
-    LocalEngine::whereKey(1)->update(['state' => 'faulted', 'stop_requested_at' => now()->subSeconds(41)]);
+    LocalEngine::whereKey(1)->update(['state' => 'faulted', 'stop_requested_at' => now()->subSeconds(LocalEngineManager::shutdownAllowanceSeconds() + 1)]);
     $manager->forceStop();
     $resume(true);
     $resume = null;
@@ -242,7 +242,7 @@ try {
         } catch (Throwable $error) {
             $cleanupErrors[] = $error->getMessage();
             try {
-                LocalEngine::whereKey(1)->update(['state' => 'faulted', 'stop_requested_at' => now()->subSeconds(41)]);
+                LocalEngine::whereKey(1)->update(['state' => 'faulted', 'stop_requested_at' => now()->subSeconds(LocalEngineManager::shutdownAllowanceSeconds() + 1)]);
                 $manager->forceStop();
             } catch (Throwable $stopError) {
                 $cleanupErrors[] = $stopError->getMessage();

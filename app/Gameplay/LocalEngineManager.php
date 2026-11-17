@@ -113,11 +113,18 @@ class LocalEngineManager
         return $this->status();
     }
 
+    /** Seconds the supervisor allows owned children to exit after End before faulting and enabling force stop. */
+    public static function shutdownAllowanceSeconds(): int
+    {
+        return max(1, (int) config('gameplay.engine_shutdown_seconds', 150));
+    }
+
     public function forceStop(): array
     {
         $engine = LocalEngine::find(1);
-        if (! $engine || $engine->state !== 'faulted' || ! $engine->stop_requested_at || $engine->stop_requested_at->gt(now()->subSeconds(40))) {
-            throw new GameException('Force stop is available only after the 40-second graceful shutdown allowance.');
+        $allowance = self::shutdownAllowanceSeconds();
+        if (! $engine || $engine->state !== 'faulted' || ! $engine->stop_requested_at || $engine->stop_requested_at->gt(now()->subSeconds($allowance))) {
+            throw new GameException("Force stop is available only after the {$allowance}-second graceful shutdown allowance.");
         }
         $this->gate->close('faulted', 'Force stop requested. Interrupted writes require reconciliation.');
         $this->host()->forceStop($engine);

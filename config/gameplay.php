@@ -8,6 +8,9 @@ return [
     'investigation_requests' => 40,
     'investigation_seconds' => 45,
     'scheduling_allowance_seconds' => 120,
+    // How long the supervisor waits for owned children to exit after End before it faults and
+    // force stop becomes available. The CLI End waits this long plus 30 seconds.
+    'engine_shutdown_seconds' => max(1, (int) env('SPACETRADERS_ENGINE_SHUTDOWN_SECONDS', 150)),
     'fixture_path' => env('SPACETRADERS_FIXTURE_PATH'),
     'enabled' => env('SPACETRADERS_AUTOMATION_ENABLED', false),
     'lock_path' => env('SPACETRADERS_LOCK_PATH', storage_path('framework/game-locks')),

@@ -138,10 +138,27 @@ class LocalEngineServiceCommandTest extends TestCase
         $this->artisan('spacetraders:engine-service', ['operation' => 'end'])
             ->expectsOutput('Engine state: '.$state)
             ->expectsOutput('Engine message: Shutdown incomplete.')
-            ->expectsOutputToContain('Force stop on spacetraders.test')
+            ->expectsOutput('Engine did not finish ending within 180 seconds. Review Force stop on spacetraders.test.')
             ->assertFailed();
 
-        Sleep::assertSleptTimes(120);
+        Sleep::assertSleptTimes(360);
+    }
+
+    public function test_end_waits_thirty_seconds_past_the_configured_shutdown_allowance(): void
+    {
+        config(['gameplay.engine_shutdown_seconds' => 20]);
+        LocalEngine::create(['id' => 1, 'state' => 'running', 'processes' => []]);
+        $this->manager->shouldReceive('status')->andReturn(
+            ['state' => 'running'], ['state' => 'faulted', 'message' => 'Graceful shutdown exceeded 20 seconds.'],
+        );
+        $this->manager->shouldReceive('end')->once()->andReturn(['state' => 'stopping']);
+        $this->manager->shouldReceive('alive')->andReturn(true);
+
+        $this->artisan('spacetraders:engine-service', ['operation' => 'end'])
+            ->expectsOutputToContain('within 50 seconds')
+            ->assertFailed();
+
+        Sleep::assertSleptTimes(100);
     }
 
     public static function endTimeouts(): array
