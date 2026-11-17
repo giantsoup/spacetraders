@@ -1,0 +1,1135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet brief wireframes</title>
+<style>
+:root {
+  --space: #070d17; --canvas: #060b14; --panel: #0d1524; --inset: #111b2c; --control: #162337;
+  --ink: #e8eef6; --muted: #97a8bc; --caption: #6f8197; --accent: #a6f3d0; --on-accent: #0c271d;
+  --cargo: #b8b1ff; --attn: #f7dc91; --fault: #ffb4bf; --sep: rgba(178,200,230,.11); --line: #34455d;
+  --note: #ff9e5e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--canvas); color: var(--ink); font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.doc { max-width: 1480px; margin: 0 auto; padding: 32px 24px 96px; }
+.doc > header h1 { font-size: clamp(28px, 4vw, 40px); margin: 4px 0 8px; line-height: 1.2; }
+.eyebrow { color: var(--accent); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; }
+.lede { color: var(--muted); max-width: 820px; }
+h2.sec { font-size: 24px; margin: 56px 0 6px; padding-top: 24px; border-top: 1px solid var(--line); }
+h3.sub { font-size: 18px; margin: 28px 0 6px; }
+.prose { max-width: 860px; color: var(--ink); }
+.prose p, .prose li { color: #cdd8e6; }
+.prose li + li { margin-top: 4px; }
+code { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--inset); padding: 1px 5px; border-radius: 4px; }
+.toolbar { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; padding: 10px 0; background: var(--canvas); border-bottom: 1px solid var(--line); }
+.toolbar a { color: var(--accent); font-size: 14px; }
+.toolbar label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; color: var(--muted); min-height: 44px; margin-left: auto; }
+table.grid { width: 100%; border-collapse: collapse; font-size: 14px; margin: 12px 0; }
+table.grid th, table.grid td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+table.grid th { color: var(--muted); font-weight: 600; font-size: 13px; }
+.tablewrap { overflow-x: auto; }
+.tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; border: 1px solid; }
+.tag.have { color: var(--accent); border-color: #4f8f75; }
+.tag.part { color: var(--attn); border-color: #8f7d4f; }
+.tag.need { color: var(--fault); border-color: #8f4f5a; }
+.tag.idea { color: var(--cargo); border-color: #6b66a8; }
+.callout { border-left: 3px solid var(--note); padding: 8px 14px; background: #1a130d; color: #f3d8c4; font-size: 14px; max-width: 860px; margin: 16px 0; }
+
+/* Board of device frames */
+.board { display: flex; flex-wrap: wrap; gap: 40px 32px; align-items: flex-start; margin-top: 20px; }
+.frame-wrap { display: grid; gap: 10px; }
+.frame-wrap > figcaption { max-width: 402px; font-size: 14px; color: var(--muted); }
+.frame-wrap > figcaption b { color: var(--ink); }
+figure { margin: 0; }
+
+/* iPhone 17 Pro: 402 × 874 CSS px; Dynamic Island top and 34 bottom safe areas; read env(safe-area-inset-*) on device */
+.phone { position: relative; width: 402px; height: 874px; border-radius: 54px; background: var(--space); outline: 10px solid #1c2433; overflow: hidden; display: flex; flex-direction: column; }
+.full .phone { height: auto; }
+.statusbar { flex: none; height: 62px; display: flex; align-items: center; justify-content: space-between; padding: 14px 34px 0; font-size: 16px; font-weight: 600; }
+.island { width: 124px; height: 36px; background: #000; border-radius: 20px; }
+.scroll { flex: 1; overflow-y: auto; position: relative; }
+.full .scroll { overflow: visible; }
+.homebar { position: absolute; bottom: 8px; left: 50%; width: 140px; height: 5px; margin-left: -70px; border-radius: 3px; background: #e8eef6; opacity: .8; z-index: 5; }
+.fold { position: absolute; left: -40px; right: -40px; top: 874px; border-top: 2px dashed var(--note); display: none; z-index: 6; }
+.fold span { position: absolute; right: 44px; top: -24px; font-size: 11px; color: var(--note); background: var(--canvas); padding: 0 6px; }
+.full .fold { display: block; }
+
+/* App chrome inside frames, using the app's shared tokens */
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 16px; min-height: 52px; }
+.brand { color: var(--accent); font-weight: 800; font-size: 13px; letter-spacing: .08em; }
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 10px 16px; border-radius: 12px; font: 650 16px/1.3 inherit; border: 2px solid transparent; }
+.btn.sm { min-height: 44px; padding: 8px 12px; font-size: 15px; }
+.btn.secondary { background: var(--control); border-color: #526881; color: #f0f5ff; }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn.danger-quiet { background: transparent; border-color: #8f4f5a; color: var(--fault); }
+.btn.block { width: 100%; }
+.content { padding: 4px 16px 24px; }
+.kicker { color: var(--muted); font-size: 13px; }
+.kicker { margin: 0 4px 8px; }
+.bluf { font-size: 22px; line-height: 1.25; font-weight: 750; margin: 18px 4px 6px; letter-spacing: -.01em; }
+.bluf-sub { margin-left: 4px; margin-right: 4px; }
+.bluf-sub { font-size: 15px; color: #c9d5e3; margin: 0 0 16px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 700; border: 1px solid; }
+.pill.attn { color: var(--attn); border-color: #8f7d4f; background: #2a2414; }
+.pill.ok { color: var(--accent); border-color: #4f8f75; background: #10271f; }
+.pill.bad { color: var(--fault); border-color: #8f4f5a; background: #2b141a; }
+.group { background: var(--panel); border-radius: 14px; overflow: hidden; }
+.group + .group { margin-top: 12px; }
+.row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; min-height: 48px; }
+.row + .row { border-top: 1px solid var(--sep); }
+.row .grow { flex: 1; min-width: 0; }
+.row .chev { color: var(--caption); font-size: 20px; line-height: 1; }
+.row .t { font-size: 16px; }
+.row .s { font-size: 14px; color: var(--muted); }
+.num { font-variant-numeric: tabular-nums; }
+.pos { color: var(--accent); }
+.negv { color: var(--fault); }
+.credits { padding: 16px; }
+.credits .label { font-size: 14px; color: var(--muted); }
+.credits .big { font-size: 44px; line-height: 1.05; font-weight: 750; letter-spacing: -.02em; }
+.credits .delta { font-size: 15px; color: var(--muted); margin-top: 4px; }
+.kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--sep); }
+.kpis > div { padding: 12px 14px; min-width: 0; }
+.kpis > div + div { border-left: 1px solid var(--sep); }
+.kpis .k { font-size: 13px; color: var(--muted); }
+.kpis .v { font-size: 22px; font-weight: 700; line-height: 1.2; }
+.kpis .d { font-size: 13px; color: var(--muted); }
+.sechead { display: flex; align-items: baseline; justify-content: space-between; margin: 24px 4px 8px; }
+.sechead h4 { margin: 0; font-size: 20px; font-weight: 700; }
+.sechead a { color: var(--accent); font-size: 15px; min-height: 44px; display: inline-flex; align-items: center; }
+.card { background: var(--panel); border-radius: 14px; padding: 14px 16px 16px; border-left: 4px solid var(--line); }
+.card + .card { margin-top: 12px; }
+.card.block { border-left-color: var(--fault); }
+.card.decide { border-left-color: var(--attn); }
+.card.watch { border-left-color: #6f8197; }
+.card .sev { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.card.block .sev { color: var(--fault); }
+.card.decide .sev { color: var(--attn); }
+.card.watch .sev { color: var(--muted); }
+.card h5 { margin: 2px 0 4px; font-size: 17px; line-height: 1.3; }
+.card p { margin: 0 0 10px; font-size: 15px; color: #c9d5e3; }
+.card .facts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 14px; color: var(--muted); margin-bottom: 12px; }
+.card .facts b { color: var(--ink); font-weight: 600; }
+.card .acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.card .when { font-size: 13px; color: var(--caption); }
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.dot.ok { background: var(--accent); }
+.dot.attn { background: var(--attn); }
+.dot.bad { background: var(--fault); }
+.dot.idle { background: #526881; }
+.statusword { font-size: 13px; font-weight: 700; }
+.bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px; margin: 4px 0 10px; }
+.bar i { display: block; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 14px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.phase { display: flex; gap: 6px; align-items: center; font-size: 14px; flex-wrap: wrap; }
+.phase .done { color: var(--muted); }
+.phase .now { color: var(--accent); font-weight: 700; }
+.phase .next { color: var(--muted); }
+.spark { width: 100%; height: 56px; display: block; }
+.log .row { align-items: flex-start; }
+.log time { font-size: 13px; color: var(--caption); white-space: nowrap; padding-top: 2px; }
+.footer-meta { font-size: 13px; color: var(--caption); text-align: center; margin: 20px 0 8px; }
+.dock { position: sticky; bottom: 0; padding: 12px 16px 42px; background: linear-gradient(to top, var(--space) 70%, transparent); z-index: 4; }
+.full .dock { position: absolute; top: calc(874px - 62px - 98px); bottom: auto; left: 0; right: 0; }
+.mark { outline: 2px dashed var(--note); outline-offset: 2px; position: relative; }
+.flag { position: absolute; z-index: 7; background: var(--note); color: #1d0f04; font-size: 11px; font-weight: 800; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+.need-note { font-size: 11px; color: var(--note); font-weight: 700; }
+
+/* Sheet */
+.sheet-backdrop { position: absolute; inset: 0; background: #05090fcc; z-index: 8; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; top: 70px; background: var(--panel); border-radius: 26px 26px 0 0; z-index: 9; display: flex; flex-direction: column; }
+.full .sheet { position: relative; top: 0; }
+.sheet .grabber { width: 36px; height: 5px; border-radius: 3px; background: #526881; margin: 8px auto 0; }
+.sheet header { display: flex; align-items: center; justify-content: space-between; padding: 6px 16px; min-height: 56px; }
+.sheet header h5 { margin: 0; font-size: 17px; }
+.sheet .body { flex: 1; overflow-y: auto; padding: 0 16px 16px; }
+.sheet .body h6 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin: 18px 4px 8px; }
+.sheet .acts { padding: 12px 16px 42px; display: grid; gap: 8px; border-top: 1px solid var(--sep); }
+.mini { width: 100%; border-collapse: collapse; font-size: 14px; }
+.mini th, .mini td { padding: 10px 12px; text-align: right; }
+.mini th:first-child, .mini td:first-child { text-align: left; }
+.mini th { color: var(--muted); font-weight: 600; font-size: 13px; }
+.mini tr + tr td { border-top: 1px solid var(--sep); }
+
+/* Segmented control and tab bar */
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--inset); border-radius: 12px; padding: 3px; gap: 3px; margin: 8px 0 14px; }
+.seg span { min-height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 9px; font-size: 15px; font-weight: 600; color: var(--muted); }
+.seg span.on { background: var(--control); color: var(--ink); }
+.strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; background: var(--panel); border-radius: 14px; }
+.strip > div { padding: 10px 10px; min-width: 0; }
+.strip > div + div { border-left: 1px solid var(--sep); }
+.strip .k { font-size: 12px; color: var(--muted); }
+.strip .v { font-size: 18px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+.tabbar { position: absolute; left: 0; right: 0; bottom: 0; height: 84px; background: #0b1220; border-top: 1px solid var(--sep); display: grid; grid-template-columns: repeat(4, 1fr); padding: 6px 8px 34px; z-index: 4; }
+.full .tabbar { position: absolute; top: calc(874px - 84px); bottom: auto; }
+.tabbar span { position: relative; display: grid; justify-items: center; align-content: center; font-size: 11px; color: var(--muted); gap: 2px; min-height: 44px; }
+.tabbar span.on { color: var(--accent); }
+.tabbar svg { width: 24px; height: 24px; }
+.badge { position: absolute; top: 0; left: calc(50% + 6px); font-style: normal; background: var(--fault); color: #2b141a; border-radius: 9px; font-size: 11px; font-weight: 800; padding: 0 6px; margin-left: 4px; }
+
+/* iPad Pro 13" (M4): 1376 × 1032 landscape, 1032 × 1376 portrait CSS px. Shown at 50%. */
+.tablet-holder { overflow: hidden; }
+.tablet { transform: scale(.5); transform-origin: 0 0; border-radius: 36px; outline: 14px solid #1c2433; background: var(--space); overflow: hidden; position: relative; }
+.tablet.land { width: 1376px; height: 1032px; }
+.tablet.port { width: 1032px; height: 1376px; }
+.holder-land { width: 688px; height: 516px; }
+.holder-port { width: 516px; height: 688px; }
+.tablet .t-status { height: 24px; display: flex; justify-content: space-between; padding: 4px 28px 0; font-size: 13px; font-weight: 600; }
+.tablet .topbar { padding: 8px 28px; }
+.tgrid { display: grid; gap: 20px; padding: 8px 28px 28px; }
+.tland { grid-template-columns: 400px minmax(0, 1fr); height: calc(1032px - 24px - 68px); }
+.tport { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.tcol { min-width: 0; overflow: hidden; }
+.optable { width: 100%; border-collapse: collapse; font-size: 15px; }
+.optable th, .optable td { padding: 11px 14px; text-align: left; white-space: nowrap; }
+.optable th { color: var(--muted); font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--sep); }
+.optable td.r, .optable th.r { text-align: right; }
+.optable tr + tr td { border-top: 1px solid var(--sep); }
+.chart { width: 100%; height: 150px; display: block; }
+
+
+/* Combined direction: slim credits header, page titles, back link, iPad tabs */
+.slim .row { padding: 10px 16px; }
+.slimv { font-size: 28px; font-weight: 750; line-height: 1.1; }
+.slimr { text-align: right; font-size: 14px; color: var(--muted); }
+.slimfoot { padding: 0 16px 10px; font-size: 13px; color: var(--caption); }
+.pagetitle { font-size: 24px; font-weight: 750; margin: 18px 4px 4px; }
+.pagesub { margin: 0 4px 12px; font-size: 15px; color: #c9d5e3; }
+.sechead h4.minor { font-size: 15px; font-weight: 700; color: var(--muted); }
+.note { color: var(--muted); font-size: 14px; margin: 12px 4px; }
+.backlink { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); font-size: 17px; }
+.row.selected { background: var(--control); box-shadow: inset 3px 0 0 var(--accent); }
+.tablet .topbar:has(.ipadtabs) { display: grid; grid-template-columns: 1fr auto 1fr; }
+.tablet .topbar:has(.ipadtabs) > .btn { justify-self: end; }
+.ipadtabs { display: inline-flex; gap: 4px; padding: 4px; background: var(--inset); border-radius: 14px; }
+.ipadtabs > span { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 18px; border-radius: 10px; font-size: 16px; font-weight: 600; color: var(--muted); }
+.ipadtabs > span.on { background: var(--control); color: var(--ink); }
+
+@media (max-width: 520px) {
+  .doc { padding: 20px 16px 64px; }
+  .phone, .frame-wrap > figcaption { width: 100%; max-width: 402px; }
+  .tablet-holder { display: none; }
+  .tablet-note { display: block !important; }
+}
+.tablet-note { display: none; color: var(--muted); font-size: 14px; }
+details.earlier { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--line); }
+details.earlier > summary { font-size: 24px; font-weight: 700; cursor: pointer; min-height: 44px; }
+.earlier-note { max-width: 860px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="doc">
+<header>
+  <p class="eyebrow">Campaign screen redesign · final design · 2026-11-17</p>
+  <h1>Fleet brief</h1>
+  <p class="lede">Turn the Campaign page from a full status readout into a short report you can read in ten seconds: how the plan is going, what the fleet is doing, and anything that has stopped and needs you, with the button to deal with it. Primary target: iPhone 17 Pro (402 × 874 pt). Secondary: iPad Pro 13" M4 (1376 × 1032 pt landscape, 1032 × 1376 portrait). Ship names, routes and numbers below are sample data.</p>
+  <nav class="toolbar" aria-label="Sections">
+    <a href="#principles">Principles</a>
+    <a href="#combined">Final design</a>
+    <a href="#ipad-final">iPad Pro 13"</a>
+    <a href="#catalogue">Attention catalogue</a>
+    <a href="#data">Data available today</a>
+    <a href="#questions">Questions</a>
+    <a href="#earlier">Earlier concepts</a>
+    <label><input type="checkbox" id="fullToggle"> Show phone screens at full length</label>
+  </nav>
+</header>
+
+<h2 class="sec" id="principles">What the screen is for</h2>
+<div class="prose">
+  <p><b>On naming.</b> An XO is a single ship's second in command. In a navy, the officer who briefs a fleet's commander is the <i>chief of staff</i>, and the commander of a fleet is an admiral (a commodore for a small squadron). The screen doesn't need the role-play to work, so this design calls it the <b>Fleet brief</b> and writes in plain language. Wording in character ("Admiral, two items need you") is an easy later choice; see the questions at the end.</p>
+  <p><b>Ranking, highest first</b>, from your request and the way short military briefs are written (the key number and bottom line up front, then only the exceptions). The credits box always sits directly under the page's title line (“Fleet brief · Day 2 of 7 · Earn phase”), in the same place on every screen, tab and state (other screens show a smaller credits bar there):</p>
+  <ol>
+    <li><b>Credits box.</b> Credits now (largest), change last hour and this wipe, then ships, routes running (trade and mining) and time to the reset in the same box.</li>
+    <li><b>Bottom line.</b> One sentence under the box: is the fleet earning, and does anything need you? The same words set the status pill and the screen's main button.</li>
+    <li><b>Needs you.</b> Only failures the plan can't handle itself: a route, a ship or the whole fleet has stopped. Each one says what happened, what it stopped, the evidence, and offers the button that resolves it. Buying ships and other plan choices are the plan's job; they show up in the log, never as questions. Warnings that need no action sit in one quiet "Also watching" row. Nothing needs you? The section says so in one line.</li>
+    <li><b>Operations.</b> Each running route with its ships and earnings rate. Probes and scouts are summed into one row.</li>
+    <li><b>Plan.</b> Phase (discover → earn → wind down) and pace toward the goal: one line on the phone, a credit chart on iPad.</li>
+    <li><b>Log.</b> The last three notable events, then a link to the full log.</li>
+  </ol>
+  <p>Today's detailed ship cards, decision rejections and load tables move to the Routes, Fleet and Log tabs and to the ship report that already exists on the flight deck. Nothing is lost; it just stops being the first thing you see.</p>
+  <p><b>Conventions:</b> one main button per screen, taken from the most urgent item; touch targets at least 44 × 44 pt; layout insets from <code>env(safe-area-inset-*)</code>, never hard-coded; severity shown by word, position and colour, never colour alone; tabular numbers; short money (4.81M) with the exact figure for screen readers and on tap; local times with the zone (PST) next to relative ones; an “Updated” time inside the credits box that becomes a stale notice if updates stop, so nothing ever sits between the title line and the credits; pause and resume always confirm in a sheet that says exactly what will happen; dark theme always; text wraps at large text sizes instead of being cut off.</p>
+</div>
+
+<!-- ============ COMBINED ============ -->
+<h2 class="sec" id="combined">Final design · Brief home with four tabs</h2>
+<div class="prose">
+  <p>The Brief is the home screen. It opens with the credits box, then one sentence on how things are going, anything that has stopped and needs you, and short summaries of routes, ships, the plan and the log. Four tabs along the bottom, <b>Brief · Routes · Fleet · Log</b>, lead to the detail: every row in a list opens a page for that route or ship.</p>
+  <ul>
+    <li><b>Credits always come first.</b> The Brief has the full credits box. Every other screen has a smaller credits bar in the same place, under the “Fleet brief · Day 2 of 7 · Earn phase” title line. Both end with the time of the last update. If updates stop, that line turns amber and reads “Not updated since 4:12 PM PST — reconnecting”.</li>
+    <li><b>Only failures ask for you.</b> A card appears under “Needs you” only when a ship, a route or the whole fleet has stopped. Its button opens a review sheet and is the screen's one main button. The Brief is arranged so the first card and its button show above the tab bar without scrolling. Buying ships and other plan choices go in the log; they never ask you anything.</li>
+    <li><b>Every row reads the same way.</b> Name on the first line, status in words on the second, one number on the right (earning rate, arrival time or cargo). Stopped items sort to the top. Group rows, such as Ended routes and Probes, show their count on the second line and open a list.</li>
+    <li><b>Moving around.</b> Tapping a row opens its page inside the same tab, and Back returns to the screen you came from (a route opened from a ship's page says “‹ GIANTSOUP-8”). “Routes ›”, “Fleet ›” and “Log ›” on the Brief switch to that tab. Tapping the tab you're on goes back to its list. On a route page, “All 41 ›” opens its full load list. The Brief tab's badge counts the items that need you.</li>
+    <li><b>Other Brief states.</b> Three screens from the earlier concepts still apply to the Brief, with the tab bar and the final credits box (“Updated” time inside it) and without concept A's pinned bottom button. The main button sits on the card: Review GIANTSOUP-9 in H1, Review balance on A4's Fleet paused card. The screens: the <a class="app-link" href="#a3">review sheet (A3)</a>, the <a class="app-link" href="#a2">all-clear Brief (A2)</a> and the <a class="app-link" href="#a4">fleet-stopped Brief (A4)</a>.</li>
+    <li><b>Route and ship pages are for reading.</b> Their only button is Review, on something that has stopped. The full ship report on the flight deck is one link away.</li>
+    <li><b>iPad.</b> The tabs sit at the top. Routes and Fleet show the list on the left and the selected route or ship on the right; tapping a route or ship on the Brief opens that tab with it selected.</li>
+  </ul>
+</div>
+<div class="callout">All of this is <span class="tag need">New</span> work: the tab bar, the four pages, the route and ship pages, their URLs, the iPad split view and the queries behind them. <a class="app-link" href="#data">Data available today</a> lists what already exists.</div>
+
+<div class="board">
+  <!-- H1 Brief -->
+  <figure class="frame-wrap">
+    <div class="phone">
+      <div class="statusbar"><span>4:14</span><span class="island"></span><span>100%</span></div>
+      <div class="scroll">
+        <div class="topbar"><span class="brand">ST // AGENT COMMAND</span><span class="btn sm secondary">Menu</span></div>
+        <div class="content">
+          <p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p>
+          <div class="group">
+            <div class="credits">
+              <div class="label">Credits</div>
+              <div class="big num" aria-label="4,812,330 credits">4.81M</div>
+              <div class="delta num"><span class="pos">▲ 312k</span> last hour · <span class="pos">+4.64M</span> this wipe</div>
+              <div class="num" style="font-size:13px;color:var(--caption);margin-top:2px">Updated 4:14:02 PM PST</div>
+            </div>
+            <div class="kpis">
+              <div><div class="k">Ships</div><div class="v num">14</div><div class="d">1 paused · 1 idle</div></div>
+              <div><div class="k">Routes</div><div class="v num">3</div><div class="d">2 trade · 1 mine</div></div>
+              <div><div class="k">Reset</div><div class="v num">5d 12h</div><div class="d">Sun 5 AM PST</div></div>
+            </div>
+          </div>
+          <p class="bluf">Earning 312k an hour. 1 item needs you.</p>
+          <p class="bluf-sub"><span class="pill attn">⚠ Needs you</span>&nbsp; 12 of 14 ships working.</p>
+          <div class="sechead"><h4>Needs you <span class="num">(1)</span></h4></div>
+          <article class="card block">
+            <div class="sev">⛔ Ship stopped</div>
+            <h5>GIANTSOUP-9 paused after two losing loads</h5>
+            <div class="facts num"><span>Lost <b class="negv">−18,240</b></span><span>Fabrics C44 → D47</span><span class="when">22 min ago</span></div>
+            <div class="acts"><span class="btn sm primary">Review GIANTSOUP-9</span></div>
+          </article>
+          <div class="group" style="margin-top:12px"><div class="row"><span aria-hidden="true" style="color:var(--muted)">◌</span><div class="grow"><div class="t">Also watching</div><div class="s">Command ship idle 27 min · Needs you at 45 min</div></div><span class="chev">›</span></div></div>
+
+          <div class="sechead"><h4>Operations</h4><a>Routes ›</a></div>
+          <div class="group">
+            <div class="row"><span class="dot bad" aria-hidden="true"></span><div class="grow"><div class="t">Fabrics · C44 → D47</div><div class="s"><span class="statusword negv">Paused</span> · GIANTSOUP-9</div></div><span class="chev">›</span></div>
+            <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">Ice water · A2 → D46</div><div class="s num">Running · 2 ships · last load +19,880</div></div><div class="num">188k/h</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">Fuel · C44 → G54</div><div class="s num">Running · 2 ships · last load +9,880</div></div><div class="num">102k/h</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">Iron ore · mining B7</div><div class="s num">Running · 2 drones · sells at A2</div></div><div class="num">22k/h</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot idle" aria-hidden="true"></span><div class="grow"><div class="t">Probes</div><div class="s">5 watching markets · 1 scouting</div></div><span class="chev">›</span></div>
+          </div>
+          <div class="sechead"><h4>Fleet</h4><a>Fleet ›</a></div>
+          <div class="group"><div style="padding:14px 16px">
+            <div class="bar" role="img" aria-label="14 ships: 4 trading, 2 mining, 6 probes, 1 idle, 1 paused"><i style="flex:4;background:var(--accent)"></i><i style="flex:2;background:var(--cargo)"></i><i style="flex:6;background:#526881"></i><i style="flex:1;background:var(--attn)"></i><i style="flex:1;background:var(--fault)"></i></div>
+            <div class="legend num"><span><i class="sw" style="background:var(--accent)"></i>4 trading</span><span><i class="sw" style="background:var(--cargo)"></i>2 mining</span><span><i class="sw" style="background:#526881"></i>6 probes</span><span><i class="sw" style="background:var(--attn)"></i>1 idle</span><span><i class="sw" style="background:var(--fault)"></i>1 paused</span></div>
+          </div></div>
+          <div class="sechead"><h4>Plan</h4></div>
+          <div class="group"><div class="row"><div class="grow"><div class="phase"><span class="done">✓ Discover</span><span class="next">→</span><span class="now">● Earn</span><span class="next">→ Wind down Sun 4 AM</span></div><div class="s">Credits behind plan pace by ≈310k</div></div></div></div>
+          <div class="sechead"><h4>Log</h4><a>Log ›</a></div>
+          <div class="group log">
+            <div class="row"><time>3:52 PM</time><div class="grow"><div class="t">GIANTSOUP-9 paused</div><div class="s">Second losing load on Fabrics C44 → D47</div></div></div>
+            <div class="row"><time>3:31 PM</time><div class="grow"><div class="t">Switched GIANTSOUP-11 to Fuel</div><div class="s">Fuel scored 1.3× better than Ice water</div></div></div>
+            <div class="row"><time>2:10 PM</time><div class="grow"><div class="t">Plan bought GIANTSOUP-14 <span class="need-note">not built yet</span></div><div class="s num">Mining drone · 41,200</div></div></div>
+          </div>
+          <p class="footer-meta num">Engine heartbeat 9 s ago</p>
+          <span class="btn danger-quiet block">Pause the whole fleet…</span>
+          <p class="need-note" style="text-align:center;margin:6px 0 0">New: today this pauses only the command ship; the extra ships keep running until each is paused on its own</p>
+          <div style="height:110px"></div>
+        </div>
+      </div>
+      <nav class="tabbar" aria-label="Fleet sections">
+        <span class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Brief<i class="badge" aria-label="1 item needs you">1</i></span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 17c6-1 4-9 10-10"/></svg>Routes</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 15l9-9 9 9M7 19h10"/></svg>Fleet</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="9"/></svg>Log</span>
+      </nav>
+      <div class="homebar"></div>
+      <div class="fold"><span>end of first screen (tab bar covers the last 84 pt; less in Safari)</span></div>
+    </div>
+    <figcaption><b>H1 · Brief (home).</b> The credits box, the one-sentence summary and the stopped ship with its Review button all fit on the first screen, above the tab bar. Review is the screen's main button. Route rows (stopped first) open the route page; “Also watching” opens the command ship's page; “Routes ›”, “Fleet ›” and “Log ›” switch tabs.</figcaption>
+  </figure>
+
+  <!-- H2 Routes tab -->
+  <figure class="frame-wrap">
+    <div class="phone">
+      <div class="statusbar"><span>4:14</span><span class="island"></span><span>100%</span></div>
+      <div class="scroll">
+        <div class="topbar"><span class="brand">ST // AGENT COMMAND</span><span class="btn sm secondary">Menu</span></div>
+        <div class="content">
+          <p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p>
+          <div class="group slim"><div class="row"><div class="grow"><div class="s">Credits</div><div class="num slimv" aria-label="4,812,330 credits">4.81M</div></div><div class="num slimr"><span class="pos">▲ 312k</span> last hour<br>14 ships · 3 routes</div></div><div class="slimfoot num">Updated 4:14:02 PM PST</div></div>
+          <h3 class="pagetitle">Routes</h3>
+          <div class="sechead"><h4 class="minor">Stopped · 1</h4></div>
+          <div class="group">
+            <div class="row"><span class="dot bad" aria-hidden="true"></span><div class="grow"><div class="t">Fabrics · C44 → D47</div><div class="s"><span class="negv statusword">Paused</span> · last two loads lost 18,240</div></div><span class="chev">›</span></div>
+          </div>
+          <div class="sechead"><h4 class="minor">Running · 3</h4></div>
+          <div class="group">
+            <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">Ice water · A2 → D46</div><div class="s num">Trade · 2 ships · net +612k</div></div><div class="num">188k/h</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">Fuel · C44 → G54</div><div class="s num">Trade · 2 ships · net +201k</div></div><div class="num">102k/h</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">Iron ore · mining B7</div><div class="s num">Mining · 2 drones · net +58k</div></div><div class="num">22k/h</div><span class="chev">›</span></div>
+          </div>
+          <div class="sechead"><h4 class="minor">Ended this wipe · 4</h4></div>
+          <div class="group">
+            <div class="row"><span class="dot idle" aria-hidden="true"></span><div class="grow"><div class="t">Ended routes</div><div class="s num">4 routes · net +5.90M</div></div><span class="chev">›</span></div>
+          </div>
+          <p class="note">Rate is what the route actually earned per hour over the last two hours, after fuel. Net is sales minus purchases and fuel on that route this wipe.</p>
+          <div style="height:110px"></div>
+        </div>
+      </div>
+      <nav class="tabbar" aria-label="Fleet sections">
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Brief<i class="badge" aria-label="1 item needs you">1</i></span>
+        <span class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 17c6-1 4-9 10-10"/></svg>Routes</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 15l9-9 9 9M7 19h10"/></svg>Fleet</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="9"/></svg>Log</span>
+      </nav>
+      <div class="homebar"></div>
+    </div>
+    <figcaption><b>H2 · Routes tab.</b> One row per route: stopped first, then running, then one row for routes that ended this wipe. Route totals don't add up to the +4.64M change in credits, on purpose: ship purchases and fuel for repositioning come out of credits but belong to no route.</figcaption>
+  </figure>
+
+  <!-- H3 Route detail -->
+  <figure class="frame-wrap">
+    <div class="phone">
+      <div class="statusbar"><span>4:14</span><span class="island"></span><span>100%</span></div>
+      <div class="scroll">
+        <div class="topbar"><span class="backlink">‹ Routes</span><span class="btn sm secondary">Menu</span></div>
+        <div class="content">
+          <p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p>
+          <div class="group slim"><div class="row"><div class="grow"><div class="s">Credits</div><div class="num slimv" aria-label="4,812,330 credits">4.81M</div></div><div class="num slimr"><span class="pos">▲ 312k</span> last hour<br>14 ships · 3 routes</div></div><div class="slimfoot num">Updated 4:14:02 PM PST</div></div>
+          <h3 class="pagetitle">Ice water</h3>
+          <p class="pagesub"><span class="pill ok">● Running</span>&nbsp; Buy at A2, sell at D46 · trade</p>
+          <div class="group">
+            <div class="kpis" style="border-top:0">
+              <div><div class="k">Rate</div><div class="v num">188k/h</div><div class="d">last 2 hours</div></div>
+              <div><div class="k">Net</div><div class="v num pos">+612k</div><div class="d">this wipe</div></div>
+              <div><div class="k">Loads</div><div class="v num">41</div><div class="d">avg +14.9k</div></div>
+            </div>
+          </div>
+          <div class="sechead"><h4 class="minor">Ships on this route · 2</h4></div>
+          <div class="group">
+            <div class="row"><div class="grow"><div class="t">GIANTSOUP-8</div><div class="s num">Flying to D46 · 40 / 40 ice water</div></div><div class="num">1 min</div><span class="chev">›</span></div>
+            <div class="row"><div class="grow"><div class="t">GIANTSOUP-10</div><div class="s num">Buying ice water at A2</div></div><div class="num">24/40</div><span class="chev">›</span></div>
+          </div>
+          <div class="sechead"><h4 class="minor">Prices now</h4></div>
+          <div class="group">
+            <div class="row"><div class="grow"><div class="t">Buy at A2</div><div class="s num">1 min ago</div></div><div class="num">412</div></div>
+            <div class="row"><div class="grow"><div class="t">Sell at D46</div><div class="s num">2 min ago · first seen at 980</div></div><div class="num">948</div></div>
+          </div>
+          <div class="sechead"><h4 class="minor">Last loads</h4><a>All 41 ›</a></div>
+          <div class="group log">
+            <div class="row"><time>4:07 PM</time><div class="grow"><div class="t">GIANTSOUP-10 · 40 units</div></div><div class="num pos">+19,880</div></div>
+            <div class="row"><time>4:01 PM</time><div class="grow"><div class="t">GIANTSOUP-8 · 40 units</div></div><div class="num pos">+21,340</div></div>
+            <div class="row"><time>3:54 PM</time><div class="grow"><div class="t">GIANTSOUP-10 · 40 units</div></div><div class="num pos">+20,460</div></div>
+          </div>
+          <div style="height:110px"></div>
+        </div>
+      </div>
+      <nav class="tabbar" aria-label="Fleet sections">
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Brief<i class="badge" aria-label="1 item needs you">1</i></span>
+        <span class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 17c6-1 4-9 10-10"/></svg>Routes</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 15l9-9 9 9M7 19h10"/></svg>Fleet</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="9"/></svg>Log</span>
+      </nav>
+      <div class="homebar"></div>
+    </div>
+    <figcaption><b>H3 · Route page.</b> Opened from a route row. Rate, net and number of loads; the ships on the route; the current buy and sell price per unit, how old each quote is, and the sell price when the plan first saw it; the latest loads. A running route has no buttons; a stopped one starts with the same Review card as the Brief. (Sample check: sell 948 − buy 412 = 536 a unit, × 40 = 21,440 before fuel, against GIANTSOUP-8's +21,340 at 4:01. Two ships on a 13-minute round trip at about 20k a load make about 188k an hour. The wipe average of +14.9k is lower because the first loads were small proof loads.)</figcaption>
+  </figure>
+
+  <!-- H4 Fleet tab -->
+  <figure class="frame-wrap">
+    <div class="phone">
+      <div class="statusbar"><span>4:14</span><span class="island"></span><span>100%</span></div>
+      <div class="scroll">
+        <div class="topbar"><span class="brand">ST // AGENT COMMAND</span><span class="btn sm secondary">Menu</span></div>
+        <div class="content">
+          <p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p>
+          <div class="group slim"><div class="row"><div class="grow"><div class="s">Credits</div><div class="num slimv" aria-label="4,812,330 credits">4.81M</div></div><div class="num slimr"><span class="pos">▲ 312k</span> last hour<br>14 ships · 3 routes</div></div><div class="slimfoot num">Updated 4:14:02 PM PST</div></div>
+          <h3 class="pagetitle">Fleet · 14 ships</h3>
+          <div class="sechead"><h4 class="minor">Stopped · 1</h4></div>
+          <div class="group">
+            <div class="row"><span class="dot bad" aria-hidden="true"></span><div class="grow"><div class="t">GIANTSOUP-9 · light hauler</div><div class="s"><span class="negv statusword">Paused</span> · docked at D47 · hold empty</div></div><span class="chev">›</span></div>
+          </div>
+          <div class="sechead"><h4 class="minor">Idle · 1</h4></div>
+          <div class="group">
+            <div class="row"><span class="dot attn" aria-hidden="true"></span><div class="grow"><div class="t">GIANTSOUP-1 · command frigate</div><div class="s">Idle 27 min · docked at A2</div></div><span class="chev">›</span></div>
+          </div>
+          <div class="sechead"><h4 class="minor">Trading · 4</h4></div>
+          <div class="group">
+            <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">GIANTSOUP-8 · light hauler</div><div class="s">Ice water · flying to D46</div></div><div class="num">1 min</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">GIANTSOUP-10 · light hauler</div><div class="s">Ice water · buying at A2</div></div><div class="num">24/40</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">GIANTSOUP-11 · light hauler</div><div class="s">Fuel · flying to G54</div></div><div class="num">6 min</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">GIANTSOUP-12 · light hauler</div><div class="s">Fuel · selling at G54</div></div><div class="num">40/40</div><span class="chev">›</span></div>
+          </div>
+          <div class="sechead"><h4 class="minor">Mining · 2</h4></div>
+          <div class="group">
+            <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">GIANTSOUP-13 · drone</div><div class="s">Iron ore · extracting at B7</div></div><div class="num">12/15</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">GIANTSOUP-14 · drone</div><div class="s">Iron ore · flying to A2 to sell</div></div><div class="num">9 min</div><span class="chev">›</span></div>
+          </div>
+          <div class="sechead"><h4 class="minor">Probes · 6</h4></div>
+          <div class="group">
+            <div class="row"><span class="dot idle" aria-hidden="true"></span><div class="grow"><div class="t">6 probes</div><div class="s">5 watching markets · 1 scouting</div></div><span class="chev">›</span></div>
+          </div>
+          <div style="height:110px"></div>
+        </div>
+      </div>
+      <nav class="tabbar" aria-label="Fleet sections">
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Brief<i class="badge" aria-label="1 item needs you">1</i></span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 17c6-1 4-9 10-10"/></svg>Routes</span>
+        <span class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 15l9-9 9 9M7 19h10"/></svg>Fleet</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="9"/></svg>Log</span>
+      </nav>
+      <div class="homebar"></div>
+    </div>
+    <figcaption><b>H4 · Fleet tab.</b> Ships grouped by what they're doing: stopped, idle, trading, mining, probes. Each row says the route and the step in words, with one number on the right (time to arrival or cargo). The six probes share one row, which opens their list. 1 + 1 + 4 + 2 + 6 = 14.</figcaption>
+  </figure>
+
+  <!-- H5 Ship detail -->
+  <figure class="frame-wrap">
+    <div class="phone">
+      <div class="statusbar"><span>4:14</span><span class="island"></span><span>100%</span></div>
+      <div class="scroll">
+        <div class="topbar"><span class="backlink">‹ Fleet</span><span class="btn sm secondary">Menu</span></div>
+        <div class="content">
+          <p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p>
+          <div class="group slim"><div class="row"><div class="grow"><div class="s">Credits</div><div class="num slimv" aria-label="4,812,330 credits">4.81M</div></div><div class="num slimr"><span class="pos">▲ 312k</span> last hour<br>14 ships · 3 routes</div></div><div class="slimfoot num">Updated 4:14:02 PM PST</div></div>
+          <h3 class="pagetitle">GIANTSOUP-8</h3>
+          <p class="pagesub"><span class="pill ok">● Trading</span>&nbsp; Light hauler</p>
+          <div class="group">
+            <div class="row"><div class="grow"><div class="t">Flying to D46</div><div class="s num">Arrives 4:15 PM PST</div></div><div class="num" style="font-size:22px;font-weight:700">1 min</div></div>
+            <div class="row"><div class="grow"><div class="t">Route</div><div class="s">Ice water · A2 → D46</div></div><span class="chev">›</span></div>
+            <div class="row"><div class="grow"><div class="t">Cargo</div><div class="s num">40 / 40 · ice water</div></div></div>
+            <div class="row"><div class="grow"><div class="t">Fuel</div><div class="s num">512 / 600</div></div></div>
+          </div>
+          <div class="sechead"><h4 class="minor">This wipe</h4></div>
+          <div class="group">
+            <div class="kpis" style="border-top:0">
+              <div><div class="k">Loads</div><div class="v num">22</div></div>
+              <div><div class="k">Net</div><div class="v num pos">+331k</div></div>
+              <div><div class="k">Last load</div><div class="v num pos">+21.3k</div></div>
+            </div>
+          </div>
+          <div class="sechead"><h4 class="minor">Recent</h4></div>
+          <div class="group log">
+            <div class="row"><time>4:07 PM</time><div class="grow"><div class="t">Bought 40 ice water at A2</div><div class="s num">Spent 16,480</div></div></div>
+            <div class="row"><time>4:01 PM</time><div class="grow"><div class="t">Sold 40 ice water at D46</div><div class="s num">+21,340 net</div></div></div>
+          </div>
+          <div class="group" style="margin-top:16px"><div class="row"><div class="grow"><div class="t" style="color:var(--accent)">Full ship report on the flight deck</div><div class="s">Fuel, cargo, crew, frame, reactor, engine, mounts, modules</div></div><span class="chev">›</span></div></div>
+          <div style="height:110px"></div>
+        </div>
+      </div>
+      <nav class="tabbar" aria-label="Fleet sections">
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Brief<i class="badge" aria-label="1 item needs you">1</i></span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 17c6-1 4-9 10-10"/></svg>Routes</span>
+        <span class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 15l9-9 9 9M7 19h10"/></svg>Fleet</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="9"/></svg>Log</span>
+      </nav>
+      <div class="homebar"></div>
+    </div>
+    <figcaption><b>H5 · Ship page.</b> Opened from a ship row. What it's doing now and when it arrives, its route, cargo and fuel, its totals this wipe and its last two actions. The route row opens the route page inside the Fleet tab, with Back reading “‹ GIANTSOUP-8”. The full flight-deck ship report is one link away (the dashboard already opens it at <code>/agents/{agent}?ship=…#report</code>). A stopped ship's page starts with the same Review card as the Brief. (Sample check: 40 × 412 = 16,480 bought at 4:07; the 4:01 sale netted +21,340.)</figcaption>
+  </figure>
+
+  <!-- H6 Log tab -->
+  <figure class="frame-wrap">
+    <div class="phone">
+      <div class="statusbar"><span>4:14</span><span class="island"></span><span>100%</span></div>
+      <div class="scroll">
+        <div class="topbar"><span class="brand">ST // AGENT COMMAND</span><span class="btn sm secondary">Menu</span></div>
+        <div class="content">
+          <p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p>
+          <div class="group slim"><div class="row"><div class="grow"><div class="s">Credits</div><div class="num slimv" aria-label="4,812,330 credits">4.81M</div></div><div class="num slimr"><span class="pos">▲ 312k</span> last hour<br>14 ships · 3 routes</div></div><div class="slimfoot num">Updated 4:14:02 PM PST</div></div>
+          <h3 class="pagetitle">Log</h3>
+          <div class="seg" role="tablist" style="grid-template-columns:repeat(4,1fr)"><span class="on">All</span><span>Problems</span><span>Routes</span><span>Plan</span></div>
+          <div class="sechead"><h4 class="minor">Today · Mon Nov 16</h4></div>
+          <div class="group log">
+            <div class="row"><time>3:52 PM</time><div class="grow"><div class="t"><span class="negv">⛔</span> GIANTSOUP-9 paused</div><div class="s">Second losing load on Fabrics C44 → D47</div></div><span class="chev">›</span></div>
+            <div class="row"><time>3:31 PM</time><div class="grow"><div class="t">Switched GIANTSOUP-11 to Fuel</div><div class="s">Fuel scored 1.3× better than Ice water</div></div><span class="chev">›</span></div>
+            <div class="row"><time>3:19 PM</time><div class="grow"><div class="t">Losing load on Fabrics</div><div class="s num">GIANTSOUP-9 · −9,110</div></div><span class="chev">›</span></div>
+            <div class="row"><time>2:10 PM</time><div class="grow"><div class="t">Plan bought GIANTSOUP-14 <span class="need-note">not built yet</span></div><div class="s num">Mining drone · 41,200</div></div><span class="chev">›</span></div>
+            <div class="row"><time>1:05 PM</time><div class="grow"><div class="t"><span class="pos">✓</span> Command ship stall cleared</div><div class="s">GIANTSOUP-1 started a run after 26 min</div></div><span class="chev">›</span></div>
+          </div>
+          <div class="sechead"><h4 class="minor">Yesterday · Sun Nov 15</h4></div>
+          <div class="group log">
+            <div class="row"><time>5:01 AM</time><div class="grow"><div class="t">New wipe: registered GIANTSOUP</div><div class="s num">175,000 starting credits</div></div></div>
+          </div>
+          <div style="height:110px"></div>
+        </div>
+      </div>
+      <nav class="tabbar" aria-label="Fleet sections">
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Brief<i class="badge" aria-label="1 item needs you">1</i></span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 17c6-1 4-9 10-10"/></svg>Routes</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 15l9-9 9 9M7 19h10"/></svg>Fleet</span>
+        <span class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="9"/></svg>Log</span>
+      </nav>
+      <div class="homebar"></div>
+    </div>
+    <figcaption><b>H6 · Log tab.</b> Newest first, grouped by day, with filters for Problems, Routes and Plan. Problems are marked with a word and an icon, not just colour. Rows about a ship or route open it; other rows, like the new-wipe entry, have no chevron. Ships the plan buys (not built yet) appear here and in the Brief's log preview, never under Needs you.</figcaption>
+  </figure>
+</div>
+
+<h3 class="sub" id="ipad-final">iPad Pro 13"</h3>
+<div class="prose"><p>Shown at 50%. On iPad the four tabs sit centred at the top, as in iPadOS apps; Menu keeps the account links. The Brief uses two columns. Routes and Fleet become split views: the list on the left and the selected route or ship on the right, so opening one never hides the list.</p></div>
+<p class="tablet-note">The iPad frames are hidden on narrow screens. Open this page on a wider screen to see them.</p>
+<div class="board">
+  <figure class="frame-wrap">
+    <div class="tablet-holder holder-land">
+      <div class="tablet land">
+        <div class="t-status"><span>4:14 Mon Nov 16</span><span>100%</span></div>
+        <div class="topbar"><span class="brand">ST // AGENT COMMAND</span><span class="ipadtabs"><span class="on">Brief <i class="badge" style="position:static" aria-label="1 item needs you">1</i></span><span>Routes</span><span>Fleet</span><span>Log</span></span><span class="btn sm secondary">Menu</span></div>
+        <div class="tgrid tland">
+          <div class="tcol">
+            <p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p>
+            <div class="group">
+              <div class="credits"><div class="label">Credits</div><div class="big num" aria-label="4,812,330 credits">4.81M</div><div class="delta num"><span class="pos">▲ 312k</span> last hour · <span class="pos">+4.64M</span> this wipe</div><div class="num" style="font-size:13px;color:var(--caption);margin-top:2px">Updated 4:14:02 PM PST</div></div>
+              <div class="kpis"><div><div class="k">Ships</div><div class="v num">14</div><div class="d">1 paused · 1 idle</div></div><div><div class="k">Routes</div><div class="v num">3</div><div class="d">2 trade · 1 mine</div></div><div><div class="k">Reset</div><div class="v num">5d 12h</div><div class="d">Sun 5 AM PST</div></div></div>
+            </div>
+            <p class="bluf">Earning 312k an hour. 1 item needs you.</p>
+            <p class="bluf-sub"><span class="pill attn">⚠ Needs you</span>&nbsp; 12 of 14 ships working.</p>
+            <div class="sechead"><h4>Needs you (1)</h4></div>
+            <article class="card block"><div class="sev">⛔ Ship stopped</div><h5>GIANTSOUP-9 paused after two losing loads</h5><div class="facts num"><span>Lost <b class="negv">−18,240</b></span><span class="when">22 min ago</span></div><div class="acts"><span class="btn sm primary">Review GIANTSOUP-9</span></div></article>
+            <div class="group" style="margin-top:12px"><div class="row"><span aria-hidden="true" style="color:var(--muted)">◌</span><div class="grow"><div class="t">Also watching</div><div class="s">Command ship idle 27 min · Needs you at 45 min</div></div><span class="chev">›</span></div></div>
+          </div>
+          <div class="tcol">
+            <div class="group" style="padding:14px 18px">
+              <div style="display:flex;justify-content:space-between;align-items:baseline"><h4 style="margin:0;font-size:18px">Credits this wipe</h4><span class="legend"><span><i class="sw" style="background:var(--accent)"></i>Actual</span><span><i class="sw" style="background:#97a8bc"></i>Plan pace</span><span class="num">Behind by ≈310k</span></span></div>
+              <svg class="chart" viewBox="0 0 900 150" preserveAspectRatio="none" role="img" aria-label="Credits over the wipe"><g stroke="rgba(178,200,230,.11)"><line x1="0" y1="30" x2="900" y2="30"/><line x1="0" y1="75" x2="900" y2="75"/><line x1="0" y1="120" x2="900" y2="120"/></g><polyline fill="none" stroke="#a6f3d0" stroke-width="2.5" points="0,146 100,144 200,140 300,133 400,124 500,112 600,96 700,78 800,58 900,36"/><polyline fill="none" stroke="#97a8bc" stroke-width="2" stroke-dasharray="6 6" points="0,146 200,136 400,116 600,84 800,46 900,24"/></svg>
+            </div>
+            <div class="sechead"><h4>Operations</h4><a>Routes ›</a></div>
+            <div class="group">
+              <div class="row"><span class="dot bad" aria-hidden="true"></span><div class="grow"><div class="t">Fabrics · C44 → D47</div><div class="s"><span class="negv statusword">Paused</span> · GIANTSOUP-9 · −18,240</div></div><span class="chev">›</span></div>
+              <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">Ice water · A2 → D46</div><div class="s num">Running · 2 ships · last load +19,880 · net +612k</div></div><div class="num">188k/h</div><span class="chev">›</span></div>
+              <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">Fuel · C44 → G54</div><div class="s num">Running · 2 ships · last load +9,880 · net +201k</div></div><div class="num">102k/h</div><span class="chev">›</span></div>
+              <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">Iron ore · mining B7</div><div class="s num">Running · 2 drones · net +58k</div></div><div class="num">22k/h</div><span class="chev">›</span></div>
+              <div class="row"><span class="dot idle" aria-hidden="true"></span><div class="grow"><div class="t">Probes</div><div class="s">5 watching markets · 1 scouting</div></div><span class="chev">›</span></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px">
+              <div><div class="sechead" style="margin-top:0"><h4>Fleet</h4><a>Fleet ›</a></div><div class="group" style="padding:14px 16px"><div class="bar" role="img" aria-label="14 ships: 4 trading, 2 mining, 6 probes, 1 idle, 1 paused"><i style="flex:4;background:var(--accent)"></i><i style="flex:2;background:var(--cargo)"></i><i style="flex:6;background:#526881"></i><i style="flex:1;background:var(--attn)"></i><i style="flex:1;background:var(--fault)"></i></div><div class="legend num"><span><i class="sw" style="background:var(--accent)"></i>4 trading</span><span><i class="sw" style="background:var(--cargo)"></i>2 mining</span><span><i class="sw" style="background:#526881"></i>6 probes</span><span><i class="sw" style="background:var(--attn)"></i>1 idle</span><span><i class="sw" style="background:var(--fault)"></i>1 paused</span></div></div></div>
+              <div><div class="sechead" style="margin-top:0"><h4>Log</h4><a>Log ›</a></div><div class="group log"><div class="row"><time>3:52 PM</time><div class="grow"><div class="t">GIANTSOUP-9 paused</div></div></div><div class="row"><time>3:31 PM</time><div class="grow"><div class="t">GIANTSOUP-11 → Fuel</div></div></div><div class="row"><time>2:10 PM</time><div class="grow"><div class="t">Plan bought GIANTSOUP-14 <span class="need-note">not built yet</span></div></div></div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>iPad landscape · Brief tab.</b> The left column is the phone's first screen: credits box, summary and the stopped ship. The right column has the credit chart, which stands in for the phone's one-line Plan, then the routes, ships and log. Tapping a route switches to the Routes tab with that route selected.</figcaption>
+  </figure>
+
+  <figure class="frame-wrap">
+    <div class="tablet-holder holder-land">
+      <div class="tablet land">
+        <div class="t-status"><span>4:14 Mon Nov 16</span><span>100%</span></div>
+        <div class="topbar"><span class="brand">ST // AGENT COMMAND</span><span class="ipadtabs"><span>Brief <i class="badge" style="position:static" aria-label="1 item needs you">1</i></span><span class="on">Routes</span><span>Fleet</span><span>Log</span></span><span class="btn sm secondary">Menu</span></div>
+        <div class="tgrid tland">
+          <div class="tcol">
+            <p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p>
+            <div class="group slim"><div class="row"><div class="grow"><div class="s">Credits</div><div class="num slimv" aria-label="4,812,330 credits">4.81M</div></div><div class="num slimr"><span class="pos">▲ 312k</span> last hour<br>14 ships · 3 routes</div></div><div class="slimfoot num">Updated 4:14:02 PM PST</div></div>
+            <h3 class="pagetitle">Routes</h3>
+            <div class="sechead"><h4 class="minor">Stopped · 1</h4></div>
+            <div class="group"><div class="row"><span class="dot bad" aria-hidden="true"></span><div class="grow"><div class="t">Fabrics · C44 → D47</div><div class="s"><span class="negv statusword">Paused</span> · last two loads lost 18,240</div></div></div></div>
+            <div class="sechead"><h4 class="minor">Running · 3</h4></div>
+            <div class="group">
+              <div class="row selected"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">Ice water · A2 → D46</div><div class="s num">Trade · 2 ships · net +612k</div></div><div class="num">188k/h</div></div>
+              <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">Fuel · C44 → G54</div><div class="s num">Trade · 2 ships · net +201k</div></div><div class="num">102k/h</div></div>
+              <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">Iron ore · mining B7</div><div class="s num">Mining · 2 drones · net +58k</div></div><div class="num">22k/h</div></div>
+            </div>
+            <div class="sechead"><h4 class="minor">Ended this wipe · 4</h4></div>
+            <div class="group"><div class="row"><span class="dot idle" aria-hidden="true"></span><div class="grow"><div class="t">Ended routes</div><div class="s num">4 routes · net +5.90M</div></div><span class="chev">›</span></div></div>
+          </div>
+          <div class="tcol">
+            <h3 class="pagetitle" style="margin-top:4px">Ice water</h3>
+            <p class="pagesub"><span class="pill ok">● Running</span>&nbsp; Buy at A2, sell at D46 · trade</p>
+            <div class="group"><div class="kpis" style="border-top:0"><div><div class="k">Rate</div><div class="v num">188k/h</div><div class="d">last 2 hours</div></div><div><div class="k">Net</div><div class="v num pos">+612k</div><div class="d">this wipe</div></div><div><div class="k">Loads</div><div class="v num">41</div><div class="d">avg +14.9k</div></div></div></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+              <div>
+                <div class="sechead"><h4 class="minor">Ships on this route · 2</h4></div>
+                <div class="group">
+                  <div class="row"><div class="grow"><div class="t">GIANTSOUP-8</div><div class="s num">Flying to D46 · 40 / 40 ice water</div></div><div class="num">1 min</div><span class="chev">›</span></div>
+                  <div class="row"><div class="grow"><div class="t">GIANTSOUP-10</div><div class="s num">Buying ice water at A2</div></div><div class="num">24/40</div><span class="chev">›</span></div>
+                </div>
+                <div class="sechead"><h4 class="minor">Prices now</h4></div>
+                <div class="group">
+                  <div class="row"><div class="grow"><div class="t">Buy at A2</div><div class="s num">1 min ago</div></div><div class="num">412</div></div>
+                  <div class="row"><div class="grow"><div class="t">Sell at D46</div><div class="s num">2 min ago · first seen at 980</div></div><div class="num">948</div></div>
+                </div>
+              </div>
+              <div>
+                <div class="sechead"><h4 class="minor">Last loads</h4><a>All 41 ›</a></div>
+                <div class="group log">
+                  <div class="row"><time>4:07 PM</time><div class="grow"><div class="t">GIANTSOUP-10 · 40 units</div></div><div class="num pos">+19,880</div></div>
+                  <div class="row"><time>4:01 PM</time><div class="grow"><div class="t">GIANTSOUP-8 · 40 units</div></div><div class="num pos">+21,340</div></div>
+                  <div class="row"><time>3:54 PM</time><div class="grow"><div class="t">GIANTSOUP-10 · 40 units</div></div><div class="num pos">+20,460</div></div>
+                  <div class="row"><time>3:48 PM</time><div class="grow"><div class="t">GIANTSOUP-8 · 40 units</div></div><div class="num pos">+20,110</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>iPad landscape · Routes tab.</b> The list sits on the left under the title line and credits bar; the selected route's page (the phone's H3) fills the right without repeating the credits. The selected row is highlighted instead of showing a chevron; only “Ended routes” keeps one, because it opens another list. Tapping a ship on the right opens its page in that pane, with Back to the route. Fleet works the same way. In portrait or a narrow window, the list and page stack as on the phone.</figcaption>
+  </figure>
+</div>
+
+<!-- ============ CATALOGUE ============ -->
+<h2 class="sec" id="catalogue">Attention catalogue</h2>
+<div class="prose">
+  <p>The ways the engine stops or warns today, how it would read as a card, and its button. Only <b>Stopped</b> items (a route, a ship or the whole fleet is not working, red) count toward “Needs you”. <b>Watching</b> items (a warning; work continues, grey) collapse into one “Also watching” row. Plan choices, such as buying ships, and plain notices, such as “replacement playbook waiting for a safe point”, go to the log and the Plan section. They never ask you anything.</p>
+  <p>Two terms used below: the <b>main campaign</b> is the command ship's approved weekly playbook; each extra trade ship runs under its own approval, called an <b>arm</b>.</p>
+  <p><span class="tag have">Exists</span> the action already exists in the web app. <span class="tag part">CLI only</span> the engine can do it, but only from the command line; there's no web button. <span class="tag need">New</span> needs new backend work. <span class="tag idea">Later</span> arrives when the plan starts buying ships itself.</p>
+</div>
+<div class="tablewrap"><table class="grid">
+  <thead><tr><th>Trigger (engine name)</th><th>Severity</th><th>Card title</th><th>Button(s)</th><th>Status</th></tr></thead>
+  <tbody>
+    <tr><td><code>engine_heartbeat_stale</code></td><td>Stopped</td><td>Engine isn't responding (last heartbeat 7 min ago)</td><td>Check engine (offer Start only when the engine state is off)</td><td><span class="tag have">Exists</span> engine status and <code>game.engine.start</code> on the flight deck; a stale heartbeat can also mean a running, faulted or stopping engine</td></tr>
+    <tr><td>Pause: <code>unexplained_change</code></td><td>Stopped · main campaign*</td><td>Credits changed without explanation</td><td>Review balance → Resume</td><td><span class="tag have">Exists</span> balance review (it opens once every active run is stopped and settled) and <code>campaign.resume</code> separately; Resume that stays disabled until the review is recorded is <span class="tag need">New</span></td></tr>
+    <tr><td>Pause: <code>uncertain_action</code></td><td>Stopped · main campaign*</td><td>Not sure whether a command went through</td><td>Reconcile action → Resume</td><td><span class="tag have">Exists</span> reconcile on the flight deck; Resume that stays disabled until it is reconciled is <span class="tag need">New</span></td></tr>
+    <tr><td>Pause: <code>consecutive_losing_loads</code> (main campaign)</td><td>Stopped · main campaign*</td><td>Two losing loads in a row</td><td>Review → Resume / Keep paused</td><td><span class="tag have">Exists</span> resume; the review sheet is <span class="tag need">New</span></td></tr>
+    <tr><td>Arm pause: <code>consecutive_losing_loads</code></td><td>Stopped · one ship</td><td>GIANTSOUP-9 paused after two losing loads</td><td>Review → Resume ship</td><td><span class="tag part">CLI only</span> <code>campaign:arm-resume</code> CLI</td></tr>
+    <tr><td>Arm pause: <code>arm_loss_stop</code></td><td>Stopped · one ship</td><td>GIANTSOUP-9 hit its loss limit</td><td>Review → Retire ship (default). Giving it a new loss limit is a plan change made on the PC, not a phone button.</td><td><span class="tag part">CLI only</span> <code>campaign:arm-revoke</code>; resume is refused past the loss stop</td></tr>
+    <tr><td>Arm grant reaches its expiry (every arm grant expires; <code>campaign:arm</code> defaults to 12 hours)</td><td>Log only</td><td>GIANTSOUP-9 renewed under this week's plan</td><td>None: the plan renews it</td><td><span class="tag need">New</span> automatic renewal within the approved playbook's limits; today it stops and needs <code>campaign:arm</code></td></tr>
+    <tr><td>Arm renewal failed</td><td>Stopped · one ship</td><td>GIANTSOUP-9 stopped: its approval couldn't be renewed</td><td>Review → Retire ship</td><td><span class="tag need">New</span> (with automatic renewal)</td></tr>
+    <tr><td>Pause: <code>registration_unknown</code>, <code>registration_requires_review</code></td><td>Stopped · main campaign*</td><td>Couldn't confirm the new agent after the reset</td><td>Import agent → Resume</td><td><span class="tag have">Exists</span> import flow</td></tr>
+    <tr><td>Pause: <code>account_token_missing</code></td><td>Stopped · main campaign*</td><td>Account token needed to register for the new wipe</td><td>Add token → Resume</td><td><span class="tag have">Exists</span> account-token flow</td></tr>
+    <tr><td>Pause: <code>grant_expired</code></td><td>Stopped · main campaign*</td><td>Playbook approval expired</td><td>None on the phone: the card says to approve the week's playbook on the PC</td><td><span class="tag part">CLI only</span> <code>campaign:approve</code> CLI, kept on the PC</td></tr>
+    <tr><td>Pause: <code>no_cargo_buyer</code>, <code>recovery_stalled</code></td><td>Stopped · main campaign*</td><td>Cargo has no buyer / recovery sale stuck</td><td>See cargo → Resume</td><td><span class="tag have">Exists</span> resume; cargo detail <span class="tag need">New</span></td></tr>
+    <tr><td>Pause: <code>director_error</code>, <code>state_requires_review</code>, <code>episode_already_closed</code></td><td>Stopped · main campaign*</td><td>Autopilot hit an error it couldn't handle</td><td>Error details → Resume (an arm pauses on its own after 5 failures in a row; it resumes with <code>campaign:arm-resume</code>)</td><td><span class="tag have">Exists</span> resume; details view <span class="tag need">New</span></td></tr>
+    <tr><td>Pause: <code>operator_pause</code></td><td>Stopped · main campaign*</td><td>You paused the fleet at 3:10 PM</td><td>Resume (confirm sheet)</td><td><span class="tag have">Exists</span></td></tr>
+    <tr><td><code>campaign_decisions_stalled</code></td><td>Watching</td><td>Autopilot hasn't made a decision in 15 min</td><td>Open log</td><td><span class="tag have">Exists</span> (data); log view <span class="tag need">New</span></td></tr>
+    <tr><td><code>campaign_progress_stalled</code></td><td>Watching</td><td>No run started or load sold in 60 min</td><td>Open log</td><td>same</td></tr>
+    <tr><td><code>command_ship_stalled</code> (25 min)</td><td>Watching, then Stopped</td><td>Command ship idle 27 min. The main campaign has no route running while it is idle.</td><td>Open ship; after 45 min it becomes a Needs you card with Review → Resume</td><td><span class="tag have">Exists</span> alert and flight deck; the 45-minute escalation is <span class="tag need">New</span></td></tr>
+    <tr><td>Wait reasons: <code>awaiting_engine</code>, <code>awaiting_automation</code>, <code>awaiting_registration</code>, <code>awaiting_reset_schedule</code>, <code>awaiting_agent</code>, <code>awaiting_fresh_state</code></td><td>Watching</td><td>Autopilot waiting: engine is off / automation disabled / …</td><td>Fix the named prerequisite</td><td><span class="tag have">Exists</span> (data); <code>awaiting_engine</code> usually also trips the 5-minute engine-heartbeat alert; the others don't alert until the 60-minute stall check</td></tr>
+    <tr><td>Pause or resume everything at once</td><td>—</td><td>Pause the whole fleet… / Resume fleet</td><td>Confirm sheet</td><td><span class="tag need">New</span> one action across the main campaign and all arms</td></tr>
+    <tr><td>Plan bought a ship (not built yet)</td><td>Log only</td><td>Plan bought GIANTSOUP-15 · light hauler · 372,400</td><td>None</td><td><span class="tag idea">Later</span> the plan buys on its own</td></tr>
+    <tr><td>New playbook revision imported</td><td>Log only</td><td>weekly-default v5 imported, waiting for approval</td><td>None on the brief; you approve it during the weekly review</td><td><span class="tag part">CLI only</span> <code>campaign:approve</code> CLI</td></tr>
+  </tbody>
+</table></div>
+<div class="callout">Resume always goes through a sheet that states what Resume will do, because the engine's rule is that resuming needs operator review and never replays an old preview. Fleet-wide Pause stays reachable from the bottom of the brief and from Menu, but is never the screen's main button.<br><br>* Today <code>campaign.pause</code> and <code>campaign.resume</code> act on the main campaign grant only. Agent-wide reasons such as <code>unexplained_change</code> and <code>uncertain_action</code> pause each arm separately at its next decision, and each arm then needs <code>campaign:arm-resume</code>. <code>CampaignHealth</code> and the watchdog read only the main campaign, so arm pauses don’t alert yet (<span class="tag need">New</span>).</div>
+
+<!-- ============ DATA ============ -->
+<h2 class="sec" id="data">Data available today</h2>
+<div class="tablewrap"><table class="grid">
+  <thead><tr><th>On the brief</th><th>Source today</th><th>Status</th></tr></thead>
+  <tbody>
+    <tr><td>Credits, change this wipe</td><td><code>CampaignStatus::read()</code>: agent credits, episode start credits</td><td><span class="tag have">Exists</span></td></tr>
+    <tr><td>Credits last hour, trend</td><td>Campaign samples, every 15 minutes</td><td><span class="tag have">Exists</span> for the last hour. The page sends only the latest 24 samples (about 6 hours); the whole-wipe line needs a <span class="tag need">New</span> query</td></tr>
+    <tr><td>Ships, by activity</td><td>Ship rows plus each ship's active run (one active run per ship since the fleet groundwork)</td><td><span class="tag need">New</span> query grouping by strategy</td></tr>
+    <tr><td>Routes running (trade)</td><td>Active runs' plans (good, source, buyer), main campaign plus arms</td><td><span class="tag need">New</span> query; the page shows only the main campaign's single run today</td></tr>
+    <tr><td>Routes running (mining)</td><td>The playbook schema accepts a <code>mining</code> activity, but no current playbook uses one (the fallback was removed). Manual mining runs exist outside the campaign.</td><td><span class="tag need">New</span> needs a mining playbook, or count manual runs</td></tr>
+    <tr><td>Per-route rate and last load</td><td><code>load_result</code> events, <code>fleet:scorecard</code> metrics</td><td><span class="tag need">New</span> aggregation</td></tr>
+    <tr><td>Reset time, phase, day of wipe</td><td>Episode <code>next_reset_at</code>, phase</td><td><span class="tag have">Exists</span></td></tr>
+    <tr><td>Attention items</td><td><code>CampaignHealth::problems()</code>, grant pause reasons, live arm grants</td><td><span class="tag have">Exists</span> for the main campaign; arms <span class="tag need">New</span></td></tr>
+    <tr><td>Evidence on cards (loss amounts, expected vs seen balance)</td><td>Load results, balance review records</td><td><span class="tag need">New</span> summary per reason</td></tr>
+    <tr><td>Tabs, route and ship pages, iPad split view (final design)</td><td>The page is a single <code>/campaign</code> route; <code>AppShell</code> has no tab bar</td><td><span class="tag need">New</span> pages, URLs and layout</td></tr>
+    <tr><td>Per-route net and load count this wipe; ended routes</td><td><code>load_result</code> events carry good, buyer and net per load</td><td><span class="tag need">New</span> aggregation by route over the whole wipe</td></tr>
+    <tr><td>Per-ship loads, net and last load this wipe</td><td>Same load events, keyed by run and ship</td><td><span class="tag need">New</span> aggregation by ship</td></tr>
+    <tr><td>Ship state, arrival time, cargo and fuel</td><td>Ship snapshot (nav route arrival, cargo, fuel)</td><td><span class="tag have">Exists</span></td></tr>
+    <tr><td>Quotes and their age on the route page</td><td>Market observations with <code>observed_at</code></td><td><span class="tag have">Exists</span>; the “first seen” bid is in director state and needs exposing (<span class="tag need">New</span>)</td></tr>
+    <tr><td>Log tab across the whole wipe, with filters</td><td>The page gets only the latest 15 main-campaign events and 15 loads</td><td><span class="tag need">New</span> paged query over all grants, including arms</td></tr>
+    <tr><td>Plan pace line</td><td>Nothing yet</td><td><span class="tag need">New</span> needs a target curve (in the playbook or a setting)</td></tr>
+    <tr><td>Ship purchases in the log</td><td>Ship actions (the manual buy-ship command records one)</td><td><span class="tag idea">Later</span> once the plan buys ships itself</td></tr>
+  </tbody>
+</table></div>
+
+<!-- ============ QUESTIONS ============ -->
+<h2 class="sec" id="questions">Questions for you</h2>
+<div class="prose">
+<p><b>Decided:</b> the Brief is the home screen; four tabs, Brief · Routes · Fleet · Log; the plan buys ships on its own, and you're asked only about failures.</p>
+<ol>
+  <li><b>Voice.</b> Plain ("1 item needs you") or in character ("Admiral, one item needs your attention")? And the name: Fleet brief, Bridge, or something else? (The menu link reads “Campaign” today.)</li>
+  <li><b>Resume one ship from the phone.</b> Resuming a single stopped ship is CLI-only today. Should the phone get that button (after the review sheet)? This design keeps approvals, renewals and loss limits off the phone: the plan renews ships, and a new playbook is approved on the PC during the weekly review.</li>
+  <li><b>Goal pace.</b> Do you want the "plan pace" line? It needs a target curve, e.g. the 8B model's planning scenario, stored with each playbook.</li>
+  <li><b>What counts as a route.</b> A distinct good + source + buyer (or mining site) with at least one ship on it right now? Probes counted separately, as drawn? No campaign playbook mines today, so should the mining count include manual mining runs, or wait until a playbook adds mining?</li>
+  <li><b>Home.</b> Should the brief replace <code>/campaign</code> only, or also become the first page after you log in (today that's Agents)?</li>
+  <li><b>Safari or Home Screen.</b> Do you open it in Safari or as a Home Screen web app? A Home Screen app gets the full 874 pt and no browser bar, and would need a small web manifest.</li>
+</ol></div>
+<!-- ============ EARLIER CONCEPTS ============ -->
+<details class="earlier" id="earlier">
+<summary>Earlier concepts, for reference</summary>
+<p class="earlier-note">These are the options drawn before you chose the Brief with four tabs. They are kept for the record and are not the design to build, except A2, A3 and A4, which the final design reuses with its tab bar and credits box and without the pinned bottom button (on A4, Review balance sits on the card). Their sample numbers were drawn first and may differ slightly from the final design above. Where they differ, the final design is right.</p>
+<!-- ============ CONCEPT A ============ -->
+<h2 class="sec" id="a">A · Brief</h2>
+<div class="prose"><p>One scrolling page in report order. The first screen answers "what's the number, are we OK, what needs me", in that order, without scrolling; everything after it is supporting detail. On the phone it uses the app's compact header with a Menu button, as the flight deck already does. Today <code>/campaign</code> uses the full header with inline links, so switching it to the compact header is a small layout change, not new navigation.</p></div>
+
+<div class="board">
+  <!-- A1 -->
+  <figure class="frame-wrap" id="a1">
+    <div class="phone">
+      <div class="statusbar"><span>4:14</span><span class="island"></span><span>100%</span></div>
+      <div class="scroll">
+        <div class="topbar"><span class="brand">ST // AGENT COMMAND</span><span class="btn sm secondary">Menu</span></div>
+        <div class="content">
+          <p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p>
+          <div class="group">
+            <div class="credits">
+              <div class="label">Credits</div>
+              <div class="big num" aria-label="4,812,330 credits">4.81M</div>
+              <div class="delta num"><span class="pos">▲ 312k</span> last hour · <span class="pos">+4.64M</span> this wipe</div>
+            </div>
+            <div class="kpis">
+              <div><div class="k">Ships</div><div class="v num">14</div><div class="d">1 paused · 1 idle</div></div>
+              <div><div class="k">Routes</div><div class="v num">3</div><div class="d">2 trade · 1 mine</div></div>
+              <div><div class="k">Reset</div><div class="v num">5d 12h</div><div class="d">Sun 5 AM PST</div></div>
+            </div>
+          </div>
+          <p class="bluf">Earning 312k an hour. 1 item needs you.</p>
+          <p class="bluf-sub"><span class="pill attn">⚠ Needs you</span>&nbsp; 12 of 14 ships working. GIANTSOUP-9 stopped after two losing loads.</p>
+
+          <div class="sechead"><h4>Needs you <span class="num">(1)</span></h4></div>
+          <article class="card block">
+            <div class="sev">⛔ Ship stopped</div>
+            <h5>GIANTSOUP-9 paused after two losing loads</h5>
+            <p>Fabrics C44 → D47 lost money twice. It sold its cargo and stopped buying. The rest of the fleet carries on.</p>
+            <div class="facts num"><span>Lost <b class="negv">−18,240</b></span><span>Predicted <b>+24,800</b></span><span class="when">3:52 PM PST · 22 min ago</span></div>
+            <div class="acts"><span class="btn sm secondary">Review GIANTSOUP-9</span></div>
+          </article>
+          <div class="group" style="margin-top:12px"><div class="row"><span aria-hidden="true" style="color:var(--muted)">◌</span><div class="grow"><div class="t">Also watching</div><div class="s">Command ship idle 27 min · Needs you at 45 min</div></div><span class="chev">›</span></div></div>
+
+          <div class="sechead"><h4>Operations</h4><a>All routes ›</a></div>
+          <div class="group">
+            <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">Ice water · A2 → D46</div><div class="s num">2 ships · last load +19,880 · 7 min ago</div></div><div class="num">188k/h</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">Fuel · C44 → G54</div><div class="s num">2 ships · last load +9,880 · 11 min ago</div></div><div class="num">102k/h</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot ok" aria-hidden="true"></span><div class="grow"><div class="t">Iron ore · mining B7</div><div class="s num">2 drones · sells at A2</div></div><div class="num">22k/h</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot bad" aria-hidden="true"></span><div class="grow"><div class="t">Fabrics · C44 → D47</div><div class="s"><span class="statusword negv">Paused</span> · GIANTSOUP-9</div></div><span class="chev">›</span></div>
+            <div class="row"><span class="dot idle" aria-hidden="true"></span><div class="grow"><div class="t">Probes</div><div class="s">5 watching markets · 1 scouting</div></div><span class="chev">›</span></div>
+          </div>
+
+          <div class="sechead"><h4>Fleet</h4><a>All ships ›</a></div>
+          <div class="group"><div style="padding:14px 16px">
+            <div class="bar" role="img" aria-label="14 ships: 4 trading, 2 mining, 6 probes, 1 idle, 1 paused">
+              <i style="flex:4;background:var(--accent)"></i><i style="flex:2;background:var(--cargo)"></i><i style="flex:6;background:#526881"></i><i style="flex:1;background:var(--attn)"></i><i style="flex:1;background:var(--fault)"></i>
+            </div>
+            <div class="legend num"><span><i class="sw" style="background:var(--accent)"></i>4 trading</span><span><i class="sw" style="background:var(--cargo)"></i>2 mining</span><span><i class="sw" style="background:#526881"></i>6 probes</span><span><i class="sw" style="background:var(--attn)"></i>1 idle</span><span><i class="sw" style="background:var(--fault)"></i>1 paused</span></div>
+          </div></div>
+
+          <div class="sechead"><h4>Plan</h4><a>Playbook ›</a></div>
+          <div class="group">
+            <div class="row"><div class="grow"><div class="phase"><span class="done">✓ Discover</span><span class="next">→</span><span class="now">● Earn</span><span class="next">→ Wind down Sun 4 AM</span></div><div class="s">weekly-default v4 · grant #5</div></div></div>
+            <div class="row" style="display:block">
+              <div class="s" style="display:flex;justify-content:space-between"><span>Credits this wipe</span><span class="num">Sun 5 AM → now</span></div>
+              <svg class="spark" viewBox="0 0 340 56" preserveAspectRatio="none" role="img" aria-label="Credits rising from 175k to 4.81M over 35 hours"><polyline fill="none" stroke="#a6f3d0" stroke-width="2" points="0,54 30,53 60,52 90,50 120,47 150,44 180,39 210,33 240,27 270,21 300,14 340,6"/><polyline fill="none" stroke="#97a8bc" stroke-width="1.5" stroke-dasharray="4 4" points="0,54 80,50 160,40 240,24 340,2"/></svg>
+              <div class="legend"><span><i class="sw" style="background:var(--accent)"></i>Actual</span><span><i class="sw" style="background:#97a8bc"></i>Plan pace</span><span class="num">Behind by ≈310k</span></div>
+            </div>
+          </div>
+
+          <div class="sechead"><h4>Log</h4><a>Full log ›</a></div>
+          <div class="group log">
+            <div class="row"><time>3:52 PM</time><div class="grow"><div class="t">GIANTSOUP-9 paused</div><div class="s">Second losing load on Fabrics C44 → D47</div></div></div>
+            <div class="row"><time>3:31 PM</time><div class="grow"><div class="t">Switched GIANTSOUP-11 to Fuel</div><div class="s">Fuel scored 1.3× better than Ice water</div></div></div>
+            <div class="row"><time>2:10 PM</time><div class="grow"><div class="t">Plan bought GIANTSOUP-14 <span class="need-note">not built yet</span></div><div class="s num">Mining drone · 41,200</div></div></div>
+          </div>
+
+          <p class="footer-meta num">Updated 4:14:02 PM PST · engine heartbeat 9 s ago</p>
+          <span class="btn danger-quiet block">Pause the whole fleet…</span>
+          <p class="need-note" style="text-align:center;margin:6px 0 0">New: today this pauses only the command ship; the extra ships keep running until each is paused on its own</p>
+          <div style="height:110px"></div>
+        </div>
+        <div class="dock"><span class="btn primary block">Review GIANTSOUP-9</span></div>
+      </div>
+      <div class="homebar"></div>
+      <div class="fold"><span>end of first screen (874 pt; less in Safari)</span></div>
+    </div>
+    <figcaption><b>A1 · One item needs you.</b> The credits box comes first, then the bottom line and the failure that needs you, all on the first screen. The pinned button repeats the most urgent item's action. Operations, Fleet, Plan and Log follow on scroll. Several routes run at once because each extra trade ship runs under its own approval (an “arm”) beside the main campaign; arms don't mine. The pinned button is the only primary-styled button; card buttons are secondary. Warnings collapse into one “Also watching” row and say when they would escalate. Ship purchases never appear as questions: in v2 the plan makes them and the log records them (the log row shows that later behaviour). The mining route is illustrative: no current playbook mines.</figcaption>
+  </figure>
+
+  <!-- A2 -->
+  <figure class="frame-wrap" id="a2">
+    <div class="phone">
+      <div class="statusbar"><span>4:14</span><span class="island"></span><span>100%</span></div>
+      <div class="scroll">
+        <div class="topbar"><span class="brand">ST // AGENT COMMAND</span><span class="btn sm secondary">Menu</span></div>
+        <div class="content">
+          <p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p>
+          <div class="group">
+            <div class="credits">
+              <div class="label">Credits</div>
+              <div class="big num">4.81M</div>
+              <div class="delta num"><span class="pos">▲ 312k</span> last hour · <span class="pos">+4.64M</span> this wipe</div>
+            </div>
+            <div class="kpis">
+              <div><div class="k">Ships</div><div class="v num">14</div><div class="d">all working</div></div>
+              <div><div class="k">Routes</div><div class="v num">3</div><div class="d">2 trade · 1 mine</div></div>
+              <div><div class="k">Reset</div><div class="v num">5d 12h</div><div class="d">Sun 5 AM PST</div></div>
+            </div>
+          </div>
+          <p class="bluf">All 14 ships working. Nothing needs you.</p>
+          <p class="bluf-sub"><span class="pill ok">✓ On plan</span>&nbsp; Earning 312k an hour across 3 routes.</p>
+          <div class="sechead"><h4>Needs you</h4></div>
+          <div class="group"><div class="row"><span aria-hidden="true" class="pos">✓</span><div class="grow"><div class="t">Nothing right now</div><div class="s">Last issue cleared 3:58 PM PST. The watchdog alerts you if the main campaign stops (alerts for extra ships are New).</div></div></div></div>
+          <div class="sechead"><h4>Operations</h4><a>All routes ›</a></div>
+          <div class="group">
+            <div class="row"><span class="dot ok"></span><div class="grow"><div class="t">Ice water · A2 → D46</div><div class="s num">3 ships · last load +21,340</div></div><div class="num">188k/h</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot ok"></span><div class="grow"><div class="t">Fuel · C44 → G54</div><div class="s num">3 ships · last load +9,880</div></div><div class="num">102k/h</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot ok"></span><div class="grow"><div class="t">Iron ore · mining B7</div><div class="s num">2 drones · sells at A2</div></div><div class="num">22k/h</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot idle"></span><div class="grow"><div class="t">Probes</div><div class="s">5 watching markets · 1 scouting</div></div><span class="chev">›</span></div>
+          </div>
+          <p class="footer-meta num">Updated 4:14:02 PM PST · engine heartbeat 9 s ago</p>
+        </div>
+      </div>
+      <div class="homebar"></div>
+      <div class="fold"><span>end of first screen</span></div>
+    </div>
+    <figcaption><b>A2 · All clear.</b> An alternative state at the same moment, not a later one: here GIANTSOUP-9 never stopped and runs Fuel. Same skeleton; the queue collapses to one reassuring line and there is no pinned button, because nothing needs doing. Showing a fake primary action would teach you to ignore it. Ship counts and rates on its route rows are illustrative and weren't recalculated for this state.</figcaption>
+  </figure>
+
+  <!-- A3 -->
+  <figure class="frame-wrap" id="a3">
+    <div class="phone">
+      <div class="statusbar"><span>4:14</span><span class="island"></span><span>100%</span></div>
+      <div class="scroll" style="overflow:hidden">
+        <div class="topbar"><span class="brand">ST // AGENT COMMAND</span><span class="btn sm secondary">Menu</span></div>
+        <div class="content"><p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p><div class="group"><div class="credits"><div class="label">Credits</div><div class="big num">4.81M</div></div></div></div>
+        <div class="sheet-backdrop"></div>
+      </div>
+      <section class="sheet" role="dialog" aria-label="GIANTSOUP-9 losses">
+        <div class="grabber"></div>
+        <header><h5>GIANTSOUP-9 · paused</h5><span class="btn sm secondary">Done</span></header>
+        <div class="body">
+          <p style="margin:0 4px 4px;color:#c9d5e3;font-size:15px">Two loads in a row on <b>Fabrics C44 → D47</b> sold for less than they cost. The playbook stops a ship after two, so it sold what it held and paused.</p>
+          <h6>Last two loads</h6>
+          <div class="group"><table class="mini num">
+            <tr><th>Load</th><th>Predicted</th><th>Actual</th></tr>
+            <tr><td>3:19 PM · 40 units</td><td>+12,400</td><td class="negv">−9,110</td></tr>
+            <tr><td>3:52 PM · 40 units</td><td>+12,400</td><td class="negv">−9,130</td></tr>
+          </table></div>
+          <h6>Likely cause</h6>
+          <div class="group"><div class="row"><div class="grow"><div class="t">D47 bid fell 31% since first seen</div><div class="s num">Fabrics bid 1,820 → 1,256 · quote 2 min old</div></div></div></div>
+          <h6>Where it is now</h6>
+          <div class="group"><div class="row"><div class="grow"><div class="t">Docked at D47</div><div class="s num">Cargo 0 / 40 · Fuel 380 / 600</div></div><span class="chev">›</span></div></div>
+          <h6>If you resume</h6>
+          <p style="margin:0 4px;color:#c9d5e3;font-size:15px">It starts from fresh market data. The next trade on Fabrics to D47 has to pass a small proof load first (one batch, at most 60k).</p>
+        </div>
+        <div class="acts">
+          <span class="btn primary block">Resume GIANTSOUP-9</span>
+          <span class="btn secondary block">Keep it paused</span>
+        </div>
+      </section>
+      <div class="homebar"></div>
+    </div>
+    <figcaption><b>A3 · Review sheet.</b> Tapping a card opens a sheet with Done, then: what happened, evidence, likely cause, where the ship is, and what Resume will do. Resume is never a one-tap action on the card itself, matching the rule that resuming needs operator review. <span class="need-note">Resuming one arm ship from the phone is New; today it is the campaign:arm-resume CLI.</span></figcaption>
+  </figure>
+
+  <!-- A4 -->
+  <figure class="frame-wrap" id="a4">
+    <div class="phone">
+      <div class="statusbar"><span>4:14</span><span class="island"></span><span>100%</span></div>
+      <div class="scroll">
+        <div class="topbar"><span class="brand">ST // AGENT COMMAND</span><span class="btn sm secondary">Menu</span></div>
+        <div class="content">
+          <p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p>
+          <div class="group">
+            <div class="credits"><div class="label">Credits · <span style="color:var(--attn)">last seen 4:02 PM PST</span></div><div class="big num" aria-label="4,812,330 credits">4.81M</div><div class="delta num">Fleet paused · no change since 4:02 PM</div></div>
+            <div class="kpis">
+              <div><div class="k">Ships</div><div class="v num">14</div><div class="d">all held</div></div>
+              <div><div class="k">Routes</div><div class="v num">0</div><div class="d">3 on hold</div></div>
+              <div><div class="k">Reset</div><div class="v num">5d 12h</div><div class="d">Sun 5 AM PST</div></div>
+            </div>
+          </div>
+          <p class="bluf">Fleet stopped: credits changed without explanation.</p>
+          <p class="bluf-sub"><span class="pill bad">⛔ Paused</span>&nbsp; No new orders until you review the balance. Ships already in flight still arrive.</p>
+          <article class="card block">
+            <div class="sev">⛔ Fleet paused</div>
+            <h5>Credits are 38,950 lower than the books say</h5>
+            <p>The engine saw a balance it can't match to any action we sent. Most often this is a purchase made on the website.</p>
+            <div class="facts num"><span>Expected <b>4,851,280</b></span><span>Seen <b>4,812,330</b></span><span class="when">4:02 PM PST</span></div>
+            <div class="acts"><span class="btn sm primary">Review balance</span></div>
+          </article>
+          <div class="sechead"><h4>What's still true</h4></div>
+          <div class="group">
+            <div class="row"><div class="grow"><div class="t">Cargo aboard</div><div class="s num">3 ships hold 118 units (cost 96,300)</div></div><span class="chev">›</span></div>
+            <div class="row"><div class="grow"><div class="t">In flight</div><div class="s num">2 ships arrive by 4:21 PM PST</div></div><span class="chev">›</span></div>
+          </div>
+          <div style="height:120px"></div>
+        </div>
+      </div>
+      <div class="homebar"></div>
+      <div class="fold"><span>end of first screen</span></div>
+    </div>
+    <figcaption><b>A4 · Fleet-wide stop.</b> Credits stay first even here, labelled with how old they are. The summary below them turns red and the stopping reason comes straight after it. The card's Review balance button goes straight to the existing balance review, which opens once every active run has been stopped and settled; Resume appears only after the review is done. <span class="need-note">That gate is new: <code>CampaignControl::resume()</code> doesn't check for a balance review today. Today each grant (main campaign, then every arm) pauses on its own at its next decision and needs its own resume; one fleet-wide pause/resume is new work.</span></figcaption>
+  </figure>
+</div>
+
+<!-- ============ CONCEPT B ============ -->
+<h2 class="sec" id="b">B · Inbox first</h2>
+<div class="prose"><p>The credits box stays on top, then the page becomes a to-do list, with Operations and Log behind a segmented control and no summary sentence. Better if the queue is often long (for example, several ships failing at once in a 100-ship wipe). Worse at answering "how is the plan going" at a glance, because the trend and routes are one tap away.</p></div>
+<div class="board">
+  <figure class="frame-wrap">
+    <div class="phone">
+      <div class="statusbar"><span>4:14</span><span class="island"></span><span>100%</span></div>
+      <div class="scroll">
+        <div class="topbar"><span class="brand">ST // AGENT COMMAND</span><span class="btn sm secondary">Menu</span></div>
+        <div class="content">
+          <p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p>
+          <div class="group">
+            <div class="credits">
+              <div class="label">Credits</div>
+              <div class="big num" aria-label="4,812,330 credits">4.81M</div>
+              <div class="delta num"><span class="pos">▲ 312k</span> last hour · <span class="pos">+4.64M</span> this wipe</div>
+            </div>
+            <div class="kpis">
+              <div><div class="k">Ships</div><div class="v num">14</div><div class="d">1 paused · 1 idle</div></div>
+              <div><div class="k">Routes</div><div class="v num">3</div><div class="d">2 trade · 1 mine</div></div>
+              <div><div class="k">Reset</div><div class="v num">5d 12h</div><div class="d">Sun 5 AM PST</div></div>
+            </div>
+          </div>
+          <div class="seg" role="tablist" style="margin-top:16px"><span class="on">Needs you · 1</span><span>Operations</span><span>Log</span></div>
+          <article class="card block">
+            <div class="sev">⛔ Ship stopped</div>
+            <h5>GIANTSOUP-9 paused after two losing loads</h5>
+            <div class="facts num"><span>Lost <b class="negv">−18,240</b></span><span class="when">22 min ago</span></div>
+            <div class="acts"><span class="btn sm primary">Review GIANTSOUP-9</span></div>
+          </article>
+          <div class="sechead"><h4 style="font-size:16px;color:var(--muted)">Also watching · no action yet</h4></div>
+          <article class="card watch">
+            <div class="sev">◌ Watching</div>
+            <h5>Command ship idle 27 min</h5>
+            <p>GIANTSOUP-1 hasn't started a run in 27 minutes; the watchdog alerted at 25. If no run starts by 45 minutes, it moves to Needs you as a stopped route.</p>
+            <div class="acts"><span class="btn sm secondary">Open ship</span></div>
+          </article>
+          <p class="footer-meta">Updated 4:14:02 PM PST</p>
+        </div>
+      </div>
+      <div class="homebar"></div>
+      <div class="fold"><span>end of first screen</span></div>
+    </div>
+    <figcaption><b>B1 · Queue as home.</b> The same credits box as A sits under the title line; the failure list replaces the summary sentence. Failures are sorted by severity, then age. Warnings that need no action (stalls that don't stop work) sit below under “Also watching” and aren't counted.</figcaption>
+  </figure>
+</div>
+
+<!-- ============ CONCEPT C ============ -->
+<h2 class="sec" id="c">C · Tab bar</h2>
+<div class="prose"><p>The Brief from concept A becomes one of four tabs: Brief, Routes, Fleet, Log. The design brief says to add bottom navigation only when there are distinct, useful top-level destinations. With 50+ ships that becomes true, so this is the growth path for A rather than a rival to it. The Brief tab carries a badge with the number of open items.</p></div>
+<div class="board">
+  <figure class="frame-wrap">
+    <div class="phone">
+      <div class="statusbar"><span>4:14</span><span class="island"></span><span>100%</span></div>
+      <div class="scroll">
+        <div class="topbar"><span class="brand">ST // AGENT COMMAND</span><span class="btn sm secondary">Menu</span></div>
+        <div class="content">
+          <p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p>
+          <div class="group"><div class="row"><div class="grow"><div class="s">Credits</div><div class="num" style="font-size:28px;font-weight:750;line-height:1.1" aria-label="4,812,330 credits">4.81M</div></div><div class="num" style="text-align:right;font-size:14px;color:var(--muted)"><span class="pos">▲ 312k</span> last hour<br>14 ships · 3 routes</div></div></div>
+          <p class="bluf" style="font-size:24px">Routes</p>
+          <div class="seg" style="grid-template-columns:repeat(3,1fr)"><span class="on">Running · 3</span><span>Paused · 1</span><span>Ended</span></div>
+          <div class="group">
+            <div class="row"><span class="dot ok"></span><div class="grow"><div class="t">Ice water · A2 → D46</div><div class="s num">2 ships · 41 loads · net +612k</div></div><div class="num">188k/h</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot ok"></span><div class="grow"><div class="t">Fuel · C44 → G54</div><div class="s num">2 ships · 18 loads · net +201k</div></div><div class="num">102k/h</div><span class="chev">›</span></div>
+            <div class="row"><span class="dot ok"></span><div class="grow"><div class="t">Iron ore · mining B7</div><div class="s num">2 drones · 66 extractions · net +58k</div></div><div class="num">22k/h</div><span class="chev">›</span></div>
+          </div>
+          <p class="s" style="color:var(--muted);font-size:14px;margin:12px 4px">Rates are realized credits per hour over the last two hours, fuel included.</p>
+          <div style="height:100px"></div>
+        </div>
+      </div>
+      <nav class="tabbar" aria-label="Fleet sections">
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Brief<i class="badge" aria-label="1 item needs you">1</i></span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 15l9-9 9 9M7 19h10"/></svg>Fleet</span>
+        <span class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 17c6-1 4-9 10-10"/></svg>Routes</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="9"/></svg>Log</span>
+      </nav>
+      <div class="homebar"></div>
+    </div>
+    <figcaption><b>C1 · Routes tab.</b> Every tab keeps the title line and a slim credits header on top. Below it, per-route totals and the realized rate. “Net this wipe” counts only these routes; ended routes earned the rest of the +4.64M. In this early version the Brief tab dropped Operations, Plan and Log; the final design keeps them.</figcaption>
+  </figure>
+</div>
+
+<!-- ============ IPAD ============ -->
+<h2 class="sec" id="ipad">iPad Pro 13" (M4), first layouts</h2>
+<div class="prose"><p>Shown at 50% of real size. The iPad doesn't stretch the phone layout: the brief and queue stay in a phone-width left column, and the right side uses the extra width for tables and the credit chart. In Split View or Stage Manager windows narrower than about 700 pt, the page falls back to the phone layout.</p></div>
+<p class="tablet-note">The iPad frames are hidden on narrow screens. Open this page on a wider screen to see them.</p>
+<div class="board">
+  <figure class="frame-wrap">
+    <div class="tablet-holder holder-land">
+      <div class="tablet land">
+        <div class="t-status"><span>4:14 Mon Nov 16</span><span>100%</span></div>
+        <div class="topbar"><span class="brand">ST // AGENT COMMAND</span><span style="display:flex;gap:24px;align-items:center;font-size:15px"><span>Agents</span><span style="color:var(--accent);text-decoration:underline">Fleet brief</span><span>Player guide</span><span>Profile</span><span>Log out</span></span></div>
+        <div class="tgrid tland">
+          <div class="tcol">
+            <p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p>
+            <div class="group">
+              <div class="credits"><div class="label">Credits</div><div class="big num" aria-label="4,812,330 credits">4.81M</div><div class="delta num"><span class="pos">▲ 312k</span> last hour · <span class="pos">+4.64M</span> this wipe</div></div>
+              <div class="kpis"><div><div class="k">Ships</div><div class="v num">14</div><div class="d">1 paused · 1 idle</div></div><div><div class="k">Routes</div><div class="v num">3</div><div class="d">2 trade · 1 mine</div></div><div><div class="k">Reset</div><div class="v num">5d 12h</div><div class="d">Sun 5 AM PST</div></div></div>
+            </div>
+            <p class="bluf">Earning 312k an hour. 1 item needs you.</p>
+            <p class="bluf-sub"><span class="pill attn">⚠ Needs you</span>&nbsp; 12 of 14 ships working.</p>
+            <div class="sechead"><h4>Needs you (1)</h4></div>
+            <article class="card block"><div class="sev">⛔ Ship stopped</div><h5>GIANTSOUP-9 paused after two losing loads</h5><div class="facts num"><span>Lost <b class="negv">−18,240</b></span><span class="when">22 min ago</span></div><div class="acts"><span class="btn sm primary">Review GIANTSOUP-9</span></div></article>
+            <div class="group" style="margin-top:12px"><div class="row"><span aria-hidden="true" style="color:var(--muted)">◌</span><div class="grow"><div class="t">Also watching</div><div class="s">Command ship idle 27 min · Needs you at 45 min</div></div><span class="chev">›</span></div></div>
+          </div>
+          <div class="tcol">
+            <div class="group" style="padding:14px 18px">
+              <div style="display:flex;justify-content:space-between;align-items:baseline"><h4 style="margin:0;font-size:18px">Credits this wipe</h4><span class="legend"><span><i class="sw" style="background:var(--accent)"></i>Actual</span><span><i class="sw" style="background:#97a8bc"></i>Plan pace</span><span class="num">Behind by ≈310k</span></span></div>
+              <svg class="chart" viewBox="0 0 900 150" preserveAspectRatio="none" role="img" aria-label="Credits over the wipe"><g stroke="rgba(178,200,230,.11)"><line x1="0" y1="30" x2="900" y2="30"/><line x1="0" y1="75" x2="900" y2="75"/><line x1="0" y1="120" x2="900" y2="120"/></g><polyline fill="none" stroke="#a6f3d0" stroke-width="2.5" points="0,146 100,144 200,140 300,133 400,124 500,112 600,96 700,78 800,58 900,36"/><polyline fill="none" stroke="#97a8bc" stroke-width="2" stroke-dasharray="6 6" points="0,146 200,136 400,116 600,84 800,46 900,24"/></svg>
+            </div>
+            <div class="sechead"><h4>Operations</h4><a>All routes ›</a></div>
+            <div class="group"><table class="optable num">
+              <tr><th>Route</th><th>Ships</th><th>Last load</th><th class="r">Net this wipe</th><th class="r">Rate</th><th>Status</th></tr>
+              <tr><td>Ice water · A2 → D46</td><td>2</td><td class="pos">+19,880 · 7 min</td><td class="r">+612k</td><td class="r">188k/h</td><td><span class="pos">● Running</span></td></tr>
+              <tr><td>Fuel · C44 → G54</td><td>2</td><td class="pos">+9,880 · 11 min</td><td class="r">+201k</td><td class="r">102k/h</td><td><span class="pos">● Running</span></td></tr>
+              <tr><td>Iron ore · mining B7</td><td>2</td><td>extracting</td><td class="r">+58k</td><td class="r">22k/h</td><td><span class="pos">● Running</span></td></tr>
+              <tr><td>Fabrics · C44 → D47</td><td>1</td><td class="negv">−9,130 · 22 min</td><td class="r negv">−18k</td><td class="r">—</td><td><span class="negv">■ Paused</span></td></tr>
+              <tr><td>Probes</td><td>6</td><td colspan="3" style="color:var(--muted)">5 watching markets · 1 scouting</td><td><span style="color:var(--muted)">○ Support</span></td></tr>
+            </table></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px">
+              <div><div class="sechead" style="margin-top:0"><h4>Fleet</h4><a>All ships ›</a></div><div class="group" style="padding:14px 16px"><div class="bar"><i style="flex:4;background:var(--accent)"></i><i style="flex:2;background:var(--cargo)"></i><i style="flex:6;background:#526881"></i><i style="flex:1;background:var(--attn)"></i><i style="flex:1;background:var(--fault)"></i></div><div class="legend num"><span><i class="sw" style="background:var(--accent)"></i>4 trading</span><span><i class="sw" style="background:var(--cargo)"></i>2 mining</span><span><i class="sw" style="background:#526881"></i>6 probes</span><span><i class="sw" style="background:var(--attn)"></i>1 idle</span><span><i class="sw" style="background:var(--fault)"></i>1 paused</span></div></div></div>
+              <div><div class="sechead" style="margin-top:0"><h4>Log</h4><a>Full log ›</a></div><div class="group log"><div class="row"><time>3:52 PM</time><div class="grow"><div class="t">GIANTSOUP-9 paused</div></div></div><div class="row"><time>3:31 PM</time><div class="grow"><div class="t">GIANTSOUP-11 → Fuel</div></div></div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>iPad landscape · 1376 × 1032.</b> Left column (≈400 pt) is the phone's first screen: credits box, summary, then the queue. Right column: credit chart against plan pace, an operations table with net and rate, then fleet and log side by side. Full top navigation replaces Menu at this width. It shows the links the shell renders without an agent; Flight deck and System map would need the page to pass the active agent (New).</figcaption>
+  </figure>
+
+  <figure class="frame-wrap">
+    <div class="tablet-holder holder-port">
+      <div class="tablet port">
+        <div class="t-status"><span>4:14 Mon Nov 16</span><span>100%</span></div>
+        <div class="topbar"><span class="brand">ST // AGENT COMMAND</span><span style="display:flex;gap:24px;align-items:center;font-size:15px"><span>Agents</span><span style="color:var(--accent);text-decoration:underline">Fleet brief</span><span>Player guide</span><span>Profile</span><span>Log out</span></span></div>
+        <div style="padding:8px 28px 0">
+          <p class="kicker">Fleet brief · Day 2 of 7 · Earn phase</p>
+        </div>
+        <div class="tgrid tport">
+          <div class="tcol">
+            <div class="group">
+              <div class="credits"><div class="label">Credits</div><div class="big num">4.81M</div><div class="delta num"><span class="pos">▲ 312k</span> last hour · <span class="pos">+4.64M</span> this wipe</div></div>
+              <div class="kpis"><div><div class="k">Ships</div><div class="v num">14</div><div class="d">1 paused · 1 idle</div></div><div><div class="k">Routes</div><div class="v num">3</div><div class="d">2 trade · 1 mine</div></div><div><div class="k">Reset</div><div class="v num">5d 12h</div><div class="d">Sun 5 AM PST</div></div></div>
+            </div>
+            <p class="bluf">Earning 312k an hour. 1 item needs you.</p>
+            <p class="bluf-sub"><span class="pill attn">⚠ Needs you</span>&nbsp; 12 of 14 ships working.</p>
+            <div class="group" style="padding:14px 16px;margin-top:20px"><div class="s" style="color:var(--muted);font-size:14px">Credits this wipe · behind plan pace by ≈310k</div><svg class="chart" style="height:120px" viewBox="0 0 440 120" preserveAspectRatio="none"><polyline fill="none" stroke="#a6f3d0" stroke-width="2.5" points="0,116 60,114 120,110 180,103 240,92 300,78 360,58 440,30"/><polyline fill="none" stroke="#97a8bc" stroke-width="2" stroke-dasharray="6 6" points="0,116 110,108 220,90 330,60 440,20"/></svg></div>
+          </div>
+          <div class="tcol">
+            <div class="sechead" style="margin-top:0"><h4>Needs you (1)</h4></div>
+            <article class="card block"><div class="sev">⛔ Ship stopped</div><h5>GIANTSOUP-9 paused after two losing loads</h5><p>Fabrics C44 → D47 lost money twice. It sold its cargo and stopped buying.</p><div class="acts"><span class="btn sm primary">Review GIANTSOUP-9</span></div></article>
+            <div class="group" style="margin-top:12px"><div class="row"><span aria-hidden="true" style="color:var(--muted)">◌</span><div class="grow"><div class="t">Also watching</div><div class="s">Command ship idle 27 min · Needs you at 45 min</div></div><span class="chev">›</span></div></div>
+          </div>
+        </div>
+        <div style="padding:0 28px">
+          <div class="sechead" style="margin-top:0"><h4>Operations</h4><a>All routes ›</a></div>
+          <div class="group"><table class="optable num">
+            <tr><th>Route</th><th>Ships</th><th>Last load</th><th class="r">Net this wipe</th><th class="r">Rate</th><th>Status</th></tr>
+            <tr><td>Ice water · A2 → D46</td><td>2</td><td class="pos">+19,880 · 7 min</td><td class="r">+612k</td><td class="r">188k/h</td><td><span class="pos">● Running</span></td></tr>
+            <tr><td>Fuel · C44 → G54</td><td>2</td><td class="pos">+9,880 · 11 min</td><td class="r">+201k</td><td class="r">102k/h</td><td><span class="pos">● Running</span></td></tr>
+            <tr><td>Iron ore · mining B7</td><td>2</td><td>extracting</td><td class="r">+58k</td><td class="r">22k/h</td><td><span class="pos">● Running</span></td></tr>
+            <tr><td>Fabrics · C44 → D47</td><td>1</td><td class="negv">−9,130 · 22 min</td><td class="r negv">−18k</td><td class="r">—</td><td><span class="negv">■ Paused</span></td></tr>
+            <tr><td>Probes</td><td>6</td><td colspan="3" style="color:var(--muted)">5 watching markets · 1 scouting</td><td><span style="color:var(--muted)">○ Support</span></td></tr>
+          </table></div>
+          <div class="sechead"><h4>Log</h4><a>Full log ›</a></div>
+          <div class="group log"><div class="row"><time>3:52 PM</time><div class="grow"><div class="t">GIANTSOUP-9 paused</div><div class="s">Second losing load on Fabrics C44 → D47</div></div></div><div class="row"><time>3:31 PM</time><div class="grow"><div class="t">Switched GIANTSOUP-11 to Fuel</div><div class="s">Fuel scored 1.3× better than Ice water</div></div></div></div>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>iPad portrait · 1032 × 1376.</b> Credits box top left with the summary and chart under it, the queue beside it, then full-width operations and log.</figcaption>
+  </figure>
+</div>
+</details>
+</div>
+<script>
+const openTarget = () => {
+  const el = location.hash && document.getElementById(location.hash.slice(1));
+  const d = el && el.closest('details');
+  if (d && !d.open) { d.open = true; el.scrollIntoView(); }
+};
+window.addEventListener('hashchange', openTarget);
+document.addEventListener('click', e => { const a = e.target.closest('a[href^="#"]'); if (a && a.getAttribute('href') === location.hash) openTarget(); });
+openTarget();
+const t = document.getElementById('fullToggle');
+const apply = () => document.body.classList.toggle('full', t.checked);
+t.addEventListener('change', apply);
+if (location.hash === '#full' || new URLSearchParams(location.search).has('full')) { t.checked = true; }
+apply();
+</script>
+</body>
+</html>
