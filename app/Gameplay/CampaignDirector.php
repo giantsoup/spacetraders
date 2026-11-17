@@ -547,6 +547,20 @@ class CampaignDirector
         return [$committed, ...array_values(array_filter($ranked, fn ($row) => ! $same($row)))];
     }
 
+    /** The oldest buyer quote a committed arm buy accepts; never below the snapshot age. */
+    private function commitQuoteLimit(): int
+    {
+        return max((int) config('gameplay.snapshot_seconds'), (int) config('gameplay.campaign_commit_quote_max_age_seconds', 900));
+    }
+
+    /** One of our ships is at the buyer (not in transit) or flying to it, so the buyer quote can be refreshed. */
+    private function buyerObservable(Agent $agent, string $buyer): bool
+    {
+        return Ship::where('agent_id', $agent->id)->get()->contains(fn ($ship) => ($ship->snapshot['nav']['status'] ?? null) === 'IN_TRANSIT'
+            ? ($ship->snapshot['nav']['route']['destination']['symbol'] ?? $ship->snapshot['nav']['waypointSymbol'] ?? null) === $buyer
+            : ($ship->snapshot['nav']['waypointSymbol'] ?? null) === $buyer);
+    }
+
     /** Seconds since the buyer's detailed quote for the good, or null when it is missing or invalidated. */
     private function buyerQuoteAge(Agent $agent, string $buyer, string $good): ?int
     {
@@ -654,6 +668,18 @@ class CampaignDirector
             $committed = $commit && $candidate['key'] === $commit['key'] && $candidate['source'] === $commit['source'] && $candidate['source'] === $ship['nav']['waypointSymbol'];
             try {
                 if ($candidate['source'] !== $ship['nav']['waypointSymbol']) {
+                    // An arm flies to a source only if it can buy there: the buyer quote will still be
+                    // within the commitment bound on arrival, or one of our ships can read the buyer.
+                    if ($arm && ! $this->buyerObservable($agent, $candidate['buyer'])) {
+                        $age = $this->buyerQuoteAge($agent, $candidate['buyer'], $candidate['good']);
+                        if ($age === null || $age + ($candidate['position_seconds'] ?? 0) > $this->commitQuoteLimit()) {
+                            $considered[] = $candidate + ['rejected' => 'Buyer quote at '.$candidate['buyer'].' would be past the '.$this->commitQuoteLimit()
+                                .' s commitment bound on arrival, and no ship of ours can read it.', 'buyer_quote_age' => $age];
+
+                            continue;
+                        }
+                    }
+
                     return $this->position($grant, $episode, $agent, $ship, $candidate['source']);
                 }
                 $probe = $this->role($episode, 'probe');
@@ -695,20 +721,26 @@ class CampaignDirector
                 $buyerAge = null;
                 if ($committed) {
                     // The buyer was just read (fresh if any of our ships is parked there). Otherwise a
-                    // committed buy may use a buyer quote up to the commitment bound, or waits for one.
+                    // committed buy may use a buyer quote up to the commitment bound. Past it, the arm
+                    // waits only while one of our ships is at or flying to the buyer; else it lets go now.
                     $age = $this->buyerQuoteAge($agent, $fresh['buyer'], $fresh['good']);
-                    $limit = (int) config('gameplay.campaign_commit_quote_max_age_seconds', 900);
+                    $limit = $this->commitQuoteLimit();
                     if ($age === null || $age > $limit) {
+                        $message = 'Committed pair: buyer quote at '.$fresh['buyer'].' is '.($age === null ? 'missing' : $age.' s old').', past the '.$limit.' s commitment bound.';
+                        if (! $this->buyerObservable($agent, $fresh['buyer'])) {
+                            $this->endCommit($grant, $episode, 'buyer_quote_unavailable', ['buyer_quote_age' => $age]);
+                            $considered[] = $fresh + ['rejected' => $message.' No ship of ours can read it.'];
+
+                            continue;
+                        }
                         $this->awaitingQuote = true;
                         $this->candidate = null;
-                        $considered[] = $fresh + ['rejected' => 'Committed pair: buyer quote at '.$fresh['buyer'].' is '.($age === null ? 'missing' : $age.' s old')
-                            .', past the '.$limit.' s commitment bound. Awaiting a buyer quote.'];
+                        $considered[] = $fresh + ['rejected' => $message.' Awaiting a buyer quote.'];
 
                         return null;
                     }
-                    if ($age > (int) config('gameplay.snapshot_seconds')) {
-                        $buyerAge = $limit;
-                    }
+                    // Every committed plan carries the bound, so a quote crossing the snapshot age mid-pass still buys.
+                    $buyerAge = $limit;
                 }
                 // Shadow only: flag a low value-per-minute choice without changing it.
                 $candidate = $fresh + ['value_floor' => $trades->valueFloor($episode, $fresh)];
@@ -730,14 +762,15 @@ class CampaignDirector
                 }
                 $considered[] = $candidate + ['rejected' => $exception->getMessage()];
                 if ($committed && ! empty($episode->refresh()->state['commit'])) {
-                    // A freshness failure waits on the committed pair; any other failure ends the commitment.
-                    if (preg_match('/fresh|stale/i', $exception->getMessage())) {
+                    // A stale-quote failure waits on the committed pair while a ship can read the buyer;
+                    // any other failure ends the commitment and the next candidate is tried.
+                    if ($exception instanceof StaleQuote && $this->buyerObservable($agent, $candidate['buyer'])) {
                         $this->awaitingQuote = true;
                         $this->candidate = null;
 
                         return null;
                     }
-                    $this->endCommit($grant, $episode, 'rejected', ['message' => $exception->getMessage()]);
+                    $this->endCommit($grant, $episode, $exception instanceof StaleQuote ? 'buyer_quote_unavailable' : 'rejected', ['message' => $exception->getMessage()]);
                 }
             }
         }

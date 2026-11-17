@@ -254,7 +254,7 @@ class OperationPlanner
         $quote = $this->observation($agent, 'market', $market);
         $good = collect($quote?->data['tradeGoods'] ?? [])->firstWhere('symbol', $symbol);
         if (! $quote || ! $good || ! empty($quote->data['invalidated_by_action']) || $quote->observed_at->lt(now()->subSeconds(max((int) config('gameplay.snapshot_seconds'), $maxAge ?? 0)))) {
-            throw new GameException('Detailed prices at '.$market.' for '.$symbol.' are unknown or stale. Stop and retain any owned cargo.');
+            throw new StaleQuote('Detailed prices at '.$market.' for '.$symbol.' are unknown or stale. Stop and retain any owned cargo.');
         }
 
         return $good + ['observed_at' => $quote->observed_at->toIso8601String()];

@@ -8,6 +8,8 @@ use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignDirector;
 use App\Gameplay\CampaignPlaybook;
 use App\Gameplay\Engine\EngineHost;
+use App\Gameplay\GameException;
+use App\Gameplay\OperationPlanner;
 use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
@@ -87,8 +89,8 @@ class ArmRouteCommitTest extends TestCase
         $this->armPass($grant);
         $run = $this->activeRun($episode);
         $this->assertSame(['trade', 'IRON_ORE', 'X1-TEST-ROCK', 'X1-TEST-PORT'], [$run->strategy, $run->plan['symbol'], $run->plan['site'], $run->plan['market']]);
-        // The parked ship's read made the buyer fresh, so no older-quote allowance applies.
-        $this->assertArrayNotHasKey('buyer_quote_max_age_seconds', $run->plan['campaign_trade']);
+        // The parked ship's read made the buyer fresh; every committed plan carries the bound.
+        $this->assertSame(900, $run->plan['campaign_trade']['buyer_quote_max_age_seconds']);
         $this->assertTrue(CarbonImmutable::parse($run->plan['route']['buyer_at'])->gte(now()->subSeconds(5)));
         $this->assertSame(0, $this->events($episode, 'claim_release')->count());
         $this->assertSame('trade_started', $this->events($episode, 'commit_end')->sole()->data['reason']);
@@ -131,6 +133,14 @@ class ArmRouteCommitTest extends TestCase
     public function test_arm_waits_for_a_buyer_quote_then_re_ranks_after_the_bound(): void
     {
         [$grant, $episode] = $this->positionAtSource();
+        // LOCAL-4 is flying to the buyer, so waiting for its read can succeed.
+        $this->editWorld(function (&$world) {
+            $ship = FakeSpaceTraders::ship('LOCAL-4', 'X1-TEST-MOON');
+            $ship['nav']['status'] = 'IN_TRANSIT';
+            $ship['nav']['route'] = ['destination' => ['symbol' => 'X1-TEST-PORT'], 'arrival' => now()->addHours(2)->toIso8601String()];
+            $world['ships'][] = $ship;
+        });
+        app(AgentSynchronizer::class)->sync($this->agent, false);
         $this->later(1000);
         $this->armPass($grant);
         $this->assertNull($this->activeRun($episode, required: false));
@@ -159,6 +169,43 @@ class ArmRouteCommitTest extends TestCase
         $run = $this->activeRun($episode);
         $this->assertSame(['scout', 'X1-TEST-MOON'], [$run->strategy, $run->plan['destination']]);
         $this->assertSame('X1-TEST-MOON', $episode->fresh()->state['commit']['source']);
+    }
+
+    public function test_unreadable_stale_buyer_ends_the_commitment_and_tries_the_next_pair_at_once(): void
+    {
+        [$grant, $episode] = $this->positionAtSource();
+        // A modest COPPER pair from MOON into ROCK, whose buyer the arm itself reads.
+        $this->editWorld(fn (&$world) => $world['market_goods']['X1-TEST-ROCK'][1]['sellPrice'] = 60);
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $this->later(1000);
+        $this->armPass($grant);
+        $end = $this->events($episode, 'commit_end')->first();
+        $this->assertSame(['buyer_quote_unavailable', 'IRON_ORE@X1-TEST-PORT'], [$end->data['reason'], $end->data['key']]);
+        $this->assertGreaterThan(900, $end->data['buyer_quote_age']);
+        $decision = json_encode($this->lastDecision($episode)->data);
+        $this->assertStringContainsString('No ship of ours can read it.', $decision);
+        // Positioning check: IRON from MOON also sells into the unreadable PORT, so it is skipped.
+        $this->assertStringContainsString('Buyer quote at X1-TEST-PORT would be past the 900 s commitment bound on arrival', $decision);
+        $run = $this->activeRun($episode);
+        $this->assertSame(['scout', 'X1-TEST-MOON'], [$run->strategy, $run->plan['destination']]);
+        $this->assertSame('COPPER_ORE@X1-TEST-ROCK', $episode->fresh()->state['commit']['key']);
+    }
+
+    public function test_a_route_failure_on_the_committed_pair_ends_the_commitment_at_once(): void
+    {
+        [$grant, $episode] = $this->positionAtSource();
+        $real = app(OperationPlanner::class);
+        $this->partialMock(OperationPlanner::class, fn ($mock) => $mock->shouldReceive('preview')->andReturnUsing(fn ($agent, $ship, $limits) => $limits['strategy'] === 'trade'
+            ? throw new GameException('No fuel-safe continuation to a verified affordable fuel seller. Refresh prices, refuel or replan before departure.')
+            : $real->preview($agent, $ship, $limits)));
+        $this->later(60);
+        $this->armPass($grant);
+        $end = $this->events($episode, 'commit_end')->first();
+        $this->assertSame(['rejected', 'IRON_ORE@X1-TEST-PORT'], [$end->data['reason'], $end->data['key']]);
+        $this->assertStringContainsString('Refresh prices, refuel or replan', $end->data['message']);
+        $this->assertNotSame('awaiting_buyer_quote', $this->lastDecision($episode)->data['choice']);
+        $run = $this->activeRun($episode);
+        $this->assertSame(['scout', 'X1-TEST-MOON'], [$run->strategy, $run->plan['destination']]);
     }
 
     public function test_arm_switches_when_the_committed_pair_turns_unprofitable(): void
