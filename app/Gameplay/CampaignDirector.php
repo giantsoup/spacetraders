@@ -309,7 +309,7 @@ class CampaignDirector
                     $index = $windDown;
                 }
             }
-            while (isset($phases[$index + 1], $phases[$index]['exit']) && app(CampaignPlaybook::class)->passes($phases[$index]['exit'], app(CampaignSafety::class)->metrics($episode, $agent))) {
+            while (isset($phases[$index + 1], $phases[$index]['exit']) && app(CampaignPlaybook::class)->passes($phases[$index]['exit'], app(CampaignSafety::class)->metrics($episode, $agent, $phases[$index]['exit']))) {
                 $from = $episode->phase;
                 $episode->update(['phase' => $phases[++$index]['id']]);
                 app(CampaignControl::class)->event($grant, $episode, 'phase', ['from' => $from, 'to' => $episode->phase]);
@@ -343,7 +343,7 @@ class CampaignDirector
                 $episode->update(['state' => $state]);
             }
             foreach ($phases[$index]['activities'] as $activity) {
-                if (isset($activity['when']) && ! app(CampaignPlaybook::class)->passes($activity['when'], app(CampaignSafety::class)->metrics($episode, $agent))) {
+                if (isset($activity['when']) && ! app(CampaignPlaybook::class)->passes($activity['when'], app(CampaignSafety::class)->metrics($episode, $agent, $activity['when']))) {
                     $considered[] = $activity + ['rejected' => 'Activity gate has not passed.'];
 
                     continue;
@@ -378,7 +378,7 @@ class CampaignDirector
                     $run = match ($activity['strategy']) {
                         'trade' => $this->trade($grant, $episode, $agent, $ship, $activity, $considered),
                         'mining' => $this->mining($grant, $episode, $agent, $ship, $considered),
-                        'scout' => $this->scout($grant, $episode, $agent, $ship, $considered),
+                        'scout' => $this->scout($grant, $episode, $agent, $ship, $considered, $activity['role'] === 'command'),
                         'sell_aboard' => null,
                     };
                     if ($run) {
@@ -392,7 +392,8 @@ class CampaignDirector
                             $episode->refresh();
                             $episode->update(['state' => array_merge($episode->state ?? [], ['current_pair' => $run->plan['campaign_trade']['key']])]);
                         }
-                        $this->decision($grant, $episode, $agent, $considered, $activity['strategy'], $run->id);
+                        $this->decision($grant, $episode, $agent, $considered, $activity['strategy'], $run->id,
+                            $run->strategy === 'trade' ? ['value_floor' => $run->plan['campaign_trade']['value_floor'] ?? null] : []);
 
                         return;
                     }
@@ -470,9 +471,9 @@ class CampaignDirector
             'cycles' => 1];
     }
 
-    private function decision(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $considered, string $choice, ?int $run = null): void
+    private function decision(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $considered, string $choice, ?int $run = null, array $extra = []): void
     {
-        app(CampaignControl::class)->event($grant, $episode, 'decision', ['credits' => $agent->credits, 'phase' => $episode->phase, 'candidates' => $considered, 'choice' => $choice, 'run_id' => $run]);
+        app(CampaignControl::class)->event($grant, $episode, 'decision', ['credits' => $agent->credits, 'phase' => $episode->phase, 'candidates' => $considered, 'choice' => $choice, 'run_id' => $run] + $extra);
     }
 
     private function sample(CampaignEpisode $episode, Agent $agent): void
@@ -535,7 +536,8 @@ class CampaignDirector
 
                     return null;
                 }
-                $candidate = $fresh;
+                // Shadow only: flag a low value-per-minute choice without changing it.
+                $candidate = $fresh + ['value_floor' => $trades->valueFloor($episode, $fresh)];
                 $this->candidate = $candidate;
                 $limits = $this->limits($grant, $episode, $agent);
                 $limits['max_spend'] = min($limits['max_spend'], $candidate['max_inventory'] + $candidate['fuel'] + $candidate['departure_refuel']);
@@ -648,25 +650,77 @@ class CampaignDirector
         return null;
     }
 
-    private function scout(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array &$considered): ?AutomationRun
+    /**
+     * A local scout (the command ship's) only reads never-priced markets (unknown prices, or no goods
+     * directory yet) at its own coordinates (distance 0), and skips any market the role probe is
+     * heading to or has a run for. It never crosses the system, and never hops between nearby
+     * stations just to refresh stale prices: with no such market it yields nothing.
+     */
+    private function scout(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array &$considered, bool $local = false): ?AutomationRun
     {
         $report = app(OpportunityAssessor::class)->report($agent);
-        $tasks = self::scoutOrder(collect($report['observation_tasks'])->where('ship', $ship['symbol'])->where('ready_for_bounded_preview', true), collect($report['markets']));
-        foreach ($tasks as $task) {
+        $tasks = collect($report['observation_tasks'])->where('ship', $ship['symbol']);
+        if ($local) {
+            // A market with no goods directory is never priced either. The scout preview reads the
+            // directory remotely before planning, so it needs only a verified route, not a ready task.
+            $nearby = $this->colocated($agent, $ship);
+            $claimed = $this->probeTargets($episode);
+            $tasks = $tasks->filter(fn ($task) => in_array($task['destination'], $nearby, true) && ! in_array($task['destination'], $claimed, true)
+                && (($task['fact'] === 'Unknown prices' && $task['ready_for_bounded_preview']) || ($task['fact'] === 'Missing goods directory' && $task['route_options'] !== [])));
+            if ($tasks->isEmpty()) {
+                $considered[] = ['strategy' => 'scout', 'role' => 'command', 'rejected' => 'No unclaimed market at the command ship\'s coordinates needs a read.'];
+
+                return null;
+            }
+        } else {
+            $tasks = $tasks->where('ready_for_bounded_preview', true);
+        }
+        foreach (self::scoutOrder($tasks, collect($report['markets'])) as $task) {
             if ($task['destination'] === $ship['nav']['waypointSymbol']) {
                 continue;
             }
             try {
                 // One way: the scout parks at each market it prices and starts the next hop from there,
-                // instead of flying home between markets.
+                // instead of flying home between markets. A local (command) scout tops up first at a fuel seller.
                 return app(AutomationRunner::class)->preview($agent, $ship['symbol'], $this->limits($grant, $episode, $agent) + [
-                    'strategy' => 'scout', 'destination' => $task['destination'], 'max_fuel' => $ship['fuel']['capacity'], 'one_way' => true]);
+                    'strategy' => 'scout', 'destination' => $task['destination'], 'max_fuel' => $ship['fuel']['capacity'], 'one_way' => true]
+                    + ($local ? ['departure_refuel' => true] : []));
             } catch (GameException $exception) {
                 $considered[] = ['strategy' => 'scout', 'destination' => $task['destination'], 'rejected' => $exception->getMessage()];
             }
         }
 
         return null;
+    }
+
+    /** @return list<string> Other waypoints in the ship's system at exactly its coordinates. */
+    private function colocated(Agent $agent, array $ship): array
+    {
+        $points = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->get()->keyBy('symbol');
+        $here = $points->get($ship['nav']['waypointSymbol'])?->data;
+        if (! $here || $ship['nav']['status'] === 'IN_TRANSIT') {
+            return [];
+        }
+
+        return $points->filter(fn ($point) => $point->symbol !== $here['symbol'] && ($point->data['systemSymbol'] ?? null) === $here['systemSymbol']
+            && ($point->data['x'] ?? null) === $here['x'] && ($point->data['y'] ?? null) === $here['y'])->keys()->all();
+    }
+
+    /** @return list<string> Markets the role probe is flying to or has a preview or active run for. */
+    private function probeTargets(CampaignEpisode $episode): array
+    {
+        $probe = $this->role($episode, 'probe');
+        if (! $probe) {
+            return [];
+        }
+        $targets = AutomationRun::where('agent_id', $episode->agent_id)->where('ship_symbol', $probe['symbol'])
+            ->where(fn ($query) => $query->where('state', 'preview')->orWhereNotNull('active_agent_id'))->get()
+            ->map(fn ($run) => $run->plan['destination'] ?? $run->plan['market'] ?? null)->filter()->all();
+        if ($probe['nav']['status'] === 'IN_TRANSIT') {
+            $targets[] = $probe['nav']['route']['destination']['symbol'] ?? $probe['nav']['waypointSymbol'];
+        }
+
+        return array_values(array_unique($targets));
     }
 
     /**

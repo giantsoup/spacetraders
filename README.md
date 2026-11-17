@@ -192,6 +192,8 @@ See the [Tailscale iPad plan](docs/tailscale-ipad-plan.md).
 
 The deploy gracefully ends a running local engine and restarts it after the site checks pass; ending cancels unsent previews and stops automation runs, which you re-approve afterwards.
 
+Each deploy rebuilds the assets and deletes the previous build's hashed chunks. A tab restored from cache (Chrome on iOS does this) can then request chunks that no longer exist. When a chunk or page import fails to load, `resources/js/app.js` reloads the page once to fetch the current build. A sessionStorage timestamp blocks a second reload within a minute, and the page skips the reload when storage is unavailable, so it cannot loop. The fix can't help if the entry script itself is gone from both the server and the browser cache.
+
 The [Windows local MVP plan](docs/windows-local-mvp-plan.md) and [Windows engine design](docs/windows-engine-design.md) describe the port, its safety protocol, and its verification evidence.
 
 ### Local engine and offline practice

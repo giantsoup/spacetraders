@@ -68,10 +68,27 @@ scout, trade, mining, and sell_aboard, tried in file order.
 
 Gates contain one metric, or any with a list of metric gates. Supported metrics are
 minutes_elapsed_gte, hours_to_reset_lte, credits_gte, markets_observed_gte,
-cycles_completed_gte, and minutes_without_trade_gte. The default playbook no longer has a
+cycles_completed_gte, minutes_without_trade_gte, and positive_spread_gte (the number of trade
+candidates the command ship could run now whose score, predicted margin per planned minute, is at
+least the 1,500 CR/min value floor; a +50 CR pair does not count). It is ranked only when the gate
+being checked uses it, because ranking records first-seen bids in episode state. A ranking error
+counts zero spreads instead of pausing the campaign; a refusal that asks to retry later waits.
+The default playbook no longer has a
 mining fallback: it earned nothing and made every other earn tick skip trade. One hour before
 the confirmed reset, wind_down only sells cargo: no purchases or mining, including previously
 queued buys.
+
+Fast start: the default discover phase ends on the first of 90 minutes, 8 priced markets, or one
+spread at or above the value floor. Its activities are a command scout, then the probe scout. A
+command-role scout only visits never-priced markets (unknown prices, or no goods directory yet;
+the preview reads the directory remotely first) at the command ship's own coordinates (distance
+0, such as a cluster of stations around one planet), skips any market the role probe is flying
+to or has a run for, and tops up first at a fuel seller. It never sends the command ship across
+the system: with no such market it yields nothing and the probe scouts the rest. Runs stay
+serialized. The discover exit is checked before the tick's read of the ships' own markets, so it
+can pass on the last stored quote. That is harmless: earn re-reads both endpoints before buying.
+Ranking during discover also records first-seen bids earlier than before; first_seen has always
+been the first bid any ranking saw, chosen pair or not.
 
 Trade settings govern proofs, lot sizes, switching, losses, and quote age:
 
@@ -81,8 +98,12 @@ Trade settings govern proofs, lot sizes, switching, losses, and quote age:
   max_buyer_batches (five), always within hold capacity and fuel-funded affordability.
 - A negative load, posted fuel included, requires another proof of that good/buyer pair only;
   other pairs keep their proof. A load is charged for fuel bought after it departs, up to what
-  its own travel burned; a departure top-up refills earlier loads and is not charged again. A forced fallback sale counts as losing only when its net is
-  negative. Two consecutive losing loads trigger sell-aboard followed by a pause.
+  its own travel burned, counted by the actual change in the tank. A departure top-up is not
+  charged to the load that buys it: it refills fuel burned earlier, by earlier loads (already in
+  their unrefilled fuel allowance) or by positioning, sell-aboard or blocked runs. It still shows
+  in run totals and credit accounting, and load results report it as departure_fuel_cost. A
+  forced fallback sale counts as losing only when its net is negative. Two consecutive losing
+  loads trigger sell-aboard followed by a pause.
 - Selection ranks every observed source/buyer/good combination deterministically by
   predicted margin per travel/trade minute. Bid predictions decay by buyer batch; source
   costs use conservative reciprocal inflation by source batch. Equal-sized realized sale
@@ -101,8 +122,27 @@ Trade settings govern proofs, lot sizes, switching, losses, and quote age:
   of capacity) out of the credits available for cargo. That ceiling counts toward spending
   limits but not toward a trade's margin. If the top-up would exceed its ceiling, the run
   blocks instead of buying or departing on a partial tank. Recovery reads its own market first
-  when that fuel quote is stale, and tops up again after its final sale when the ship is then
-  docked at a verified fuel seller, except in wind_down.
+  when that fuel quote is stale (a refused read is skipped unless it asks to retry later), and
+  tops up again after its final sale when the ship is then docked at a verified fuel seller,
+  except in wind_down. Recovery caps its departure top-up ceiling at the credits above the
+  reserve. Only when that capped ceiling can't fill the tank at the quoted price does it plan
+  from the fuel aboard instead, as before the top-up existed, so it never blocks for want of
+  credits. While recovery waits to depart it re-reads that market only until the tank is full.
+- Shadow data, never enforced and never changing a purchase, sale, route or spend:
+  - Each ranked candidate records which limit set its lot (lot_bound: hold, buyer_batches,
+    proof_units, proof_credits or credits) and the unit count, up to that lot, with the best
+    predicted margin per planned minute under the pair's learned decay (optimal_units,
+    optimal_margin, optimal_score). shadow_lot_bound is optimal_size when that count is smaller.
+    Ties in score go to the larger count. Load results repeat these with the units bought.
+  - The chosen trade carries a value_floor flag: planned CR per minute below 1,500, or below 30%
+    of the median realized CR per minute of the last ten load results. Load results include
+    elapsed_seconds and realized_cr_per_minute.
+  - Pairs ruled out only by run_max_minutes are listed in each decision's long_run_rejections
+    (good, source, buyer, predicted margin and planned minutes), at most five, highest predicted
+    margin first. Each pair keeps its highest-margin row.
+  - Decision events are deduplicated on choice, rejection counts and run. The value_floor and
+    long_run_rejections fields are not compared (only their rejection count is), so a repeated
+    decision keeps the first event's shadow values.
 - The probe is not sent to a buyer where any of our ships is already stationary. Extra ships
   bought manually are not campaign roles and are never driven, but each tick in earn reads one
   market where such a ship is parked, in rotation, skipping markets read within the quote age.
@@ -185,7 +225,10 @@ latest command-ship run start, the move into earn, or the last resume, so paused
 not count; probe and extra-ship runs do not reset it. It is silent while paused, with a stale
 engine heartbeat, outside earn, in wind_down, and for the first thirty minutes of an episode.
 A deploy or engine outage records no resume event, so it can fire on the first healthy check
-afterwards; it clears once the command ship starts a run.
+afterwards; it clears once the command ship starts a run. The timer counts from run starts, not
+run ends, so it relies on run_max_minutes (15) and the ten-minute recovery sale floor keeping a
+single command-ship run under twenty-five minutes; raising either can make a long, healthy run
+look stalled.
 These stall alerts do not pause execution. No approved campaign means there is nothing to
 monitor.
 

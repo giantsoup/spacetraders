@@ -4,6 +4,12 @@
 # minutes) and lets the probe keep scouting in earn whenever no trade is feasible.
 # v3 (2026-11-16): the mining fallback earned nothing and made every other earn tick skip trade, so
 # it is removed. Proofs may spend 60000 (one full buyer batch of the top goods) instead of 10000.
+# v4 (2026-11-16): fast start. Discover also leaves on the first positive spread the command ship
+# could trade, and the command ship first reads markets at its own coordinates (distance 0 only;
+# it never crosses the system to scout) before the probe scouts the rest.
+# v5 (2026-11-16): a spread counts toward the discover exit only when it scores at least the
+# 1,500 CR/min value floor (predicted margin per planned minute), so a +50 CR pair no longer ends
+# discover. The command scout also reads colocated markets whose goods directory is unknown.
 name: weekly-default
 version: 1
 agent: { symbol: GIANTSOUP, faction: VOID }
@@ -19,8 +25,8 @@ trade:
   quote_max_age_seconds: 180
 phases:
   - id: discover
-    exit: { any: [ { minutes_elapsed_gte: 90 }, { markets_observed_gte: 8 } ] }
-    activities: [ { role: probe, strategy: scout } ]
+    exit: { any: [ { minutes_elapsed_gte: 90 }, { markets_observed_gte: 8 }, { positive_spread_gte: 1 } ] }
+    activities: [ { role: command, strategy: scout }, { role: probe, strategy: scout } ]
   - id: earn
     exit: { hours_to_reset_lte: 1 }
     activities:
