@@ -87,8 +87,9 @@ class CycleAccounting
         $totals['accounting'] = $accounting;
         $totals['accounted_at'] = now()->toIso8601String();
         $totals['elapsed_seconds'] = $seconds;
-        $totals['ending_fuel'] = $end['fuel'];
-        $totals['unsold'] = $end['inventory'];
+        if ($end['fuel'] !== null) {
+            $totals['ending_fuel'] = $end['fuel'];
+        }
         $run->update(['totals' => $totals]);
     }
 

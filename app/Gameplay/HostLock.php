@@ -8,9 +8,9 @@ class HostLock
 
     private array $nested = [];
 
-    public function scoped(string $key, callable $work): mixed
+    public function scoped(string $key, callable $work, float $seconds = 0): mixed
     {
-        return $this->run($key, function () use ($key, $work) {
+        return $this->retry($key, function () use ($key, $work) {
             $previous = $this->nested[$key] ?? false;
             $this->nested[$key] = true;
             try {
@@ -18,7 +18,7 @@ class HostLock
             } finally {
                 $this->nested[$key] = $previous;
             }
-        });
+        }, $seconds);
     }
 
     public function retry(string $key, callable $work, float $seconds = 15): mixed
@@ -36,7 +36,7 @@ class HostLock
                 if ($entered || $exception->retryAfter === 0 || microtime(true) >= $deadline) {
                     throw $exception;
                 }
-                usleep(100000);
+                usleep((int) min(100000, max(0, ($deadline - microtime(true)) * 1000000)));
             }
         } while (true);
     }

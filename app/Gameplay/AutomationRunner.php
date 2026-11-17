@@ -576,8 +576,10 @@ class AutomationRunner
         $totals = $run->totals;
         $totals['elapsed_seconds'] = $run->started_at ? (int) $run->started_at->diffInSeconds(now()) : 0;
         $totals['cash_contribution'] = $totals['credit_delta'];
-        $totals['ending_fuel'] = $ship['fuel']['current'] ?? null;
-        $totals['unsold'] = $ship ? MiningPlanner::inventory($ship) : null;
+        if ($ship) {
+            $totals['ending_fuel'] = $ship['fuel']['current'] ?? $totals['ending_fuel'] ?? null;
+            $totals['unsold'] = MiningPlanner::inventory($ship);
+        }
         $totals['stopped_at'] = now()->toIso8601String();
         $run->update(['state' => RunState::Stopped, 'active_agent_id' => null, 'next_action_at' => null, 'totals' => $totals, 'blocked_reason' => $reason]);
         app(CycleAccounting::class)->record($run, $ship);
