@@ -52,7 +52,7 @@ const draftPanel = ref(null);
 const reviewPanel = ref(null);
 const acceptContract = ref(false);
 const forceAcknowledged = ref(false);
-const forceAvailable = computed(() => props.engine?.state === 'faulted' && props.engine.stop_requested_at && Date.now() - Date.parse(props.engine.stop_requested_at) >= 40000);
+const forceAvailable = computed(() => props.engine?.state === 'faulted' && props.engine.stop_requested_at && Date.now() - Date.parse(props.engine.stop_requested_at) >= (props.engine.shutdown_allowance_seconds ?? 180) * 1000);
 const balanceNote = ref('');
 const startingBalance = ref('');
 const credit = value => value === null || value === undefined ? 'Unknown' : `${Number(value).toLocaleString()} CR`;

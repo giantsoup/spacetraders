@@ -113,11 +113,20 @@ class LocalEngineManager
         return $this->status();
     }
 
+    /** Seconds the supervisor allows owned children to exit after End before faulting and enabling force stop. */
+    public static function shutdownAllowanceSeconds(): int
+    {
+        $seconds = (int) config('gameplay.engine_shutdown_seconds', 180);
+
+        return $seconds > 0 ? max(30, $seconds) : 180;
+    }
+
     public function forceStop(): array
     {
         $engine = LocalEngine::find(1);
-        if (! $engine || $engine->state !== 'faulted' || ! $engine->stop_requested_at || $engine->stop_requested_at->gt(now()->subSeconds(40))) {
-            throw new GameException('Force stop is available only after the 40-second graceful shutdown allowance.');
+        $allowance = self::shutdownAllowanceSeconds();
+        if (! $engine || $engine->state !== 'faulted' || ! $engine->stop_requested_at || $engine->stop_requested_at->gt(now()->subSeconds($allowance))) {
+            throw new GameException("Force stop is available only after the {$allowance}-second graceful shutdown allowance.");
         }
         $this->gate->close('faulted', 'Force stop requested. Interrupted writes require reconciliation.');
         $this->host()->forceStop($engine);
@@ -143,7 +152,7 @@ class LocalEngineManager
     {
         $engine = LocalEngine::find(1);
         if (! $engine) {
-            return ['state' => 'off', 'gate_open' => false, 'message' => 'Local engine is off.'];
+            return ['state' => 'off', 'gate_open' => false, 'message' => 'Local engine is off.', 'shutdown_allowance_seconds' => self::shutdownAllowanceSeconds()];
         }
         if (in_array($engine->state, ['starting', 'running', 'stopping'], true)
             && ! ($engine->state === 'starting' && $engine->updated_at->gt(now()->subSeconds(5)))
@@ -153,6 +162,7 @@ class LocalEngineManager
         }
 
         return array_merge($engine->only(['state', 'gate_open', 'session_id', 'heartbeat_at', 'message', 'stop_requested_at']), [
+            'shutdown_allowance_seconds' => self::shutdownAllowanceSeconds(),
             'warning' => $this->gate->enabled() && app(DeploymentGate::class)->hasForeignWorker()
                 ? 'Another queue worker is polling gameplay jobs outside the engine; stop it.' : null,
         ]);

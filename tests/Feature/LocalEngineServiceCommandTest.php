@@ -138,10 +138,58 @@ class LocalEngineServiceCommandTest extends TestCase
         $this->artisan('spacetraders:engine-service', ['operation' => 'end'])
             ->expectsOutput('Engine state: '.$state)
             ->expectsOutput('Engine message: Shutdown incomplete.')
-            ->expectsOutputToContain('Force stop on spacetraders.test')
+            ->expectsOutput('Engine did not finish ending within 210 seconds. Review Force stop on spacetraders.test.')
             ->assertFailed();
 
-        Sleep::assertSleptTimes(120);
+        Sleep::assertSleptTimes(420);
+    }
+
+    public function test_end_waits_thirty_seconds_past_the_configured_shutdown_allowance(): void
+    {
+        config(['gameplay.engine_shutdown_seconds' => 40]);
+        LocalEngine::create(['id' => 1, 'state' => 'running', 'processes' => []]);
+        $this->manager->shouldReceive('status')->andReturn(['state' => 'running'], ['state' => 'stopping', 'message' => 'Ending.']);
+        $this->manager->shouldReceive('end')->once()->andReturn(['state' => 'stopping']);
+        $this->manager->shouldReceive('alive')->andReturn(true);
+
+        $this->artisan('spacetraders:engine-service', ['operation' => 'end'])
+            ->expectsOutputToContain('within 70 seconds')
+            ->assertFailed();
+
+        Sleep::assertSleptTimes(140);
+    }
+
+    public function test_end_reports_a_fault_immediately_instead_of_waiting_for_off(): void
+    {
+        LocalEngine::create(['id' => 1, 'state' => 'running', 'processes' => []]);
+        $this->manager->shouldReceive('status')->andReturn(
+            ['state' => 'running'], ['state' => 'stopping', 'message' => 'Ending.'],
+            ['state' => 'faulted', 'message' => 'Graceful shutdown exceeded 180 seconds. Force stop may interrupt an upstream request.'],
+        );
+        $this->manager->shouldReceive('end')->once()->andReturn(['state' => 'stopping']);
+        $this->manager->shouldReceive('alive')->andReturn(true);
+
+        $this->artisan('spacetraders:engine-service', ['operation' => 'end'])
+            ->expectsOutput('Engine state: faulted')
+            ->expectsOutput('Engine message: Graceful shutdown exceeded 180 seconds. Force stop may interrupt an upstream request.')
+            ->expectsOutput('Engine faulted while ending and cannot reach off. Review Force stop on spacetraders.test.')
+            ->assertFailed();
+
+        Sleep::assertSleptTimes(1);
+    }
+
+    public function test_end_does_not_rerequest_end_while_already_stopping(): void
+    {
+        LocalEngine::create(['id' => 1, 'state' => 'stopping', 'processes' => []]);
+        $this->manager->shouldReceive('status')->andReturn(['state' => 'stopping'], ['state' => 'off']);
+        $this->manager->shouldNotReceive('end');
+        $this->manager->shouldReceive('alive')->andReturn(false);
+
+        $this->artisan('spacetraders:engine-service', ['operation' => 'end'])
+            ->expectsOutput('Engine state: off')
+            ->assertSuccessful();
+
+        Sleep::assertNeverSlept();
     }
 
     public static function endTimeouts(): array

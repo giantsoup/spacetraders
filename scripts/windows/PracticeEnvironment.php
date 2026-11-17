@@ -110,13 +110,15 @@ final class PracticeEnvironment
             return $status;
         }
         app(LocalEngineManager::class)->end();
-        $deadline = hrtime(true) + ($force ? 120_000_000_000 : 45_000_000_000);
+        $allowance = LocalEngineManager::shutdownAllowanceSeconds();
+        $wait = $force ? $allowance + 80 : $allowance + 5;
+        $deadline = hrtime(true) + $wait * 1_000_000_000;
         do {
             $status = self::snapshot();
             if (self::stopped($status)) {
                 return $status;
             }
-            if ($force && $status['state'] === 'faulted' && ($status['stop_requested_at'] ?? null)?->lte(now()->subSeconds(40))) {
+            if ($force && $status['state'] === 'faulted' && ($status['stop_requested_at'] ?? null)?->lte(now()->subSeconds($allowance))) {
                 app(LocalEngineManager::class)->forceStop();
                 $status = self::snapshot();
                 if (! self::stopped($status)) {
@@ -128,9 +130,9 @@ final class PracticeEnvironment
             usleep(200000);
         } while (hrtime(true) < $deadline);
         if (! $force) {
-            throw new RuntimeException('Engine processes remain after 45 seconds. Serve was left running. Inspect Status; retry Stop -Force for verified force stop.');
+            throw new RuntimeException("Engine processes remain after {$wait} seconds. Serve was left running. Inspect Status; retry Stop -Force for verified force stop.");
         }
-        throw new RuntimeException('Engine force-stop allowance did not become available within 120 seconds. Serve was left running. Inspect Status before retrying Stop -Force.');
+        throw new RuntimeException("Engine force-stop allowance did not become available within {$wait} seconds. Serve was left running. Inspect Status before retrying Stop -Force.");
     }
 
     public static function verify(): array

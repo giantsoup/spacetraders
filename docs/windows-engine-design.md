@@ -1,6 +1,6 @@
 # Windows local engine port: implementation design
 
-The Windows port keeps the existing lifecycle. Supervisor, admission and End semantics, heartbeat, the 40 s grace, fault rules and session invalidation stay shared. Only the OS-specific parts move behind one `EngineHost` seam. On Windows, a per-user on-demand Scheduled Task replaces launchd, cooperative stop replaces signals, and lease files replace `posix_kill`. macOS behavior must not change.
+The Windows port keeps the existing lifecycle. Supervisor, admission and End semantics, heartbeat, the graceful shutdown allowance (180 s by default), fault rules and session invalidation stay shared. Only the OS-specific parts move behind one `EngineHost` seam. On Windows, a per-user on-demand Scheduled Task replaces launchd, cooperative stop replaces signals, and lease files replace `posix_kill`. macOS behavior must not change.
 
 ## Findings that shape the design
 
@@ -202,7 +202,7 @@ Registration and import set PHP's web-request limit to 55 seconds, below Herd's 
    - the supervisor lease is free (orphan watchdog).
 4. The worker's `Looping` listener sets `app('queue.worker')->shouldQuit = true` and returns `false`. The worker finishes its current job and exits.
 5. The scheduler exits on its next 200 ms tick.
-6. The supervisor waits, settles runs (:76-83), sets state off and exits. The existing 40 s fault message is unchanged.
+6. The supervisor waits, settles runs (:76-83), sets state off and exits. If children outlive the configured allowance, the supervisor faults with a message that names that allowance.
 
 Use the DB signal, never `queue:restart`: it is a global cache key and stops unrelated workers.
 
@@ -224,7 +224,7 @@ Use the DB signal, never `queue:restart`: it is a global cache key and stops unr
 - Upstream HTTP is already bounded (30 s, 10 s connect; `SpaceTradersClient.php:58-65`), and SQLite `busy_timeout` is 5000.
 - `retry_after=180` is longer than the 150 s watchdog.
 
-### Force stop (web, after the 40 s gate at :137)
+### Force stop (web, after the shutdown-allowance gate)
 
 1. `close('faulted', …)`.
 2. Run one PowerShell CIM query for the stored PIDs: `ProcessId`, `CreationDate` as UTC ISO, and `CommandLine`.
@@ -238,7 +238,7 @@ Use the DB signal, never `queue:restart`: it is a global cache key and stops unr
 ### Windows wrappers and offline practice
 
 - `php.ps1` and `composer.ps1` use `System.Diagnostics.Process` with native argument quoting, the repository working directory, and inherited console streams (no redirection). Embedded quotes and trailing backslashes survive PowerShell 5.1; prompts appear before input and the native exit code is forwarded. Inspection scripts retain buffered native-command capture.
-- Practice `Stop -Force` and `Reset -Force` re-read the stop timestamp on every poll and wait for the current `stop_requested_at + 40 s` gate and a faulted session before verified force stop. A mid-wait fault can restart that allowance. The total wait is bounded at 120 s; if eligibility never arrives, the server stays running for inspection.
+- Practice `Stop -Force` and `Reset -Force` re-read the stop timestamp on every poll and wait for the current `stop_requested_at` + shutdown allowance gate (`gameplay.engine_shutdown_seconds`, default 180 s) and a faulted session before verified force stop. A mid-wait fault can restart that allowance. The total wait is bounded at the allowance plus 80 s (260 s by default); if eligibility never arrives, the server stays running for inspection.
 - Windows fixtures set explicit deployment, cache, lock, request-budget, storage, and application-cache paths inside their owned directory.
 - The practice runner checks effective configuration after boot, including path boundaries and resolved ancestors. It refuses commands when mutable paths escape the practice directory.
 
@@ -275,11 +275,12 @@ identity against the main checkout's effective database identity, loading only
 main environment/configuration (no providers or database connection). A matching
 identity is refused. The real `.env` is only read, never rewritten.
 
-`Stop` requests the same End session operation as the UI and waits up to 45
-seconds for a terminal engine state, closed gate, and all three released leases,
+`Stop` requests the same End session operation as the UI and waits up to the
+shutdown allowance plus 5 seconds (185 by default) for a terminal engine state, closed gate, and all three released leases,
 then stops only the recorded HTTP server tree. If graceful shutdown times out,
 the server and environment are preserved. `Stop -Force` may invoke the existing
-identity-verified force-stop path only after the manager's 40-second allowance.
+identity-verified force-stop path only after the manager's graceful shutdown
+allowance (`SPACETRADERS_ENGINE_SHUTDOWN_SECONDS`, default 180 seconds).
 `Reset -Force` first stops, uninstalls with the isolated environment, verifies
 `schtasks /Query` fails for the practice task, then deletes the owned directory.
 

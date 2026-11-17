@@ -89,17 +89,26 @@ class LocalEngineService extends Command
 
     private function endEngine(LocalEngineManager $manager): int
     {
-        if ($manager->status()['state'] === 'off') {
+        $initial = $manager->status()['state'];
+        if ($initial === 'off') {
             $this->line('Engine state: off');
 
             return self::SUCCESS;
         }
 
         $engine = LocalEngine::find(1);
-        $deadline = now()->addSeconds(60);
-        $manager->end();
+        $wait = LocalEngineManager::shutdownAllowanceSeconds() + 30;
+        $deadline = now()->addSeconds($wait);
+        if ($initial !== 'stopping') {
+            $manager->end();
+        }
         do {
             $status = $manager->status();
+            if ($status['state'] === 'faulted') {
+                $this->line('Engine state: faulted');
+                $this->line('Engine message: '.($status['message'] ?? ''));
+                throw new GameException('Engine faulted while ending and cannot reach off. Review Force stop on spacetraders.test.');
+            }
             $alive = array_filter(['supervisor', 'worker', 'scheduler'], fn ($role) => $manager->alive($engine, $role));
             if ($status['state'] === 'off' && $alive === []) {
                 $this->line('Engine state: off');
@@ -114,6 +123,6 @@ class LocalEngineService extends Command
 
         $this->line('Engine state: '.$status['state']);
         $this->line('Engine message: '.($status['message'] ?? ''));
-        throw new GameException('Engine did not finish ending within 60 seconds. Review Force stop on spacetraders.test.');
+        throw new GameException("Engine did not finish ending within {$wait} seconds. Review Force stop on spacetraders.test.");
     }
 }

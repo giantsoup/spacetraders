@@ -143,7 +143,7 @@ try {
     posix_kill($force->processes['supervisor'], SIGSTOP);
     try {
         $manager->end();
-        LocalEngine::whereKey(1)->update(['state' => 'faulted', 'stop_requested_at' => now()->subSeconds(41)]);
+        LocalEngine::whereKey(1)->update(['state' => 'faulted', 'stop_requested_at' => now()->subSeconds(LocalEngineManager::shutdownAllowanceSeconds() + 1)]);
         $manager->forceStop();
         until(fn () => ! $manager->alive($force, 'supervisor') && ! $manager->alive($force, 'worker') && ! $manager->alive($force, 'scheduler'));
         verify(! LocalEngine::find(1)->gate_open, 'Acknowledged force stop kills only the fixed owned service after its modeled grace period');

@@ -148,20 +148,20 @@ class PracticeEnvironmentTest extends TestCase
         $manager = Mockery::mock(LocalEngineManager::class);
         $manager->shouldReceive('end')->once();
         $manager->shouldReceive('status')->times(6)->andReturnUsing(function () use ($started, &$poll, &$forced) {
-            $seconds = [0, 39, 45, 69, 70, 70][$poll++];
+            $seconds = [0, 179, 185, 209, 210, 210][$poll++];
             $this->travelTo($started->copy()->addSeconds($seconds));
 
             return [
-                'state' => $forced ? 'off' : ($seconds < 45 ? 'stopping' : 'faulted'),
+                'state' => $forced ? 'off' : ($seconds < 185 ? 'stopping' : 'faulted'),
                 'gate_open' => false,
-                'stop_requested_at' => $started->copy()->addSeconds($seconds < 45 ? 0 : 30),
+                'stop_requested_at' => $started->copy()->addSeconds($seconds < 185 ? 0 : 30),
             ];
         });
         $manager->shouldReceive('alive')->times(18)->andReturnUsing(function ($engine, $role) use (&$forced) {
             return $role === 'worker' && ! $forced;
         });
         $manager->shouldReceive('forceStop')->once()->andReturnUsing(function () use ($started, &$forced) {
-            $this->assertSame($started->copy()->addSeconds(70)->getTimestamp(), now()->getTimestamp());
+            $this->assertSame($started->copy()->addSeconds(210)->getTimestamp(), now()->getTimestamp());
             $forced = true;
 
             return [];
