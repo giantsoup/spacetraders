@@ -140,9 +140,12 @@ class CampaignDirector
             return;
         }
         try {
-            app(SpaceTradersClient::class)->scope(fn () => $this->direct($grant), deadline: microtime(true) + self::DEADLINE_SECONDS);
+            $deadline = microtime(true) + self::DEADLINE_SECONDS;
+            app(SpaceTradersClient::class)->scope(fn () => $this->direct($grant, $deadline), deadline: $deadline);
         } catch (ValidationException) {
             $control->pause($grant, 'registration_requires_review');
+        } catch (DirectorAgentLockTimeout) {
+            $this->wait($grant, 'awaiting_agent_lock');
         } catch (GameException $exception) {
             if ($exception->retryAfter > 0) {
                 $this->wait($grant, 'awaiting_fresh_state');
@@ -159,7 +162,7 @@ class CampaignDirector
         app(CampaignControl::class)->event($grant, null, 'wait', ['reason' => $reason]);
     }
 
-    private function direct(CampaignGrant $grant): void
+    private function direct(CampaignGrant $grant, float $deadline): void
     {
         // The reset read belongs to the grant's arm ship, or to the director when the grant has no ship.
         $schedule = FleetMetrics::as($grant->arm()['ship'] ?? 'director', fn () => app(SpaceTradersApi::class)->resetSchedule());
@@ -230,19 +233,21 @@ class CampaignDirector
             app(CampaignControl::class)->event($grant, null, 'registration', ['agent_id' => $agent->id, 'reset_id' => $schedule['reset_id']]);
         }
         if ($arm) {
-            app(FleetMetrics::class)->as($arm['ship'], fn () => $this->episode($grant, $agent, $schedule, $next));
+            app(FleetMetrics::class)->as($arm['ship'], fn () => $this->episode($grant, $agent, $schedule, $next, $deadline));
         } else {
             $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->where('reset_id', $agent->reset_id)->latest('id')->first();
             $ship = $episode?->state['role_ships']['command'] ?? Ship::where('agent_id', $agent->id)->get()
                 ->first(fn ($ship) => ($ship->snapshot['registration']['role'] ?? null) === 'COMMAND')?->symbol;
-            FleetMetrics::as($ship, fn () => $this->episode($grant, $agent, $schedule, $next));
+            FleetMetrics::as($ship, fn () => $this->episode($grant, $agent, $schedule, $next, $deadline));
         }
     }
 
-    private function episode(CampaignGrant $grant, Agent $agent, array $schedule, CarbonImmutable $next): void
+    private function episode(CampaignGrant $grant, Agent $agent, array $schedule, CarbonImmutable $next, float $deadline): void
     {
         $arm = $grant->arm();
-        app(HostLock::class)->scoped('agent-'.$agent->id, function () use ($grant, $agent, $schedule, $next, $arm) {
+        $entered = false;
+        $work = function () use ($grant, $agent, $schedule, $next, $arm, &$entered) {
+            $entered = true;
             $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->where('reset_id', $schedule['reset_id'])->whereNull('closed_at')->first();
             if ($episode && $this->startRetainedPreview($grant, $episode, $agent)) {
                 return;
@@ -449,7 +454,15 @@ class CampaignDirector
                 $this->discoverIfDue($episode, $agent);
             }
             $this->decision($grant, $episode, $agent, $considered, $this->awaitingQuote ? 'awaiting_buyer_quote' : 'idle');
-        });
+        };
+        try {
+            app(HostLock::class)->scoped('agent-'.$agent->id, $work, min(10, max(0, $deadline - microtime(true))));
+        } catch (GameException $exception) {
+            if (! $entered && $exception->retryAfter > 0) {
+                throw new DirectorAgentLockTimeout;
+            }
+            throw $exception;
+        }
     }
 
     /**

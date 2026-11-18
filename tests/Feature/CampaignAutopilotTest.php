@@ -16,12 +16,16 @@ use App\Gameplay\CampaignReport;
 use App\Gameplay\CampaignSafety;
 use App\Gameplay\CampaignStatus;
 use App\Gameplay\CampaignTrade;
+use App\Gameplay\CommandRules;
 use App\Gameplay\ContractPlanner;
 use App\Gameplay\CreditAccounting;
+use App\Gameplay\CycleAccounting;
+use App\Gameplay\DirectorAgentLockTimeout;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\EngineGate;
 use App\Gameplay\FuelPlanner;
 use App\Gameplay\GameException;
+use App\Gameplay\HostLock;
 use App\Gameplay\MiningPlanner;
 use App\Gameplay\OperationPlanner;
 use App\Gameplay\OpportunityAssessor;
@@ -2013,6 +2017,228 @@ class CampaignAutopilotTest extends TestCase
         $this->tick();
 
         return $grant;
+    }
+
+    private function incidentLoadedTrade(): AutomationRun
+    {
+        $this->tradeGrant();
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $action = $this->incidentNextCommand($run);
+        $this->assertSame('buy', $action->command);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertSame('confirmed', $action->fresh()->state->value);
+        $this->assertSame(['IRON_ORE' => 3], $run->fresh()->totals['unsold']);
+
+        return $run->fresh();
+    }
+
+    public function test_incident_director_retries_transient_agent_entry_contention(): void
+    {
+        $grant = $this->approve();
+        $lock = new class extends HostLock
+        {
+            public int $attempts = 0;
+
+            public function run(string $key, callable $work): mixed
+            {
+                if (str_starts_with($key, 'agent-') && ++$this->attempts === 1) {
+                    throw new GameException('Synthetic agent contention.', retryAfter: 2);
+                }
+
+                return parent::run($key, $work);
+            }
+        };
+        $this->app->instance(HostLock::class, $lock);
+        $this->tick();
+        $this->assertGreaterThanOrEqual(2, $lock->attempts);
+        $this->assertDatabaseCount('campaign_episodes', 1);
+        $this->assertNotSame('awaiting_agent_lock', $grant->fresh()->wait_reason);
+        $this->assertNull($grant->fresh()->paused_at);
+    }
+
+    public function test_incident_director_labels_only_exhausted_entry_contention_as_awaiting_agent_lock(): void
+    {
+        $grant = $this->approve();
+        $lock = new class extends HostLock
+        {
+            public float $wait = -1;
+
+            public function scoped(string $key, callable $work, float $seconds = 0): mixed
+            {
+                $this->wait = $seconds;
+                throw new GameException('Another operation owns this command boundary. Retry shortly.', retryAfter: 2);
+            }
+        };
+        $this->app->instance(HostLock::class, $lock);
+        $this->tick();
+        $this->assertSame(10.0, $lock->wait);
+        $this->assertSame('awaiting_agent_lock', $grant->fresh()->wait_reason);
+        $this->assertNull($grant->fresh()->paused_at);
+        $this->assertDatabaseCount('campaign_episodes', 0);
+        $this->assertSame('awaiting_agent_lock', CampaignEvent::where('kind', 'wait')->latest('id')->firstOrFail()->data['reason']);
+    }
+
+    public function test_incident_director_does_not_relabel_or_replay_contention_inside_its_callback(): void
+    {
+        $grant = $this->approve();
+        $this->partialMock(AgentSynchronizer::class)->shouldReceive('sync')->once()
+            ->andThrow(new GameException('Another operation owns this command boundary. Retry shortly.', retryAfter: 2));
+        $this->tick();
+        $this->assertSame('awaiting_fresh_state', $grant->fresh()->wait_reason);
+        $this->assertNull($grant->fresh()->paused_at);
+        $this->assertDatabaseCount('campaign_episodes', 0);
+    }
+
+    public function test_incident_director_entry_wait_is_capped_by_its_remaining_deadline(): void
+    {
+        $grant = $this->approve();
+        $lock = new class extends HostLock
+        {
+            public array $waits = [];
+
+            public function scoped(string $key, callable $work, float $seconds = 0): mixed
+            {
+                $this->waits[] = $seconds;
+                throw new GameException('Synthetic acquisition exhaustion.', retryAfter: 2);
+            }
+        };
+        $this->app->instance(HostLock::class, $lock);
+        $entry = new \ReflectionMethod(CampaignDirector::class, 'episode');
+        foreach ([0.15, -1] as $remaining) {
+            try {
+                $entry->invoke(app(CampaignDirector::class), $grant, $this->agent, [], CarbonImmutable::now()->addDay(), microtime(true) + $remaining);
+                $this->fail('Entry acquisition must time out.');
+            } catch (DirectorAgentLockTimeout $exception) {
+                $this->assertGreaterThan(0, $exception->retryAfter);
+            }
+        }
+        $this->assertGreaterThan(0, $lock->waits[0]);
+        $this->assertLessThanOrEqual(0.15, $lock->waits[0]);
+        $this->assertSame(0.0, $lock->waits[1]);
+    }
+
+    private function incidentNextCommand(AutomationRun $run): ShipAction
+    {
+        $run->refresh()->update(['next_action_at' => now()]);
+        app(AutomationRunner::class)->advance($run->id);
+        $this->assertTrue(ShipAction::where('automation_run_id', $run->id)->where('state', 'pending')->exists(), (string) $run->fresh()->blocked_reason);
+
+        return ShipAction::where('automation_run_id', $run->id)->where('state', 'pending')->sole();
+    }
+
+    private function incidentEarlyDeferral(AutomationRun $run): void
+    {
+        $calls = count(json_decode(file_get_contents($this->file), true)['calls']);
+        $defer = true;
+        $this->partialMock(RequestBudget::class)->shouldReceive('reserve')->andReturnUsing(function () use (&$defer) {
+            if ($defer) {
+                throw new RequestDeferred('Synthetic budget deferral before ship fetch.', 5);
+            }
+        });
+        $run->refresh()->update(['next_action_at' => now()]);
+        app(AutomationRunner::class)->advance($run->id);
+        $defer = false;
+        $this->assertSame($calls, count(json_decode(file_get_contents($this->file), true)['calls']));
+        $this->assertSame('waiting', $run->fresh()->state->value);
+        $this->assertNull($run->fresh()->totals['accounting']['unsold_inventory']);
+        $this->assertSame('unresolved', $run->fresh()->totals['accounting']['state']);
+    }
+
+    public function test_incident_loaded_trade_survives_early_deferral_and_reserves_the_next_command(): void
+    {
+        $run = $this->incidentLoadedTrade();
+        $this->incidentEarlyDeferral($run);
+        $this->assertSame(['IRON_ORE' => 3], $run->fresh()->totals['unsold']);
+        $action = $this->incidentNextCommand($run);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertSame('confirmed', $action->fresh()->state->value, $action->fresh()->message ?? '');
+        $this->assertNotSame('blocked', $run->fresh()->state->value);
+    }
+
+    public function test_incident_partial_recovery_sale_survives_early_deferral_and_sells_again(): void
+    {
+        $this->tradeWorld();
+        $this->editWorld(function (&$world) {
+            $world['ships'][0]['nav']['waypointSymbol'] = 'X1-TEST-PORT';
+            $world['ships'][0]['cargo'] = ['capacity' => 40, 'units' => 7, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 7]]];
+            $world['market_goods']['X1-TEST-PORT'][0]['tradeVolume'] = 2;
+        });
+        $this->approve();
+        $this->tick();
+        $run = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertTrue($run->plan['sell_only']);
+        $sale = $this->incidentNextCommand($run);
+        $this->assertSame('sell', $sale->command);
+        app(ShipCommandExecutor::class)->execute($sale->id);
+        $this->assertSame('confirmed', $sale->fresh()->state->value);
+        $this->assertSame(['IRON_ORE' => 5], $run->fresh()->totals['unsold']);
+        $this->incidentEarlyDeferral($run);
+        $this->assertSame(['IRON_ORE' => 5], $run->fresh()->totals['unsold']);
+        $sale = $this->incidentNextCommand($run);
+        $this->assertSame('sell', $sale->command);
+        app(ShipCommandExecutor::class)->execute($sale->id);
+        $this->assertSame('confirmed', $sale->fresh()->state->value, $sale->fresh()->message ?? '');
+        $this->assertSame(['IRON_ORE' => 3], $run->fresh()->totals['unsold']);
+    }
+
+    public function test_incident_repeated_block_accounting_never_adopts_external_cargo(): void
+    {
+        $run = $this->incidentLoadedTrade();
+        $this->editWorld(function (&$world) {
+            $world['ships'][0]['cargo']['units'] = 4;
+            $world['ships'][0]['cargo']['inventory'][0]['units'] = 4;
+        });
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            $run->refresh()->update(['state' => 'running', 'next_action_at' => now()]);
+            app(AutomationRunner::class)->advance($run->id);
+            $this->assertSame('blocked', $run->fresh()->state->value);
+            $this->assertStringContainsString('Cargo changed outside', $run->fresh()->blocked_reason);
+            $this->assertSame(['IRON_ORE' => 3], $run->fresh()->totals['unsold']);
+            $this->assertSame(['IRON_ORE' => 4], $run->fresh()->totals['accounting']['unsold_inventory']);
+            app(CycleAccounting::class)->record($run, Ship::where('symbol', $run->ship_symbol)->firstOrFail()->snapshot);
+            $this->assertSame(['IRON_ORE' => 3], $run->fresh()->totals['unsold']);
+        }
+        $this->assertFalse(ShipAction::where('state', 'pending')->exists());
+        $report = app(CampaignReport::class)->build(CampaignEpisode::findOrFail($run->campaign_episode_id));
+        $reportedRun = collect($report['json']['runs'])->firstWhere('id', $run->id);
+        $this->assertSame(['IRON_ORE' => 3], $reportedRun['unsold']);
+        $this->expectException(GameException::class);
+        $this->expectExceptionMessage('Cargo changed outside this run');
+        app(CommandRules::class)->refresh($this->agent->fresh(), $run->ship_symbol, 'orbit', [], $run->fresh());
+    }
+
+    public function test_incident_stop_without_snapshot_preserves_expected_inventory_and_fuel(): void
+    {
+        $run = $this->incidentLoadedTrade();
+        $run->update(['totals' => array_merge($run->totals, ['ending_fuel' => 100])]);
+        Ship::where('agent_id', $this->agent->id)->where('symbol', $run->ship_symbol)->delete();
+        app(AutomationRunner::class)->finishStop($run, 'Synthetic missing ship snapshot.');
+        $this->assertSame('stopped', $run->fresh()->state->value);
+        $this->assertSame(['IRON_ORE' => 3], $run->fresh()->totals['unsold']);
+        $this->assertSame(100, $run->fresh()->totals['ending_fuel']);
+        $this->assertNull($run->fresh()->totals['accounting']['unsold_inventory']);
+        $this->assertSame('unresolved', $run->fresh()->totals['accounting']['state']);
+    }
+
+    public function test_incident_corrupt_saved_expectation_recovers_through_normal_campaign_handoff(): void
+    {
+        $run = $this->incidentLoadedTrade();
+        $run->update(['state' => 'blocked', 'blocked_reason' => 'Cargo changed outside the approved operation.',
+            'totals' => array_merge($run->totals, ['unsold' => null])]);
+        app(CycleAccounting::class)->record($run, null);
+        $this->assertNull($run->fresh()->totals['unsold']);
+        $this->tick();
+        $this->assertSame('stopped', $run->fresh()->state->value);
+        $this->assertNull($run->fresh()->active_agent_id);
+        $this->assertSame(['IRON_ORE' => 3], $run->fresh()->totals['unsold']);
+        $recovery = AutomationRun::whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertTrue($recovery->plan['sell_only']);
+        $this->assertSame($run->id, $recovery->plan['recovery_of']);
+        $recovery = $this->driveRun($recovery);
+        $this->assertSame('completed', $recovery->state->value, $recovery->blocked_reason ?? '');
+        $this->assertContains('sell', $this->confirmedCommands($recovery));
+        $this->assertSame(['IRON_ORE' => 3], $recovery->totals['sold']);
+        $this->assertSame([], $recovery->totals['unsold']);
     }
 
     public function test_trade_refreshes_stale_quotes_sizes_to_the_grant_and_reselects_goods(): void
