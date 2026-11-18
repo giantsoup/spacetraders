@@ -1,0 +1,26 @@
+{
+  "access_date_local": "2026-11-14",
+  "timezone": "America/Los_Angeles",
+  "captures": [
+    {
+      "file": "status.json",
+      "url": "https://api.spacetraders.io/v2",
+      "retrieved_at": "2026-11-15T01:27:43Z",
+      "http_date": "Sun, 15 Nov 2026 01:27:42 GMT",
+      "sha256": "5fc77be69f95aadedeb68c8b79184d1fe33aaaf94f1ff87599cf957b375134de"
+    },
+    {
+      "file": "openapi.json",
+      "url": "https://api.spacetraders.io/v2/documentation/json",
+      "retrieved_at": "2026-11-15T01:27:44Z",
+      "http_date": "Sun, 15 Nov 2026 01:27:43 GMT",
+      "sha256": "b882bf3ef808c7d6641e314196bdbb5829d3621e2f2f8f42ea61c582e62b919b"
+    },
+    {
+      "file": "error-codes.json",
+      "url": "https://api.spacetraders.io/v2/error-codes",
+      "retrieved_at_note": "Retrieved later in the same research session; exact response Date was not recorded.",
+      "sha256": "0e27bee63d028d2ae804f6f224512be47496f28b0e100f70eec414561ddc9dd5"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+    "engine_heartbeat_stale": false,
+    "grant": 1,
+    "revision_hash": "e99e76b42fee0da7feb7c3103f33f05122343c7bb542858510b69ff39bf44c65",
+    "operator_user": 1,
+    "active": false,
+    "expires_at": "2026-11-15T12:55:00+00:00",
+    "episode": 1,
+    "phase": "wind_down",
+    "pause_reason": "grant_expired",
+    "wait_reason": null,
+    "last_decision": {
+        "at": "2026-11-15T12:00:21+00:00",
+        "choice": "idle",
+        "run_id": null,
+        "rejections": []
+    },
+    "pending_grant": null
+}

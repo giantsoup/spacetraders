@@ -1,0 +1,166 @@
+{
+  "status": "SpaceTraders is currently online and available to play",
+  "version": "v2.3.0",
+  "resetDate": "2026-11-08",
+  "description": "SpaceTraders is a headless API and fleet-management game where players can work together or against each other to trade, explore, expand, and conquer in a dynamic and growing universe. Build your own UI, write automated scripts, or just play the game from the comfort of your terminal. The game is currently in alpha and is under active development.",
+  "stats": {
+    "agents": 187,
+    "ships": 40576,
+    "systems": 7033,
+    "waypoints": 206416,
+    "accounts": 11220
+  },
+  "health": {
+    "lastMarketUpdate": "2026-11-15T01:26:11.552Z"
+  },
+  "leaderboards": {
+    "mostCredits": [
+      {
+        "agentSymbol": "WHATER",
+        "credits": 7816628242
+      },
+      {
+        "agentSymbol": "TAYSUUS",
+        "credits": 7136287110
+      },
+      {
+        "agentSymbol": "TYR0VC",
+        "credits": 4831468253
+      },
+      {
+        "agentSymbol": "GOBBLICIDE",
+        "credits": 2699480698
+      },
+      {
+        "agentSymbol": "BLOODWATTLE",
+        "credits": 2635979073
+      },
+      {
+        "agentSymbol": "TANDEM",
+        "credits": 2246966223
+      },
+      {
+        "agentSymbol": "VEPRINE-D",
+        "credits": 2197572567
+      },
+      {
+        "agentSymbol": "JEANLUC",
+        "credits": 1691258394
+      },
+      {
+        "agentSymbol": "ALIEN-1",
+        "credits": 1176046397
+      },
+      {
+        "agentSymbol": "CKBS",
+        "credits": 843823349
+      },
+      {
+        "agentSymbol": "AG3NT",
+        "credits": 739306610
+      },
+      {
+        "agentSymbol": "VCMININGCORP",
+        "credits": 573162908
+      },
+      {
+        "agentSymbol": "CETUS",
+        "credits": 524457161
+      },
+      {
+        "agentSymbol": "LUSHA",
+        "credits": 484386436
+      },
+      {
+        "agentSymbol": "ODIODIN",
+        "credits": 376845518
+      }
+    ],
+    "mostSubmittedCharts": [
+      {
+        "agentSymbol": "WHATER",
+        "chartCount": 26501
+      },
+      {
+        "agentSymbol": "TAYSUUS",
+        "chartCount": 23463
+      },
+      {
+        "agentSymbol": "JEANLUC",
+        "chartCount": 18119
+      },
+      {
+        "agentSymbol": "ODI",
+        "chartCount": 13940
+      },
+      {
+        "agentSymbol": "TYR0VC",
+        "chartCount": 13123
+      }
+    ]
+  },
+  "serverResets": {
+    "next": "2026-11-15T13:00:00.000Z",
+    "frequency": "weekly"
+  },
+  "announcements": [
+    {
+      "title": "Server Resets",
+      "body": "We will be doing complete server resets frequently during the alpha to deploy fixes, add new features, and balance the game. Resets will typically be conducted on Saturday mornings. Previous access tokens will no longer be valid after the reset and you will need to re-register your agent. Take this as an opportunity to try and make it to the top of the leaderboards!"
+    },
+    {
+      "title": "Support Us",
+      "body": "Supporters of SpaceTraders can reserve their agent call sign between resets. Consider donating to support our development: https://https://my.spacetraders.io"
+    },
+    {
+      "title": "Discord",
+      "body": "Our Discord community is very active and helpful. Share what you're working on, ask questions, and get help from other players and the developers: https://discord.com/invite/jh6zurdWk5"
+    }
+  ],
+  "links": [
+    {
+      "name": "Website",
+      "url": "https://spacetraders.io"
+    },
+    {
+      "name": "Documentation",
+      "url": "https://spacetraders.io"
+    },
+    {
+      "name": "Playground",
+      "url": "https://spacetraders.io/playground"
+    },
+    {
+      "name": "API Reference",
+      "url": "https://spacetraders.io/openapi"
+    },
+    {
+      "name": "OpenAPI Spec - Bundled",
+      "url": "https://api.spacetraders.io/v2//documentation/json"
+    },
+    {
+      "name": "Discord",
+      "url": "https://discord.com/invite/jh6zurdWk5"
+    },
+    {
+      "name": "Support Us",
+      "url": "https://my.spacetraders.io"
+    },
+    {
+      "name": "Report Issues",
+      "url": "https://github.com/SpaceTradersAPI/api-docs/issues"
+    },
+    {
+      "name": "Wiki",
+      "url": "https://github.com/SpaceTradersAPI/api-docs/wiki"
+    },
+    {
+      "name": "Account Portal",
+      "url": "https://my.spacetraders.io"
+    },
+    {
+      "name": "Twitter",
+      "url": "https://twitter.com/SpaceTradersAPI"
+    }
+  ]
+}

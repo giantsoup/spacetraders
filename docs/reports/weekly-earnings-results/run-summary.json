@@ -1,0 +1,98 @@
+{
+  "checks": {
+    "accounting": "passed",
+    "constant_rate": "passed",
+    "zero_uptime": "passed",
+    "step_comparison": {
+      "quarter_hour": 958446731.7300488,
+      "eighth_hour": 959413606.7300488,
+      "relative_difference": 0.0010077770350739362
+    }
+  },
+  "results": [
+    {
+      "scenario": "Cautious",
+      "hours": 168,
+      "end_cash": 103094660.82042097,
+      "cash_gain_after_capex": 102919660.82042097,
+      "net_operating_earnings": 124728100.0,
+      "ship_capex": 21538439.179579027,
+      "probe_capex": 270000.0,
+      "trading_float_released": 3700000.0,
+      "cash_before_float_release": 99394660.82042097,
+      "haulers": 36,
+      "probes": 9,
+      "active_ship_limit_from_assumed_requests": 40,
+      "hauler_purchase_limit": 37,
+      "request_budget_per_hour": 3600.0,
+      "last_purchase_hour": 72.25
+    },
+    {
+      "scenario": "Planning",
+      "hours": 168,
+      "end_cash": 958446731.7300488,
+      "cash_gain_after_capex": 958271731.7300488,
+      "net_operating_earnings": 999175000.0,
+      "ship_capex": 40303268.269951195,
+      "probe_capex": 600000.0,
+      "trading_float_released": 7800000.0,
+      "cash_before_float_release": 950646731.7300488,
+      "haulers": 77,
+      "probes": 20,
+      "active_ship_limit_from_assumed_requests": 120,
+      "hauler_purchase_limit": 77,
+      "request_budget_per_hour": 3600.0,
+      "last_purchase_hour": 28.25
+    },
+    {
+      "scenario": "Stretch",
+      "hours": 168,
+      "end_cash": 4346070901.050053,
+      "cash_gain_after_capex": 4345895901.050053,
+      "net_operating_earnings": 4441107500.0,
+      "ship_capex": 94101598.94994757,
+      "probe_capex": 1110000.0,
+      "trading_float_released": 22300000.0,
+      "cash_before_float_release": 4323770901.050053,
+      "haulers": 148,
+      "probes": 37,
+      "active_ship_limit_from_assumed_requests": 240,
+      "hauler_purchase_limit": 148,
+      "request_budget_per_hour": 3600.0,
+      "last_purchase_hour": 16.5
+    }
+  ],
+  "sensitivity": [
+    {
+      "change": "Planning inputs",
+      "end_cash": 958446731.7300488,
+      "haulers": 77
+    },
+    {
+      "change": "Half hauler earnings",
+      "end_cash": 631323282.1187344,
+      "haulers": 119
+    },
+    {
+      "change": "Double ship prices",
+      "end_cash": 838073463.4600976,
+      "haulers": 77
+    },
+    {
+      "change": "Half market capacity",
+      "end_cash": 501501073.5000376,
+      "haulers": 37
+    },
+    {
+      "change": "Twice requests per ship",
+      "end_cash": 756766413.9111454,
+      "haulers": 59
+    },
+    {
+      "change": "Uptime falls to 50 percent",
+      "end_cash": 505509231.7300488,
+      "haulers": 77
+    }
+  ],
+  "output_dir": "<windows-user-profile>\\Projects\\spacetraders\\docs\\reports\\weekly-earnings-results"
+}

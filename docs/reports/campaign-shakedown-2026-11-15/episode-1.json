@@ -1,0 +1,1177 @@
+{
+    "episode": 1,
+    "grant": 1,
+    "revision_hash": "e99e76b42fee0da7feb7c3103f33f05122343c7bb542858510b69ff39bf44c65",
+    "reset_id": "2026-11-08",
+    "phase": "wind_down",
+    "start_credits": 845384,
+    "last_credits": 1288056,
+    "duration_seconds": 24367,
+    "ship_seconds": 4219,
+    "idle_seconds": 20148,
+    "requests_used_between_samples": 3747,
+    "credits_over_time": [
+        {
+            "at": "2026-11-15T06:16:11+00:00",
+            "credits": 845384,
+            "phase": "discover"
+        },
+        {
+            "at": "2026-11-15T06:31:26+00:00",
+            "credits": 845384,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T06:46:44+00:00",
+            "credits": 845384,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T07:02:09+00:00",
+            "credits": 845384,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T07:18:46+00:00",
+            "credits": 852990,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T07:34:48+00:00",
+            "credits": 969867,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T07:49:51+00:00",
+            "credits": 1033130,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T08:05:11+00:00",
+            "credits": 1192647,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T08:20:25+00:00",
+            "credits": 1153725,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T08:35:28+00:00",
+            "credits": 1137456,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T08:50:34+00:00",
+            "credits": 1288056,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T09:05:34+00:00",
+            "credits": 1288056,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T09:20:54+00:00",
+            "credits": 1288056,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T09:36:17+00:00",
+            "credits": 1288056,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T09:51:26+00:00",
+            "credits": 1288056,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T10:06:57+00:00",
+            "credits": 1288056,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T10:22:01+00:00",
+            "credits": 1288056,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T10:37:17+00:00",
+            "credits": 1288056,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T10:52:19+00:00",
+            "credits": 1288056,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T11:07:49+00:00",
+            "credits": 1288056,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T11:23:05+00:00",
+            "credits": 1288056,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T11:38:10+00:00",
+            "credits": 1288056,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T11:53:35+00:00",
+            "credits": 1288056,
+            "phase": "earn"
+        },
+        {
+            "at": "2026-11-15T12:08:38+00:00",
+            "credits": 1288056,
+            "phase": "wind_down"
+        },
+        {
+            "at": "2026-11-15T12:24:05+00:00",
+            "credits": 1288056,
+            "phase": "wind_down"
+        },
+        {
+            "at": "2026-11-15T12:39:33+00:00",
+            "credits": 1288056,
+            "phase": "wind_down"
+        },
+        {
+            "at": "2026-11-15T12:55:01+00:00",
+            "credits": 1288056,
+            "phase": "wind_down"
+        }
+    ],
+    "runs": [
+        {
+            "id": 10,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 11,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 12,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 13,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 14,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 15,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 16,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 17,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 18,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 19,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 20,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 21,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 22,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 23,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 24,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 25,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 26,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 27,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 28,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 29,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 30,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 31,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 32,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 33,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 34,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 35,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 36,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 37,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 38,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 39,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 40,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 41,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 42,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 43,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 44,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 45,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 46,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 47,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 48,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 49,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 50,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 51,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 52,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 53,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 54,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 55,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 56,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 57,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 58,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 59,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 60,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 61,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 62,
+            "strategy": "scout",
+            "state": "stopped",
+            "net_credits": 0,
+            "ship_seconds": 0,
+            "credits_per_ship_hour": null,
+            "cycles": 0,
+            "unsold": null,
+            "reason": "Campaign derives a fresh preview each decision."
+        },
+        {
+            "id": 63,
+            "strategy": "scout",
+            "state": "completed",
+            "net_credits": -72,
+            "ship_seconds": 134,
+            "credits_per_ship_hour": -1934.33,
+            "cycles": 1,
+            "unsold": [],
+            "reason": "Observation complete. No earnings were assumed."
+        },
+        {
+            "id": 64,
+            "strategy": "trade",
+            "state": "completed",
+            "net_credits": 7606,
+            "ship_seconds": 220,
+            "credits_per_ship_hour": 124461.82,
+            "cycles": 1,
+            "unsold": [],
+            "reason": null
+        },
+        {
+            "id": 65,
+            "strategy": "trade",
+            "state": "completed",
+            "net_credits": 64704,
+            "ship_seconds": 270,
+            "credits_per_ship_hour": 862720,
+            "cycles": 1,
+            "unsold": [],
+            "reason": null
+        },
+        {
+            "id": 66,
+            "strategy": "trade",
+            "state": "completed",
+            "net_credits": 60363,
+            "ship_seconds": 302,
+            "credits_per_ship_hour": 719558.94,
+            "cycles": 1,
+            "unsold": [],
+            "reason": null
+        },
+        {
+            "id": 67,
+            "strategy": "scout",
+            "state": "completed",
+            "net_credits": -72,
+            "ship_seconds": 97,
+            "credits_per_ship_hour": -2672.16,
+            "cycles": 1,
+            "unsold": [],
+            "reason": "Observation complete. No earnings were assumed."
+        },
+        {
+            "id": 68,
+            "strategy": "trade",
+            "state": "completed",
+            "net_credits": 6982,
+            "ship_seconds": 224,
+            "credits_per_ship_hour": 112210.71,
+            "cycles": 1,
+            "unsold": [],
+            "reason": null
+        },
+        {
+            "id": 69,
+            "strategy": "trade",
+            "state": "completed",
+            "net_credits": 56553,
+            "ship_seconds": 274,
+            "credits_per_ship_hour": 743032.12,
+            "cycles": 1,
+            "unsold": [],
+            "reason": null
+        },
+        {
+            "id": 70,
+            "strategy": "scout",
+            "state": "completed",
+            "net_credits": 0,
+            "ship_seconds": 193,
+            "credits_per_ship_hour": 0,
+            "cycles": 1,
+            "unsold": [],
+            "reason": "Observation complete. No earnings were assumed."
+        },
+        {
+            "id": 71,
+            "strategy": "trade",
+            "state": "completed",
+            "net_credits": 7466,
+            "ship_seconds": 301,
+            "credits_per_ship_hour": 89294.35,
+            "cycles": 1,
+            "unsold": [],
+            "reason": null
+        },
+        {
+            "id": 72,
+            "strategy": "trade",
+            "state": "completed",
+            "net_credits": 65091,
+            "ship_seconds": 346,
+            "credits_per_ship_hour": 677247.4,
+            "cycles": 1,
+            "unsold": [],
+            "reason": null
+        },
+        {
+            "id": 73,
+            "strategy": "trade",
+            "state": "completed",
+            "net_credits": 78498,
+            "ship_seconds": 372,
+            "credits_per_ship_hour": 759658.06,
+            "cycles": 1,
+            "unsold": [],
+            "reason": null
+        },
+        {
+            "id": 74,
+            "strategy": "scout",
+            "state": "completed",
+            "net_credits": 0,
+            "ship_seconds": 179,
+            "credits_per_ship_hour": 0,
+            "cycles": 1,
+            "unsold": [],
+            "reason": "Observation complete. No earnings were assumed."
+        },
+        {
+            "id": 75,
+            "strategy": "trade",
+            "state": "stopped",
+            "net_credits": -38778,
+            "ship_seconds": 191,
+            "credits_per_ship_hour": -730894.24,
+            "cycles": 0,
+            "unsold": {
+                "SHIP_PLATING": 12
+            },
+            "reason": "Campaign handoff: derive a fresh plan or sell aboard."
+        },
+        {
+            "id": 76,
+            "strategy": "scout",
+            "state": "completed",
+            "net_credits": 0,
+            "ship_seconds": 183,
+            "credits_per_ship_hour": 0,
+            "cycles": 1,
+            "unsold": [],
+            "reason": "Observation complete. No earnings were assumed."
+        },
+        {
+            "id": 77,
+            "strategy": "sell_aboard",
+            "state": "completed",
+            "net_credits": 75486,
+            "ship_seconds": 125,
+            "credits_per_ship_hour": 2173996.8,
+            "cycles": 1,
+            "unsold": [],
+            "reason": null
+        },
+        {
+            "id": 78,
+            "strategy": "scout",
+            "state": "completed",
+            "net_credits": -144,
+            "ship_seconds": 151,
+            "credits_per_ship_hour": -3433.11,
+            "cycles": 1,
+            "unsold": [],
+            "reason": "Observation complete. No earnings were assumed."
+        },
+        {
+            "id": 79,
+            "strategy": "scout",
+            "state": "completed",
+            "net_credits": 0,
+            "ship_seconds": 180,
+            "credits_per_ship_hour": 0,
+            "cycles": 1,
+            "unsold": [],
+            "reason": "Observation complete. No earnings were assumed."
+        },
+        {
+            "id": 80,
+            "strategy": "trade",
+            "state": "stopped",
+            "net_credits": -91611,
+            "ship_seconds": 160,
+            "credits_per_ship_hour": -2061247.5,
+            "cycles": 0,
+            "unsold": {
+                "SHIP_PARTS": 18
+            },
+            "reason": "Campaign handoff: derive a fresh plan or sell aboard."
+        },
+        {
+            "id": 81,
+            "strategy": "scout",
+            "state": "completed",
+            "net_credits": 0,
+            "ship_seconds": 182,
+            "credits_per_ship_hour": 0,
+            "cycles": 1,
+            "unsold": [],
+            "reason": "Observation complete. No earnings were assumed."
+        },
+        {
+            "id": 82,
+            "strategy": "sell_aboard",
+            "state": "completed",
+            "net_credits": 150600,
+            "ship_seconds": 135,
+            "credits_per_ship_hour": 4016000,
+            "cycles": 1,
+            "unsold": [],
+            "reason": null
+        }
+    ],
+    "strategies": {
+        "scout": {
+            "runs": 61,
+            "net_credits": -288,
+            "ship_seconds": 1299,
+            "credits_per_ship_hour": -798.15
+        },
+        "trade": {
+            "runs": 10,
+            "net_credits": 216874,
+            "ship_seconds": 2660,
+            "credits_per_ship_hour": 293513.68
+        },
+        "sell_aboard": {
+            "runs": 2,
+            "net_credits": 226086,
+            "ship_seconds": 260,
+            "credits_per_ship_hour": 3130421.54
+        }
+    },
+    "pauses": [
+        {
+            "at": "2026-11-15T12:55:27+00:00",
+            "reason": "grant_expired"
+        }
+    ],
+    "predictions": [
+        {
+            "metric": "proof_realized_ratio",
+            "gte": 0.8,
+            "actual": 1.061415979528007,
+            "sample_at": null,
+            "result": "pass"
+        },
+        {
+            "metric": "minutes_to_first_profit",
+            "lte": 45,
+            "actual": 63.55,
+            "sample_at": null,
+            "result": "fail"
+        },
+        {
+            "metric": "freshness_holds",
+            "lte": 2,
+            "actual": 0,
+            "sample_at": null,
+            "result": "pass"
+        }
+    ],
+    "load_results": [
+        {
+            "run_id": 64,
+            "good": "SHIP_PARTS",
+            "buyer": "X1-PZ83-H47",
+            "net": 7606,
+            "cash_net": 7606,
+            "unrefilled_fuel_allowance": 0,
+            "proof_eligible": true,
+            "proof": true,
+            "predicted_margin": 7102,
+            "realized_ratio": 1.0709659250915236,
+            "standalone_recovery": false,
+            "forced_sale": false,
+            "losing": false,
+            "finished_at": "2026-11-15T07:19:44+00:00"
+        },
+        {
+            "run_id": 65,
+            "good": "SHIP_PARTS",
+            "buyer": "X1-PZ83-H47",
+            "net": 64704,
+            "cash_net": 64704,
+            "unrefilled_fuel_allowance": 0,
+            "proof_eligible": true,
+            "proof": false,
+            "predicted_margin": 61533,
+            "realized_ratio": 1.051533323582468,
+            "standalone_recovery": false,
+            "forced_sale": false,
+            "losing": false,
+            "finished_at": "2026-11-15T07:24:56+00:00"
+        },
+        {
+            "run_id": 66,
+            "good": "SHIP_PARTS",
+            "buyer": "X1-PZ83-H47",
+            "net": 60363,
+            "cash_net": 60363,
+            "unrefilled_fuel_allowance": 0,
+            "proof_eligible": true,
+            "proof": false,
+            "predicted_margin": 75576,
+            "realized_ratio": 0.7987059383931406,
+            "standalone_recovery": false,
+            "forced_sale": false,
+            "losing": false,
+            "finished_at": "2026-11-15T07:30:56+00:00"
+        },
+        {
+            "run_id": 68,
+            "good": "SHIP_PLATING",
+            "buyer": "X1-PZ83-H47",
+            "net": 6982,
+            "cash_net": 6982,
+            "unrefilled_fuel_allowance": 0,
+            "proof_eligible": true,
+            "proof": true,
+            "predicted_margin": 6402,
+            "realized_ratio": 1.0905966885348328,
+            "standalone_recovery": false,
+            "forced_sale": false,
+            "losing": false,
+            "finished_at": "2026-11-15T07:38:03+00:00"
+        },
+        {
+            "run_id": 69,
+            "good": "SHIP_PLATING",
+            "buyer": "X1-PZ83-H47",
+            "net": 56553,
+            "cash_net": 56553,
+            "unrefilled_fuel_allowance": 0,
+            "proof_eligible": true,
+            "proof": false,
+            "predicted_margin": 55818,
+            "realized_ratio": 1.0131677953348381,
+            "standalone_recovery": false,
+            "forced_sale": false,
+            "losing": false,
+            "finished_at": "2026-11-15T07:43:46+00:00"
+        },
+        {
+            "run_id": 71,
+            "good": "SHIP_PLATING",
+            "buyer": "X1-PZ83-A2",
+            "net": 7466,
+            "cash_net": 7466,
+            "unrefilled_fuel_allowance": 0,
+            "proof_eligible": true,
+            "proof": true,
+            "predicted_margin": 7034,
+            "realized_ratio": 1.061415979528007,
+            "standalone_recovery": false,
+            "forced_sale": false,
+            "losing": false,
+            "finished_at": "2026-11-15T07:53:51+00:00"
+        },
+        {
+            "run_id": 72,
+            "good": "SHIP_PLATING",
+            "buyer": "X1-PZ83-A2",
+            "net": 65091,
+            "cash_net": 65091,
+            "unrefilled_fuel_allowance": 0,
+            "proof_eligible": true,
+            "proof": false,
+            "predicted_margin": 60897,
+            "realized_ratio": 1.0688703877038277,
+            "standalone_recovery": false,
+            "forced_sale": false,
+            "losing": false,
+            "finished_at": "2026-11-15T08:00:34+00:00"
+        },
+        {
+            "run_id": 73,
+            "good": "SHIP_PLATING",
+            "buyer": "X1-PZ83-A2",
+            "net": 78498,
+            "cash_net": 78498,
+            "unrefilled_fuel_allowance": 0,
+            "proof_eligible": true,
+            "proof": false,
+            "predicted_margin": 87903,
+            "realized_ratio": 0.8930070646053035,
+            "standalone_recovery": false,
+            "forced_sale": false,
+            "losing": false,
+            "finished_at": "2026-11-15T08:07:38+00:00"
+        },
+        {
+            "run_id": 75,
+            "good": "SHIP_PLATING",
+            "buyer": "X1-PZ83-H47",
+            "net": 36636,
+            "cash_net": 36708,
+            "unrefilled_fuel_allowance": 72,
+            "proof_eligible": false,
+            "proof": false,
+            "predicted_margin": 34278,
+            "realized_ratio": 1.068790477857518,
+            "standalone_recovery": false,
+            "forced_sale": false,
+            "losing": false,
+            "finished_at": "2026-11-15T08:21:55+00:00"
+        },
+        {
+            "run_id": 80,
+            "good": "SHIP_PARTS",
+            "buyer": "X1-PZ83-H47",
+            "net": 58917,
+            "cash_net": 58989,
+            "unrefilled_fuel_allowance": 72,
+            "proof_eligible": false,
+            "proof": false,
+            "predicted_margin": 16113,
+            "realized_ratio": 3.6564885496183206,
+            "standalone_recovery": false,
+            "forced_sale": false,
+            "losing": false,
+            "finished_at": "2026-11-15T08:39:19+00:00"
+        }
+    ],
+    "standalone_recoveries": [],
+    "learning_metrics": {
+        "proof_realized_ratio": 1.061415979528007,
+        "minutes_to_first_profit": 63.55,
+        "freshness_holds": 0
+    },
+    "measurement_notes": "Cash receipts minus confirmed spending, not economic profit. Load results include confirmed acquisition basis and posted fuel bills. Forced fallback sales count as losing loads regardless of net. Request counts are shared account/host counters between samples, not campaign-only attribution. Unsold cargo, wear and incomplete cycles are not profit."
+}

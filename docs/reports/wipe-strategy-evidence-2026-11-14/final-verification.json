@@ -1,0 +1,19 @@
+{
+  "reportSha256": "2cd908db2520b38050e3adaf10f99e8768d4f221b5aff4b6459719a8c7a2ae94",
+  "reviewRounds": 1,
+  "scores": {
+    "claude": 8,
+    "sol": 8,
+    "muse": 7
+  },
+  "smallFindingsResolvedBy": "parent",
+  "widths": [
+    1280,
+    728,
+    390,
+    320
+  ],
+  "calculatorCases": 12,
+  "meterVisibilityVerified": true,
+  "evidenceDirectory": "<windows-user-profile>/AppData/Local/Temp/spacetraders-strategy-council-20261114"
+}

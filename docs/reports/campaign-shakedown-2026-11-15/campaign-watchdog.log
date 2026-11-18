@@ -1,0 +1,4 @@
+2026-11-15T09:47:07+00:00 Alert [campaign_progress_stalled:1]: Campaign has not started a run or recorded a load or recovery result for sixty minutes.
+2026-11-15T11:47:08+00:00 Alert [campaign_progress_stalled:1]: Campaign has not started a run or recorded a load or recovery result for sixty minutes.
+2026-11-15T12:02:08+00:00 Recovered [campaign_progress_stalled:1]: problem cleared.
+2026-11-15T13:02:08+00:00 Alert [campaign_paused:1:grant_expired]: Campaign 1 is paused: grant_expired.
