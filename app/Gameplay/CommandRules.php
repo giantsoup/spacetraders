@@ -97,12 +97,12 @@ class CommandRules
                             $commitment = app(CampaignTrade::class)->fuelReserve($agent, $protectedRun->ship_symbol, $protectedRun->plan['market']);
                         } catch (GameException $e) {
                             // Stale quotes mid-delivery are normal; fall back to the fuel allowances the trade plan approved:
-                            // fuel_reserve covers the delivery leg, fuel the return leg. Protect the larger.
+                            // Protect full delivery/return cash ceilings, never the economic consumption allowance.
                             $planned = $protectedRun->plan['campaign_trade'] ?? [];
-                            if (! isset($planned['fuel_reserve']) && ! isset($planned['fuel'])) {
+                            if (! isset($planned['fuel_reserve']) && ! isset($planned['fuel_safety_ceiling'])) {
                                 throw new GameException('Campaign ship '.$protectedRun->ship_symbol.' carries cargo and its delivery fuel reserve cannot be verified right now ('.$e->getMessage().'). Retry after its fuel quotes refresh.');
                             }
-                            $commitment = (int) max($planned['fuel_reserve'] ?? 0, $planned['fuel'] ?? 0);
+                            $commitment = (int) max($planned['fuel_reserve'] ?? 0, $planned['fuel_safety_ceiling'] ?? $protectedRun->plan['route']['fuel_ceiling'] ?? 0);
                         }
                     }
                     $protected += $commitment;

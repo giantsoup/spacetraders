@@ -124,7 +124,7 @@ class FuelPlanner
         if (! $this->listsFuel($agent, $waypoint, $listings)) {
             return null;
         }
-        $market = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $waypoint)->first();
+        $market = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $waypoint)->orderByDesc('observed_at')->orderByDesc('id')->first();
         $fuel = collect($market?->data['tradeGoods'] ?? [])->firstWhere('symbol', 'FUEL');
         if (! $market || ! $fuel || ! empty($market->data['invalidated_by_action']) || $fuel['purchasePrice'] < 1 || $fuel['tradeVolume'] < 1
             || $market->observed_at->lt(now()->subSeconds(config('gameplay.snapshot_seconds')))) {
@@ -247,7 +247,7 @@ class FuelPlanner
     public function listings(Agent $agent): Collection
     {
         return GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
-            ->where('kind', 'market_listing')->get()->keyBy('symbol');
+            ->where('kind', 'market_listing')->orderBy('observed_at')->orderBy('id')->get()->keyBy('symbol');
     }
 
     public function units(Agent $agent, array $ship, array $from, array $to, ?string $policy = null): int

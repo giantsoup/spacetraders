@@ -241,7 +241,7 @@ class CampaignAutopilotTest extends TestCase
         $purchase = app(ShipCommandExecutor::class)->preview($this->agent->fresh(), 'LOCAL-1', 'buy_ship',
             ['shipType' => 'SHIP_MINING_DRONE', 'waypointSymbol' => 'X1-TEST-ROCK', 'maxTotal' => 20000, 'reserve' => 0], 'stale-purchase');
         $planned = $run->fresh()->plan['campaign_trade'];
-        $this->assertSame((int) max($planned['fuel_reserve'], $planned['fuel']), $purchase->before_state['estimate']['protected_in_flight']);
+        $this->assertSame((int) max($planned['fuel_reserve'], $planned['fuel_safety_ceiling']), $purchase->before_state['estimate']['protected_in_flight']);
     }
 
     public function test_stale_fallback_never_protects_less_than_the_fresh_delivery_reserve_with_asymmetric_fuel_prices(): void
@@ -262,7 +262,7 @@ class CampaignAutopilotTest extends TestCase
         GameObservation::where('kind', 'market')->update(['observed_at' => now()->subHour()]);
         $stale = app(ShipCommandExecutor::class)->preview($this->agent->fresh(), 'LOCAL-3', 'buy_ship', $arguments, 'asymmetric-stale');
         $planned = $run->fresh()->plan['campaign_trade'];
-        $this->assertNotSame($planned['fuel_reserve'], $planned['fuel']);
+        $this->assertNotSame($planned['fuel_reserve'], $planned['fuel_safety_ceiling']);
         $this->assertGreaterThan(0, $fresh->before_state['estimate']['protected_in_flight']);
         $this->assertGreaterThanOrEqual($fresh->before_state['estimate']['protected_in_flight'], $stale->before_state['estimate']['protected_in_flight']);
     }
@@ -2552,7 +2552,7 @@ class CampaignAutopilotTest extends TestCase
         $departure = $run->plan['route']['departure_refuel_ceiling'];
         $this->assertGreaterThan(0, $departure);
         $this->assertSame($departure, $run->plan['campaign_trade']['departure_refuel']);
-        $this->assertSame($run->plan['campaign_trade']['max_inventory'] + $run->plan['campaign_trade']['fuel'] + $departure, $run->plan['max_spend']);
+        $this->assertSame($run->plan['campaign_trade']['max_inventory'] + $run->plan['campaign_trade']['fuel_safety_ceiling'] + $departure, $run->plan['max_spend']);
         if ($capped !== null) {
             $this->assertSame($capped, $run->plan['max_inventory']);
         }
@@ -2922,7 +2922,8 @@ class CampaignAutopilotTest extends TestCase
         $this->assertSame('trade', $run->strategy);
         $route = $run->plan['route'];
         $this->assertGreaterThan(0, $route['departure_refuel_ceiling']);
-        $this->assertSame($run->plan['units'] * 3 - ($route['fuel_ceiling'] - $route['departure_refuel_ceiling']), $route['estimated_cash_margin']);
+        $this->assertSame($run->plan['units'] * 3 - $route['expected_fuel_cost'], $route['estimated_cash_margin']);
+        $this->assertSame(2, $route['acceptance_margin']);
         $this->assertLessThan(1, $route['estimated_cash_margin'] - $route['departure_refuel_ceiling'], 'The old margin check would have rejected this pair.');
         $run = $this->driveRun($run);
         $this->assertSame('completed', $run->state->value, $run->blocked_reason ?? json_encode($run->totals));
@@ -3139,7 +3140,7 @@ class CampaignAutopilotTest extends TestCase
         $this->assertSame('buyer_batches', $trade['lot_bound']);
         $this->assertSame(8, $trade['optimal_units']);
         $this->assertSame('optimal_size', $trade['shadow_lot_bound']);
-        $expected = app(CampaignTrade::class)->prediction(8, ['purchasePrice' => 30, 'tradeVolume' => 4], ['sellPrice' => 200, 'tradeVolume' => 4], 0.45, $trade['fuel']);
+        $expected = app(CampaignTrade::class)->prediction(8, ['purchasePrice' => 30, 'tradeVolume' => 4], ['sellPrice' => 200, 'tradeVolume' => 4], 0.45, $trade['cycle_fuel_allowance']);
         $this->assertSame($expected['predicted_margin'], $trade['optimal_margin']);
         $this->assertGreaterThan(0, $trade['predicted_margin'], 'The bought lot still predicts a positive margin.');
         $this->assertGreaterThan($trade['predicted_margin'], $trade['optimal_margin']);
@@ -3259,7 +3260,8 @@ class CampaignAutopilotTest extends TestCase
         $candidate = app(CampaignTrade::class)->rank($grant, $episode, $this->agent->fresh(), Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot, $considered)[0];
         $this->assertGreaterThan(0, $candidate['predicted_margin']);
         if ($spreads === 0) {
-            $this->assertSame(50, $candidate['predicted_margin']);
+            $this->assertSame(55, $candidate['predicted_margin']);
+            $this->assertSame(50, $candidate['conservative_margin']);
             $this->assertLessThan(CampaignTrade::FLOOR_CR_PER_MINUTE, $candidate['score']);
             $this->assertFalse(AutomationRun::where('strategy', 'trade')->exists());
             $this->assertFalse(CampaignEvent::where('kind', 'phase')->exists());

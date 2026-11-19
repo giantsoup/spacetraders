@@ -78,12 +78,18 @@ class OperationPlanner
             $bid = $this->quote($agent, $destination, $limits['symbol'], self::buyerAge($limits));
             $inventory = $limits['units'] * $ask['purchasePrice'];
             // Departure fuel refills the tank for later work, not this trade: it counts toward spending, not margin.
-            $margin = $limits['units'] * ($bid['sellPrice'] - $ask['purchasePrice']) - ($fuelCeiling - $departureCeiling);
-            if ($ask['purchasePrice'] < 1 || $bid['sellPrice'] < $limits['min_sell_price'] || $margin < $limits['min_margin'] || $inventory > $limits['max_inventory'] || $inventory + $fuelCeiling > $limits['max_spend'] || $inventory > $limits['max_loss'] || $limits['units'] > $ship['cargo']['capacity']) {
+            $costs = app(TradeFuelCost::class)->estimate($agent, $fuelUnits, [$home, $destination], $fuelCeiling - $departureCeiling);
+            if (! empty($limits['campaign_trade']) && ($costs['expected_fuel_cost'] !== ($limits['campaign_trade']['expected_fuel_cost'] ?? null)
+                || $costs['cycle_fuel_allowance'] !== ($limits['campaign_trade']['cycle_fuel_allowance'] ?? null))) {
+                throw new GameException('Fuel economics changed since ranking. Rerank before creating a fresh campaign preview.');
+            }
+            $route += $costs;
+            $margin = $limits['units'] * ($bid['sellPrice'] - $ask['purchasePrice']) - $costs['cycle_fuel_allowance'];
+            if ($ask['purchasePrice'] < 1 || $bid['sellPrice'] < $limits['min_sell_price'] || $margin <= 0 || $margin < $limits['min_margin'] || $inventory > $limits['max_inventory'] || $inventory + $fuelCeiling > $limits['max_spend'] || $inventory > $limits['max_loss'] || $limits['units'] > $ship['cargo']['capacity']) {
                 throw new GameException('Trade fails the complete-cycle margin, inventory exposure, cargo, spending or cash-loss bounds.');
             }
             $route += ['source_at' => $ask['observed_at'], 'buyer_at' => $bid['observed_at'], 'inventory_exposure' => $inventory,
-                'estimated_cash_margin' => $margin, 'conservative_cash_margin' => -$inventory - $fuelCeiling,
+                'estimated_cash_margin' => $margin + $costs['cycle_fuel_allowance'] - $costs['expected_fuel_cost'], 'acceptance_margin' => $margin, 'conservative_cash_margin' => -$inventory - $fuelCeiling,
                 'empty_return_included' => true, 'earnings_per_hour' => null, 'time_and_wear' => 'Unmeasured; margin is not economic profit.'];
         }
         if ($agent->credits < $limits['reserve'] + $limits['max_spend']) {
@@ -150,8 +156,17 @@ class OperationPlanner
             // Once the departure top-up has run, its actual cost is in fuel_cost; count its ceiling only before then.
             // The margin, like the preview's, excludes departure fuel; spending includes it.
             $fuelExposure = ($totals['fuel_cost'] ?? 0) + $plan['route']['fuel_ceiling'] - (($totals['fuel_units'] ?? 0) > 0 ? $departure : 0);
-            $projectedMargin = $plan['units'] * $bid['sellPrice'] - $spent - $remaining * $ask['purchasePrice'] - ($plan['route']['fuel_ceiling'] - $departure);
-            if ($projectedMargin < $plan['min_margin'] || $ask['purchasePrice'] < 1 || $bid['sellPrice'] <= $ask['purchasePrice']) {
+            // Historical plans retain their full margin charge until a fresh preview supplies all economics fields.
+            $allowance = $plan['route']['fuel_ceiling'] - $departure;
+            if (isset($plan['route']['expected_fuel_cost'], $plan['route']['cycle_fuel_allowance'], $plan['route']['fuel_safety_ceiling'])) {
+                $costs = app(TradeFuelCost::class)->estimate($agent, $plan['route']['fuel_estimate'], [$plan['site'], $plan['market']], $allowance);
+                if ($costs['expected_fuel_cost'] !== $plan['route']['expected_fuel_cost'] || $costs['cycle_fuel_allowance'] !== $plan['route']['cycle_fuel_allowance']) {
+                    return AutomationStep::blocked('Fuel economics changed. Retain owned cargo and create a fresh preview before further purchases.');
+                }
+                $allowance = $costs['cycle_fuel_allowance'];
+            }
+            $projectedMargin = $plan['units'] * $bid['sellPrice'] - $spent - $remaining * $ask['purchasePrice'] - $allowance;
+            if ($projectedMargin <= 0 || $projectedMargin < $plan['min_margin'] || $ask['purchasePrice'] < 1 || $bid['sellPrice'] <= $ask['purchasePrice']) {
                 return AutomationStep::blocked('Spread deteriorated. Stop purchases. Owned cargo retained; compare local sale and reachable buyers using remaining costs before a new approval.');
             }
             if ($ship['nav']['status'] !== 'DOCKED') {
@@ -270,7 +285,7 @@ class OperationPlanner
 
     private function observation(Agent $agent, string $kind, string $symbol): ?GameObservation
     {
-        return GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', $kind)->where('symbol', $symbol)->first();
+        return GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', $kind)->where('symbol', $symbol)->orderByDesc('observed_at')->orderByDesc('id')->first();
     }
 
     private function travel(array $ship, string $destination): AutomationStep
