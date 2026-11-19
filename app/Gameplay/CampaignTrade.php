@@ -8,6 +8,7 @@ use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\GameObservation;
+use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use Carbon\CarbonImmutable;
@@ -53,9 +54,9 @@ class CampaignTrade
             $cashNet = $parts->sum(fn ($part) => $part->totals['sale_proceeds'] ?? 0) - $fuel['cost'] - $cost;
             $unrefilled = max(0, $fuel['travel'] - $fuel['units']);
             $fuelPrice = GameObservation::where('agent_id', $episode->agent_id)->where('reset_id', $episode->reset_id)->where('kind', 'market')
-                ->whereIn('symbol', [$run->plan['site'], $run->plan['market']])->get()
+                ->whereIn('symbol', [$run->plan['site'], $run->plan['market']])->orderByDesc('observed_at')->orderByDesc('id')->get()->unique('symbol')
                 ->flatMap(fn ($row) => $row->data['tradeGoods'] ?? [])->where('symbol', 'FUEL')->max('purchasePrice');
-            $fuelAllowance = $unrefilled > 0 ? ($fuelPrice ? (int) ceil($unrefilled / 100) * $fuelPrice : ($run->plan['route']['fuel_ceiling'] ?? 0)) : 0;
+            $fuelAllowance = $unrefilled > 0 ? ($fuelPrice ? TradeFuelCost::consumption($unrefilled, $fuelPrice) : ($run->plan['route']['fuel_ceiling'] ?? 0)) : 0;
             $net = $cashNet - $fuelAllowance;
             $sales = ShipAction::whereIn('automation_run_id', $parts->pluck('id'))->where('command', 'sell')->where('state', 'confirmed')->get();
             $proofEligible = ! $sales->contains(fn ($sale) => ($sale->before_state['ship']['nav']['waypointSymbol'] ?? null) !== $run->plan['market']);
@@ -76,6 +77,8 @@ class CampaignTrade
                 'ship' => $run->ship_symbol, 'arm' => $label, 'source' => $run->plan['site'] ?? null,
                 'purchase_cost' => $cost, 'sale_proceeds' => $parts->sum(fn ($part) => $part->totals['sale_proceeds'] ?? 0),
                 'started_at' => $parts->min('started_at')->toIso8601String(), 'seconds' => (int) $parts->min('started_at')->diffInSeconds($parts->max('updated_at'), true),
+                'best_margin_basis' => $prediction['best_margin_basis'] ?? 'forecast', 'selection_basis' => $prediction['selection_basis'] ?? null,
+                'best_available_score' => $prediction['best_available_score'] ?? null, 'best_unclaimed_score' => $prediction['best_unclaimed_score'] ?? null,
                 'best_available' => $prediction['best_available'] ?? null, 'best_unclaimed' => $prediction['best_unclaimed'] ?? null,
                 'limiting_factor' => $prediction['limiting_factor'] ?? null, 'shortened' => isset($run->plan['original_units']),
                 'shortened_reason' => $run->plan['shortened_reason'] ?? null, 'ask_over_prediction' => $run->plan['ask_over_prediction'] ?? null];
@@ -310,7 +313,7 @@ class CampaignTrade
      */
     public function valueFloor(CampaignEpisode $episode, array $candidate, ?array $results = null): array
     {
-        $planned = $candidate['predicted_margin'] / max(1, $candidate['seconds'] / 60);
+        $planned = $candidate['score'] ?? $candidate['predicted_margin'] / max(1, $candidate['seconds'] / 60);
         $recent = collect($results ?? $this->results($episode))
             ->filter(fn ($result) => empty($result['standalone_recovery']) && isset($result['realized_cr_per_minute']))
             ->take(-self::FLOOR_TRAILING_LOADS)->pluck('realized_cr_per_minute');
@@ -359,7 +362,7 @@ class CampaignTrade
     public function rank(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array &$considered): array
     {
         $rules = $grant->revision()->body['trade'];
-        $markets = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->get()->keyBy('symbol');
+        $markets = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->orderBy('observed_at')->orderBy('id')->get()->keyBy('symbol');
         $pairs = app(OpportunityAssessor::class)->report($agent, 'trade', $ship['symbol'], true)['opportunities'];
         $state = $episode->state ?? [];
         $ranked = [];
@@ -383,12 +386,10 @@ class CampaignTrade
         $exposure = $arm ? $this->allowance($grant, $agent, ship: $ship['symbol']) : INF;
         $available = null;
         $unclaimed = null;
+        $compare = fn (array $left, array $right) => $right['score'] <=> $left['score'] ?: [$left['key'], $left['source']] <=> [$right['key'], $right['source']];
         // Docked at a verified fuel seller, the run tops up first, so legs start from a full tank
         // and the refuel ceiling comes out of the credits available for cargo.
         $departure = app(FuelPlanner::class)->departureRefuel($agent, $ship);
-        $planned = $departure['ship'] ?? $ship;
-        $funded = $departure['agent'] ?? $agent;
-        $refuel = $departure['ceiling'] ?? 0;
         foreach ($pairs as $pair) {
             $key = $pair['good'].'@'.$pair['market'];
             $ask = collect($markets->get($pair['source'])?->data['tradeGoods'] ?? [])->firstWhere('symbol', $pair['good']);
@@ -400,72 +401,17 @@ class CampaignTrade
             }
             $state['first_seen'][$key] ??= $bid['sellPrice'];
             try {
-                $atSource = $planned;
-                $position = app(FuelPlanner::class)->leg($funded, $planned, $pair['source'], 0);
-                $atSource['nav']['waypointSymbol'] = $pair['source'];
-                $atSource['fuel']['current'] -= $position['outbound_fuel'];
-                $outbound = app(FuelPlanner::class)->leg($funded, $atSource, $pair['market'], 0);
-                $atBuyer = $atSource;
-                $atBuyer['nav']['waypointSymbol'] = $pair['market'];
-                $atBuyer['fuel']['current'] -= $outbound['outbound_fuel'];
-                $return = app(FuelPlanner::class)->leg($funded, $atBuyer, $pair['source'], 0);
-                $fuel = $return['refuel_ceiling'];
                 $learning[$key] ??= ['mode' => $this->mode($episode, $pair['good'], $pair['market'], $results),
                     'decay' => $this->decay($episode, $pair['good'], $pair['market'])];
-                $mode = $learning[$key]['mode'];
-                $batches = $mode === 'first_scaled' ? $rules['lot']['first_scaled_max_buyer_batches'] : $rules['lot']['max_buyer_batches'];
-                $ceiling = max(0, $agent->credits - $refuel - max($outbound['refuel_ceiling'], $fuel));
-                $caps = ['hold' => $ship['cargo']['capacity'], 'buyer_batches' => $batches * $bid['tradeVolume']];
-                $creditBound = 'credits';
-                if ($mode === 'proof') {
-                    $caps['proof_units'] = $rules['proof']['max_units_batches'] * min($ask['tradeVolume'], $bid['tradeVolume']);
-                    if ($rules['proof']['max_credits'] < $ceiling) {
-                        [$ceiling, $creditBound] = [$rules['proof']['max_credits'], 'proof_credits'];
-                    }
-                }
-                if ($exposure < $ceiling) {
-                    [$ceiling, $creditBound] = [(int) floor($exposure), 'exposure'];
-                }
-                $units = min($caps);
-                $decay = $learning[$key]['decay'];
-                $low = 0;
-                $high = $units;
-                while ($low < $high) {
-                    $middle = intdiv($low + $high + 1, 2);
-                    if ($this->prediction($middle, $ask, $bid, $decay, $fuel)['predicted_cost'] <= $ceiling) {
-                        $low = $middle;
-                    } else {
-                        $high = $middle - 1;
-                    }
-                }
-                // Which limit set the lot: the credit ceiling (proof, exposure or cash), else the smallest unit cap.
-                $bound = $low < $units ? $creditBound : array_search($units, $caps, true);
-                $limit = ['buyer_batches' => 'lot', 'proof_units' => 'proof', 'proof_credits' => 'proof'][$bound] ?? $bound;
-                $units = $low;
-                $prediction = $this->prediction($units, $ask, $bid, $decay, $fuel);
-                $travel = ($position['estimated_seconds'] ?? 0) + ($outbound['estimated_seconds'] ?? 0) + ($return['estimated_seconds'] ?? 0);
-                $duration = fn (int $count) => $travel + (ceil($count / $ask['tradeVolume']) + ceil($count / $bid['tradeVolume'])) * 10 + 120;
-                $seconds = $duration($units);
-                if ($units < 1 || $prediction['predicted_margin'] <= 0) {
-                    throw new GameException('No profitable lot fits cargo, fuel, proof and duration bounds.');
-                }
-                if ($seconds > $grant->limits['run_max_minutes'] * 60) {
-                    // Shadow data: profitable pairs that only the run duration rules out.
-                    $considered[] = ['good' => $pair['good'], 'source' => $pair['source'], 'buyer' => $pair['market'], 'units' => $units,
-                        'predicted_margin' => $prediction['predicted_margin'], 'planned_minutes' => round($seconds / 60, 1), 'long_run' => true,
-                        'rejected' => 'Planned run exceeds run_max_minutes.'];
+                $projection = $this->projectPair($agent, $ship, $departure, $pair, $ask, $bid, $rules,
+                    $grant->limits['run_max_minutes'] * 60, $learning[$key]['mode'], $learning[$key]['decay'], $exposure, (bool) $arm);
+                if (isset($projection['long_run'])) {
+                    $considered[] = $projection['long_run'];
 
                     continue;
                 }
-                $optimal = $this->optimalLot($units, $ask, $bid, $decay, $fuel, $duration);
-                $candidate = ['key' => $key, 'source' => $pair['source'], 'buyer' => $pair['market'], 'good' => $pair['good'], 'units' => $units,
-                    'mode' => $mode, 'proof' => $mode === 'proof', 'decay' => $decay, 'bid' => $bid['sellPrice'], 'fuel' => $fuel, 'departure_refuel' => $refuel,
-                    'fuel_reserve' => $outbound['refuel_ceiling'], 'max_inventory' => $arm ? min($ceiling, (int) ceil($prediction['predicted_cost'] * 1.05)) : $ceiling, 'seconds' => $seconds,
-                    'limiting_factor' => $limit, 'ship' => $ship['symbol'], 'position_seconds' => $position['estimated_seconds'] ?? 0,
-                    'score' => $prediction['predicted_margin'] / max(1, $seconds / 60), 'lot_bound' => $bound,
-                    'shadow_lot_bound' => $optimal['units'] < $units ? 'optimal_size' : $bound, 'optimal_units' => $optimal['units'],
-                    'optimal_margin' => $optimal['margin'], 'optimal_seconds' => $optimal['seconds'], 'optimal_score' => $optimal['score']] + $prediction;
-                if (! $available || $candidate['predicted_margin'] > $available['predicted_margin']) {
+                $candidate = $projection['candidate'];
+                if (! $available || $compare($candidate, $available) < 0) {
                     $available = $candidate;
                 }
                 if (isset($taken[$pair['good'].'@'.$pair['source']]) || isset($taken[$pair['good'].'@'.$pair['market']])) {
@@ -473,7 +419,7 @@ class CampaignTrade
 
                     continue;
                 }
-                if (! $unclaimed || $candidate['predicted_margin'] > $unclaimed['predicted_margin']) {
+                if (! $unclaimed || $compare($candidate, $unclaimed) < 0) {
                     $unclaimed = $candidate;
                 }
                 if (($state['current_pair'] ?? null) === $key && $bid['sellPrice'] <= $state['first_seen'][$key] * $rules['switch']['bid_below_first_seen']) {
@@ -486,7 +432,7 @@ class CampaignTrade
                 $considered[] = $pair + ['rejected' => $exception->getMessage()];
             }
         }
-        usort($ranked, fn ($left, $right) => $right['score'] <=> $left['score'] ?: [$left['key'], $left['source']] <=> [$right['key'], $right['source']]);
+        usort($ranked, $compare);
         if ($ranked) {
             $current = collect($ranked)->firstWhere('key', $state['current_pair'] ?? null);
             if ($current && $ranked[0]['key'] !== $current['key'] && $ranked[0]['score'] < $current['score'] * $rules['switch']['better_pair_ratio']) {
@@ -495,7 +441,8 @@ class CampaignTrade
             }
         }
         $episode->update(['state' => $state]);
-        $best = ['best_available' => $available['predicted_margin'] ?? null, 'best_available_key' => $available['key'] ?? null,
+        $best = ['best_margin_basis' => 'forecast', 'selection_basis' => 'conservative_score',
+            'best_available_score' => $available['score'] ?? null, 'best_unclaimed_score' => $unclaimed['score'] ?? null, 'best_available' => $available['predicted_margin'] ?? null, 'best_available_key' => $available['key'] ?? null,
             'best_unclaimed' => $unclaimed['predicted_margin'] ?? null, 'best_unclaimed_key' => $unclaimed['key'] ?? null];
         $ranked = array_map(fn ($candidate) => $candidate + $best, $ranked);
         foreach ($ranked as $candidate) {
@@ -505,10 +452,91 @@ class CampaignTrade
         return $ranked;
     }
 
+    public function projectPair(Agent $agent, array $ship, ?array $departure, array $pair, array $ask, array $bid,
+        array $rules, int $runMaxSeconds, string $mode, float $decay, float $exposure = INF, bool $arm = false): array
+    {
+        $key = $pair['good'].'@'.$pair['market'];
+        $planned = $departure['ship'] ?? $ship;
+        $funded = $departure['agent'] ?? $agent;
+        $refuel = $departure['ceiling'] ?? 0;
+        $atSource = $planned;
+        $position = app(FuelPlanner::class)->leg($funded, $planned, $pair['source'], 0);
+        $atSource['nav']['waypointSymbol'] = $pair['source'];
+        $atSource['fuel']['current'] -= $position['outbound_fuel'];
+        $outbound = app(FuelPlanner::class)->leg($funded, $atSource, $pair['market'], 0);
+        $atBuyer = $atSource;
+        $atBuyer['nav']['waypointSymbol'] = $pair['market'];
+        $atBuyer['fuel']['current'] -= $outbound['outbound_fuel'];
+        $return = app(FuelPlanner::class)->leg($funded, $atBuyer, $pair['source'], 0);
+        $costs = app(TradeFuelCost::class)->estimate($agent, $outbound['outbound_fuel'] + $return['outbound_fuel'], [$pair['source'], $pair['market']], $return['refuel_ceiling']);
+        $fuel = $costs['cycle_fuel_allowance'];
+        $positionCosts = app(TradeFuelCost::class)->estimate($agent, $position['outbound_fuel'], [$ship['nav']['waypointSymbol'], $pair['source']], $position['refuel_ceiling']);
+        $batches = $mode === 'first_scaled' ? $rules['lot']['first_scaled_max_buyer_batches'] : $rules['lot']['max_buyer_batches'];
+        $ceiling = max(0, $agent->credits - ReconMission::returnExposure($agent) - $refuel - max($outbound['refuel_ceiling'], $costs['fuel_safety_ceiling']));
+        $caps = ['hold' => $ship['cargo']['capacity'], 'buyer_batches' => $batches * $bid['tradeVolume']];
+        $creditBound = 'credits';
+        if ($mode === 'proof') {
+            $caps['proof_units'] = $rules['proof']['max_units_batches'] * min($ask['tradeVolume'], $bid['tradeVolume']);
+            if ($rules['proof']['max_credits'] < $ceiling) {
+                [$ceiling, $creditBound] = [$rules['proof']['max_credits'], 'proof_credits'];
+            }
+        }
+        if ($exposure < $ceiling) {
+            [$ceiling, $creditBound] = [(int) floor($exposure), 'exposure'];
+        }
+        $units = min($caps);
+        $low = 0;
+        $high = $units;
+        while ($low < $high) {
+            $middle = intdiv($low + $high + 1, 2);
+            if ($this->prediction($middle, $ask, $bid, $decay, $fuel)['predicted_cost'] <= $ceiling) {
+                $low = $middle;
+            } else {
+                $high = $middle - 1;
+            }
+        }
+        // Which limit set the lot: the credit ceiling (proof, exposure or cash), else the smallest unit cap.
+        $bound = $low < $units ? $creditBound : array_search($units, $caps, true);
+        $limit = ['buyer_batches' => 'lot', 'proof_units' => 'proof', 'proof_credits' => 'proof'][$bound] ?? $bound;
+        $units = $low;
+        $prediction = $this->prediction($units, $ask, $bid, $decay, $costs['expected_fuel_cost']);
+        $acceptanceMargin = $prediction['predicted_margin'] + $costs['expected_fuel_cost'] - $fuel;
+        $travel = ($position['estimated_seconds'] ?? 0) + ($outbound['estimated_seconds'] ?? 0) + ($return['estimated_seconds'] ?? 0);
+        $duration = fn (int $count) => $travel + (ceil($count / $ask['tradeVolume']) + ceil($count / $bid['tradeVolume'])) * 10 + 120;
+        $seconds = $duration($units);
+        if ($units < 1 || $acceptanceMargin <= 0) {
+            throw new GameException('No profitable lot fits cargo, fuel, proof and duration bounds.');
+        }
+        if ($seconds > $runMaxSeconds) {
+            // Shadow data: profitable pairs that only the run duration rules out.
+            return ['long_run' => ['good' => $pair['good'], 'source' => $pair['source'], 'buyer' => $pair['market'], 'units' => $units,
+                'predicted_margin' => $prediction['predicted_margin'], 'planned_minutes' => round($seconds / 60, 1), 'long_run' => true,
+                'rejected' => 'Planned run exceeds run_max_minutes.']];
+        }
+        $optimal = $this->optimalLot($units, $ask, $bid, $decay, $fuel, $duration);
+        $candidate = $costs + ['position_cost' => $positionCosts['expected_fuel_cost'], 'initial_contribution' => $prediction['predicted_margin'] - $positionCosts['expected_fuel_cost'],
+            'conservative_margin' => $acceptanceMargin, 'key' => $key, 'source' => $pair['source'], 'buyer' => $pair['market'], 'good' => $pair['good'], 'units' => $units,
+            'mode' => $mode, 'proof' => $mode === 'proof', 'decay' => $decay, 'bid' => $bid['sellPrice'], 'departure_refuel' => $refuel,
+            'fuel_reserve' => $outbound['refuel_ceiling'], 'max_inventory' => $arm ? min($ceiling, (int) ceil($prediction['predicted_cost'] * 1.05)) : $ceiling, 'seconds' => $seconds,
+            'limiting_factor' => $limit, 'ship' => $ship['symbol'], 'position_seconds' => $position['estimated_seconds'] ?? 0,
+            'score' => $acceptanceMargin / max(1, $seconds / 60), 'lot_bound' => $bound,
+            'shadow_lot_bound' => $optimal['units'] < $units ? 'optimal_size' : $bound, 'optimal_units' => $optimal['units'],
+            'optimal_margin' => $optimal['margin'], 'optimal_seconds' => $optimal['seconds'], 'optimal_score' => $optimal['score']] + $prediction;
+
+        return ['candidate' => $candidate];
+    }
+
     public function authorize(Agent $agent, AutomationRun $run, CampaignEpisode $episode): void
     {
         $rules = $episode->grant()->revision()->body['trade'];
         $plan = $run->plan;
+        if (! isset($plan['campaign_trade']['expected_fuel_cost'], $plan['campaign_trade']['cycle_fuel_allowance'], $plan['campaign_trade']['fuel_safety_ceiling'])) {
+            throw new GameException('Historical trade fuel economics require a fresh campaign preview.');
+        }
+        if ($plan['campaign_trade']['expected_fuel_cost'] !== ($plan['route']['expected_fuel_cost'] ?? null)
+            || $plan['campaign_trade']['cycle_fuel_allowance'] !== ($plan['route']['cycle_fuel_allowance'] ?? null)) {
+            throw new GameException('Fuel economics changed since ranking. Rerank before authorizing a fresh campaign preview.');
+        }
         $ask = app(OperationPlanner::class)->quote($agent, $plan['site'], $plan['symbol']);
         $bid = app(OperationPlanner::class)->quote($agent, $plan['market'], $plan['symbol'], OperationPlanner::buyerAge($plan));
         $mode = $this->mode($episode, $plan['symbol'], $plan['market']);

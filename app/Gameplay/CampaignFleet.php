@@ -2,9 +2,11 @@
 
 namespace App\Gameplay;
 
+use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignGrant;
+use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use Illuminate\Database\Eloquent\Builder;
@@ -21,6 +23,9 @@ class CampaignFleet
             return $role === 'command' ? $ships->firstWhere('symbol', $arm)?->snapshot : null;
         }
         $pinned = $ships->firstWhere('symbol', $state['role_ships'][$role] ?? null);
+        if ($role === 'probe' && ReconMission::where('agent_id', $episode->agent_id)->whereNull('closed_at')->get()->contains(fn ($mission) => ReconMission::holds(Agent::findOrFail($episode->agent_id), $mission->ship_symbol))) {
+            return null;
+        }
         if ($pinned) {
             return $pinned->snapshot;
         }

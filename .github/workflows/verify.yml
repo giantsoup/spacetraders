@@ -19,24 +19,56 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 40
     env:
-      PHP_BIN: php
+      PHP_SOURCE_VERSION: 8.5.12
+      PHP_SOURCE_SHA256: 08bc2eba2a588654ade1357174aa646b761556c862dda0678345ee29ed481209
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/storage/app/mvp-evidence/ci-browsers
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Read tested PHP patch
         id: runtime
         run: echo "php=$(cat .php-version)" >> "$GITHUB_OUTPUT"
-      - uses: shivammathur/setup-php@d52fc211a0436f8839a587b3b5b8efddab4744ea # v2
+      # setup-php resolves a minor's latest patch; only use it to bootstrap Composer.
+      - name: Bootstrap Composer tools
+        uses: shivammathur/setup-php@d52fc211a0436f8839a587b3b5b8efddab4744ea # v2
         with:
           php-version: ${{ steps.runtime.outputs.php }}
           extensions: curl, dom, fileinfo, mbstring, openssl, pcntl, pdo_mysql, pdo_sqlite, posix, session, sqlite3, tokenizer, xml
           tools: composer:2.10.3
           coverage: none
+      - name: Build isolated exact PHP CLI
+        timeout-minutes: 20
+        run: bash .github/ci/build-php-cli.sh
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version-file: .node-version
+      - name: Assert persisted PHP runtime and private configuration
+        run: |
+          test "$(command -v php)" = "$PHP_BIN"
+          test "$("$PHP_BIN" -r 'echo PHP_BINARY;')" = "$PHP_BIN"
+          test "$("$PHP_BIN" -r 'echo PHP_VERSION;')" = "$(cat .php-version)"
+          expected_ini="$PHPRC/php.ini"
+          "$PHP_BIN" -r 'if (php_ini_loaded_file() !== $argv[1] || php_ini_scanned_files() !== false) { fwrite(STDERR, "Unexpected PHP ini configuration\n"); exit(1); } echo "PASS private PHP ini\n";' "$expected_ini"
+          env -u PHPRC -u PHP_INI_SCAN_DIR "$PHP_BIN" -r 'if (php_ini_loaded_file() !== $argv[1] || php_ini_scanned_files() !== false) { fwrite(STDERR, "Unexpected compiled PHP ini defaults\n"); exit(1); } echo "PASS compiled private PHP ini defaults\n";' "$expected_ini"
+          "$PHP_BIN" scripts/runtime-preflight.php
+          "$PHP_BIN" -r '$required = ["curl","dom","fileinfo","mbstring","openssl","pcntl","pdo_mysql","pdo_sqlite","posix","session","sqlite3","tokenizer","xml","ctype","filter","hash","iconv","json","libxml","pcre","phar","xmlwriter","xmlreader","SimpleXML","zlib"]; foreach ($required as $ext) { if (!extension_loaded($ext)) { fwrite(STDERR,"Missing $ext\n"); exit(1); } } if (!function_exists("mb_ereg")) { exit(1); } echo "PASS full CI extension set and mbregex\n";'
+          "$PHP_BIN" --ini
+          "$PHP_BIN" -m
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            otool -L "$PHP_BIN"
+            "$PHP_BIN" -r 'echo OPENSSL_VERSION_TEXT, "\n", curl_version()["ssl_version"], "\n";'
+          fi
+      - name: Reject corrupted PHP source
+        run: |
+          corrupt_archive="$RUNNER_TEMP/corrupt-php.tar.xz"
+          cp "$PHP_SOURCE_ARCHIVE" "$corrupt_archive"
+          printf 'CORRUPT' >> "$corrupt_archive"
+          if bash .github/ci/build-php-cli.sh --verify-only "$corrupt_archive" > "$RUNNER_TEMP/php-checksum-negative.log" 2>&1; then
+            echo 'Corrupted PHP source was accepted' >&2
+            exit 1
+          fi
+          grep -F 'PHP source checksum mismatch' "$RUNNER_TEMP/php-checksum-negative.log"
       - name: Install locked dependencies
         id: dependencies
         run: |
@@ -55,9 +87,10 @@ jobs:
       - name: Real disposable database workers
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
-          php scripts/verify-mvp-worker.php
-          php scripts/verify-automation-worker.php
-          php scripts/verify-deployment.php
+          test "$(command -v php)" = "$PHP_BIN"
+          "$PHP_BIN" scripts/verify-mvp-worker.php
+          "$PHP_BIN" scripts/verify-automation-worker.php
+          "$PHP_BIN" scripts/verify-deployment.php
       - name: Browser journeys with fake provider and compiled assets
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
@@ -70,5 +103,6 @@ jobs:
       - name: Native owned engine and Start/Stop browser journey
         if: ${{ !cancelled() && runner.os == 'macOS' && steps.dependencies.outcome == 'success' }}
         run: |
-          php scripts/verify-local-engine.php
+          test "$(command -v php)" = "$PHP_BIN"
+          "$PHP_BIN" scripts/verify-local-engine.php
           node scripts/verify-automation-browser.mjs

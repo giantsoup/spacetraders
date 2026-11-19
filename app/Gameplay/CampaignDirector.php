@@ -759,7 +759,7 @@ class CampaignDirector
                 $candidate = $fresh + ['value_floor' => $trades->valueFloor($episode, $fresh)];
                 $this->candidate = $candidate;
                 $limits = $this->limits($grant, $episode, $agent);
-                $limits['max_spend'] = min($limits['max_spend'], $candidate['max_inventory'] + $candidate['fuel'] + $candidate['departure_refuel']);
+                $limits['max_spend'] = min($limits['max_spend'], $candidate['max_inventory'] + $candidate['fuel_safety_ceiling'] + $candidate['departure_refuel']);
                 $plan = $limits + ['strategy' => 'trade', 'market' => $candidate['buyer'], 'symbol' => $candidate['good'], 'units' => $candidate['units'],
                     'min_sell_price' => (int) ceil($candidate['predicted_cost'] / $candidate['units']), 'min_margin' => 1,
                     'max_inventory' => $candidate['max_inventory'], 'max_fuel' => $ship['fuel']['capacity'],

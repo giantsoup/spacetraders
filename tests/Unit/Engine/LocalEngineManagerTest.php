@@ -323,9 +323,11 @@ class LocalEngineManagerTest extends TestCase
         $this->manager->install();
     }
 
-    public function test_install_command_delegates_the_original_environment_and_reports_the_checkout(): void
+    #[DataProvider('reconFlags')]
+    public function test_install_command_delegates_the_original_environment_and_reports_the_checkout(bool $reconEnabled): void
     {
         $this->installConfiguration();
+        config(['gameplay.gate_recon_enabled' => $reconEnabled]);
         $this->host->shouldReceive('registered')->once()->andReturn(false);
         $this->host->shouldReceive('install')->once()->withArgs(function ($php, $env) {
             $this->assertSame(realpath(PHP_BINARY), $php);
@@ -341,6 +343,7 @@ class LocalEngineManagerTest extends TestCase
                 'SPACETRADERS_DEPLOYMENT_PATH' => config('deployment.path'), 'SPACETRADERS_RELEASE' => config('deployment.release'),
                 'SPACETRADERS_LOCK_PATH' => config('gameplay.lock_path'), 'SPACETRADERS_FIXTURE_PATH' => config('gameplay.fixture_path') ?: '',
                 'SPACETRADERS_REQUEST_BUDGET_PATH' => config('gameplay.request_budget_path'),
+                'SPACETRADERS_GATE_RECON_ENABLED' => config('gameplay.gate_recon_enabled') ? 'true' : 'false',
                 'SPACETRADERS_AUTOMATION_ENABLED' => config('gameplay.enabled') ? 'true' : 'false',
                 'SPACETRADERS_LOCAL_ENGINE_ENABLED' => 'true', 'SPACETRADERS_OPERATOR_ID' => (string) config('gameplay.operator_id'),
                 'SPACETRADERS_LOCAL_HOST' => config('gameplay.local_host'), 'SPACETRADERS_PHP_BINARY' => $php,
@@ -389,6 +392,11 @@ class LocalEngineManagerTest extends TestCase
     private function engine(array $attributes = []): LocalEngine
     {
         return LocalEngine::create(array_merge(['id' => 1, 'state' => 'running', 'gate_open' => true, 'session_id' => 'test-session', 'heartbeat_at' => now(), 'processes' => [], 'message' => 'Test engine.'], $attributes));
+    }
+
+    public static function reconFlags(): array
+    {
+        return [[false], [true]];
     }
 
     private function installConfiguration(int $preflightExit = 0): void

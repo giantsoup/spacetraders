@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'gate_recon_enabled' => env('SPACETRADERS_GATE_RECON_ENABLED', false),
     'local_engine_enabled' => env('SPACETRADERS_LOCAL_ENGINE_ENABLED', false),
     'operator_id' => env('SPACETRADERS_OPERATOR_ID'),
     'local_host' => env('SPACETRADERS_LOCAL_HOST', 'spacetraders.test'),

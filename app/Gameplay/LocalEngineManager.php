@@ -79,6 +79,7 @@ class LocalEngineManager
                 'SPACETRADERS_DEPLOYMENT_PATH' => config('deployment.path'), 'SPACETRADERS_RELEASE' => config('deployment.release'),
                 'SPACETRADERS_LOCK_PATH' => config('gameplay.lock_path'), 'SPACETRADERS_FIXTURE_PATH' => config('gameplay.fixture_path') ?: '',
                 'SPACETRADERS_REQUEST_BUDGET_PATH' => config('gameplay.request_budget_path'),
+                'SPACETRADERS_GATE_RECON_ENABLED' => config('gameplay.gate_recon_enabled') ? 'true' : 'false',
                 'SPACETRADERS_AUTOMATION_ENABLED' => config('gameplay.enabled') ? 'true' : 'false',
                 'SPACETRADERS_LOCAL_ENGINE_ENABLED' => 'true', 'SPACETRADERS_OPERATOR_ID' => (string) config('gameplay.operator_id'),
                 'SPACETRADERS_LOCAL_HOST' => config('gameplay.local_host'), 'SPACETRADERS_PHP_BINARY' => $php,
