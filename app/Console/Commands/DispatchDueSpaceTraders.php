@@ -8,6 +8,7 @@ use App\Gameplay\DeploymentGate;
 use App\Gameplay\EngineGate;
 use App\Gameplay\FleetMetrics;
 use App\Gameplay\GameException;
+use App\Gameplay\GateRecon;
 use App\Gameplay\HostLock;
 use App\Gameplay\ShipCommandExecutor;
 use App\Jobs\AdvanceAutomationRun;
@@ -15,6 +16,7 @@ use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignGrant;
+use App\Models\ReconMission;
 use App\Models\ShipAction;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -57,6 +59,16 @@ class DispatchDueSpaceTraders extends Command
                 });
             } catch (GameException) {
                 // The sender still holds its OS lock. Do not steal command ownership.
+            }
+        }
+        foreach (ReconMission::whereNull('closed_at')->limit(50)->get() as $mission) {
+            if (hrtime(true) >= $deadline) {
+                break;
+            }
+            try {
+                $executor->locked(Agent::findOrFail($mission->agent_id), fn () => app(GateRecon::class)->reconcileSettlement($mission));
+            } catch (GameException) {
+                // The owner is still working; retry on the next bounded sweep.
             }
         }
         $timing = ['lags' => [], 'director' => 0, 'arms' => 0];

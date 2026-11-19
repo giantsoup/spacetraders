@@ -81,6 +81,9 @@ class EngineGate
         ShipAction::whereIn('state', ['preview', 'pending'])
             ->where(fn ($query) => $query->whereNotNull('outcome->body_sha256')->orWhereNotNull('outcome->response_received_at'))
             ->update(['state' => 'uncertain', 'message' => 'A write receipt already exists. Reconcile without replay after the engine session closes.', 'settled_at' => now()]);
+        ShipAction::where('state', 'pending')->whereIn('automation_run_id', AutomationRun::where('strategy', 'gate_recon')->select('id'))
+            ->update(['state' => 'rejected', 'message' => $message, 'settled_at' => now(),
+                'outcome->local_refusal' => ['at' => now()->utc()->toIso8601String(), 'stage' => 'engine_invalidated', 'message' => $message]]);
         ShipAction::whereIn('state', ['preview', 'pending'])->update(['state' => 'rejected', 'message' => $message, 'settled_at' => now()]);
         AutomationRun::where('state', 'preview')->update(['state' => 'stopped', 'blocked_reason' => $message]);
         AutomationRun::whereNotNull('active_agent_id')->update(['stop_requested_at' => now(), 'state' => 'stopping', 'blocked_reason' => $message, 'next_action_at' => now(), 'last_dispatched_at' => null]);

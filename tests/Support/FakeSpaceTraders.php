@@ -3,6 +3,7 @@
 namespace Tests\Support;
 
 use App\Gameplay\AutomationRunner;
+use App\Gameplay\GameException;
 use App\Gameplay\RequestDeferred;
 use App\Gameplay\ShipCommandExecutor;
 use App\Models\AutomationRun;
@@ -145,6 +146,24 @@ final class FakeSpaceTraders
     public static function respond(array &$world, Request $request): array
     {
         $path = substr(parse_url($request->url(), PHP_URL_PATH), strlen('/v2')) ?: '/';
+        if (($world['defer_probe_preflight'] ?? false) && $request->method() === 'GET' && $path === '/my/ships/LOCAL-2') {
+            throw new RequestDeferred('Synthetic pending preflight budget deferral.', 5);
+        }
+        if ($request->method() === 'POST' && str_ends_with($path, '/jump')) {
+            if ($world['throw_jump_after_reservation'] ?? false) {
+                throw new GameException('Synthetic local error after reservation.');
+            }
+            if ($world['codeless_jump_rejection'] ?? false) {
+                return [['error' => ['message' => 'Synthetic code-less server refusal.']], 400];
+            }
+            if ($world['expire_jump_deferral'] ?? false) {
+                Date::setTestNow(now()->addMinutes(4));
+                throw new RequestDeferred('Synthetic expired transport budget deferral.', 5);
+            }
+        }
+        if (($world['defer_jump_before_transport'] ?? false) && $request->method() === 'POST' && str_ends_with($path, '/jump')) {
+            throw new RequestDeferred('Synthetic pretransport jump budget deferral.', 5);
+        }
         if (($world['defer_followup_after_write'] ?? false) && $request->method() === 'GET' && $path === '/my/ships/LOCAL-1' && count($world['writes']) > 0) {
             throw new RequestDeferred('Synthetic post-receipt request-budget deferral.', 5);
         }
@@ -152,6 +171,10 @@ final class FakeSpaceTraders
             return [['error' => ['code' => 4000, 'message' => 'Synthetic inherited-auth ambiguity.']], 401];
         }
         $args = $request->data();
+        if (($world['defer_read_path'] ?? null) === $path && $request->method() === 'GET'
+            && (! isset($world['defer_read_page']) || (int) ($args['page'] ?? 1) === $world['defer_read_page'])) {
+            throw new RequestDeferred('Synthetic public-read budget deferral.', 5);
+        }
         $traits = [];
         foreach (explode('&', parse_url($request->url(), PHP_URL_QUERY) ?? '') as $pair) {
             $parts = explode('=', $pair, 2);
@@ -456,6 +479,18 @@ final class FakeSpaceTraders
                 return [['data' => ['cooldown' => $ship['cooldown'], $field => $world['scan_'.$field] ?? []]], 201];
             }
             if (in_array($command, ['jump', 'warp'], true)) {
+                $fromGate = $ship['nav']['waypointSymbol'];
+                if ($command === 'jump' && isset($world['gate_connections'])) {
+                    if (isset($world['jump_reject'])) {
+                        $code = is_array($world['jump_reject']) ? ($world['jump_reject'][$fromGate] ?? null) : $world['jump_reject'];
+                        if ($code) {
+                            return [['error' => ['code' => $code, 'message' => 'Synthetic jump rejection.']], 400];
+                        }
+                    }
+                    if (! in_array($args['waypointSymbol'], $world['gate_connections'][$fromGate] ?? [], true)) {
+                        return [['error' => ['code' => 4229]], 400];
+                    }
+                }
                 $ship['nav']['systemSymbol'] = implode('-', array_slice(explode('-', $args['waypointSymbol']), 0, 2));
                 $ship['nav']['waypointSymbol'] = $args['waypointSymbol'];
                 $ship['nav']['status'] = $command === 'jump' ? 'IN_ORBIT' : 'IN_TRANSIT';
@@ -465,9 +500,10 @@ final class FakeSpaceTraders
 
                     return [['data' => ['nav' => $ship['nav'], 'fuel' => $ship['fuel']]], 200];
                 }
-                $price = $world['jump_price'] ?? 100;
+                $price = is_array($world['jump_price'] ?? null) ? ($world['jump_price'][$fromGate] ?? 100) : ($world['jump_price'] ?? 100);
                 $world['credits'] -= $price;
-                $ship['cooldown'] = ['shipSymbol' => $ship['symbol'], 'totalSeconds' => 0, 'remainingSeconds' => 0];
+                $cooldown = $world['jump_cooldown'] ?? 0;
+                $ship['cooldown'] = ['shipSymbol' => $ship['symbol'], 'totalSeconds' => $cooldown, 'remainingSeconds' => $cooldown, 'expiration' => now()->addSeconds($cooldown)->toIso8601String()];
 
                 return [['data' => ['nav' => $ship['nav'], 'cooldown' => $ship['cooldown'], 'agent' => ['credits' => $world['credits']], 'transaction' => ['waypointSymbol' => $ship['nav']['waypointSymbol'], 'tradeSymbol' => 'ANTIMATTER', 'type' => 'PURCHASE', 'units' => 1, 'pricePerUnit' => $price, 'totalPrice' => $price, 'shipSymbol' => $ship['symbol'], 'timestamp' => now()->toIso8601String()]]], 200];
             }
@@ -585,7 +621,9 @@ final class FakeSpaceTraders
             return [['data' => ['exportToImportMap' => ['IRON_ORE' => ['IRON']]]], 200];
         }
         if (str_ends_with($path, '/jump-gate')) {
-            return [['data' => ['symbol' => 'X1-TEST-ROCK', 'connections' => ['X1-NEXT-GATE']]], 200];
+            $gate = explode('/', $path)[4];
+
+            return [['data' => ['symbol' => isset($world['gate_connections']) ? $gate : 'X1-TEST-ROCK', 'connections' => $world['gate_connections'][$gate] ?? ['X1-NEXT-GATE']]], 200];
         }
         if (str_ends_with($path, '/construction')) {
             return [['data' => $world['construction'] ?? ['symbol' => 'X1-TEST-ROCK', 'isComplete' => false, 'materials' => [['tradeSymbol' => 'IRON_ORE', 'required' => 100, 'fulfilled' => 0]]]], 200];

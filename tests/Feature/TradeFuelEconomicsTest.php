@@ -465,4 +465,38 @@ class TradeFuelEconomicsTest extends TestCase
     {
         $this->assertSame(['expected_fuel_cost' => $expected, 'cycle_fuel_allowance' => $allowance, 'fuel_safety_ceiling' => $legacy], TradeFuelCost::bounded($burn, $price, $legacy));
     }
+
+    public function test_rank_characterization_keeps_full_zero_exposure_output(): void
+    {
+        $this->startTrade();
+        $ship = Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot;
+        $episode = CampaignEpisode::firstOrFail();
+        $outputs = [];
+        foreach (['normal', 'long_run', 'claimed'] as $case) {
+            $planned = $ship;
+            if ($case === 'long_run') {
+                $planned['engine']['speed'] = 1;
+            }
+            if ($case === 'claimed') {
+                $otherGrant = $this->grant->replicate();
+                $otherGrant->slot = null;
+                $otherGrant->limits = $otherGrant->limits + ['arm' => ['label' => 'Other', 'ship' => 'LOCAL-3']];
+                $otherGrant->save();
+                $other = $episode->replicate();
+                $other->campaign_grant_id = $otherGrant->id;
+                $other->state = ['claim' => ['good' => 'FUEL', 'source' => 'X1-TEST-A4', 'buyer' => 'X1-TEST-H49', 'at' => now()->toIso8601String()]];
+                $other->save();
+            }
+            $considered = [];
+            $ranked = app(CampaignTrade::class)->rank($this->grant, $episode, $this->agent->fresh(), $planned, $considered);
+            if ($case === 'long_run') {
+                $this->assertTrue(collect($considered)->contains(fn ($row) => ! empty($row['long_run'])));
+            }
+            if ($case === 'claimed') {
+                $this->assertTrue(collect($considered)->contains(fn ($row) => ($row['rejected'] ?? null) === 'Claimed by another ship.'));
+            }
+            $outputs[$case] = hash('sha256', json_encode([$ranked, $considered], JSON_THROW_ON_ERROR));
+        }
+        $this->assertSame(['normal' => 'bf6f8560cb9ff92a2c9a2eba177a1ce4cdf3b3fd9a6c455bbeb560be83ec1e7b', 'long_run' => '011f7028ef5d16bf9afe4a2d3016954d5ee409c5aebdf78e887662d6df3533e0', 'claimed' => '954c2fb403fdab1e5d68a3ad6a7ad3046eb24dfe7c0f59bddac086d5d262a21e'], $outputs);
+    }
 }

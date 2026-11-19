@@ -72,6 +72,10 @@ class CreditAccounting
                 $totals['sale_proceeds'] += $price;
             }
         }
+        if ($action->command === 'jump') {
+            $totals['jump_cost'] = ($totals['jump_cost'] ?? 0) + $price;
+            $totals['jumps'] = ($totals['jumps'] ?? 0) + 1;
+        }
         if ($action->command === 'navigate') {
             $totals['travel_fuel'] = ($totals['travel_fuel'] ?? 0) + ($outcome['travel']['actual_fuel'] ?? 0);
         }

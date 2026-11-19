@@ -6,12 +6,15 @@ use App\Gameplay\CampaignReport;
 use App\Gameplay\CampaignStatus;
 use App\Gameplay\CampaignWatchdog;
 use App\Gameplay\GameException;
+use App\Gameplay\GateRecon;
 use App\Gameplay\HostLock;
+use App\Gameplay\ReconReport;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\CampaignRevision;
+use App\Models\ReconMission;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Artisan;
@@ -156,3 +159,89 @@ Artisan::command('campaign:arm-revoke {label?} {--all}', function (CampaignContr
         $this->info('Arm '.$grant->arm()['label'].' revoked.');
     }
 })->purpose('Revoke arm authority, stop its runs and close its episode');
+
+Artisan::command('recon:approve {--agent=} {--ship=} {--user=} {--dry-run} {--cash-floor=} {--envelope=} {--jump-exposure=} {--explore-until=} {--return-deadline=} {--cooldown-estimate-s=} {--max-dwell-minutes=} {--market-reads-per-visit=} {--catalogue-pages-per-system=} {--cash-wait-seconds=} {--ask-recheck-seconds=} {--evaluation-retry-seconds=} {--evaluation-retry-limit=} {--module-less-trial=} {--scaled-score-min=} {--scaled-margin-min=} {--confirm-max-age-min=}', function (GateRecon $recon) {
+    if (! $this->option('user')) {
+        throw new GameException('Select the approving operator with --user=<id>.');
+    }
+    $user = User::findOrFail($this->option('user'));
+    $agent = $user->agents()->where('name', $this->option('agent') ?: 'MACSOUP')->firstOrFail();
+    $ship = $this->option('ship') ?: $agent->name.'-2';
+    $terms = [];
+    foreach (['cash-floor', 'envelope', 'jump-exposure', 'cooldown-estimate-s', 'max-dwell-minutes', 'market-reads-per-visit', 'catalogue-pages-per-system', 'cash-wait-seconds', 'ask-recheck-seconds', 'evaluation-retry-seconds', 'evaluation-retry-limit'] as $flag) {
+        if ($this->option($flag) !== null) {
+            if (! ctype_digit((string) $this->option($flag))) {
+                throw new GameException('Expected a nonnegative integer for --'.$flag);
+            }
+            $terms[str_replace('-', '_', $flag)] = (int) $this->option($flag);
+        }
+    }
+    foreach (['explore-until', 'return-deadline'] as $flag) {
+        if ($this->option($flag) !== null) {
+            $terms[str_replace('-', '_', $flag)] = CarbonImmutable::parse($this->option($flag))->toIso8601String();
+        }
+    }
+    foreach (['scaled-score-min', 'scaled-margin-min', 'confirm-max-age-min'] as $flag) {
+        if ($this->option($flag) !== null) {
+            if (! is_numeric($this->option($flag))) {
+                throw new GameException('Expected a number for --'.$flag);
+            }
+            $terms['qualify'][str_replace('-', '_', $flag)] = (float) $this->option($flag);
+        }
+    }
+    if ($this->option('module-less-trial') !== null) {
+        $value = filter_var($this->option('module-less-trial'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        if ($value === null) {
+            throw new GameException('Use true or false for --module-less-trial.');
+        }
+        $terms['module_less_trial'] = $value;
+    }
+    $mission = $recon->approve($agent, $user, $ship, $terms, (bool) $this->option('dry-run'));
+    $order = array_values(array_filter(array_keys($mission->graph), fn ($system) => $system !== $mission->origin_system && $mission->path($mission->origin_system, $system)));
+    usort($order, fn ($a, $b) => [count($mission->path($mission->origin_system, $a)), -count($mission->graph[$a]['catalogue']['marketplaces'] ?? []), $a]
+        <=> [count($mission->path($mission->origin_system, $b)), -count($mission->graph[$b]['catalogue']['marketplaces'] ?? []), $b]);
+    $this->line(json_encode(['mission' => $mission->id, 'dry_run' => (bool) $this->option('dry-run'), 'terms_hash' => $mission->terms_hash,
+        'terms' => $mission->terms, 'graph' => $mission->graph, 'candidate_order' => $order], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+})->purpose('Approve immutable bounded probe reconnaissance; dry-run creates no mission');
+
+Artisan::command('recon:start {mission}', function (GateRecon $recon) {
+    $run = $recon->start(ReconMission::findOrFail($this->argument('mission')));
+    $this->info('Recon run: '.$run->id.' (v5, absolute deadline '.$run->expires_at->toIso8601String().')');
+})->purpose('Start or explicitly resume recon using a fresh run and the same mission ledger');
+
+Artisan::command('recon:status {mission?}', function (GateRecon $recon) {
+    $missions = ReconMission::when($this->argument('mission'), fn ($q) => $q->whereKey($this->argument('mission')), fn ($q) => $q->whereNull('closed_at'))->get();
+    $this->line(json_encode($missions->map(fn ($mission) => $recon->status($mission))->all(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+})->purpose('Show recon holds, return funds and evidence without game requests');
+
+Artisan::command('recon:cancel {mission}', function (GateRecon $recon) {
+    $recon->cancel(ReconMission::findOrFail($this->argument('mission')));
+    $this->info('Exploration cancelled. An abroad probe retains its homeward hold and authorization.');
+})->purpose('Cancel exploration; retain the loan and return funds while abroad');
+
+Artisan::command('recon:report {mission}', function (ReconReport $report) {
+    $mission = ReconMission::findOrFail($this->argument('mission'));
+    $directory = storage_path('app/recon');
+    File::ensureDirectoryExists($directory, 0700);
+    $path = $directory.'/mission-'.$mission->id.'.md';
+    File::put($path, $report->build($mission));
+    chmod($path, 0600);
+    $this->line('Report: '.$path);
+    $this->line('Outcome: '.($mission->outcome ?: $mission->state).'; spent '.$mission->ledger()['spent'].' CR; return exposure '.$mission->exposure().' CR.');
+})->purpose('Write the provisional reconnaissance evidence and accounting report');
+
+Artisan::command('recon:authorize-return {mission} {--jump-cap=} {--total-exposure=} {--until=} {--user=} {--dry-run}', function (GateRecon $recon) {
+    foreach (['jump-cap', 'total-exposure', 'until', 'user'] as $required) {
+        if ($this->option($required) === null) {
+            throw new GameException('Explicit return approval requires --'.$required);
+        }
+    }
+    foreach (['jump-cap', 'total-exposure'] as $integer) {
+        if (! ctype_digit((string) $this->option($integer))) {
+            throw new GameException('Expected a positive integer for --'.$integer);
+        }
+    }
+    $record = $recon->authorizeReturn(ReconMission::findOrFail($this->argument('mission')), User::findOrFail($this->option('user')),
+        (int) $this->option('jump-cap'), (int) $this->option('total-exposure'), CarbonImmutable::parse($this->option('until')), (bool) $this->option('dry-run'));
+    $this->line(json_encode($record, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+})->purpose('Explicitly approve a bounded homeward-only rescue on the same mission');

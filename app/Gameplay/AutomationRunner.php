@@ -11,8 +11,10 @@ use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\GameObservation;
 use App\Models\LocalEngine;
+use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -77,10 +79,15 @@ class AutomationRunner
             if ($run->expires_at->isPast() || $run->reset_id !== $agent->reset_id || AutomationRun::where('active_agent_id', $agent->id)->where('ship_symbol', $run->ship_symbol)->exists()) {
                 $this->rejectPreview($run, 'Preview expired, reset or another run already owns this ship.');
             }
-            if (! in_array($run->plan_version, [1, 2, 3, 4], true) || ($this->gate->enabled() && ! in_array($run->plan_version, [2, 3, 4], true)) || ($run->plan_version === 3 && ! in_array($run->strategy, ['scout', 'trade'], true)) || ($run->plan_version === 4 && (! $run->campaign_episode_id || $run->strategy !== 'sell_aboard'))) {
+            if (! in_array($run->plan_version, [1, 2, 3, 4, 5], true) || ($this->gate->enabled() && ! in_array($run->plan_version, [2, 3, 4, 5], true)) || ($run->plan_version === 3 && ! in_array($run->strategy, ['scout', 'trade'], true)) || ($run->plan_version === 4 && (! $run->campaign_episode_id || $run->strategy !== 'sell_aboard'))) {
                 throw new GameException('Unsupported or historical plan version. Create a fresh staged preview.');
             }
-            if ($run->plan_version === 4) {
+            if ($run->plan_version === 5) {
+                if ($run->strategy !== 'gate_recon') {
+                    throw new GameException('Version 5 is reserved for gate reconnaissance.');
+                }
+                $plan = app(GateRecon::class)->validateStart($agent, $run);
+            } elseif ($run->plan_version === 4) {
                 $fresh = app(CampaignRecovery::class)->compose($agent, $run->ship_symbol, $run->plan['market'], $run->plan);
                 if (! hash_equals($run->fingerprint, $fresh['fingerprint'])) {
                     $this->rejectPreview($run, 'Recovery ship, balance or quote changed. Create a fresh preview.');
@@ -123,7 +130,7 @@ class AutomationRunner
             app(CampaignSafety::class)->check($run, $agent);
             DB::transaction(function () use ($run, $agent, $plan) {
                 $this->gate->check($run->engine_session_id);
-                $run->update(['plan' => $plan, 'active_agent_id' => $agent->id, 'state' => RunState::Running, 'started_at' => now(), 'expires_at' => now()->addMinutes($plan['minutes']), 'next_action_at' => now(), 'last_dispatched_at' => now()]);
+                $run->update(['plan' => $plan, 'active_agent_id' => $agent->id, 'state' => RunState::Running, 'started_at' => now(), 'expires_at' => $run->plan_version === 5 ? CarbonImmutable::parse($plan['return_deadline']) : now()->addMinutes($plan['minutes']), 'next_action_at' => now(), 'last_dispatched_at' => now()]);
                 AdvanceAutomationRun::dispatch($run->id)->afterCommit();
             });
 
@@ -191,6 +198,13 @@ class AutomationRunner
             if (! $run->active_agent_id) {
                 return;
             }
+            if ($run->strategy === 'gate_recon') {
+                app(GateRecon::class)->reconcileSettlement(ReconMission::findOrFail($run->plan['mission_id']));
+                $run->refresh();
+                if (! $run->active_agent_id) {
+                    return;
+                }
+            }
             $run->update(['heartbeat_at' => now()]);
             if (ShipAction::where('agent_id', $agent->id)->where(fn ($q) => $q->where('state', 'uncertain')->orWhere(fn ($q) => ShipCommandExecutor::reviewFor($q, $run->ship_symbol)))->exists()) {
                 if ($run->campaign_episode_id && ShipAction::where('agent_id', $agent->id)->where('state', 'uncertain')->exists()) {
@@ -234,7 +248,9 @@ class AutomationRunner
                 $totals['other_credit_delta'] = $otherDelta;
                 $totals['agent_balance_delta'] = $credits - $run->plan['initial_credits'];
                 $run->update(['totals' => $totals]);
-                if ($run->strategy === 'contracts') {
+                if ($run->strategy === 'gate_recon') {
+                    $step = app(GateRecon::class)->next($agent, $ship, $run);
+                } elseif ($run->strategy === 'contracts') {
                     $this->assertContractState($agent, $run, $ship);
                     $step = $this->contracts->next($ship, $run->plan, $run->totals, now()->toImmutable());
                 } elseif (! empty($run->plan['sell_only'])) {
@@ -274,7 +290,7 @@ class AutomationRunner
                 match ($step->kind) {
                     'blocked' => $this->executor->block($run, $step->reason),
                     'wait' => $run->update(['state' => RunState::Waiting, 'next_action_at' => $step->until]),
-                    'trip' => $run->strategy === 'contracts' ? $this->completeContract($run, $ship) : $this->completeTrip($run, $ship),
+                    'trip' => $run->strategy === 'gate_recon' ? app(GateRecon::class)->complete($run) : ($run->strategy === 'contracts' ? $this->completeContract($run, $ship) : $this->completeTrip($run, $ship)),
                     'depart' => $run->update(['totals' => array_merge($run->totals, ['phase' => 'sell']), 'next_action_at' => now(), 'state' => RunState::Running]),
                     'act' => $this->enqueue($run, $step),
                 };
@@ -398,9 +414,12 @@ class AutomationRunner
                 'agent_id' => $run->agent_id, 'automation_run_id' => $run->id, 'key' => (string) Str::uuid(),
                 'reset_id' => $run->reset_id, 'ship_symbol' => $run->ship_symbol, 'origin' => 'automation',
                 'target_type' => str_starts_with($step->command, 'contract_') ? 'contract' : 'ship', 'target_id' => str_starts_with($step->command, 'contract_') ? $run->plan['contract_plan']['contract']['id'] : $run->ship_symbol,
-                'command' => $step->command, 'arguments' => array_merge($step->arguments, ['reserve' => $run->plan['reserve']]),
+                'command' => $step->command, 'arguments' => array_merge($step->arguments, ['reserve' => $run->plan_version === 5 && $run->strategy === 'gate_recon' ? max($run->plan['reserve'], $step->arguments['reserve'] ?? 0) : $run->plan['reserve']]),
                 'state' => 'pending', 'last_dispatched_at' => now(), 'expires_at' => min($run->expires_at, now()->addMinutes(3)),
             ]);
+            if ($run->strategy === 'gate_recon' && $step->command === 'jump') {
+                app(GateRecon::class)->bindIntent($run, $action);
+            }
             ExecuteShipCommand::dispatch($action->id)->afterCommit();
         });
     }

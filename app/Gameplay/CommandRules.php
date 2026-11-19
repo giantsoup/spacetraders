@@ -5,6 +5,7 @@ namespace App\Gameplay;
 use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\GameObservation;
+use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
 
@@ -82,12 +83,20 @@ class CommandRules
         $fleetPurchase = $command === 'buy_ship' && ! isset($arguments['site'], $arguments['market']);
         $spending = in_array($command, ['buy', 'buy_ship', 'repair', 'install_mount', 'remove_mount', 'install_module', 'remove_module', 'jump', 'refuel'], true);
         $floor = max($arguments['reserve'] ?? 0, $run?->plan['reserve'] ?? 0, ! $run && $spending && ! $fleetPurchase ? max(1, (int) config('gameplay.manual_reserve_floor')) : 0);
+        $returnExposure = ReconMission::returnExposure($agent);
+        if ($run && $run->strategy !== 'gate_recon' && $spending) {
+            $floor = max($floor, $returnExposure);
+        }
         $protected = 0;
         // Only spending commands can consume another run's commitment.
         if (! $run && $spending) {
+            $protected += $returnExposure;
             $reserves = 0;
             $remaining = 0;
             foreach (AutomationRun::where('active_agent_id', $agent->id)->get() as $protectedRun) {
+                if ($protectedRun->strategy === 'gate_recon') {
+                    continue;
+                }
                 if ($protectedRun->campaign_episode_id) {
                     $commitment = 0;
                     // The run keeps its ship snapshot current; reading it costs no request.
@@ -184,7 +193,9 @@ class CommandRules
                     throw new GameException('Select a destination in another system.');
                 }
                 $drive = $command === 'jump' ? 'MODULE_JUMP_DRIVE_' : 'MODULE_WARP_DRIVE_';
-                if (! collect($ship['modules'])->contains(fn ($item) => str_starts_with($item['symbol'], $drive))) {
+                if ($command === 'jump' && $run?->strategy === 'gate_recon') {
+                    app(GateRecon::class)->authorizeJump($agent, $run, $ship, $from, $target, $arguments);
+                } elseif (! collect($ship['modules'])->contains(fn ($item) => str_starts_with($item['symbol'], $drive))) {
                     throw new GameException($command === 'jump' ? 'Jump client policy requires an observed jump-drive module; drive restrictions remain a live gate.' : 'The required warp drive is not installed.');
                 }
                 if ($command === 'jump') {
@@ -194,6 +205,12 @@ class CommandRules
                     $gate = $this->api->manualRead($agent, 'get-jump-gate', ['systemSymbol' => $from['systemSymbol'], 'waypointSymbol' => $from['symbol']]);
                     if (! in_array($target['symbol'], $gate['data']['connections'], true)) {
                         throw new GameException('The destination is not a connected gate.');
+                    }
+                    if ($run?->strategy === 'gate_recon') {
+                        $back = $this->api->manualRead($agent, 'get-jump-gate', ['systemSymbol' => $target['systemSymbol'], 'waypointSymbol' => $target['symbol']]);
+                        if (! in_array($from['symbol'], $back['data']['connections'], true)) {
+                            throw new GameException('Recon target has no live return link.');
+                        }
                     }
                     $cost = $arguments['maxTotal'];
                     $estimate['fee_unknown'] = true;
@@ -344,7 +361,7 @@ class CommandRules
                     $estimate['effects'] = 'Fuel and elapsed-time values are operator review thresholds, not formulas or server caps. Actual server route and fuel settle this action. Uncalibrated travel can strand a ship.';
                     break;
                 }
-                if (in_array('MARKETPLACE', array_column($from['traits'], 'symbol'), true)) {
+                if ($run?->strategy !== 'gate_recon' && in_array('MARKETPLACE', array_column($from['traits'], 'symbol'), true)) {
                     $this->sync->observe($agent, 'market', $from['symbol'], $this->api->market($agent, $from['symbol']));
                 }
                 try {
@@ -543,7 +560,7 @@ class CommandRules
             }
             throw new GameException('The quote exceeds the approved spending ceiling or protected reserve.');
         }
-        if ($run && $cost > 0 && (($run->totals['purchase_cost'] ?? 0) + $run->totals['fuel_cost'] + $cost > $run->plan['max_spend'] || -$run->plan['max_loss'] > $run->totals['credit_delta'] - $cost)) {
+        if ($run && $cost > 0 && (($run->strategy === 'gate_recon' ? ($run->totals['spending'] ?? 0) : ($run->totals['purchase_cost'] ?? 0) + $run->totals['fuel_cost']) + $cost > $run->plan['max_spend'] || -$run->plan['max_loss'] > $run->totals['credit_delta'] - $cost)) {
             throw new GameException('Dispatch would exceed the remaining run spending or cash-loss limit.');
         }
 

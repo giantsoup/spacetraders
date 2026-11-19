@@ -8,6 +8,7 @@ use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\LocalEngine;
+use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Services\SpaceTradersClient;
@@ -185,6 +186,8 @@ class ShipCommandExecutor
                 return;
             }
             $received = false;
+            $reserved = false;
+            $recon = $run?->strategy === 'gate_recon';
             try {
                 $this->gate->check($action->engine_session_id);
                 $this->clear($agent, $action->id, defer: $run !== null, ship: $run ? $action->ship_symbol : null);
@@ -223,10 +226,11 @@ class ShipCommandExecutor
                     if ($run && ! AutomationRun::whereKey($run->id)->whereNull('stop_requested_at')->whereNotNull('active_agent_id')->where('expires_at', '>', now())->update(['heartbeat_at' => now()])) {
                         throw new GameException('Run stopped or expired before this action was reserved.');
                     }
-                    if (! ShipAction::whereKey($action->id)->where('state', 'pending')->update(['state' => 'sending', 'before_state' => json_encode($before), 'sent_at' => now()])) {
+                    if (! ShipAction::whereKey($action->id)->where('state', 'pending')->update(['state' => 'sending', 'before_state' => json_encode($before), 'sent_at' => now()] + ($run?->strategy === 'gate_recon' ? ['outcome->transport_reservations' => (int) ($action->fresh()->outcome['transport_reservations'] ?? 0) + 1] : []))) {
                         throw new GameException('Action was already reserved.');
                     }
                 });
+                $reserved = true;
                 $action->refresh();
                 $data = $this->api->mutate($agent, $action->ship_symbol, $action->command, $action->arguments, function (array $receipt) use ($action, &$received) {
                     $received = true;
@@ -246,11 +250,12 @@ class ShipCommandExecutor
 
                     return;
                 }
+                $markers = $recon && $reserved ? ['outcome->pretransport_deferrals' => (int) ($action->outcome['pretransport_deferrals'] ?? 0) + 1] : [];
                 // Only a budget deferral before the write starts can return to pending.
                 if ($action->expires_at->isFuture() && ! ExplorationPolicy::command($action->command) && empty($action->fresh()->outcome['stop_requested_at'])) {
-                    $action->update(['state' => ActionState::Pending, 'sent_at' => null, 'message' => $e->getMessage()]);
+                    $action->update(['state' => ActionState::Pending, 'sent_at' => null, 'message' => $e->getMessage()] + $markers);
                 } else {
-                    $action->update(['state' => ActionState::Rejected, 'message' => ExplorationPolicy::command($action->command) ? 'Exploration stopped at the request budget. Create a fresh preview; no automatic retry.' : 'Intent expired while waiting for the request budget.', 'settled_at' => now()]);
+                    $action->update(['state' => ActionState::Rejected, 'message' => ExplorationPolicy::command($action->command) ? 'Exploration stopped at the request budget. Create a fresh preview; no automatic retry.' : 'Intent expired while waiting for the request budget.', 'settled_at' => now()] + $markers + ($recon ? $this->localRefusal('budget', $e->getMessage()) : []));
                     if ($run) {
                         $this->block($run, ExplorationPolicy::command($action->command) ? 'Exploration stopped at the request budget. Create a fresh preview; no automatic retry.' : 'Intent expired while waiting for the request budget.');
                     }
@@ -269,7 +274,7 @@ class ShipCommandExecutor
                 }
                 $uncertain = $action->state === ActionState::Sending && ($received || $e->uncertain);
                 $action->update(['state' => $uncertain ? ActionState::Uncertain : ActionState::Rejected,
-                    'message' => $e->getMessage(), 'api_code' => $e->apiCode, 'settled_at' => now()]);
+                    'message' => $e->getMessage(), 'api_code' => $e->apiCode, 'settled_at' => now()] + ($recon && $action->state === ActionState::Pending ? $this->localRefusal('preflight', $e->getMessage()) : []));
                 if ($run) {
                     $this->block($run, $e->getMessage());
                 }
@@ -280,12 +285,21 @@ class ShipCommandExecutor
                 ]);
                 $action->refresh();
                 $action->update(['state' => $action->state === ActionState::Sending ? ActionState::Uncertain : ActionState::Rejected,
-                    'message' => 'Local execution failed. Reconcile before further commands.', 'settled_at' => now()]);
+                    'message' => 'Local execution failed. Reconcile before further commands.', 'settled_at' => now()] + ($recon && $action->state === ActionState::Pending ? $this->localRefusal('preflight', 'Local execution failed.') : []));
                 if ($run) {
                     $this->block($run, 'Local execution failed. Reconciliation required.');
                 }
+            } finally {
+                if ($recon && $mission = ReconMission::find($run->plan['mission_id'] ?? null)) {
+                    app(GateRecon::class)->reconcileSettlement($mission);
+                }
             }
         });
+    }
+
+    private function localRefusal(string $stage, string $message): array
+    {
+        return ['outcome->local_refusal' => ['at' => now()->utc()->toIso8601String(), 'stage' => $stage, 'message' => $message]];
     }
 
     private function confirm(Agent $agent, ShipAction $action, array $data, array $before, ?AutomationRun $run): void

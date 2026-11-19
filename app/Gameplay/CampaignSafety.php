@@ -8,6 +8,7 @@ use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\GameObservation;
+use App\Models\ReconMission;
 use App\Models\ShipAction;
 
 class CampaignSafety
@@ -83,7 +84,7 @@ class CampaignSafety
             }
             app(CampaignTrade::class)->quoteLife($agent, $run->plan, $run->totals);
             $reserve = app(CampaignTrade::class)->fuelReserve($agent, $run->ship_symbol, $run->plan['market']);
-            if ($agent->credits - ($arguments['maxTotal'] ?? PHP_INT_MAX) < $reserve) {
+            if ($agent->credits - ($arguments['maxTotal'] ?? PHP_INT_MAX) < $reserve + ReconMission::returnExposure($agent)) {
                 throw new GameException('Buy skipped: delivery fuel reserve requires a smaller batch.');
             }
         }
