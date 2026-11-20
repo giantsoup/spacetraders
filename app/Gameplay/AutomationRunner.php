@@ -118,6 +118,9 @@ class AutomationRunner
                 $ship = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->firstOrFail()->snapshot;
                 $plan = $run->plan;
                 $fresh = $this->prepare($agent, $ship, $plan);
+                if (isset($plan['campaign_local_earn'])) {
+                    app(CampaignLocalEarn::class)->checkStart($agent, $run, CampaignEpisode::findOrFail($run->campaign_episode_id), $ship);
+                }
                 if ($agent->credits !== $plan['initial_credits'] || MiningPlanner::inventory($ship) !== $plan['initial_inventory'] || $ship['fuel']['current'] !== $plan['initial_fuel'] || $ship['nav']['waypointSymbol'] !== $plan['initial_waypoint'] || $ship['nav']['status'] !== $plan['initial_status'] || FuelPlanner::configuration($ship) !== ($plan['initial_configuration'] ?? FuelPlanner::configuration($ship)) || (isset($plan['initial_quote_signatures']) && $plan['initial_quote_signatures'] !== $this->quoteSignatures($agent, $fresh))) {
                     $this->rejectPreview($run, 'Ship state, equipment or quotes changed. Create a fresh operation preview.');
                 }
@@ -160,7 +163,17 @@ class AutomationRunner
                 app(CampaignTrade::class)->authorize($agent, $run, $episode);
             }
 
-            return $this->start($agent, $run);
+            if (CampaignLocalEarn::policy($grant, $episode)) {
+                app(CampaignTrade::class)->recordResults($episode);
+                app(CampaignSafety::class)->check($run, $agent);
+            }
+            $alreadyStarted = $run->fresh()->started_at !== null;
+            $started = $this->start($agent, $run);
+            if (! $alreadyStarted && CampaignLocalEarn::policy($grant, $episode)) {
+                app(CampaignLocalEarn::class)->started($started, $episode);
+            }
+
+            return $started;
         });
     }
 

@@ -216,6 +216,29 @@ try {
             await shot(page, 'no-trade-final-402x874');
         }
     }
+    seed('local-earn');
+    await open(page);
+    assert.ok((await page.locator('.strategy-source').innerText()).includes('offline-local-earn'));
+    await jump(page, 'Trade selection');
+    assert.ok((await page.locator('.story').innerText()).includes('bounded shortlist'));
+    for (const [branch, heading, shotName, phrase] of [
+        [/The refreshed pair still qualifies/, 'Size the load', 'local-earn-alternatives-402', '12 pairs'],
+        [/No safe buy starts at the current source/, 'Scout before spending fuel', 'local-earn-positioning-402', 'fuel-free probe'],
+        [/A candidate fails the loading check/, 'Try another safe pair', 'local-earn-quote-402', 'next pair'],
+        [/Fewer than 12 seconds remain/, 'Defer the entire local pass', 'local-earn-budget-402', 'scout'],
+        [/The bounded shortlist is exhausted/, 'Allow the ordinary fallback', 'local-earn-fallback-402', 'fixed bound'],
+    ]) {
+        await page.getByRole('button', { name: branch }).tap();
+        await page.getByRole('heading', { name: heading, exact: true }).waitFor();
+        assert.ok((await page.locator('.outcome').innerText()).includes(phrase));
+        await layout(page, shotName);
+        await shot(page, shotName, true);
+    }
+    await jump(page, 'Phase and activity');
+    const localPhases = await page.getByRole('list', { name: 'Playbook phase order' }).innerText();
+    assert.ok(localPhases.includes('Earn'));
+    assert.ok(!localPhases.includes('Discover'));
+    await shot(page, 'local-earn-phases-402', true);
     // Inject a separate, strategy-neutral graph through a real Inertia navigation.
     // This proves recursive outcomes without adding test-only flags to the product.
     await page.goto(`${origin}/campaign`, { waitUntil: 'networkidle' });

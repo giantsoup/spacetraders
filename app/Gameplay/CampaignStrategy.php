@@ -2,6 +2,7 @@
 
 namespace App\Gameplay;
 
+use App\Models\CampaignEpisode;
 use App\Models\CampaignGrant;
 use Symfony\Component\Yaml\Yaml;
 
@@ -40,11 +41,11 @@ class CampaignStrategy
                 'example' => ! $grant, 'pauseReason' => $grant?->pause_reason,
                 'pending' => $pending ? ['name' => $pending->revision()->name,
                     'notice' => 'Activation depends on the director and a safe handoff from the current grant.'] : null],
-            'graph' => $this->graph($body),
+            'graph' => $this->graph($body, $grant ? (CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->latest('id')->value('phase') ?? $body['phases'][0]['id']) : null),
         ];
     }
 
-    public function graph(array $body): array
+    public function graph(array $body, ?string $phase = null): array
     {
         $nodes = [];
         $chapters = [];
@@ -64,6 +65,7 @@ class CampaignStrategy
         $number = fn ($value) => $this->number($value);
         $percent = fn ($value) => $number($value * 100).'%';
         $trade = $body['trade'];
+        $local = ($phase ?? $body['phases'][0]['id']) === 'earn' ? ($trade['local_earn'] ?? null) : null;
         $hasTrade = collect($body['phases'])->contains(fn ($phase) => collect($phase['activities'])->contains(fn ($activity) => $activity['strategy'] === 'trade'));
         $hasMining = collect($body['phases'])->contains(fn ($phase) => collect($phase['activities'])->contains(fn ($activity) => $activity['strategy'] === 'mining'));
         $losses = $trade['losses']['pause_after_consecutive_losing_loads'];
@@ -133,14 +135,26 @@ class CampaignStrategy
             $bid = $percent($trade['switch']['bid_below_first_seen']);
             $ratio = $number($trade['switch']['better_pair_ratio']);
             $quote = $trade['quote_max_age_seconds'];
-            $add('trade', 'Trade selection', 'Rank feasible observed good/buyer pairs by conservative margin per planned minute. Fuel, available cash, cargo hold, route time and fleet claims bound the choice.', [
+            $summary = 'Rank feasible observed good/buyer pairs by conservative margin per planned minute. Fuel, available cash, cargo hold, route time and fleet claims bound the choice.';
+            $branches = [
                 'bid' => ['Current buyer bid falls to '.$bid.' or less of first seen', 'Drop', 'Rule out the current pair', 'Reject that current good/buyer pair at or below '.$bid.' of the first buyer bid C0 recorded. Other pairs can still qualify.'],
                 'switch' => ['A challenger scores at least '.$ratio.'× the eligible current pair', 'Switch', 'Try the challenger', 'Keep a still-eligible current pair unless another scores at least '.$ratio.'× as well. Refresh quotes and rerank before loading. A changed preferred pair yields this activity.'],
                 'position' => ['The command ship is away from the source', 'Run', 'Position, then observe', 'Position the command ship to the source. Then use an available probe to observe the buyer when needed. Positioning can start a run and end this pass.'],
                 'stale' => ['Quotes lack enough freshness for loading', 'Wait', 'Refresh before buying', 'Quote age must fit '.$quote.' seconds and the remaining buy plan. Refresh source and buyer quotes, then rerank. A stale or changed pair can yield to the next eligible activity, or end the pass if none starts.'],
                 'floor' => ['Earn score is below the value floor', 'Flag', 'Flag the low score', 'In Earn the value floor is a diagnostic flag. The absolute floor is '.number_format(CampaignTrade::FLOOR_CR_PER_MINUTE).' CR/min, also compared with '.($percent(CampaignTrade::FLOOR_MEDIAN_SHARE)).' of the trailing '.CampaignTrade::FLOOR_TRAILING_LOADS.' loads’ median realized score. A positive-spread phase exit counts only eligible trades at the absolute floor.'],
                 'eligible' => ['The refreshed pair still qualifies', 'Continue', 'Size the load', 'Use the pair’s confirmed evidence to choose proof or scaled sizing.'],
-            ]);
+            ];
+            if ($local) {
+                $summary = 'C0 Earn checks a bounded shortlist in the command ship’s system. It tries fresh buys at the current source first, then pairs it can refresh there. Estimates cover the projected pairs.';
+                $branches['switch'][3] = 'Within comparable readiness, retain an eligible current pair unless a challenger scores at least '.$ratio.'× as well. Order the exact good, source and buyer identities once. Keep that order as each pair is refreshed and rechecked.';
+                $branches['position'] = ['No safe buy starts at the current source', 'Run', 'Scout before spending fuel', 'Try one available fuel-free probe to check the buyer first. Recon keeps its probe while the loan is active. If no observer run starts, C0 can move the command ship on evidence no older than '.$local['position_evidence_max_age_seconds'].' seconds. A buyer observer must be available or the quote must survive travel and loading. The trade must cover conservative cycle and positioning fuel and protect recon return cash. At most '.$local['max_positionings_without_trade'].' paid moves can start before a trade. A trade or '.CampaignLocalEarn::POSITION_COOLDOWN_MINUTES.' minutes with work settled can reset the count. One run ends the pass.'];
+                $branches['stale'] = ['A candidate fails the loading check', 'Next pair', 'Try another safe pair', 'Quotes must be fresh enough to finish loading within the '.$quote.'-second limit. Reuse recent reads from occupied markets and recheck the exact pair with its own proof, claims, fuel and cash limits. A known refusal before sending an action may advance to the next pair. API errors, uncertain actions, provider deferrals and safety or approval failures end the pass.'];
+                $branches['eligible'][3] = 'Project at most '.$local['projection_limit'].' pairs and try up to '.$local['max_attempts'].' buys. Require a positive conservative contribution after cycle and positioning fuel. Rank by contribution per planned minute, including positioning time. A smaller safe profit can start after an earlier pair fails. Use confirmed receipts to measure the actual load result.';
+                $branches['budget'] = ['Fewer than '.CampaignLocalEarn::RESERVE_SECONDS.' seconds remain', 'Wait', 'Defer the entire local pass', 'End the pass before another projection, preview, move or scout. Keep the provider deadline. A retryable preview can be retained and rechecked against approval, harvested losses and full safety on the next pass.'];
+                $branches['exhausted'] = ['The bounded shortlist is exhausted', 'Continue', 'Allow the ordinary fallback', 'First-seen bids come from projected pairs. The fixed bound can miss a better pair. New quotes affect the next pass’s order. Exhausting the candidates allows ordinary scout and discovery work. A budget deferral ends the entire pass.'];
+                $nodes['safety']['summary'] = 'Harvest finished local loads and recheck full safety before starting a retained preview. Otherwise sync, record results and check safety before planning.';
+            }
+            $add('trade', 'Trade selection', $summary, $branches);
             $add('proof', 'Proof or scale', 'C0 learns separately for each good and intended buyer. New or losing pairs need proof before scaling.', [
                 'new' => ['No qualifying proof', 'Proof', 'Run a small proof', 'Cap the load at '.$trade['proof']['max_units_batches'].($trade['proof']['max_units_batches'] === 1 ? ' batch' : ' batches').' at the smaller of the two markets’ trade volumes and '.number_format($trade['proof']['max_credits']).' CR of inventory. Cash, fuel, hold and time can lower the load further.'],
                 'qualified' => ['Proof meets '.$percent($trade['proof']['min_realized_ratio']).' of predicted margin', 'Scale', 'Scale the next load', 'Eligible delivery to the intended buyer at '.$percent($trade['proof']['min_realized_ratio']).' or more of predicted margin unlocks up to '.$trade['lot']['first_scaled_max_buyer_batches'].' buyer batches first, then '.$trade['lot']['max_buyer_batches'].' on later scaled loads. The default marginal batch decay is '.$percent($trade['lot']['default_batch_decay']).' until observations provide an estimate.'],
@@ -158,6 +172,9 @@ class CampaignStrategy
             $finalBranches['pause'] = ['Loss streak reaches '.$losses.' losing loads', 'Pause', 'Recover cargo, then pause', 'New buys stop. Sell-only recovery continues while needed, then C0 pauses for operator review. This ends the pass.'];
         } else {
             $finalBranches['configured'] = ['Configured activities yield', 'Recheck', 'Follow the configured activity order', 'Scouting reads markets. Command scouting stays at its own coordinates.'.($hasMining ? ' Mining uses a bounded investigation and run when eligible.' : '').' Cargo first handles sell_aboard entries through recovery. If nothing starts, this pass ends and C0 returns later. Predictions are report targets.'];
+        }
+        if ($local) {
+            $nodes['proof']['summary'] .= ' This-reset replacement starts fresh C0 proof and bids. H1 retains its own results; its C0 learning and receipt-derived decay reference follows the new episode. Replacement refuses any increase in H1 sizing mode.';
         }
         $add('learn', 'Start and learn', $finalSummary, $finalBranches);
 
