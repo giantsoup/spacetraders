@@ -15,8 +15,8 @@ class CampaignStrategyFixture
         if ($state === 'example') {
             return;
         }
-        $body = Yaml::parse(file_get_contents(base_path('campaigns/weekly-default.yaml')));
-        $body['name'] = $state === 'no-trade' ? 'offline-survey' : 'offline-approved';
+        $body = Yaml::parse(file_get_contents(base_path($state === 'local-earn' ? 'campaigns/rehearsal-macsoup-local-earn.yaml' : 'campaigns/weekly-default.yaml')));
+        $body['name'] = $state === 'no-trade' ? 'offline-survey' : ($state === 'local-earn' ? 'offline-local-earn' : 'offline-approved');
         if ($state === 'no-trade') {
             $body['phases'] = [['id' => 'survey', 'activities' => [
                 ['role' => 'probe', 'strategy' => 'scout', 'when' => ['credits_gte' => 1000]],

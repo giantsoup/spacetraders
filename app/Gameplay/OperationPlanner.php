@@ -12,6 +12,15 @@ class OperationPlanner
 
     public function preview(Agent $agent, array $ship, array $limits): array
     {
+        try {
+            return $this->project($agent, $ship, $limits);
+        } catch (GameException $exception) {
+            throw ! empty($limits['campaign_trade']['local_earn']) || ! empty($limits['campaign_local_earn']) ? LocalEarnRefusal::planning($exception) : $exception;
+        }
+    }
+
+    private function project(Agent $agent, array $ship, array $limits): array
+    {
         $home = $ship['nav']['waypointSymbol'];
         $destination = $limits['strategy'] === 'scout' ? $limits['destination'] : $limits['market'];
         if ($home === $destination) {

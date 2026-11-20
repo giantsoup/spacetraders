@@ -10,6 +10,7 @@ use App\Models\CampaignGrant;
 use App\Models\CampaignSample;
 use App\Models\GameObservation;
 use App\Models\OpportunityInvestigation;
+use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
@@ -39,6 +40,14 @@ class CampaignDirector
 
     /** Set when an arm's committed pair waits for a usable buyer quote this pass. */
     private bool $awaitingQuote = false;
+
+    private float $deadline = INF;
+
+    private array $localSummary = [];
+
+    private array $marketReads = [];
+
+    private int $localActionBefore = 0;
 
     public function tick(): bool
     {
@@ -100,6 +109,8 @@ class CampaignDirector
     private function directGrant(CampaignGrant $grant): void
     {
         $this->passOutcome = 'waiting';
+        $this->localSummary = [];
+        $this->marketReads = [];
         $before = FleetMetrics::requestTotal();
         try {
             $this->runDirectGrant($grant);
@@ -140,8 +151,10 @@ class CampaignDirector
             return;
         }
         try {
-            $deadline = microtime(true) + self::DEADLINE_SECONDS;
+            $deadline = $this->deadline = microtime(true) + self::DEADLINE_SECONDS;
             app(SpaceTradersClient::class)->scope(fn () => $this->direct($grant, $deadline), deadline: $deadline);
+        } catch (LocalEarnBudget) {
+            $this->wait($grant, 'local_budget_deferred');
         } catch (ValidationException) {
             $control->pause($grant, 'registration_requires_review');
         } catch (DirectorAgentLockTimeout) {
@@ -365,11 +378,22 @@ class CampaignDirector
                         $market = $observer['nav']['waypointSymbol'];
                         $point = GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'waypoint')->where('symbol', $market)->first();
                         if (in_array('MARKETPLACE', array_column($point?->data['traits'] ?? [], 'symbol'), true)) {
+                            if (CampaignLocalEarn::policy($grant, $episode)) {
+                                app(CampaignLocalEarn::class)->reserve($this->deadline);
+                                $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $market)->first();
+                                if ($quote && empty($quote->data['invalidated_by_action']) && ! empty($quote->data['tradeGoods']) && $quote->observed_at->gt(now()->subSeconds(20))) {
+                                    continue;
+                                }
+                            }
+                            $this->marketReads[$market] = true;
                             $sync->observe($agent, 'market', $market, app(SpaceTradersApi::class)->market($agent, $market));
                         }
                     }
                 }
                 if (! $arm && $episode->phase === 'earn') {
+                    if (CampaignLocalEarn::policy($grant, $episode)) {
+                        app(CampaignLocalEarn::class)->reserve($this->deadline);
+                    }
                     $this->refreshParkedMarket($episode, $agent);
                 }
             }
@@ -412,7 +436,11 @@ class CampaignDirector
                     continue;
                 }
                 $tradeAttempted = $tradeAttempted || $activity['strategy'] === 'trade';
+                $localEarn = CampaignLocalEarn::policy($grant, $episode);
                 try {
+                    if ($localEarn) {
+                        app(CampaignLocalEarn::class)->reserve($this->deadline);
+                    }
                     $this->candidate = null;
                     $run = match ($activity['strategy']) {
                         'trade' => $this->trade($grant, $episode, $agent, $ship, $activity, $considered),
@@ -441,7 +469,23 @@ class CampaignDirector
 
                         return;
                     }
+                } catch (LocalEarnBudget) {
+                    $this->localSummary['end'] = 'local_budget_deferred';
+                    $this->decision($grant, $episode, $agent, $considered, 'local_budget_deferred');
+                    $this->wait($grant, 'local_budget_deferred');
+
+                    return;
                 } catch (GameException $exception) {
+                    if ($activity['strategy'] === 'trade' && $localEarn) {
+                        $this->localSummary['end'] = 'closed_stop';
+                        $considered[] = $activity + ['rejected' => $exception->getMessage()];
+                        $this->decision($grant, $episode, $agent, $considered, 'local_stopped');
+                        if (! $this->pauseForLocalStartFailure($grant, $episode, $agent, $exception) && ! $grant->refresh()->paused_at) {
+                            $this->wait($grant, $exception->retryAfter > 0 ? 'awaiting_fresh_state' : 'local_preflight_refused');
+                        }
+
+                        return;
+                    }
                     if ($exception->retryAfter > 0) {
                         $this->wait($grant, 'awaiting_run_start');
 
@@ -451,6 +495,9 @@ class CampaignDirector
                 }
             }
             if (! $arm && $episode->phase === 'earn' && ! app(CampaignSafety::class)->windDown($episode)) {
+                if (CampaignLocalEarn::policy($grant, $episode)) {
+                    app(CampaignLocalEarn::class)->reserve($this->deadline);
+                }
                 $this->discoverIfDue($episode, $agent);
             }
             $this->decision($grant, $episode, $agent, $considered, $this->awaitingQuote ? 'awaiting_buyer_quote' : 'idle');
@@ -594,7 +641,15 @@ class CampaignDirector
         if (! $run) {
             return false;
         }
+        $localEarn = CampaignLocalEarn::policy($grant, $episode);
+        if ($localEarn) {
+            $this->localActionBefore = (int) ShipAction::where('agent_id', $agent->id)->max('id');
+        }
         try {
+            if ($localEarn) {
+                app(CampaignTrade::class)->recordResults($episode);
+                app(CampaignSafety::class)->check($run, $agent);
+            }
             if (app(CampaignSafety::class)->windDown($episode) && empty($run->plan['sell_only'])) {
                 throw new GameException('Wind-down invalidates a retained buying or positioning preview.');
             }
@@ -607,11 +662,15 @@ class CampaignDirector
             }
             $this->decision($grant, $episode, $agent, [], $run->strategy, $run->id);
         } catch (GameException $exception) {
-            if ($exception->retryAfter > 0) {
+            $rejection = [['strategy' => $run->strategy, 'rejected' => $exception->getMessage()]];
+            if ($localEarn && $this->pauseForLocalStartFailure($grant, $episode, $agent, $exception)) {
+                $this->localSummary['end'] = 'closed_stop';
+                $this->decision($grant, $episode, $agent, $rejection, 'local_stopped');
+            } elseif ($exception->retryAfter > 0) {
                 $this->wait($grant, 'awaiting_run_start');
             } else {
                 AutomationRun::whereKey($run->id)->where('state', 'preview')->update(['state' => 'stopped', 'blocked_reason' => $exception->getMessage()]);
-                $this->decision($grant, $episode, $agent, [['strategy' => $run->strategy, 'rejected' => $exception->getMessage()]], 'preview_discarded');
+                $this->decision($grant, $episode, $agent, $rejection, 'preview_discarded');
             }
         }
 
@@ -646,7 +705,7 @@ class CampaignDirector
     private function decision(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $considered, string $choice, ?int $run = null, array $extra = []): void
     {
         $this->passOutcome = $run !== null ? 'started' : ($choice === 'awaiting_run' ? 'awaiting_run' : 'waiting');
-        app(CampaignControl::class)->event($grant, $episode, 'decision', ['credits' => $agent->credits, 'phase' => $episode->phase, 'candidates' => $considered, 'choice' => $choice, 'run_id' => $run] + $extra);
+        app(CampaignControl::class)->event($grant, $episode, 'decision', ['credits' => $agent->credits, 'phase' => $episode->phase, 'candidates' => $considered, 'choice' => $choice, 'run_id' => $run] + $extra + ($this->localSummary ? ['local_earn' => $this->localSummary] : []));
     }
 
     private function sample(CampaignEpisode $episode, Agent $agent): void
@@ -665,6 +724,9 @@ class CampaignDirector
             $considered[] = ['strategy' => 'trade', 'rejected' => 'Wind-down blocks new trade buys.'];
 
             return null;
+        }
+        if (CampaignLocalEarn::policy($grant, $episode)) {
+            return $this->localTrade($grant, $episode, $agent, $ship, $considered);
         }
         $trades = app(CampaignTrade::class);
         $ranked = $trades->rank($grant, $episode, $agent, $ship, $considered);
@@ -792,6 +854,204 @@ class CampaignDirector
         return null;
     }
 
+    private function localTrade(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array &$considered): ?AutomationRun
+    {
+        $this->localActionBefore = (int) ShipAction::where('agent_id', $agent->id)->max('id');
+        $local = app(CampaignLocalEarn::class);
+        $policy = CampaignLocalEarn::policy($grant, $episode);
+        $ranked = $local->shortlist($grant, $episode, $agent, $ship, $considered, $this->localSummary, $this->deadline);
+        $this->localSummary['prior_endpoint_reads'] = array_keys($this->marketReads);
+        $positioning = $local->positioning($episode);
+        $this->localSummary['positioning'] = $positioning + ['cap' => $policy['max_positionings_without_trade']];
+        $attempts = 0;
+        $rejectedForObservation = [];
+        foreach ($ranked as $candidate) {
+            if ($candidate['source'] !== $ship['nav']['waypointSymbol'] || $candidate['readiness'] > 1 || $attempts >= $policy['max_attempts']) {
+                continue;
+            }
+            $local->reserve($this->deadline);
+            $attempts++;
+            $run = null;
+            $attempt = ['good' => $candidate['good'], 'source' => $candidate['source'], 'buyer' => $candidate['buyer'], 'reads' => 0];
+            try {
+                foreach (array_unique([$candidate['source'], $candidate['buyer']]) as $market) {
+                    $local->reserve($this->deadline);
+                    if (! isset($this->marketReads[$market]) && $this->parked($agent, $market)) {
+                        $this->marketReads[$market] = true;
+                        $attempt['reads']++;
+                        $this->localSummary['endpoint_reads'][] = $market;
+                        app(AgentSynchronizer::class)->observe($agent, 'market', $market, app(SpaceTradersApi::class)->market($agent, $market));
+                    }
+                }
+                $ask = app(OperationPlanner::class)->quote($agent, $candidate['source'], $candidate['good']);
+                $bid = app(OperationPlanner::class)->quote($agent, $candidate['buyer'], $candidate['good']);
+                $local->reserve($this->deadline);
+                $this->localSummary['exact_rechecks']++;
+                $candidate = $local->project($grant, $episode, $agent, $ship,
+                    ['good' => $candidate['good'], 'source' => $candidate['source'], 'market' => $candidate['buyer']], $ask, $bid, function () use ($local) {
+                        $local->reserve($this->deadline);
+                        $this->localSummary['exact_projections']++;
+                    });
+                $candidate['value_floor'] = app(CampaignTrade::class)->valueFloor($episode, $candidate);
+                $limits = $this->limits($grant, $episode, $agent);
+                $limits['max_spend'] = min($limits['max_spend'], $candidate['max_inventory'] + $candidate['fuel_safety_ceiling'] + $candidate['departure_refuel']);
+                $plan = $limits + ['strategy' => 'trade', 'site' => $candidate['source'], 'market' => $candidate['buyer'], 'symbol' => $candidate['good'],
+                    'units' => $candidate['units'], 'min_sell_price' => (int) ceil($candidate['predicted_cost'] / $candidate['units']), 'min_margin' => 1,
+                    'max_inventory' => $candidate['max_inventory'], 'max_fuel' => $ship['fuel']['capacity'],
+                    'campaign_trade' => $candidate + ['quote_max_age_seconds' => $grant->revision()->body['trade']['quote_max_age_seconds']]];
+                app(CampaignTrade::class)->quoteLife($agent, $plan, []);
+                $local->reserve($this->deadline);
+                $run = app(AutomationRunner::class)->preview($agent, $ship['symbol'], $plan);
+                // Link even a deferred native preview to its authority for the normal resume mechanism.
+                $run->update(['campaign_episode_id' => $episode->id]);
+                $local->reserve($this->deadline);
+                app(AutomationRunner::class)->startCampaign($agent, $run, $episode);
+                $attempt['outcome'] = 'trade_started';
+                $this->localSummary['attempts'][] = $attempt;
+                $this->localSummary['end'] = 'trade_started';
+                $this->candidate = $candidate;
+
+                return $run;
+            } catch (GameException $exception) {
+                $attempt += ['outcome' => 'refused', 'stage' => $exception instanceof LocalEarnRefusal ? $exception->stage : ($exception instanceof StaleQuote ? 'quote' : 'closed_stop'), 'reason' => $exception->getMessage()];
+                $this->localSummary['attempts'][] = $attempt;
+                if (! $this->localRefusal($exception, $agent, $episode, $run)) {
+                    throw $exception;
+                }
+                if (! $exception instanceof StaleQuote) {
+                    $rejectedForObservation[$candidate['good'].'@'.$candidate['source'].'>'.$candidate['buyer']] = true;
+                }
+                $considered[] = $candidate + ['rejected' => $exception->getMessage(), 'stage' => $attempt['stage']];
+            }
+        }
+        // Exactly one fuel-free observation attempt, independently of the capped buy attempts.
+        $probe = $this->role($episode, 'probe');
+        $backoff = $episode->state['probe_position_failed'] ?? null;
+        if ($probe && $probe['symbol'] !== $ship['symbol'] && $probe['nav']['status'] !== 'IN_TRANSIT'
+            && app(FuelPlanner::class)->fuelFree($probe) && ! ReconMission::holds($agent, $probe['symbol'])
+            && $local->unowned($agent, $probe['symbol']) && (! is_string($backoff) || CarbonImmutable::parse($backoff)->addMinutes(30)->lte(now()))) {
+            foreach ($ranked as $candidate) {
+                $local->reserve($this->deadline);
+                if ($candidate['source'] !== $ship['nav']['waypointSymbol'] || $this->parked($agent, $candidate['buyer'])
+                    || isset($rejectedForObservation[$candidate['good'].'@'.$candidate['source'].'>'.$candidate['buyer']])) {
+                    continue;
+                }
+                try {
+                    app(CampaignTrade::class)->quoteLife($agent, ['site' => $candidate['source'], 'market' => $candidate['buyer'], 'symbol' => $candidate['good'], 'units' => $candidate['units'],
+                        'campaign_trade' => ['quote_max_age_seconds' => $grant->revision()->body['trade']['quote_max_age_seconds']]], []);
+
+                    continue;
+                } catch (StaleQuote) {
+                    // Only a missing loading-life buyer quote justifies this separate observation.
+                }
+                $local->reserve($this->deadline);
+                $run = null;
+                try {
+                    $run = $this->localPosition($grant, $episode, $agent, $probe, $candidate, true);
+                    app(AutomationRunner::class)->startCampaign($agent, $run, $episode);
+                    $this->localSummary['end'] = 'free_observation_started';
+                    $this->candidate = null;
+
+                    return $run;
+                } catch (GameException $exception) {
+                    if (! $this->localRefusal($exception, $agent, $episode, $run)) {
+                        throw $exception;
+                    }
+                    $episode->update(['state' => array_merge($episode->refresh()->state ?? [], ['probe_position_failed' => now()->toIso8601String()])]);
+                    $considered[] = ['strategy' => 'probe', 'stage' => 'free_observation', 'rejected' => $exception->getMessage()];
+                    break;
+                }
+            }
+        }
+        if ($positioning['count'] < $policy['max_positionings_without_trade']) {
+            foreach ($ranked as $candidate) {
+                $local->reserve($this->deadline);
+                if ($candidate['source'] === $ship['nav']['waypointSymbol'] || ! $local->positionEvidence($grant, $agent, $ship, $candidate)) {
+                    continue;
+                }
+                $local->reserve($this->deadline);
+                $run = null;
+                try {
+                    $local->claims($episode, $candidate['good'], $candidate['source'], $candidate['buyer']);
+                    $run = $this->localPosition($grant, $episode, $agent, $ship, $candidate, false);
+                    app(AutomationRunner::class)->startCampaign($agent, $run, $episode);
+                    $this->localSummary['end'] = 'paid_position_started';
+                    $this->candidate = $candidate;
+
+                    return $run;
+                } catch (GameException $exception) {
+                    if (! $this->localRefusal($exception, $agent, $episode, $run)) {
+                        throw $exception;
+                    }
+                    $considered[] = $candidate + ['stage' => 'position', 'rejected' => $exception->getMessage()];
+                    break;
+                }
+            }
+        }
+        $this->candidate = null;
+        $local->reserve($this->deadline);
+
+        return null;
+    }
+
+    /** Closed allowlist. Never continue after a request failure, action creation, or active owner. */
+    private function localRefusal(GameException $exception, Agent $agent, CampaignEpisode $episode, ?AutomationRun $run): bool
+    {
+        if ($exception->apiCode !== null || $exception->uncertain || $exception->retryAfter > 0
+            || ! ($exception instanceof LocalEarnRefusal || $exception instanceof StaleQuote)
+            || ! CampaignLocalEarn::policy($episode->grant(), $episode) || app(CampaignSafety::class)->windDown($episode)
+            || app(CampaignSafety::class)->reason($episode->grant(), $episode->refresh(), $agent)
+            || $this->localOwnsWork($agent, $episode)
+            || ($run && (ShipAction::where('automation_run_id', $run->id)->exists() || $run->fresh()->started_at))) {
+            return false;
+        }
+        if ($run) {
+            app(ShipCommandExecutor::class)->locked($agent, function () use ($run, $exception) {
+                $run->refresh();
+                if ($run->active_agent_id || $run->started_at || ShipAction::where('automation_run_id', $run->id)->exists()) {
+                    throw new GameException('Local preview acquired work; candidate fallback is closed.');
+                }
+                $run->update(['state' => 'stopped', 'blocked_reason' => $exception->getMessage()]);
+            });
+        }
+
+        return true;
+    }
+
+    private function localOwnsWork(Agent $agent, CampaignEpisode $episode): bool
+    {
+        return ShipAction::where('agent_id', $agent->id)->where('id', '>', $this->localActionBefore)->exists()
+            || AutomationRun::where('active_agent_id', $agent->id)->where(fn ($q) => $q->where('campaign_episode_id', $episode->id)->orWhereIn('ship_symbol', app(CampaignFleet::class)->symbols($episode)))->exists();
+    }
+
+    private function pauseForLocalStartFailure(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, GameException $exception): bool
+    {
+        $reason = app(CampaignSafety::class)->reason($grant, $episode->refresh(), $agent);
+        if (! $reason || $reason === 'consecutive_losing_loads') {
+            if (! $exception->uncertain && ! $this->localOwnsWork($agent, $episode)) {
+                return false;
+            }
+            $reason = 'state_requires_review';
+        }
+        app(CampaignControl::class)->pause($grant, $reason, $episode);
+
+        return true;
+    }
+
+    private function localPosition(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array $candidate, bool $free): AutomationRun
+    {
+        $limits = $this->limits($grant, $episode, $agent);
+        $limits['reserve'] = max($limits['reserve'], ReconMission::returnExposure($agent));
+        $limits['max_spend'] = $free ? 0 : max(0, $agent->credits - $limits['reserve']);
+        $run = app(AutomationRunner::class)->preview($agent, $ship['symbol'], $limits + [
+            'strategy' => 'scout', 'destination' => $free ? $candidate['buyer'] : $candidate['source'], 'max_fuel' => $ship['fuel']['capacity'], 'one_way' => true,
+            'departure_refuel' => ! $free, 'campaign_local_earn' => ['kind' => $free ? 'free_observation' : 'paid_position', 'candidate' => $candidate]]);
+        $run->update(['campaign_episode_id' => $episode->id]);
+        app(CampaignLocalEarn::class)->reserve($this->deadline);
+
+        return $run;
+    }
+
     private function position(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, string $destination): AutomationRun
     {
         return app(AutomationRunner::class)->preview($agent, $ship['symbol'], $this->limits($grant, $episode, $agent) + [
@@ -831,7 +1091,10 @@ class CampaignDirector
             CampaignEpisode::whereKey($episode->id)->update(['state->parked_refresh' => $symbol]);
             $episode->refresh();
             try {
+                $this->marketReads[$symbol] = true;
                 app(AgentSynchronizer::class)->observe($agent, 'market', $symbol, app(SpaceTradersApi::class)->market($agent, $symbol));
+            } catch (LocalEarnBudget $exception) {
+                throw $exception;
             } catch (GameException) {
             }
 
@@ -911,12 +1174,19 @@ class CampaignDirector
                 continue;
             }
             try {
+                if (CampaignLocalEarn::policy($grant, $episode)) {
+                    app(CampaignLocalEarn::class)->reserve($this->deadline);
+                }
+
                 // One way: the scout parks at each market it prices and starts the next hop from there,
                 // instead of flying home between markets. A local (command) scout tops up first at a fuel seller.
                 return app(AutomationRunner::class)->preview($agent, $ship['symbol'], $this->limits($grant, $episode, $agent) + [
                     'strategy' => 'scout', 'destination' => $task['destination'], 'max_fuel' => $ship['fuel']['capacity'], 'one_way' => true]
                     + ($local ? ['departure_refuel' => true] : []));
             } catch (GameException $exception) {
+                if ($exception instanceof LocalEarnBudget) {
+                    throw $exception;
+                }
                 $considered[] = ['strategy' => 'scout', 'destination' => $task['destination'], 'rejected' => $exception->getMessage()];
             }
         }

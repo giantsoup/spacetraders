@@ -453,7 +453,7 @@ class CampaignTrade
     }
 
     public function projectPair(Agent $agent, array $ship, ?array $departure, array $pair, array $ask, array $bid,
-        array $rules, int $runMaxSeconds, string $mode, float $decay, float $exposure = INF, bool $arm = false): array
+        array $rules, int $runMaxSeconds, string $mode, float $decay, float $exposure = INF, bool $arm = false, bool $localEarn = false): array
     {
         $key = $pair['good'].'@'.$pair['market'];
         $planned = $departure['ship'] ?? $ship;
@@ -523,6 +523,10 @@ class CampaignTrade
             'shadow_lot_bound' => $optimal['units'] < $units ? 'optimal_size' : $bound, 'optimal_units' => $optimal['units'],
             'optimal_margin' => $optimal['margin'], 'optimal_seconds' => $optimal['seconds'], 'optimal_score' => $optimal['score']] + $prediction;
 
+        if ($localEarn) {
+            $candidate['position_fuel_allowance'] = $positionCosts['cycle_fuel_allowance'];
+        }
+
         return ['candidate' => $candidate];
     }
 
@@ -530,6 +534,11 @@ class CampaignTrade
     {
         $rules = $episode->grant()->revision()->body['trade'];
         $plan = $run->plan;
+        if (isset($plan['campaign_trade']['local_earn'])) {
+            if (! CampaignLocalEarn::policy($episode->grant(), $episode) || ($plan['campaign_trade']['conservative_initial_contribution'] ?? 0) <= 0) {
+                throw new GameException('Local Earn requires current C0 Earn authority and positive conservative contribution.');
+            }
+        }
         if (! isset($plan['campaign_trade']['expected_fuel_cost'], $plan['campaign_trade']['cycle_fuel_allowance'], $plan['campaign_trade']['fuel_safety_ceiling'])) {
             throw new GameException('Historical trade fuel economics require a fresh campaign preview.');
         }

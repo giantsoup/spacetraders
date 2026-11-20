@@ -28,7 +28,7 @@ Artisan::command('campaign:import {file}', function (CampaignPlaybook $playbooks
     $this->info('Revision: '.$revision->id.' '.$revision->content_hash);
 })->purpose('Validate and store an immutable campaign revision');
 
-Artisan::command('campaign:approve {revision} {--user=} {--expires=}', function (CampaignControl $control) {
+Artisan::command('campaign:approve {revision} {--user=} {--expires=} {--replace-grant=} {--replace-hash=} {--replace-episode=}', function (CampaignControl $control) {
     $value = $this->argument('revision');
     $revision = ctype_digit($value) ? CampaignRevision::findOrFail($value) : CampaignRevision::where('content_hash', $value)->firstOrFail();
     $userId = $this->option('user') ?: config('gameplay.operator_id');
@@ -37,7 +37,8 @@ Artisan::command('campaign:approve {revision} {--user=} {--expires=}', function 
     }
     $user = $userId ? User::findOrFail($userId) : User::firstOrFail();
     $expires = $this->option('expires') ? CarbonImmutable::parse($this->option('expires')) : null;
-    $grant = $control->approve($revision, $user, $expires);
+    $grant = $control->approve($revision, $user, $expires,
+        $this->option('replace-grant') !== null ? ['grant' => (int) $this->option('replace-grant'), 'hash' => (string) $this->option('replace-hash'), 'episode' => (int) $this->option('replace-episode')] : null);
     $this->info('Grant: '.$grant->id.($grant->slot === 2 ? ' (pending safe point)' : ' (active)'));
 })->purpose('Approve a revision for unattended execution');
 

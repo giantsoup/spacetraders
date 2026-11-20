@@ -33,11 +33,25 @@ class CampaignPlaybook
         $this->keys($body, ['name', 'version', 'agent', 'limits', 'trade', 'phases', 'predictions']);
         $this->keys($body['agent'] ?? null, ['symbol', 'faction']);
         $this->keys($body['limits'] ?? null, ['reserve_credits', 'fuel_reserve', 'run_max_minutes']);
-        $this->keys($body['trade'] ?? null, ['proof', 'lot', 'losses', 'switch', 'quote_max_age_seconds']);
+        $this->keys($body['trade'] ?? null, ['proof', 'lot', 'losses', 'switch', 'quote_max_age_seconds', 'local_earn']);
         $this->keys($body['trade']['proof'] ?? null, ['max_units_batches', 'max_credits', 'min_realized_ratio']);
         $this->keys($body['trade']['lot'] ?? null, ['max_buyer_batches', 'first_scaled_max_buyer_batches', 'default_batch_decay']);
         $this->keys($body['trade']['losses'] ?? null, ['losing_load', 'pause_after_consecutive_losing_loads']);
         $this->keys($body['trade']['switch'] ?? null, ['bid_below_first_seen', 'better_pair_ratio']);
+        if (array_key_exists('local_earn', $body['trade'])) {
+            $policy = $body['trade']['local_earn'];
+            $this->keys($policy, ['projection_limit', 'max_attempts', 'position_evidence_max_age_seconds', 'max_positionings_without_trade']);
+            foreach (['projection_limit' => [1, 24], 'max_attempts' => [1, 5],
+                'position_evidence_max_age_seconds' => [$body['trade']['quote_max_age_seconds'] ?? 180, 900],
+                'max_positionings_without_trade' => [0, 3]] as $key => [$minimum, $maximum]) {
+                if (! is_int($policy[$key] ?? null) || $policy[$key] < $minimum || $policy[$key] > $maximum) {
+                    throw new GameException('Invalid local Earn policy: '.$key);
+                }
+            }
+            if ($policy['max_attempts'] > $policy['projection_limit']) {
+                throw new GameException('Local Earn attempts cannot exceed the projection limit.');
+            }
+        }
         $validator = Validator::make($body, [
             'name' => ['required', 'string', 'regex:/\A[a-z][a-z0-9-]{0,79}\z/'],
             'agent.symbol' => ['required', 'string', 'regex:/\A[A-Z0-9_]{3,14}\z/'],

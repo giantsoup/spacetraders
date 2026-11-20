@@ -17,26 +17,41 @@ class CampaignControl
     /** Decision events keep at most this many duration-only rejections, highest predicted margin first. */
     public const LONG_RUN_REJECTIONS = 5;
 
-    public function approve(CampaignRevision $revision, User $user, ?CarbonImmutable $expires = null): CampaignGrant
+    public function approve(CampaignRevision $revision, User $user, ?CarbonImmutable $expires = null, ?array $replacement = null): CampaignGrant
     {
-        if ($expires && $expires->isPast()) {
-            throw new GameException('Grant expiry must be in the future.');
-        }
-
-        return app(HostLock::class)->retry('campaign', fn () => DB::transaction(function () use ($revision, $user, $expires) {
+        return app(HostLock::class)->scoped('campaign', function () use ($revision, $user, $expires, $replacement) {
             app(CampaignPlaybook::class)->validate($revision->body);
-            CampaignGrant::where('slot', 2)->get()->each(fn ($grant) => $grant->update(['slot' => null, 'superseded_at' => now()]));
             $current = CampaignGrant::where('slot', 1)->first();
-            $busy = $current && $this->busy($current);
-            if ($current && ! $busy) {
-                $this->supersede($current);
+            if (isset($revision->body['trade']['local_earn']) && $current) {
+                try {
+                    return app(CampaignLocalEarnReplacement::class)->approve($this, $current, $revision, $user, $expires, $replacement);
+                } catch (GameException $exception) {
+                    $this->event($current, null, 'replacement_refused', ['revision' => $revision->id, 'reason' => $exception->getMessage()]);
+                    throw $exception;
+                }
             }
-            $grant = CampaignGrant::create(['campaign_revision_id' => $revision->id, 'revision_hash' => $revision->content_hash,
-                'user_id' => $user->id, 'limits' => $revision->body['limits'], 'expires_at' => $expires, 'slot' => $busy ? 2 : 1]);
-            $this->event($grant, null, 'approval', ['revision' => $revision->id, 'pending' => $busy]);
+            if ($expires && $expires->isPast()) {
+                throw new GameException('Grant expiry must be in the future.');
+            }
+            if (isset($revision->body['trade']['local_earn']) && (! $expires || ($revision->body['phases'][0]['id'] ?? null) !== 'earn')) {
+                throw new GameException('Local Earn approval requires an Earn-first revision and an explicit expiry.');
+            }
 
-            return $grant;
-        }));
+            return DB::transaction(function () use ($revision, $user, $expires) {
+                app(CampaignPlaybook::class)->validate($revision->body);
+                CampaignGrant::where('slot', 2)->get()->each(fn ($grant) => $grant->update(['slot' => null, 'superseded_at' => now()]));
+                $current = CampaignGrant::where('slot', 1)->first();
+                $busy = $current && $this->busy($current);
+                if ($current && ! $busy) {
+                    $this->supersede($current);
+                }
+                $grant = CampaignGrant::create(['campaign_revision_id' => $revision->id, 'revision_hash' => $revision->content_hash,
+                    'user_id' => $user->id, 'limits' => $revision->body['limits'], 'expires_at' => $expires, 'slot' => $busy ? 2 : 1]);
+                $this->event($grant, null, 'approval', ['revision' => $revision->id, 'pending' => $busy]);
+
+                return $grant;
+            });
+        }, 15);
     }
 
     /**
@@ -57,6 +72,9 @@ class CampaignControl
 
         return app(HostLock::class)->retry('campaign', fn () => DB::transaction(function () use ($revision, $user, $arm, $expires) {
             app(CampaignPlaybook::class)->validate($revision->body);
+            if (isset($revision->body['trade']['local_earn'])) {
+                throw new GameException('Local Earn is C0-specific and cannot authorize an arm.');
+            }
             $live = CampaignGrant::liveArms()->get();
             if ($live->contains(fn ($grant) => $grant->arm()['label'] === $arm['label'])) {
                 throw new GameException('Arm label '.$arm['label'].' is already live.');
@@ -254,7 +272,8 @@ class CampaignControl
             $previous = CampaignEvent::where('campaign_grant_id', $grant->id)->whereIn('kind', ['wait', 'decision'])->latest('id')->first();
             if ($previous && $previous->kind === $kind && $previous->campaign_episode_id === $episode?->id && ($kind === 'wait' ? ($previous->data['reason'] ?? null) === ($data['reason'] ?? null)
                 : ($previous->data['choice'] ?? null) === ($data['choice'] ?? null) && ($previous->data['rejections'] ?? []) === $data['rejections']
-                    && ($previous->data['run_id'] ?? null) === ($data['run_id'] ?? null))) {
+                    && ($previous->data['run_id'] ?? null) === ($data['run_id'] ?? null)
+                    && ($previous->data['local_earn'] ?? null) === ($data['local_earn'] ?? null))) {
                 return $previous;
             }
         }
