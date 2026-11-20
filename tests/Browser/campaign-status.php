@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\CampaignStatusFixture;
+use Tests\Support\CampaignStrategyFixture;
 
 if (! in_array(PHP_SAPI, ['cli', 'cli-server'], true) || getenv('APP_ENV') !== 'testing'
     || ! getenv('CAMPAIGN_STATUS_BROWSER_DIRECTORY')) {
@@ -37,7 +38,9 @@ Http::fake(fn () => throw new RuntimeException('Browser verification denies outb
 if (PHP_SAPI === 'cli') {
     Artisan::call('migrate:fresh', ['--force' => true]);
     $user = User::factory()->create(['name' => 'Offline campaign operator']);
-    if (($argv[1] ?? null) !== '--empty') {
+    if (str_starts_with($argv[1] ?? '', '--strategy-')) {
+        CampaignStrategyFixture::seed($user, substr($argv[1], strlen('--strategy-')));
+    } elseif (($argv[1] ?? null) !== '--empty') {
         CampaignStatusFixture::seed($user, getenv('CAMPAIGN_SHIP_MATRIX') === '1');
     }
     echo "Seeded isolated browser database.\n";

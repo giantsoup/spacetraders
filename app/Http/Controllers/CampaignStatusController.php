@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignStatus;
+use App\Gameplay\CampaignStrategy;
 use App\Gameplay\GameException;
 use App\Gameplay\HostLock;
 use App\Models\CampaignGrant;
@@ -20,6 +21,13 @@ class CampaignStatusController extends Controller
         $this->authorizeOperator($request);
 
         return Inertia::render('Campaign/Status', $status->read() + ['status' => $request->session()->get('status')]);
+    }
+
+    public function strategy(Request $request, CampaignStrategy $strategy): Response
+    {
+        $this->authorizeOperator($request);
+
+        return Inertia::render('Campaign/Strategy', $strategy->read());
     }
 
     public function pause(Request $request, CampaignControl $control, HostLock $lock): RedirectResponse
