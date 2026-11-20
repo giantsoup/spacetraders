@@ -165,7 +165,7 @@ class GateRecon
                 throw new GameException('Balance, cargo or equipment changed. Reconcile before starting.');
             }
             $this->transition($mission, ['state' => $mode, 'hold' => null]);
-            $plan = ['strategy' => 'gate_recon', 'mission_id' => $mission->id, 'terms_hash' => $mission->terms_hash,
+            $plan = ['strategy' => 'gate_recon', 'mission_id' => $mission->id, 'terms_hash' => $mission->terms_hash, 'outbound_basis' => $mission->outboundBasis(),
                 'reserve' => 0, 'max_spend' => $authority, 'max_loss' => $authority, 'minutes' => max(1, (int) now()->diffInMinutes($deadline)), 'return_deadline' => $deadline->toIso8601String(),
                 'initial_credits' => $agent->credits, 'initial_inventory' => MiningPlanner::inventory($ship), 'initial_fuel' => $ship['fuel']['current'],
                 'initial_waypoint' => $ship['nav']['waypointSymbol'], 'initial_status' => $ship['nav']['status'], 'equipment' => OpportunityEvaluator::equipment($ship),
@@ -206,6 +206,7 @@ class GateRecon
         $mission = ReconMission::find($run->plan['mission_id'] ?? null);
         if (! $mission || $run->plan_version !== 5 || $run->campaign_episode_id || $mission->closed_at || $mission->agent_id !== $agent->id
             || $mission->reset_id !== $agent->reset_id || $mission->ship_symbol !== $run->ship_symbol
+            || ! hash_equals($mission->outboundBasis(), $run->plan['outbound_basis'] ?? $mission->terms_hash)
             || ! hash_equals($mission->terms_hash, $run->plan['terms_hash'] ?? '') || ! hash_equals($mission->terms_hash, ReconMission::hash($mission->terms))) {
             throw new GameException('Recon mission authority does not match this run.');
         }
@@ -230,13 +231,24 @@ class GateRecon
     private function transition(ReconMission $mission, array $changes): void
     {
         DB::transaction(function () use ($mission, $changes) {
+            $query = ReconMission::whereKey($mission->id)->where('state', $mission->state)->whereNull('closed_at');
+            if (array_key_exists('outbound_authorizations', $changes)) {
+                $old = $mission->outbound_authorizations ?? [];
+                $next = $changes['outbound_authorizations'];
+                $mission->verifyOutboundAppend($old, $next);
+                if (count($next) !== count($old) + 1) {
+                    throw new GameException('Exactly one outbound authorization must be appended.');
+                }
+                $raw = $mission->getRawOriginal('outbound_authorizations');
+                $raw === null ? $query->whereNull('outbound_authorizations') : $query->where('outbound_authorizations', $raw);
+            }
             $values = $changes;
-            foreach (['hold', 'graph', 'visits', 'capability', 'return_reservation', 'homeward_authorizations'] as $field) {
+            foreach (['hold', 'graph', 'visits', 'capability', 'return_reservation', 'homeward_authorizations', 'outbound_authorizations'] as $field) {
                 if (isset($values[$field])) {
                     $values[$field] = json_encode($values[$field], JSON_THROW_ON_ERROR);
                 }
             }
-            if (! ReconMission::whereKey($mission->id)->where('state', $mission->state)->whereNull('closed_at')->update($values)) {
+            if (! $query->update($values)) {
                 throw new GameException('Recon mission changed during transition.');
             }
             $mission->refresh();
@@ -512,6 +524,7 @@ class GateRecon
         if (! config('gameplay.gate_recon_enabled')) {
             return $this->hold($mission, $home ? 'flag_off_home' : 'flag_off_abroad');
         }
+        $this->mission($agent, $run);
         if ($mission->state === 'review' || ($mission->hold['reason'] ?? null) === 'restart_needed') {
             return AutomationStep::blocked('Recon requires explicit review or recon:start.');
         }
@@ -534,6 +547,10 @@ class GateRecon
             } else {
                 return $this->depart($agent, $mission, $ship, $run, $mission->origin_system, true);
             }
+        }
+        $outbound = $mission->outbound();
+        if ($outbound && $outbound['status'] === 'available') {
+            return $this->departOutbound($agent, $mission, $ship, $run, $outbound);
         }
         if ($this->graphStep($agent, $mission, $system)) {
             return AutomationStep::wait(now()->toImmutable());
@@ -579,7 +596,7 @@ class GateRecon
                 continue;
             }
             $path = $mission->path($system, $target);
-            $candidates[] = ['system' => $target, 'key' => [$class, count($path) - 1, -count($node['catalogue']['marketplaces'] ?? []), $target]];
+            $candidates[] = ['system' => $target, 'key' => $this->rankingKey($mission, $target, $class, count($path) - 1)];
         }
         usort($candidates, fn ($a, $b) => $a['key'] <=> $b['key']);
         $cash = $budget = $time = false;
@@ -672,8 +689,9 @@ class GateRecon
     private function depart(Agent $agent, ReconMission $mission, array $ship, AutomationRun $run, string $target, bool $homeward): AutomationStep
     {
         $system = $ship['nav']['systemSymbol'];
-        $path = $mission->path($system, $target);
-        if (! $path || count($path) < 2) {
+        $path = $homeward ? ($mission->authorization()['remaining_path'] ?? []) : $mission->path($system, $target);
+        if (! $path || $path[0] !== $system || end($path) !== $target || count($path) < 2
+            || ($homeward && ! $this->verifiedRoute($mission, $path, $system))) {
             return $this->hold($mission, 'return_authorization_needed', null, true);
         }
         $gate = $mission->graph[$system]['gate'];
@@ -738,7 +756,16 @@ class GateRecon
         $run->update(['plan' => $plan]);
         if (empty($action->arguments['recon_homeward'])) {
             $target = $action->arguments['recon_path'][1];
-            $path = $mission->path($target, $mission->origin_system);
+            if (isset($action->arguments['recon_outbound_hash'])) {
+                $grant = $mission->outbound();
+                if (! $grant || $grant['status'] !== 'bound/consumed' || $grant['intent_id'] !== $action->id) {
+                    throw new GameException('Outbound grant is already consumed or expired.');
+                }
+                $agent = Agent::findOrFail($run->agent_id);
+                $ship = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->firstOrFail()->snapshot;
+                $this->authorizeJump($agent, $run, $ship, $mission->graph[$grant['from']], $mission->graph[$target], $action->arguments);
+            }
+            $path = $action->arguments['recon_return_path'] ?? $mission->path($target, $mission->origin_system);
             $caps = array_fill(0, count($path) - 1, $mission->terms['jump_exposure']);
             ShipAction::whereKey($action->id)->update(['outcome->recon_return_reservation' => ['path' => $path, 'caps' => $caps, 'total' => array_sum($caps), 'cursor' => $action->id, 'outbound_action_id' => $action->id]]);
         }
@@ -753,7 +780,7 @@ class GateRecon
             throw new GameException('Recon jump capability or mission mode is not authorized.');
         }
         $leg = $run->plan['recon_leg'] ?? [];
-        foreach (['waypointSymbol', 'maxTotal', 'reserve', 'recon_homeward', 'recon_path', 'recon_target'] as $key) {
+        foreach (['waypointSymbol', 'maxTotal', 'reserve', 'recon_homeward', 'recon_path', 'recon_target', 'recon_outbound_hash', 'recon_return_path', 'recon_commitments', 'recon_inflight_exposure'] as $key) {
             if (($arguments[$key] ?? null) !== ($leg[$key] ?? null)) {
                 throw new GameException('Recon command differs from the approved current leg.');
             }
@@ -777,12 +804,7 @@ class GateRecon
         if ($mission->actions()->where('command', 'jump')->whereIn('state', ['pending', 'sending', 'uncertain'])->when($intentId, fn ($q) => $q->whereKeyNot($intentId))->exists()) {
             throw new GameException('Another recon jump is unsettled.');
         }
-        $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $ship['nav']['waypointSymbol'])->first();
-        $ask = collect($quote?->data['tradeGoods'] ?? [])->firstWhere('symbol', 'ANTIMATTER');
-        if (! $quote || $quote->observed_at->lt(now()->subSeconds(config('gameplay.snapshot_seconds'))) || ! empty($quote->data['invalidated_by_action'])
-            || ! $ask || $ask['purchasePrice'] < 1 || $ask['purchasePrice'] > $arguments['maxTotal']) {
-            throw new GameException('Recon departure quote is stale, missing or above the authorized cap.');
-        }
+        $this->requireDepartureQuote($agent, $ship['nav']['waypointSymbol'], $arguments['maxTotal']);
         if ($homeward) {
             $auth = $mission->authorization();
             if ($mission->state !== 'returning' || $path !== $auth['remaining_path'] || $arguments['maxTotal'] !== ($auth['remaining_caps'][0] ?? null)
@@ -790,7 +812,28 @@ class GateRecon
                 || $arguments['reserve'] !== array_sum(array_slice($auth['remaining_caps'], 1))) {
                 throw new GameException('Homeward path, remaining cap or deadline needs explicit authorization.');
             }
+        } elseif (isset($arguments['recon_outbound_hash'])) {
+            $grant = $mission->outbound();
+            if (! $grant || $grant['hash'] !== $arguments['recon_outbound_hash'] || $grant['status'] === 'expired'
+                || ($grant['intent_id'] !== null && $grant['intent_id'] !== $intentId)
+                || ($grant['intent_id'] !== null && (! $intent || $intent->arguments !== $arguments))
+                || $homeward || $mission->state !== 'exploring' || $path !== [$grant['from'], $grant['target']]
+                || $arguments['waypointSymbol'] !== $grant['target_gate'] || $ship['nav']['waypointSymbol'] !== $grant['from_gate']
+                || $arguments['maxTotal'] !== $grant['cap'] || $arguments['recon_return_path'] !== $grant['path']) {
+                throw new GameException('Outbound grant does not authorize this exact intent.');
+            }
+            $this->validateOutboundRoutes($mission, $grant, $system);
+            $funding = $this->outboundFunding($agent, $mission, $grant['cap'], $grant['path'], $intentId);
+            if ($arguments['recon_inflight_exposure'] !== $funding['protected_return']
+                || ! is_int($arguments['recon_commitments'] ?? null)
+                || $arguments['reserve'] !== $mission->terms['cash_floor'] + $arguments['recon_commitments'] + $funding['protected_return']
+                || $agent->credits - $grant['cap'] < max($arguments['reserve'], $funding['reserve'])) {
+                throw new GameException('Outbound live cash or persisted protected return reserve changed: '.json_encode($funding));
+            }
         } else {
+            if (($mission->outbound()['status'] ?? null) === 'available') {
+                throw new GameException('Only the sealed outbound edge is authorized while its grant is available.');
+            }
             $R = count($path) - 1;
             $home = $mission->path($arguments['recon_target'], $mission->origin_system);
             if (! $home) {
@@ -807,6 +850,16 @@ class GateRecon
         }
         if ($agent->credits - $arguments['maxTotal'] < $arguments['reserve']) {
             throw new GameException('Recon live cash cannot fund the hop and its reserved path.');
+        }
+    }
+
+    private function requireDepartureQuote(Agent $agent, string $gate, int $cap): void
+    {
+        $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $gate)->first();
+        $ask = collect($quote?->data['tradeGoods'] ?? [])->firstWhere('symbol', 'ANTIMATTER');
+        if (! $quote || $quote->observed_at->lt(now()->subSeconds(config('gameplay.snapshot_seconds'))) || ! empty($quote->data['invalidated_by_action'])
+            || ! $ask || $ask['purchasePrice'] < 1 || $ask['purchasePrice'] > $cap) {
+            throw new GameException('Recon departure quote is stale, missing or above the authorized cap.');
         }
     }
 
@@ -972,6 +1025,276 @@ class GateRecon
         app(CycleAccounting::class)->record($run, Ship::where('agent_id', $run->agent_id)->where('symbol', $run->ship_symbol)->first()?->snapshot);
     }
 
+    private function rankingKey(ReconMission $mission, string $target, int $class, int $hops): array
+    {
+        return [$class, $hops, -count($mission->graph[$target]['catalogue']['marketplaces'] ?? []), $target];
+    }
+
+    private function verifiedRoute(ReconMission $mission, array $path, string $from): bool
+    {
+        if (! $path || $path[0] !== $from || end($path) !== $mission->origin_system || count(array_unique($path)) !== count($path)) {
+            return false;
+        }
+        foreach (array_slice($path, 1) as $index => $system) {
+            if (! $mission->edge($path[$index], $system)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function validateOutboundRoutes(ReconMission $mission, array $grant, string $current): void
+    {
+        $saved = $mission->authorization();
+        if ($current !== $grant['from'] || ! $mission->edge($current, $grant['target'])
+            || $mission->graph[$current]['gate'] !== $grant['from_gate'] || $mission->graph[$grant['target']]['gate'] !== $grant['target_gate']
+            || $grant['target'] === $mission->origin_system || isset($mission->visits[$grant['target']])
+            || ! $this->verifiedRoute($mission, $saved['remaining_path'], $current)
+            || count($saved['remaining_caps']) !== count($saved['remaining_path']) - 1 || $saved['remaining_total'] < $saved['exposure']
+            || ! $this->verifiedRoute($mission, $grant['path'], $grant['target']) || in_array($current, $grant['path'], true)
+            || count($grant['path']) >= count($saved['remaining_path'])
+            || $grant['caps'] !== array_fill(0, count($grant['path']) - 1, $mission->terms['jump_exposure'])
+            || ! $this->timeFits($mission, count($grant['path']))) {
+            throw new GameException('Sealed outbound edge, saved/prospective return path, eligibility or time no longer fits.');
+        }
+    }
+
+    private function outboundFunding(Agent $agent, ReconMission $mission, int $cap, array $path, ?int $intentId = null, bool $requireFunded = true): array
+    {
+        $commitments = $this->liveCommitments($agent);
+        $protected = max($mission->authorization()['exposure'], $mission->terms['jump_exposure'] * (count($path) - 1));
+        $required = $cap + $protected;
+        $facts = ['credits' => $agent->credits, 'commitments' => $commitments, 'protected_return' => $protected,
+            'required' => $required, 'ledger_remaining' => $mission->ledger($intentId)['remaining'],
+            'cash_available' => $agent->credits - $mission->terms['cash_floor'] - $commitments,
+            'reserve' => $mission->terms['cash_floor'] + $commitments + $protected];
+        $facts['envelope_fits'] = $facts['ledger_remaining'] >= $required;
+        $facts['cash_fits'] = $facts['cash_available'] >= $required;
+        if ($requireFunded && (! $facts['envelope_fits'] || ! $facts['cash_fits'])) {
+            throw new GameException('Outbound cash/envelope cannot cover cap and protected return: '.json_encode($facts));
+        }
+
+        return $facts;
+    }
+
+    public function authorizeOutbound(ReconMission $mission, User $owner, ?string $target, int $cap, string $expectedBasis, bool $dryRun = false): array
+    {
+        $agent = Agent::findOrFail($mission->agent_id);
+
+        return $this->locked($agent, function () use ($agent, $mission, $owner, $target, $cap, $expectedBasis, $dryRun) {
+            $agent->refresh();
+            $mission->refresh();
+            $authority = clone $mission;
+            $basis = $mission->outboundBasis();
+            if ($owner->id !== $agent->user_id || $owner->id !== $mission->approved_by || $cap <= $mission->terms['jump_exposure'] || $cap > 20000
+                || (! $dryRun && ($target === null || $target === ''))) {
+                throw new GameException('Outbound approval requires the owning operator, exact target and an integer cap above baseline and at most 20000.');
+            }
+            // Replay is an identity lookup, not a new approval or lifecycle operation.
+            foreach ($mission->outbound_authorizations ?? [] as $record) {
+                if ($record['prior_basis'] === $expectedBasis) {
+                    if ($record['user_id'] !== $owner->id || $record['target'] !== $target || $record['cap'] !== $cap) {
+                        throw new GameException('Stale outbound basis was applied to a different approval identity.');
+                    }
+                    $intent = $mission->actions()->where('arguments->recon_outbound_hash', $record['hash'])->orderBy('id')->first();
+
+                    return ['record' => $record, 'replayed' => true, 'intent_id' => $intent?->id, 'intent_state' => $intent?->state->value,
+                        'status' => $record['hash'] === $basis ? $mission->outbound()['status'] : 'superseded'];
+                }
+            }
+            $this->enabled();
+            if (! config('gameplay.enabled') || $basis !== $expectedBasis || $mission->closed_at || $mission->reset_id !== $agent->reset_id
+                || $mission->state !== 'exploring' || $mission->homeward_authorizations || now()->gte($mission->terms['explore_until'])
+                || now()->gte($mission->terms['return_deadline']) || ($mission->outbound()['status'] ?? null) === 'available') {
+                throw new GameException('Outbound approval requires a fresh basis and open same-reset exploring mission with no unused grant or rescue.');
+            }
+            if ($agent->isArchived() || $this->api->status() !== $mission->reset_id) {
+                throw new GameException('World reset detected. Outbound approval cannot change this mission or its run.');
+            }
+            $ship = $this->sync->refreshShip($agent, $mission->ship_symbol)->snapshot;
+            $agent->update(['credits' => $this->api->agent($agent)['credits']]);
+            $busy = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+                ->where(fn ($q) => $q->where(fn ($q) => $q->whereIn('state', ['pending', 'sending', 'uncertain'])
+                    ->where(fn ($q) => $q->where('ship_symbol', $mission->ship_symbol)->orWhereNull('ship_symbol')))
+                    ->orWhere(fn ($q) => ShipCommandExecutor::reviewFor($q, $mission->ship_symbol)))->exists();
+            if ($busy || $mission->actions()->where(fn ($q) => $q->whereIn('state', ['pending', 'sending', 'uncertain'])->orWhere('review_required', true)
+                ->orWhere(fn ($q) => $q->where('command', 'jump')->where('state', 'acknowledged')->whereNull('outcome->transaction_total')))->exists()
+                || AutomationRun::where('active_agent_id', $agent->id)->where('ship_symbol', $mission->ship_symbol)
+                    ->whereNotIn('id', $mission->runs()->select('id'))->exists()
+                || $ship['nav']['status'] === 'IN_TRANSIT' || MiningPlanner::inventory($ship) !== []
+                || OpportunityEvaluator::equipment($ship) !== $mission->terms['equipment'] || $this->rejectedEquipment($agent, $ship)
+                || (app(CreditAccounting::class)->summary($agent)['unexplained_change'] ?? 0) !== 0) {
+                throw new GameException('Probe must be stationary, settled, empty, unchanged and free of conflicting work; reconcile first.');
+            }
+            $current = $ship['nav']['systemSymbol'];
+            if ($ship['nav']['waypointSymbol'] !== ($mission->graph[$current]['gate'] ?? null)) {
+                throw new GameException('Probe must be at its authorized departure gate.');
+            }
+            // Refresh route endpoints through the ordinary metered read paths. Work is bounded;
+            // successful catalogue pages remain available for a repeated dry run after deferral.
+            $reads = 0;
+            $refreshed = [];
+            $refresh = function (array $systems) use ($agent, $mission, &$reads, &$refreshed): void {
+                foreach (array_unique($systems) as $system) {
+                    if (isset($refreshed[$system])) {
+                        continue;
+                    }
+                    if ($reads + 2 > 40) {
+                        throw new GameException('Outbound evidence read limit reached; rerun dry-run after the normal read budget recovers.');
+                    }
+                    $this->readGate($agent, $mission, $system, false);
+                    $this->readGate($agent, $mission, $system, true);
+                    $reads += 2;
+                    $refreshed[$system] = true;
+                }
+            };
+            $refresh([$current]);
+            $neighbors = array_map(fn ($gate) => implode('-', array_slice(explode('-', $gate), 0, 2)), $mission->graph[$current]['connections'] ?? []);
+            $refresh($neighbors);
+            $saved = $mission->authorization();
+            $refresh($saved['remaining_path']);
+            if (! $this->verifiedRoute($mission, $saved['remaining_path'], $current)) {
+                throw new GameException('Saved exact return path is broken; operator review is required.');
+            }
+            $candidates = [];
+            foreach ($neighbors as $candidate) {
+                if ($candidate === $mission->origin_system || isset($mission->visits[$candidate]) || ! $mission->edge($current, $candidate)) {
+                    continue;
+                }
+                $path = $mission->path($candidate, $mission->origin_system, [$current]);
+                if (! $path || count($path) >= count($saved['remaining_path'])) {
+                    continue;
+                }
+                $refresh($path);
+                if (! $this->verifiedRoute($mission, $path, $candidate)) {
+                    throw new GameException('Prospective return path changed; rerun dry-run with refreshed evidence.');
+                }
+                for (; $reads < 40 && $this->catalogueStep($agent, $mission, $candidate); $reads++) {
+                    // Shared provider read budget also applies to each catalogue page.
+                }
+                if (! ($mission->graph[$candidate]['catalogue']['complete'] ?? false)) {
+                    throw new GameException('Candidate catalogue incomplete for '.$candidate.'; rerun dry-run or review the original catalogue page limit.');
+                }
+                $candidates[] = ['system' => $candidate, 'path' => $path, 'key' => $this->rankingKey($mission, $candidate, 1, 1)];
+            }
+            usort($candidates, fn ($a, $b) => $a['key'] <=> $b['key']);
+            $selected = $candidates[0] ?? throw new GameException('No eligible unvisited neighbor has a verified shorter return avoiding the departure.');
+            if ($target !== null && $target !== $selected['system']) {
+                throw new GameException('Requested target is not the highest-ranked eligible neighbor: '.$selected['system']);
+            }
+            $record = ['terms_hash' => $mission->terms_hash, 'prior_basis' => $basis, 'user_id' => $owner->id, 'at' => now()->toIso8601String(),
+                'cursor' => (int) ($mission->actions()->max('id') ?? 0), 'from' => $current, 'from_gate' => $mission->graph[$current]['gate'],
+                'target' => $selected['system'], 'target_gate' => $mission->graph[$selected['system']]['gate'], 'cap' => $cap,
+                'reset_id' => $mission->reset_id, 'until' => $mission->terms['explore_until'], 'path' => $selected['path'],
+                'caps' => array_fill(0, count($selected['path']) - 1, $mission->terms['jump_exposure'])];
+            $ship = $this->sync->refreshShip($agent, $mission->ship_symbol)->snapshot;
+            $agent->update(['credits' => $this->api->agent($agent)['credits']]);
+            if ($ship['nav']['status'] === 'IN_TRANSIT' || $ship['nav']['waypointSymbol'] !== $record['from_gate']
+                || MiningPlanner::inventory($ship) !== [] || OpportunityEvaluator::equipment($ship) !== $mission->terms['equipment']
+                || (app(CreditAccounting::class)->summary($agent)['unexplained_change'] ?? 0) !== 0
+                || now()->gte($record['until'])) {
+                throw new GameException('Probe, balance or exploration cutoff changed during approval reads.');
+            }
+            $this->validateOutboundRoutes($mission, $record, $ship['nav']['systemSymbol']);
+            $record['funding'] = $this->outboundFunding($agent, $mission, $cap, $record['path'], requireFunded: ! $dryRun);
+            $record['hash'] = ReconMission::hash($record);
+            if (! $dryRun) {
+                DB::transaction(function () use ($mission, $authority, $record) {
+                    // Observation transitions refresh $mission. Keep the lock-entry raw
+                    // authority snapshot for this append's conditional update.
+                    $this->transition($authority, ['outbound_authorizations' => [...($authority->outbound_authorizations ?? []), $record], 'hold' => null]);
+                    foreach ($mission->runs()->whereNotNull('active_agent_id')->get() as $old) {
+                        app(AutomationRunner::class)->finishStop($old, 'Outbound authority approved. Use recon:start for a fresh run.');
+                    }
+                });
+                $mission->refresh();
+            }
+
+            return ['record' => $record, 'candidates' => $candidates, 'selected' => $selected['system'], 'dry_run' => $dryRun,
+                'status' => $dryRun ? 'proposed' : 'available'];
+        });
+    }
+
+    private function departOutbound(Agent $agent, ReconMission $mission, array $ship, AutomationRun $run, array $grant): AutomationStep
+    {
+        try {
+            $this->validateOutboundRoutes($mission, $grant, $ship['nav']['systemSymbol']);
+            $funding = $this->outboundFunding($agent, $mission, $grant['cap'], $grant['path']);
+            if ($ship['nav']['waypointSymbol'] !== $grant['from_gate'] || MiningPlanner::inventory($ship) !== []
+                || OpportunityEvaluator::equipment($ship) !== $mission->terms['equipment']
+                || (app(CreditAccounting::class)->summary($agent)['unexplained_change'] ?? 0) !== 0) {
+                throw new GameException('Sealed departure, balance, cargo or equipment changed.');
+            }
+            if ($ship['nav']['status'] === 'DOCKED') {
+                return AutomationStep::act('orbit');
+            }
+            $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $grant['from_gate'])->first();
+            $ask = collect($quote?->data['tradeGoods'] ?? [])->firstWhere('symbol', 'ANTIMATTER');
+            $cadence = $ask && $ask['purchasePrice'] > $grant['cap'] ? $mission->terms['ask_recheck_seconds'] : config('gameplay.snapshot_seconds');
+            if (! $quote || ! empty($quote->data['invalidated_by_action']) || $quote->observed_at->lte(now()->subSeconds($cadence))) {
+                $this->marketRead($agent, $mission, $grant['from'], $grant['from_gate'], false);
+
+                return AutomationStep::wait(now()->toImmutable());
+            }
+            if (! $ask || $ask['purchasePrice'] < 1 || $ask['purchasePrice'] > $grant['cap']) {
+                throw new GameException('Sealed outbound ask is missing or above the approved cap.');
+            }
+            if (now()->lt($ship['cooldown']['readyAt'])) {
+                return AutomationStep::wait(CarbonImmutable::parse($ship['cooldown']['readyAt']));
+            }
+            $arguments = ['waypointSymbol' => $grant['target_gate'], 'maxTotal' => $grant['cap'], 'reserve' => $funding['reserve'],
+                'recon_homeward' => false, 'recon_path' => [$grant['from'], $grant['target']], 'recon_target' => $grant['target'],
+                'recon_outbound_hash' => $grant['hash'], 'recon_return_path' => $grant['path'],
+                'recon_commitments' => $funding['commitments'], 'recon_inflight_exposure' => $funding['protected_return']];
+            $run->update(['plan' => array_replace($run->plan, ['recon_leg' => $arguments])]);
+            $this->authorizeJump($agent, $run, $ship, $mission->graph[$grant['from']], $mission->graph[$grant['target']], $arguments);
+
+            return AutomationStep::act('jump', $arguments);
+        } catch (RequestDeferred $e) {
+            throw $e;
+        } catch (GameException $e) {
+            return $this->hold($mission, 'outbound_wait', now()->toImmutable()->addSeconds($mission->terms['cash_wait_seconds']), cause: ['detail' => $e->getMessage()]);
+        }
+    }
+
+    public function validateOutboundIntent(AutomationRun $run, ShipAction $action): void
+    {
+        if (! isset($action->arguments['recon_outbound_hash'])) {
+            return;
+        }
+        $agent = Agent::findOrFail($run->agent_id);
+        $mission = $this->mission($agent, $run);
+        $grant = $mission->outbound();
+        if (! $grant || $grant['status'] !== 'bound/consumed' || $grant['intent_id'] !== $action->id
+            || ! in_array($grant['intent_state'], [ActionState::Pending->value, ActionState::Sending->value], true)
+            || ($run->plan['recon_intent_id'] ?? null) !== $action->id || ($run->plan['recon_leg'] ?? null) !== $action->arguments) {
+            throw new GameException('Only the exact bound outbound intent may send; fresh operator approval is required.');
+        }
+        $this->requireDepartureQuote($agent, $grant['from_gate'], $grant['cap']);
+        $now = now();
+        if ($now->gte($action->expires_at) || $now->gte($run->expires_at) || $now->gte($grant['until']) || $now->gte($mission->terms['return_deadline'])) {
+            throw new GameException('Outbound intent or authority expired before transport. Fresh operator approval is required.');
+        }
+    }
+
+    private function liveCommitments(Agent $agent): int
+    {
+        $commitments = 0;
+        foreach (AutomationRun::where('active_agent_id', $agent->id)->where('strategy', '!=', 'gate_recon')->get() as $other) {
+            if ($other->campaign_episode_id) {
+                $carrying = Ship::where('agent_id', $agent->id)->where('symbol', $other->ship_symbol)->first()?->snapshot;
+                if (($carrying['cargo']['units'] ?? 0) > 0 && isset($other->plan['market'])) {
+                    $commitments += app(CampaignTrade::class)->fuelReserve($agent, $other->ship_symbol, $other->plan['market']);
+                }
+            } else {
+                $commitments += $other->plan['reserve'] + max(0, $other->plan['max_spend'] - ($other->totals['spending'] ?? 0));
+            }
+        }
+
+        return $commitments;
+    }
+
     public function authorizeReturn(ReconMission $mission, User $user, int $cap, int $total, CarbonImmutable $until, bool $dryRun = false): array
     {
         $agent = Agent::findOrFail($mission->agent_id);
@@ -1010,17 +1333,7 @@ class GateRecon
             if (! $path || $total < $cap * (count($path) - 1)) {
                 throw new GameException('Return exposure does not cover the verified path.');
             }
-            $commitments = 0;
-            foreach (AutomationRun::where('active_agent_id', $agent->id)->where('strategy', '!=', 'gate_recon')->get() as $other) {
-                if ($other->campaign_episode_id) {
-                    $carrying = Ship::where('agent_id', $agent->id)->where('symbol', $other->ship_symbol)->first()?->snapshot;
-                    if (($carrying['cargo']['units'] ?? 0) > 0 && isset($other->plan['market'])) {
-                        $commitments += app(CampaignTrade::class)->fuelReserve($agent, $other->ship_symbol, $other->plan['market']);
-                    }
-                } else {
-                    $commitments += $other->plan['reserve'] + max(0, $other->plan['max_spend'] - ($other->totals['spending'] ?? 0));
-                }
-            }
+            $commitments = $this->liveCommitments($agent);
             if ($agent->credits - $total - $commitments < $mission->terms['cash_floor']) {
                 throw new GameException('Return approval must preserve the original cash floor and other live commitments.');
             }
@@ -1044,8 +1357,16 @@ class GateRecon
         $agent = Agent::findOrFail($mission->agent_id);
         $ship = Ship::where('agent_id', $agent->id)->where('symbol', $mission->ship_symbol)->first();
         $abroad = $ship && $ship->snapshot['nav']['systemSymbol'] !== $mission->origin_system;
+        $outbound = $mission->outbound();
+        $homeward = $mission->state === 'returning' ? $mission->authorization() : null;
+        $exceptional = ! $homeward && $outbound && ($outbound['status'] === 'available'
+            || ($outbound['status'] === 'bound/consumed' && in_array($outbound['intent_state'], ['pending', 'sending'], true)));
 
         return ['mission' => $mission->id, 'state' => $mission->state, 'outcome' => $mission->outcome, 'terms_hash' => $mission->terms_hash,
+            'outbound_basis' => $mission->outboundBasis(), 'outbound' => $outbound,
+            'outbound_authorizations' => array_map(fn ($record) => $record + ['status' => $record['hash'] === $outbound['hash'] ? $outbound['status'] : 'superseded'], $mission->outbound_authorizations ?? []),
+            'active_jump_cap' => $homeward ? ($homeward['remaining_caps'][0] ?? 0) : ($exceptional ? $outbound['cap'] : $mission->terms['jump_exposure']),
+            'jump_cap_source' => $homeward ? ($homeward['hash'] ?? $mission->terms_hash) : ($exceptional ? $outbound['hash'] : $mission->terms_hash), 'baseline_jump_cap' => $mission->terms['jump_exposure'],
             'terms' => $mission->terms, 'credits' => $agent->credits, 'ledger' => $mission->ledger(), 'return_exposure' => $mission->exposure(),
             'hold' => $abroad && ! config('gameplay.gate_recon_enabled') ? ['reason' => 'flag_off_abroad'] : $mission->hold,
             'abroad_without_run' => $abroad && ! $mission->runs()->whereNotNull('active_agent_id')->exists(), 'visits' => $mission->visits, 'graph' => $mission->graph,

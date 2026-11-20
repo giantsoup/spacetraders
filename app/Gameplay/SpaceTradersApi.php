@@ -356,7 +356,7 @@ class SpaceTradersApi
             'response_effects' => $this->responseFields($command, $arguments)];
     }
 
-    public function mutate(Agent $agent, string $ship, string $command, array $arguments, ?callable $receipt = null): array
+    public function mutate(Agent $agent, string $ship, string $command, array $arguments, ?callable $receipt = null, ?callable $beforeTransport = null): array
     {
         $path = str_starts_with($command, 'contract_')
             ? '/my/contracts/'.$arguments['contractId'].'/'.match ($command) {
@@ -381,7 +381,7 @@ class SpaceTradersApi
             'transfer' => ['tradeSymbol' => $arguments['symbol'], 'units' => $arguments['units'], 'shipSymbol' => $arguments['targetShip']],
             default => [],
         };
-        $data = $this->payload($this->call(strtolower($this->commandMetadata($command, $ship, $arguments)['method']), $path, $body, $agent, receipt: $receipt, inheritedAuth: in_array($command, ['install_module', 'remove_module'], true)), true);
+        $data = $this->payload($this->call(strtolower($this->commandMetadata($command, $ship, $arguments)['method']), $path, $body, $agent, receipt: $receipt, inheritedAuth: in_array($command, ['install_module', 'remove_module'], true), beforeTransport: $beforeTransport), true);
         $rules = match ($command) {
             'scrap' => ['agent.credits' => 'required|integer|min:0', 'transaction.shipSymbol' => 'required|in:'.$ship, 'transaction.waypointSymbol' => 'required|string', 'transaction.timestamp' => 'required|date', 'transaction.totalPrice' => 'required|integer|min:0'],
             'jump' => ['nav' => 'required|array', 'nav.waypointSymbol' => 'required|in:'.$arguments['waypointSymbol'], 'cooldown.remainingSeconds' => 'required|integer|min:0', 'transaction.totalPrice' => 'required|integer|min:0', 'agent.credits' => 'required|integer|min:0'],
@@ -587,7 +587,7 @@ class SpaceTradersApi
         $this->validate($body, ['data' => 'present|array|max:20', 'data.*' => 'array', 'data.*.'.$identity => 'required|string|distinct|max:80', 'meta.total' => 'required|integer|min:0', 'meta.page' => 'required|integer|in:'.$page, 'meta.limit' => 'required|integer|in:20']);
     }
 
-    private function call(string $method, string $path, array $body = [], ?Agent $agent = null, bool $allowNoContent = false, ?callable $receipt = null, bool $inheritedAuth = false): array
+    private function call(string $method, string $path, array $body = [], ?Agent $agent = null, bool $allowNoContent = false, ?callable $receipt = null, bool $inheritedAuth = false, ?callable $beforeTransport = null): array
     {
         $deadline = null;
         if ($this->readGuard) {
@@ -597,7 +597,7 @@ class SpaceTradersApi
             $deadline = ($this->readGuard)();
         }
         try {
-            $response = $this->client->request($method, $path, $body, $agent?->credential(), $deadline, $agent?->account_id);
+            $response = $this->client->request($method, $path, $body, $agent?->credential(), $deadline, $agent?->account_id, $beforeTransport);
         } catch (ConnectionException) {
             throw new GameException('SpaceTraders connection failed.', uncertain: $method !== 'get', retryAfter: 10);
         }

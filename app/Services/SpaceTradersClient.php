@@ -49,7 +49,7 @@ class SpaceTradersClient
         }
     }
 
-    public function request(string $method, string $path, array $data = [], ?string $token = null, ?float $deadline = null, ?string $account = null): Response
+    public function request(string $method, string $path, array $data = [], ?string $token = null, ?float $deadline = null, ?string $account = null, ?callable $beforeTransport = null): Response
     {
         $deadline = $this->scopeDeadline === null ? $deadline : min($this->scopeDeadline, $deadline ?? $this->scopeDeadline);
         $read = strtolower($method) === 'get';
@@ -92,6 +92,9 @@ class SpaceTradersClient
                 }
             }
             $options['query'] = implode('&', $pairs);
+        }
+        if ($beforeTransport !== null) {
+            $beforeTransport();
         }
         $category = FleetMetrics::category($method, $path);
         FleetMetrics::count($method, $path, $category);

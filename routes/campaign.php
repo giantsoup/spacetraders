@@ -245,3 +245,17 @@ Artisan::command('recon:authorize-return {mission} {--jump-cap=} {--total-exposu
         (int) $this->option('jump-cap'), (int) $this->option('total-exposure'), CarbonImmutable::parse($this->option('until')), (bool) $this->option('dry-run'));
     $this->line(json_encode($record, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 })->purpose('Explicitly approve a bounded homeward-only rescue on the same mission');
+
+Artisan::command('recon:authorize-outbound {mission} {--jump-cap=} {--expect-basis=} {--user=} {--target=} {--dry-run}', function (GateRecon $recon) {
+    foreach (['jump-cap', 'expect-basis', 'user'] as $required) {
+        if ($this->option($required) === null) {
+            throw new GameException('Outbound approval requires --'.$required);
+        }
+    }
+    if (! ctype_digit((string) $this->option('jump-cap')) || (int) $this->option('jump-cap') > 20000) {
+        throw new GameException('Outbound cap must be an integer at most 20000 CR.');
+    }
+    $result = $recon->authorizeOutbound(ReconMission::findOrFail($this->argument('mission')), User::findOrFail($this->option('user')),
+        $this->option('target'), (int) $this->option('jump-cap'), $this->option('expect-basis'), (bool) $this->option('dry-run'));
+    $this->line(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+})->purpose('Seal one exact outbound recon edge, preserving original return caps and mission limits');

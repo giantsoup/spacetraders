@@ -212,6 +212,29 @@ Confirm operator 1 still owns MACSOUP. Compare printed terms and hash before sta
 
 Start refuses any active scout, transit, unresolved action or busy owner. Let the old scout settle; do not bypass ownership. The first module-less jump is a bounded trial with unknown server acceptance. Known 4210/4229 at home ends it without retry or purchases. A local exposure is not a server fee cap. Overcharges halt recon; uncertainty follows the existing global hold and no-replay rules. Existing acknowledgement stops all active agent runs, including C0's, without changing its grant.
 
+## Continue an existing mission with one outbound exception
+
+Deploy through the drain, backup, additive migration, build, and service checks above. For an existing mission, keep recon enabled. Skip flag disable, the second flag restart, and new-mission approval. Preserve the same mission, grants, watchdog, and sharing settings. If deployment fails, preserve state and roll forward. Never restore a pre-action backup or remove schema while the probe is abroad.
+
+After release, confirm the owning operator, same reset, settled empty probe at its saved gate, explained cash, and original exploration cutoff. Read the mission's current `outbound_basis` with `recon:status`. Use that exact hash as `BASIS_HASH` below. Substitute the existing mission and operator IDs.
+
+```bash
+"$PHP_BIN" artisan recon:status MISSION_ID
+"$PHP_BIN" artisan recon:authorize-outbound MISSION_ID --jump-cap=20000 --expect-basis=BASIS_HASH --user=OPERATOR_ID --dry-run
+"$PHP_BIN" artisan recon:authorize-outbound MISSION_ID --jump-cap=20000 --expect-basis=BASIS_HASH --user=OPERATOR_ID --target=SELECTED_SYSTEM
+"$PHP_BIN" artisan recon:start MISSION_ID
+"$PHP_BIN" artisan recon:status MISSION_ID
+"$PHP_BIN" artisan recon:report MISSION_ID
+```
+
+Record the dry-run's ordered candidates, selected system, exact gates, proposed return path, and funding. Replace `SELECTED_SYSTEM` with that selection. Apply checks the live ranking again. If the top candidate changes, inspect a new dry-run. Apply stops only the mission's settled previous run. It queues no jump. Start creates the required fresh run.
+
+The grant permits one exact edge at up to 20,000 CR. Later legs and the prospective return retain 7,500 CR caps. The original envelope, cash floor, deadlines, and receipts remain in force. Funding protects the larger saved or prospective return, plus other live commitments. An available grant keeps exploration on that edge during a funding, route, time, or quote hold. Inspect the hold's cause instead of choosing another target.
+
+Status and report show the basis, grant hash, cap source, exact edge, consumption, and hold evidence. Confirm the jump receipt, actual debit, adopted return reservation, and first fresh destination market observations before reporting arrival and scouting. A quoted ceiling cannot limit the provider's actual charge.
+
+An identical application using its original prior basis returns the existing record, even after movement. It never sends or grants another attempt. Once an intent binds, rejection, expiry, a never-sent result, and engine End retain consumption. After settlement, another exceptional intent requires a new approval using the latest basis. An unused grant cannot be retargeted. At the original cutoff, ordinary return takes precedence. Rescue and review rules still apply.
+
 ## Resume or recover without losing receipts
 
 After End or a provably never-sent refusal, inspect `recon:status` and explicitly run `recon:start MISSION_ID`. The new run retains the mission ledger, fixed envelope, return authorizations and deadlines. No old intent is replayed.
