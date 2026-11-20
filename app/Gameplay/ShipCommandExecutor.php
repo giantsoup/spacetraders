@@ -188,11 +188,16 @@ class ShipCommandExecutor
             $received = false;
             $reserved = false;
             $recon = $run?->strategy === 'gate_recon';
+            $outbound = $recon && isset($action->arguments['recon_outbound_hash']);
+            $refusedBeforeTransport = false;
             try {
                 $this->gate->check($action->engine_session_id);
                 $this->clear($agent, $action->id, defer: $run !== null, ship: $run ? $action->ship_symbol : null);
                 if ($action->reset_id !== $agent->reset_id || $action->expires_at->isPast() || ($run && ($run->stop_requested_at || $run->expires_at->isPast() || ! $run->active_agent_id))) {
                     throw new GameException('Intent expired, reset or stopped before execution.');
+                }
+                if ($outbound) {
+                    app(GateRecon::class)->validateOutboundIntent($run, $action);
                 }
                 $fresh = $this->rules->refresh($agent, $action->ship_symbol, $action->command, $action->arguments, $run);
                 if ($run && $action->command === 'buy') {
@@ -215,8 +220,11 @@ class ShipCommandExecutor
                 }
                 $this->unchangedApproval($action, $before);
                 // Stop and reservation contend on a database transaction, independently of the host lock.
-                DB::transaction(function () use ($action, $run, $before, $agent) {
+                DB::transaction(function () use ($action, $run, $before, $agent, $outbound) {
                     $this->gate->check($action->engine_session_id);
+                    if ($outbound) {
+                        app(GateRecon::class)->validateOutboundIntent($run, $action);
+                    }
                     if ($run) {
                         app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments, boundaryOnly: true);
                     }
@@ -232,10 +240,16 @@ class ShipCommandExecutor
                 });
                 $reserved = true;
                 $action->refresh();
+                // The provider request budget may wait after the action is reserved.
+                $beforeTransport = $outbound ? function () use ($run, $action, &$refusedBeforeTransport) {
+                    $refusedBeforeTransport = true;
+                    app(GateRecon::class)->validateOutboundIntent($run, $action);
+                    $refusedBeforeTransport = false;
+                } : null;
                 $data = $this->api->mutate($agent, $action->ship_symbol, $action->command, $action->arguments, function (array $receipt) use ($action, &$received) {
                     $received = true;
                     $action->update(['outcome' => array_merge($action->fresh()->outcome ?? [], $receipt, ['response_received_at' => now()->utc()->toIso8601String()])]);
-                });
+                }, beforeTransport: $beforeTransport);
                 $received = true;
                 $action->update(['outcome' => array_merge($action->fresh()->outcome ?? [], ['response' => $data, 'response_validated' => true, 'response_received_at' => now()->utc()->toIso8601String()])]);
                 $this->confirm($agent, $action, $data, $before, $run);
@@ -273,8 +287,17 @@ class ShipCommandExecutor
                     return;
                 }
                 $uncertain = $action->state === ActionState::Sending && ($received || $e->uncertain);
+                $localRefusal = [];
+                if ($refusedBeforeTransport) {
+                    $localRefusal = $this->localRefusal('pretransport', $e->getMessage()) + [
+                        'sent_at' => null,
+                        'outcome->pretransport_deferrals' => (int) ($action->outcome['pretransport_deferrals'] ?? 0) + 1,
+                    ];
+                } elseif ($recon && $action->state === ActionState::Pending) {
+                    $localRefusal = $this->localRefusal('preflight', $e->getMessage());
+                }
                 $action->update(['state' => $uncertain ? ActionState::Uncertain : ActionState::Rejected,
-                    'message' => $e->getMessage(), 'api_code' => $e->apiCode, 'settled_at' => now()] + ($recon && $action->state === ActionState::Pending ? $this->localRefusal('preflight', $e->getMessage()) : []));
+                    'message' => $e->getMessage(), 'api_code' => $e->apiCode, 'settled_at' => now()] + $localRefusal);
                 if ($run) {
                     $this->block($run, $e->getMessage());
                 }

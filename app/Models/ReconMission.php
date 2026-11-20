@@ -12,7 +12,7 @@ class ReconMission extends Model
     protected $guarded = [];
 
     protected $casts = ['terms' => 'array', 'hold' => 'array', 'graph' => 'array', 'visits' => 'array', 'capability' => 'array',
-        'return_reservation' => 'array', 'homeward_authorizations' => 'array', 'approved_at' => 'immutable_datetime',
+        'return_reservation' => 'array', 'homeward_authorizations' => 'array', 'outbound_authorizations' => 'array', 'approved_at' => 'immutable_datetime',
         'start_window_until' => 'immutable_datetime', 'closed_at' => 'immutable_datetime'];
 
     protected static function booted(): void
@@ -21,6 +21,7 @@ class ReconMission extends Model
             if ($mission->isDirty(['terms', 'terms_hash', 'agent_id', 'reset_id', 'ship_symbol', 'origin_system', 'origin_gate', 'approved_by', 'approved_at'])) {
                 throw new LogicException('Recon terms are immutable. Cancel and approve a new mission.');
             }
+            $mission->verifyOutboundAppend($mission->getOriginal('outbound_authorizations') ?? [], $mission->outbound_authorizations ?? []);
             $old = $mission->getOriginal('homeward_authorizations') ?? [];
             if (array_slice($mission->homeward_authorizations ?? [], 0, count($old)) !== $old) {
                 throw new LogicException('Homeward authorizations are append-only.');
@@ -53,7 +54,55 @@ class ReconMission extends Model
         return AutomationRun::where('agent_id', $this->agent_id)->where('reset_id', $this->reset_id)->where('strategy', 'gate_recon')->where('plan->mission_id', $this->id);
     }
 
-    public function path(string $from, string $to): ?array
+    public function verifyOutboundAppend(array $old, array $next): void
+    {
+        if (! array_is_list($next) || array_slice($next, 0, count($old)) !== $old) {
+            throw new LogicException('Outbound authorizations are append-only.');
+        }
+        $this->outboundBasis($next);
+    }
+
+    public function outboundBasis(?array $records = null): string
+    {
+        if (! hash_equals($this->terms_hash, self::hash($this->terms))) {
+            throw new LogicException('Recon original terms hash is invalid.');
+        }
+        $basis = $this->terms_hash;
+        foreach ($records ?? $this->outbound_authorizations ?? [] as $record) {
+            $payload = $record;
+            unset($payload['hash']);
+            if (($record['prior_basis'] ?? null) !== $basis || ($record['terms_hash'] ?? null) !== $this->terms_hash
+                || ($record['reset_id'] ?? null) !== $this->reset_id || ($record['user_id'] ?? null) !== $this->approved_by
+                || ! is_int($record['cap'] ?? null) || $record['cap'] <= $this->terms['jump_exposure'] || $record['cap'] > 20000
+                || ($record['until'] ?? null) !== $this->terms['explore_until']
+                || ! hash_equals(self::hash($payload), $record['hash'] ?? '')) {
+                throw new LogicException('Outbound authorization chain is invalid.');
+            }
+            $basis = $record['hash'];
+        }
+
+        return $basis;
+    }
+
+    public function outbound(): ?array
+    {
+        $this->outboundBasis();
+        $records = $this->outbound_authorizations ?? [];
+        if (! $records) {
+            return null;
+        }
+        $record = end($records);
+        $intent = $this->actions()->where('command', 'jump')->where('arguments->recon_outbound_hash', $record['hash'])->orderBy('id')->first();
+        $agent = Agent::find($this->agent_id);
+        $expired = ! $agent || $agent->isArchived() || $this->closed_at || $this->homeward_authorizations || now()->gte($record['until'])
+            || now()->gte($this->terms['return_deadline'])
+            || $this->reset_id !== $agent?->reset_id;
+
+        return $record + ['status' => $expired ? 'expired' : ($intent ? 'bound/consumed' : 'available'),
+            'intent_id' => $intent?->id, 'intent_state' => $intent?->state->value];
+    }
+
+    public function path(string $from, string $to, array $exclude = []): ?array
     {
         $queue = [[$from]];
         $seen = [$from => true];
@@ -65,7 +114,7 @@ class ReconMission extends Model
             }
             foreach ($this->graph[$last]['connections'] ?? [] as $gate) {
                 $system = implode('-', array_slice(explode('-', $gate), 0, 2));
-                if (! isset($seen[$system]) && $this->edge($last, $system)) {
+                if (! in_array($system, $exclude, true) && ! isset($seen[$system]) && $this->edge($last, $system)) {
                     $seen[$system] = true;
                     $queue[] = [...$path, $system];
                 }
