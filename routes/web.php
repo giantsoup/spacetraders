@@ -40,6 +40,7 @@ Route::get('/', function () {
 
 Route::middleware('auth')->group(function () {
     Route::get('/campaign', [CampaignStatusController::class, 'show'])->name('campaign.show');
+    Route::get('/campaign/strategy', [CampaignStatusController::class, 'strategy'])->name('campaign.strategy');
     Route::post('/campaign/pause', [CampaignStatusController::class, 'pause'])->name('campaign.pause');
     Route::post('/campaign/resume', [CampaignStatusController::class, 'resume'])->name('campaign.resume');
     Route::delete('/agents/account-token', [AgentController::class, 'forgetAccountToken'])->name('agents.accountToken.forget');

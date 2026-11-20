@@ -289,3 +289,46 @@ The smoke check requires this development checkout's migrated SQLite database, a
 engine, and no active work. It denies HTTP, creates a fake episode in a transaction,
 prints status (unhealthy is expected with the engine off), writes a report, then rolls
 back its rows. It neither registers an agent nor starts automation. Do not run it on production.
+
+## Maintain the Strategy walkthrough
+
+Campaign → Strategy (`/campaign/strategy`) explains C0 using the revision in slot 1.
+Paused and expired grants remain the source. Slot 2 supplies only a queued notice.
+Without slot 1, the page validates `campaigns/weekly-default.yaml` in memory and labels
+it as an unapproved example. The GET never imports, activates, ranks or resolves ships.
+Reload the page to read the current approval.
+
+`app/Gameplay/CampaignStrategy.php` owns the explanation graph and playbook formatting.
+Phase order, activity conditions and trade thresholds come from the selected revision.
+When director, safety, recovery or trade behavior changes, update the matching graph
+wording and its regression tests in the same change.
+
+`resources/js/Components/StrategyWalkthrough.vue` accepts a graph with `root`, ordered
+`chapters` and a `nodes` map. Each node has a stable `id`, `kind`, `title`, `summary` and
+`links`. Links contain `condition`, `label`, `target` and a presentation `tone`.
+Chapter nodes can also contain ordered `groups`, each with `title`, `exitLabel`, `exits`,
+`note` and `activities` with `label` and optional `condition`. Outcome nodes can link to
+further outcomes. A node without links ends that example path. Supply an acyclic graph
+whose link targets exist. The renderer does not interpret campaign rules.
+
+Use `<StrategyWalkthrough :graph="graph" />` for another explanation graph. Selection and
+reading history stay in Vue. Branches do not advance reading progress. Back closes the
+last open outcome before returning to the previous chapter. The shared `FocusSheet`
+provides the mobile chapter overview and focus containment; desktop uses a chapter rail.
+All walkthrough styles are scoped to the page or components.
+
+Run the server regressions, compile the app, then run the isolated browser fixture:
+
+~~~sh
+php artisan test --compact --filter=CampaignStrategyTest
+npm run build
+HERD_PHP=/absolute/path/to/php node tests/Browser/campaign-strategy.mjs
+~~~
+
+The browser check reuses `tests/Browser/campaign-status.php` with a synthetic operator,
+an isolated temporary SQLite database, disabled engine and denied outbound HTTP.
+`CAMPAIGN_STRATEGY_EVIDENCE` selects the screenshot directory.
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` selects a cached Chromium executable when the
+Playwright default is unavailable. The script also tries WebKit and reports when its
+executable is missing. `PLAYWRIGHT_WEBKIT_EXECUTABLE_PATH` selects another cached WebKit
+executable. Browser emulation does not replace a physical iPhone check.

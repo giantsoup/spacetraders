@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile, realpath } from 'node:fs/promises';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -11,7 +11,7 @@ import { chromium } from 'playwright';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const evidence = process.env.CAMPAIGN_STATUS_EVIDENCE || path.join(tmpdir(), 'campaign-status-evidence');
 await mkdir(evidence, { recursive: true });
-const directory = await mkdtemp(path.join(tmpdir(), 'campaign-status-browser-'));
+const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'campaign-status-browser-')));
 for (const folder of ['sessions', 'views']) await mkdir(path.join(directory, folder));
 await writeFile(path.join(directory, 'campaign.sqlite'), '');
 const php = process.env.HERD_PHP || 'C:\\Users\\taylo\\.config\\herd\\bin\\php85\\php.exe';
@@ -53,7 +53,7 @@ try {
             await new Promise(resolve => setTimeout(resolve, 100));
         }
     }
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}) });
     const context = await browser.newContext();
     await context.route('**/*', route => {
         if (new URL(route.request().url()).origin !== origin) {
@@ -183,7 +183,7 @@ try {
         await stopped;
     }
     await writeFile(path.join(evidence, 'server.log'), serverLog);
-    assert.equal(path.dirname(directory), path.resolve(tmpdir()));
+    assert.equal(path.dirname(directory), await realpath(tmpdir()));
     assert.ok(path.basename(directory).startsWith('campaign-status-browser-'));
     await rm(directory, { recursive: true, force: true });
 }

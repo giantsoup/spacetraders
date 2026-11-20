@@ -1,4 +1,5 @@
 <script setup>
+import CampaignNavigation from '@/Components/CampaignNavigation.vue';
 import DangerButton from '@/Components/DangerButton.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import ShipScene from '@/Components/ShipScene.vue';
@@ -61,6 +62,7 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
 <template>
     <Head title="Campaign status" />
     <AuthenticatedLayout>
+        <CampaignNavigation />
         <template #header>
             <p class="app-eyebrow">CAMPAIGN AUTOPILOT</p>
             <h1>Campaign status</h1>
