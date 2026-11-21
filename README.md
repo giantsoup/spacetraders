@@ -93,7 +93,7 @@ The first mobile release is complete when the installed app can inspect the flee
 
 ## Local development
 
-The tested runtime is PHP 8.5.12, Node 26.13.0, and pnpm 12.16.1. Use the committed lockfiles. The [PHP runtime runbook](docs/issue-7/php85-runtime.md) explains the exact patch pin and supported executable wrappers.
+The tested runtime is PHP 8.5.13, Node 26.13.0, and pnpm 12.16.1. Use the committed lockfiles. The [PHP runtime runbook](docs/issue-7/php85-runtime.md) explains the exact patch pin and supported executable wrappers.
 
 On macOS, select this checkout's Herd PHP without changing global settings:
 

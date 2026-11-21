@@ -21,8 +21,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     env:
-      PHP_SOURCE_VERSION: 8.5.12
-      PHP_SOURCE_SHA256: 08bc2eba2a588654ade1357174aa646b761556c862dda0678345ee29ed481209
+      PHP_SOURCE_VERSION: 8.5.13
+      PHP_SOURCE_SHA256: 607602acaf0c3061818e9916ec44a058e8b3d43959a83862b9cd3ec7bf5b785f
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/storage/app/mvp-evidence/ci-browsers
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
