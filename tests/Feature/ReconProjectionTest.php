@@ -139,4 +139,44 @@ class ReconProjectionTest extends ReconTestCase
         $this->quotes(100, 400);
         $this->assertSame('unconfirmed', app(ReconProjection::class)->evaluate($this->agent, $this->mission, 'X1-NEXT')['classification']);
     }
+
+    public function test_remote_source_near_or_beyond_one_tank_from_gate_qualifies_when_fuel_stops_exist(): void
+    {
+        $row = Ship::where('symbol', 'LOCAL-1')->firstOrFail();
+        $ship = $row->snapshot;
+        $ship['fuel'] = ['capacity' => 400, 'current' => 400];
+        $row->update(['snapshot' => $ship]);
+        // Case 1: direct gate->ASK takes 352 fuel, leaving 48, while ASK->BID->ASK takes 184 fuel.
+        // Because ASK sells fuel, the trader refuels at ASK before starting the trade cycle.
+        GameObservation::where('kind', 'waypoint')->where('symbol', 'X1-NEXT-ASK')->firstOrFail()
+            ->update(['data' => ['symbol' => 'X1-NEXT-ASK', 'systemSymbol' => 'X1-NEXT', 'type' => 'PLANET', 'x' => 350, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]]]);
+        GameObservation::where('kind', 'waypoint')->where('symbol', 'X1-NEXT-BID')->firstOrFail()
+            ->update(['data' => ['symbol' => 'X1-NEXT-BID', 'systemSymbol' => 'X1-NEXT', 'type' => 'PLANET', 'x' => 440, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]]]);
+        $report = app(ReconProjection::class)->evaluate($this->agent, $this->mission, 'X1-NEXT');
+        $this->assertSame('unconfirmed', $report['classification'], json_encode($report));
+        $this->assertCount(1, $report['qualifying']);
+
+        // Case 2: gate->ASK is 440 units (>400 tank). Without a mid-system fuel stop it fails;
+        // once a verified intermediate fuel seller at x=220 is observed, 1-stop arrival qualifies it.
+        GameObservation::where('kind', 'waypoint')->where('symbol', 'X1-NEXT-ASK')->firstOrFail()
+            ->update(['data' => ['symbol' => 'X1-NEXT-ASK', 'systemSymbol' => 'X1-NEXT', 'type' => 'PLANET', 'x' => 440, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]]]);
+        GameObservation::where('kind', 'waypoint')->where('symbol', 'X1-NEXT-BID')->firstOrFail()
+            ->update(['data' => ['symbol' => 'X1-NEXT-BID', 'systemSymbol' => 'X1-NEXT', 'type' => 'PLANET', 'x' => 490, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]]]);
+        $withoutMid = app(ReconProjection::class)->evaluate($this->agent, $this->mission, 'X1-NEXT');
+        $this->assertSame([], $withoutMid['qualifying']);
+
+        app(AgentSynchronizer::class)->observe($this->agent, 'waypoint', 'X1-NEXT-MID', [
+            'symbol' => 'X1-NEXT-MID', 'systemSymbol' => 'X1-NEXT', 'type' => 'FUEL_STATION', 'x' => 220, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]]);
+        $midData = ['symbol' => 'X1-NEXT-MID', 'imports' => [], 'exports' => [], 'exchange' => [['symbol' => 'FUEL']],
+            'tradeGoods' => [['symbol' => 'FUEL', 'tradeVolume' => 100, 'purchasePrice' => 5, 'sellPrice' => 1]]];
+        $midObs = app(AgentSynchronizer::class)->observe($this->agent, 'market', 'X1-NEXT-MID', $midData);
+        app(AgentSynchronizer::class)->observe($this->agent, 'market_listing', 'X1-NEXT-MID', $midData);
+        $visits = $this->mission->visits;
+        $visits['X1-NEXT']['markets']['X1-NEXT-MID'] = ['first_at' => now()->subMinutes(20)->toIso8601String(), 'observed_at' => now()->toIso8601String(), 'observation_id' => $midObs->id, 'data' => $midData];
+        $this->mission->update(['visits' => $visits]);
+
+        $withMid = app(ReconProjection::class)->evaluate($this->agent, $this->mission->fresh(), 'X1-NEXT');
+        $this->assertSame('unconfirmed', $withMid['classification'], json_encode($withMid));
+        $this->assertCount(1, $withMid['qualifying']);
+    }
 }

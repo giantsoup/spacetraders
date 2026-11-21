@@ -410,4 +410,49 @@ class ReconLifecycleTest extends ReconTestCase
         $this->assertSame('closed', $mission->fresh()->state);
         $this->assertSame('time_exhausted', $mission->fresh()->outcome);
     }
+
+    public function test_large_system_confirms_qualifying_pair_before_visit_read_budget_runs_out_and_skips_fuel_stations_first(): void
+    {
+        $world = json_decode(file_get_contents($this->file), true);
+        // Place two bare FUEL_STATIONs closer to the gate than a distance-0 orbital cluster (C1/C2)
+        // plus 11 other standalone markets so total markets (15) exceed market_reads_per_visit (10).
+        foreach ([1 => 10, 2 => 15] as $i => $x) {
+            $symbol = 'X1-NEXT-FUEL'.$i;
+            $world['waypoints'][] = ['symbol' => $symbol, 'systemSymbol' => 'X1-NEXT', 'type' => 'FUEL_STATION', 'x' => $x, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]];
+            $world['market_goods'][$symbol] = [['symbol' => 'FUEL', 'tradeVolume' => 100, 'purchasePrice' => 5, 'sellPrice' => 1]];
+        }
+        foreach (['C1' => [100, 1], 'C2' => [1000, 400]] as $name => $prices) {
+            $symbol = 'X1-NEXT-'.$name;
+            $world['waypoints'][] = ['symbol' => $symbol, 'systemSymbol' => 'X1-NEXT', 'type' => 'PLANET', 'x' => 40, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]];
+            $world['market_goods'][$symbol] = [
+                ['symbol' => 'IRON', 'tradeVolume' => 10, 'purchasePrice' => $prices[0], 'sellPrice' => $prices[1]],
+                ['symbol' => 'FUEL', 'tradeVolume' => 100, 'purchasePrice' => 5, 'sellPrice' => 1],
+            ];
+        }
+        for ($i = 1; $i <= 11; $i++) {
+            $symbol = 'X1-NEXT-EXTRA'.$i;
+            $world['waypoints'][] = ['symbol' => $symbol, 'systemSymbol' => 'X1-NEXT', 'type' => 'PLANET', 'x' => 60 + $i * 5, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]];
+            $world['market_goods'][$symbol] = [
+                ['symbol' => 'IRON', 'tradeVolume' => 10, 'purchasePrice' => 500, 'sellPrice' => 10],
+                ['symbol' => 'FUEL', 'tradeVolume' => 100, 'purchasePrice' => 5, 'sellPrice' => 1],
+            ];
+        }
+        file_put_contents($this->file, json_encode($world));
+        $this->tradeWorld();
+        $this->campaign();
+        $this->directorTrade();
+        $mission = $this->mission(['market_reads_per_visit' => 10]);
+        $run = app(GateRecon::class)->start($mission);
+        for ($i = 0; $i < 240 && $run->fresh()->active_agent_id; $i++) {
+            $this->tick($run);
+        }
+        $visit = $mission->fresh()->visits['X1-NEXT'];
+        $this->assertSame('found', $mission->fresh()->outcome, json_encode($visit));
+        $this->assertSame('promising', $visit['classification']);
+        $this->assertNotEmpty($visit['unsampled'], 'Confirmation must succeed even when unsampled markets remain in a large system.');
+        $this->assertArrayHasKey('confirmed_at', $visit['markets']['X1-NEXT-C1']);
+        $this->assertArrayHasKey('confirmed_at', $visit['markets']['X1-NEXT-C2']);
+        $this->assertArrayNotHasKey('X1-NEXT-FUEL1', $visit['markets'], 'Orbital trade clusters must be sampled ahead of closer bare fuel stations.');
+        $this->assertLessThanOrEqual(10, $visit['reads']);
+    }
 }

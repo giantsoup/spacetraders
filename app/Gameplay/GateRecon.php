@@ -922,11 +922,13 @@ class GateRecon
         $H = count($mission->path($system, $mission->origin_system) ?? []) - 1;
         $leaveBy = min(CarbonImmutable::parse($visit['arrival'])->addMinutes($mission->terms['max_dwell_minutes']),
             $this->deadline($mission)->subSeconds(($this->cooldownEstimate($mission) + 60) * max(0, $H) + 900));
-        $room = $visit['reads'] < $mission->terms['market_reads_per_visit'] - 1 && now()->lt($leaveBy);
+        $usableRemaining = max(0, ($mission->terms['market_reads_per_visit'] - 1) - $visit['reads']);
+        $room = $usableRemaining > 0 && now()->lt($leaveBy);
         $target = null;
         $confirmation = false;
         $waitUntil = null;
-        if ($room && ! $unsampled && $evaluation['qualifying']) {
+        $confirmReadsNeeded = $this->confirmReadsNeeded($mission, $visit, $evaluation['qualifying']);
+        if ($room && $evaluation['qualifying'] && (! $unsampled || ($confirmReadsNeeded !== null && $usableRemaining <= $confirmReadsNeeded))) {
             foreach ($evaluation['qualifying'] as $pair) {
                 if ($pair['confirmed']) {
                     $classification = 'promising';
@@ -950,8 +952,11 @@ class GateRecon
         }
         if ($classification !== 'promising' && $target === null && $room) {
             $targets = array_values(array_unique([...$unsampled, ...($visit['refresh_queue'] ?? [])]));
-            usort($targets, function ($a, $b) use ($agent, $ship) {
-                return app(FuelPlanner::class)->leg($agent, $ship, $a)['estimated_seconds'] <=> app(FuelPlanner::class)->leg($agent, $ship, $b)['estimated_seconds'] ?: $a <=> $b;
+            $priorities = $this->samplePriorities($agent, $system, $catalogue['marketplaces'] ?? [], $targets);
+            usort($targets, function ($a, $b) use ($agent, $ship, $priorities) {
+                return ($priorities[$a] ?? 1) <=> ($priorities[$b] ?? 1)
+                    ?: app(FuelPlanner::class)->leg($agent, $ship, $a)['estimated_seconds'] <=> app(FuelPlanner::class)->leg($agent, $ship, $b)['estimated_seconds']
+                    ?: $a <=> $b;
             });
             $target = $targets[0] ?? null;
         }
@@ -997,6 +1002,68 @@ class GateRecon
         $this->marketRead($agent, $mission, $system, $target, $confirmation);
 
         return AutomationStep::wait(now()->toImmutable());
+    }
+
+    /** Confirmation reads still required by the highest-ranked qualifying pair, or null if none. */
+    private function confirmReadsNeeded(ReconMission $mission, array $visit, array $qualifying): ?int
+    {
+        if (! $qualifying) {
+            return null;
+        }
+        $pair = $qualifying[0];
+        if (! empty($pair['confirmed'])) {
+            return 0;
+        }
+        $needed = 0;
+        foreach (array_unique([$pair['source'], $pair['buyer']]) as $market) {
+            $sample = $visit['markets'][$market] ?? [];
+            if (empty($sample['confirmed_at']) || CarbonImmutable::parse($sample['confirmed_at'])->lt(now()->subMinutes($mission->terms['qualify']['confirm_max_age_min']))) {
+                $needed++;
+            }
+        }
+
+        return $needed;
+    }
+
+    /**
+     * Sampling priority for unsampled markets in a remote system:
+     * 0 = distance-0 orbital clusters (non-fuel-station marketplaces sharing coordinates),
+     * 1 = standalone trade hubs (planets, moons, stations, asteroid bases),
+     * 2 = bare fuel stations (sampled last so limited visit reads hit trade hubs first).
+     *
+     * @return array<string, int>
+     */
+    private function samplePriorities(Agent $agent, string $system, array $marketplaces, array $targets): array
+    {
+        $points = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->where('kind', 'waypoint')->whereIn('symbol', array_values(array_unique([...$marketplaces, ...$targets])))->get()->keyBy('symbol');
+        $coords = [];
+        foreach ($marketplaces as $symbol) {
+            $point = $points->get($symbol)?->data;
+            if (! $point || ($point['systemSymbol'] ?? null) !== $system || ($point['type'] ?? null) === 'FUEL_STATION') {
+                continue;
+            }
+            $key = ($point['x'] ?? '?').','.(string) ($point['y'] ?? '?');
+            $coords[$key] = ($coords[$key] ?? 0) + 1;
+        }
+        $priorities = [];
+        foreach ($targets as $symbol) {
+            $point = $points->get($symbol)?->data;
+            if (! $point) {
+                $priorities[$symbol] = 1;
+
+                continue;
+            }
+            if (($point['type'] ?? null) === 'FUEL_STATION') {
+                $priorities[$symbol] = 2;
+
+                continue;
+            }
+            $key = ($point['x'] ?? '?').','.(string) ($point['y'] ?? '?');
+            $priorities[$symbol] = ($coords[$key] ?? 0) >= 2 ? 0 : 1;
+        }
+
+        return $priorities;
     }
 
     private function retryVisit(ReconMission $mission, string $system): void

@@ -499,4 +499,26 @@ class TradeFuelEconomicsTest extends TestCase
         }
         $this->assertSame(['normal' => 'bf6f8560cb9ff92a2c9a2eba177a1ce4cdf3b3fd9a6c455bbeb560be83ec1e7b', 'long_run' => '011f7028ef5d16bf9afe4a2d3016954d5ee409c5aebdf78e887662d6df3533e0', 'claimed' => '954c2fb403fdab1e5d68a3ad6a7ad3046eb24dfe7c0f59bddac086d5d262a21e'], $outputs);
     }
+
+    public function test_positioning_to_a_fuel_selling_source_refills_before_evaluating_the_trade_cycle(): void
+    {
+        $this->startTrade();
+        $sync = app(AgentSynchronizer::class);
+        $sync->observe($this->agent, 'waypoint', 'X1-TEST-GATE', [
+            'symbol' => 'X1-TEST-GATE', 'systemSymbol' => 'X1-TEST', 'x' => -350, 'y' => 0, 'type' => 'JUMP_GATE', 'traits' => []]);
+        $point = GameObservation::where('kind', 'waypoint')->where('symbol', 'X1-TEST-H49')->firstOrFail();
+        $point->update(['data' => array_replace($point->data, ['x' => 90])]);
+        $quote = GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-H49')->firstOrFail();
+        $data = $quote->data;
+        $data['tradeGoods'][0]['sellPrice'] = 95;
+        $quote->update(['data' => $data]);
+        $ship = Ship::where('symbol', 'LOCAL-1')->firstOrFail()->snapshot;
+        $ship['nav']['waypointSymbol'] = 'X1-TEST-GATE';
+        // Gate->A4 takes 352 fuel (leaving 48), and A4->H49->A4 takes 184 fuel. Because A4 sells
+        // fuel and the positioning run tops up on arrival, the cycle starts from a full 400 tank.
+        $candidate = $this->candidate($ship);
+        $this->assertSame('X1-TEST-A4', $candidate['source']);
+        $this->assertSame('X1-TEST-H49', $candidate['buyer']);
+        $this->assertGreaterThan(0, $candidate['conservative_margin']);
+    }
 }

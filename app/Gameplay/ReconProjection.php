@@ -66,9 +66,9 @@ class ReconProjection
                         $pair = ['good' => $ask['symbol'], 'source' => $source, 'market' => $buyer];
                         $trade = app(CampaignTrade::class);
                         $decay = $rules['lot']['default_batch_decay'];
-                        $row['proof'] = $trade->projectPair($agent, $hypothetical, null, $pair, $ask, $bid, $rules, $seconds, 'proof', $decay);
                         $atSource = $hypothetical;
                         $atSource['nav']['waypointSymbol'] = $source;
+                        $row['proof'] = $this->projectProof($agent, $hypothetical, $atSource, $pair, $ask, $bid, $rules, $seconds, $decay, $markets);
                         $row['scaled'] = $trade->projectPair($agent, $atSource, null, $pair, $ask, $bid, $rules, $seconds, 'scaled', $decay);
                         $proof = $row['proof']['candidate'] ?? null;
                         $scaled = $row['scaled']['candidate'] ?? null;
@@ -108,6 +108,69 @@ class ReconProjection
                 : ($this->noMarkets($mission, $system) ? 'no_markets' : ($operable ? 'below_bar' : 'no_viable_pair')))));
 
         return $result;
+    }
+
+    private function projectProof(Agent $agent, array $atGate, array $atSource, array $pair, array $ask, array $bid, array $rules, int $seconds, float $decay, $markets): array
+    {
+        $trade = app(CampaignTrade::class);
+        try {
+            return $trade->projectPair($agent, $atGate, null, $pair, $ask, $bid, $rules, $seconds, 'proof', $decay);
+        } catch (GameException $exception) {
+            if (! str_contains($exception->getMessage(), 'No fuel-safe continuation')) {
+                throw $exception;
+            }
+            $arrival = $this->oneStopArrival($agent, $atGate, $pair['source'], $markets);
+            if (! $arrival) {
+                throw $exception;
+            }
+            $arrived = $atSource;
+            $arrived['fuel']['current'] = $arrival['fuel_after'];
+
+            return $trade->projectPair($agent, $arrived, null, $pair, $ask, $bid, $rules, $seconds, 'proof', $decay);
+        }
+    }
+
+    /**
+     * When the jump gate sits farther than one tank from an inner trade source, verify whether one
+     * intermediate fuel stop within the system reaches the source safely.
+     */
+    private function oneStopArrival(Agent $agent, array $atGate, string $source, $markets): ?array
+    {
+        $fuel = app(FuelPlanner::class);
+        $listings = $fuel->listings($agent);
+        $cutoff = now()->subSeconds(config('gameplay.fuel_quote_max_seconds', 21600));
+        $best = null;
+        foreach ($markets as $symbol => $quote) {
+            if ($symbol === $atGate['nav']['waypointSymbol'] || $symbol === $source || ! empty($quote->data['invalidated_by_action']) || $quote->observed_at->lt($cutoff)) {
+                continue;
+            }
+            $fuelGood = collect($quote->data['tradeGoods'] ?? [])->firstWhere('symbol', 'FUEL');
+            if (! $fuelGood || ($fuelGood['purchasePrice'] ?? 0) < 1 || ($fuelGood['tradeVolume'] ?? 0) < 1 || ! $fuel->listsFuel($agent, $symbol, $listings)) {
+                continue;
+            }
+            try {
+                $first = $fuel->leg($agent, $atGate, $symbol, 0, listings: $listings);
+                if ($first['continuation'] !== $symbol) {
+                    continue;
+                }
+                $mid = $atGate;
+                $mid['nav']['waypointSymbol'] = $symbol;
+                $mid['fuel']['current'] = $mid['fuel']['capacity'];
+                $funded = clone $agent;
+                $funded->credits -= $first['refuel_ceiling'];
+                $second = $fuel->leg($funded, $mid, $source, 0, listings: $listings);
+                $fuelAfter = $second['continuation'] === $source && $mid['fuel']['capacity'] > 0
+                    ? $mid['fuel']['capacity']
+                    : $mid['fuel']['current'] - $second['outbound_fuel'];
+                $totalSeconds = ($first['estimated_seconds'] ?? 0) + ($second['estimated_seconds'] ?? 0);
+                if (! $best || $totalSeconds < $best['seconds']) {
+                    $best = ['stop' => $symbol, 'seconds' => $totalSeconds, 'fuel_after' => $fuelAfter];
+                }
+            } catch (GameException) {
+            }
+        }
+
+        return $best;
     }
 
     private function noMarkets(ReconMission $mission, string $system): bool
