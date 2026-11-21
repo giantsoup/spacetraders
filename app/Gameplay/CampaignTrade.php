@@ -463,6 +463,11 @@ class CampaignTrade
         $position = app(FuelPlanner::class)->leg($funded, $planned, $pair['source'], 0);
         $atSource['nav']['waypointSymbol'] = $pair['source'];
         $atSource['fuel']['current'] -= $position['outbound_fuel'];
+        // Positioning runs as a separate one-way leg that refuels on arrival at a verified fuel
+        // seller (and the trade run also tops up on departure), so the trade cycle starts full.
+        if ($pair['source'] !== $planned['nav']['waypointSymbol'] && $position['continuation'] === $pair['source'] && $atSource['fuel']['capacity'] > 0) {
+            $atSource['fuel']['current'] = $atSource['fuel']['capacity'];
+        }
         $outbound = app(FuelPlanner::class)->leg($funded, $atSource, $pair['market'], 0);
         $atBuyer = $atSource;
         $atBuyer['nav']['waypointSymbol'] = $pair['market'];
