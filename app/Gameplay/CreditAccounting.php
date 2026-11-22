@@ -72,6 +72,9 @@ class CreditAccounting
                 $totals['sale_proceeds'] += $price;
             }
         }
+        if ($action->command === 'buy_ship' && ! empty($outcome['delivered_ship']) && empty($outcome['configuration_mismatch'])) {
+            $totals['purchased_ships'] = array_values(array_unique([...($totals['purchased_ships'] ?? []), $outcome['delivered_ship']]));
+        }
         if ($action->command === 'jump') {
             $totals['jump_cost'] = ($totals['jump_cost'] ?? 0) + $price;
             $totals['jumps'] = ($totals['jumps'] ?? 0) + 1;
@@ -80,8 +83,8 @@ class CreditAccounting
             $totals['travel_fuel'] = ($totals['travel_fuel'] ?? 0) + ($outcome['travel']['actual_fuel'] ?? 0);
         }
         $run->update(['totals' => $totals, 'next_action_at' => now(), 'heartbeat_at' => now(), 'last_dispatched_at' => null]);
-        if ($outcome['price_discrepancy'] || ($outcome['fuel_discrepancy'] ?? false) || (isset($run->plan['max_fuel']) && ($totals['travel_fuel'] ?? 0) > $run->plan['max_fuel']) || $totals['spending'] > $run->plan['max_spend'] || ($totals['no_progress'] ?? 0) >= 1 || $totals['credit_delta'] < -$run->plan['max_loss']) {
-            $run->update(['state' => 'blocked', 'blocked_reason' => 'Execution price, spending, loss or no-progress limit reached.']);
+        if ($outcome['price_discrepancy'] || ($outcome['fuel_discrepancy'] ?? false) || ! empty($outcome['configuration_mismatch']) || (isset($run->plan['max_fuel']) && ($totals['travel_fuel'] ?? 0) > $run->plan['max_fuel']) || $totals['spending'] > $run->plan['max_spend'] || ($totals['no_progress'] ?? 0) >= 1 || $totals['credit_delta'] < -$run->plan['max_loss']) {
+            $run->update(['state' => 'blocked', 'blocked_reason' => ! empty($outcome['configuration_mismatch']) ? 'Delivered ship configuration differed from the approved offer. Review required.' : 'Execution price, spending, loss or no-progress limit reached.']);
         }
         app(CycleAccounting::class)->record($run, $ship);
     }

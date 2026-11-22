@@ -241,11 +241,19 @@ class ShipCommandExecutor
                 $reserved = true;
                 $action->refresh();
                 // The provider request budget may wait after the action is reserved.
-                $beforeTransport = $outbound ? function () use ($run, $action, &$refusedBeforeTransport) {
-                    $refusedBeforeTransport = true;
-                    app(GateRecon::class)->validateOutboundIntent($run, $action);
-                    $refusedBeforeTransport = false;
-                } : null;
+                $beforeTransport = match (true) {
+                    $outbound => function () use ($run, $action, &$refusedBeforeTransport) {
+                        $refusedBeforeTransport = true;
+                        app(GateRecon::class)->validateOutboundIntent($run, $action);
+                        $refusedBeforeTransport = false;
+                    },
+                    $run && $run->campaign_episode_id && $action->command === 'buy_ship' => function () use ($run, $agent, $action, &$refusedBeforeTransport) {
+                        $refusedBeforeTransport = true;
+                        app(CampaignSafety::class)->check($run->fresh(), $agent->fresh(), $action->command, $action->arguments, boundaryOnly: true);
+                        $refusedBeforeTransport = false;
+                    },
+                    default => null,
+                };
                 $data = $this->api->mutate($agent, $action->ship_symbol, $action->command, $action->arguments, function (array $receipt) use ($action, &$received) {
                     $received = true;
                     $action->update(['outcome' => array_merge($action->fresh()->outcome ?? [], $receipt, ['response_received_at' => now()->utc()->toIso8601String()])]);
@@ -477,7 +485,7 @@ class ShipCommandExecutor
         if (in_array($action->command, ['buy', 'sell'], true) && (($data['transaction']['units'] ?? null) !== $action->arguments['units'] || ($data['transaction']['tradeSymbol'] ?? null) !== $action->arguments['symbol'])) {
             throw new GameException('Trade response does not match the reserved intent.', uncertain: true);
         }
-        DB::transaction(function () use ($agent, $action, $data, $actualShip, $credits, $price, $delta, $discrepancy, $fuelDiscrepancy, $configurationMismatch, $cooldownDiscrepancy, $run, $target) {
+        DB::transaction(function () use ($agent, $action, $data, $before, $actualShip, $credits, $price, $delta, $discrepancy, $fuelDiscrepancy, $configurationMismatch, $cooldownDiscrepancy, $run, $target) {
             if ($actualShip) {
                 $this->sync->saveShip($agent, $actualShip);
             }
@@ -547,13 +555,14 @@ class ShipCommandExecutor
                     'reported_consumed' => $data['fuel']['consumed'] ?? null, 'server_route' => $actualShip['nav']['route'], 'events' => $data['events'] ?? []];
                 $this->sync->observe($agent, 'travel', $actualShip['symbol'], $outcome['travel'], 'navigation', $actualShip['symbol']);
             }
-            $action->update(['state' => ActionState::Confirmed, 'review_required' => $discrepancy, 'outcome' => array_merge($action->fresh()->outcome ?? [], $outcome), 'settled_at' => now(), 'message' => $fuelDiscrepancy ? 'Actual fuel differed from the approved prediction. Reconcile and replan before further commands.' : ($discrepancy ? (ExplorationPolicy::command($action->command) ? 'Exploration exceeded the cooldown review threshold or changed credits unexpectedly. Review before further work.' : 'Execution differed from approved quote or reserve. Further work is paused.') : 'Confirmed by SpaceTraders.')]);
+            $reviewRequired = $discrepancy || ($configurationMismatch && $run?->strategy === 'buy_probe');
+            $action->update(['state' => ActionState::Confirmed, 'review_required' => $reviewRequired, 'outcome' => array_merge($action->fresh()->outcome ?? [], $outcome), 'settled_at' => now(), 'message' => $fuelDiscrepancy ? 'Actual fuel differed from the approved prediction. Reconcile and replan before further commands.' : ($discrepancy ? (ExplorationPolicy::command($action->command) ? 'Exploration exceeded the cooldown review threshold or changed credits unexpectedly. Review before further work.' : 'Execution differed from approved quote or reserve. Further work is paused.') : 'Confirmed by SpaceTraders.')]);
             app(CreditAccounting::class)->record($agent, $action, $delta);
             if (isset($data['contract'])) {
                 $this->sync->observe($agent, 'contract', $data['contract']['id'], $data['contract']);
             }
             if ($run) {
-                app(CreditAccounting::class)->apply($run, $action, $actualShip, $outcome, $delta, $price);
+                app(CreditAccounting::class)->apply($run, $action, $action->command === 'buy_ship' ? $before['ship'] : $actualShip, $outcome, $delta, $price);
             }
         });
         if ($action->command === 'buy_ship' && ($configurationMismatch || (isset($action->arguments['site']) && app(MiningPlanner::class)->capability($actualShip) !== null))) {

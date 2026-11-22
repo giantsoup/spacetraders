@@ -65,6 +65,8 @@ class CampaignStrategy
         $number = fn ($value) => $this->number($value);
         $percent = fn ($value) => $number($value * 100).'%';
         $trade = $body['trade'];
+        $probes = $body['probes'] ?? null;
+        $probePool = is_array($probes) && (bool) ($probes['pool'] ?? true);
         $local = ($phase ?? $body['phases'][0]['id']) === 'earn' ? ($trade['local_earn'] ?? null) : null;
         $hasTrade = collect($body['phases'])->contains(fn ($phase) => collect($phase['activities'])->contains(fn ($activity) => $activity['strategy'] === 'trade'));
         $hasMining = collect($body['phases'])->contains(fn ($phase) => collect($phase['activities'])->contains(fn ($activity) => $activity['strategy'] === 'mining'));
@@ -84,7 +86,9 @@ class CampaignStrategy
         $add('safety', 'Safety and current work', 'Revalidate a retained preview first. Otherwise sync local results, record finished loads, and check safety before planning new work.', [
             'preview' => ['A retained preview is available', 'Recheck', 'Recheck before starting', 'Revalidate authority, safety, plan limits and current state. A valid preview can start a run. A retryable error defers it and a rejected preview is discarded. Each outcome ends this pass.'],
             'uncertain' => ['Accounting or an action is uncertain', 'Pause', 'Review the balance', 'This pass ends before cargo recovery. Uncertain actions, review holds or unexplained credit changes need operator review.'],
-            'active' => ['Another run is active or a role ship is busy', 'Wait', 'Let current work settle', 'A running operation or pending ship action can end this pass while the role ship is busy. A blocked, stale or stopping run can hand off once pending actions and transit settle. Wind-down also hands off work outside sell-only recovery.'],
+            'active' => ['Another run is active or a role ship is busy', 'Wait', 'Let current work settle', $probePool
+                ? 'Active runs settle per ship. While the command ship is busy, idle pool probes can still bootstrap up to '.$probes['target'].' probes or scout distinct markets concurrently. A blocked, stale or stopping run hands off once pending actions and transit settle. Wind-down hands off work outside sell-only recovery.'
+                : 'A running operation or pending ship action can end this pass while the role ship is busy. A blocked, stale or stopping run can hand off once pending actions and transit settle. Wind-down also hands off work outside sell-only recovery.'],
             'losses' => ['Loss streak reaches '.$losses.' losing loads', 'Recover', 'Recover cargo before pausing', 'The pause is pending while sell-only recovery is needed. Once role-ship cargo is cleared, C0 pauses for review. Other safety holds can stop earlier.'],
             'clear' => ['No safety hold or current work', 'Continue', 'Check cargo first', 'New work is possible only after checking the existing cargo on the command ship and probe.'],
         ]);
@@ -125,8 +129,15 @@ class CampaignStrategy
         $windDown = in_array('wind_down', array_column($body['phases'], 'id'), true)
             ? 'In the final hour, C0 moves to the configured Wind-down phase.'
             : 'This revision has no literal wind_down phase. Its phase label can stay as configured in the final hour.';
-        $add('phase', 'Phase and activity', 'Check phase exits before activities. Several exits can pass in one turn. Try eligible activities in order. The first activity that starts a run wins.', [
-            'run' => ['An eligible activity starts a run', 'Run', 'The first successful activity wins', 'Starting a run ends this pass. Later activities wait for another pass. A missing role ship, transit or a failed activity condition skips that activity.'],
+        $phaseSummary = 'Check phase exits before activities. Several exits can pass in one turn. Try eligible activities in order. '.($probePool
+            ? 'With the probe pool enabled, C0 can also bootstrap up to '.$probes['target'].' probes (max '.number_format($probes['max_price']).' CR each, keeping at least '.number_format($probes['min_working_capital']).' CR working capital) and dispatch idle pool probes to distinct markets concurrently.'
+            : (is_array($probes)
+                ? 'Before activities, C0 can bootstrap up to '.$probes['target'].' probes (max '.number_format($probes['max_price']).' CR each, keeping at least '.number_format($probes['min_working_capital']).' CR working capital). The first activity that starts a run wins.'
+                : 'The first activity that starts a run wins.'));
+        $add('phase', 'Phase and activity', $phaseSummary, [
+            'run' => ['An eligible activity starts a run', 'Run', $probePool ? 'Dispatch idle ships' : 'The first successful activity wins', $probePool
+                ? 'With the probe pool enabled, C0 can start runs for idle ships concurrently in one pass rather than stopping after the first. A missing or busy role ship, transit or a failed activity condition skips that ship.'
+                : 'Starting a run ends this pass. Later activities wait for another pass. A missing role ship, transit or a failed activity condition skips that activity.'],
             'discovery' => ['Discovery is due outside Earn', 'Recheck', 'Discovery can take over this pass', 'Outside Earn and wind-down, due discovery advances before activities and ends the pass. Discover waits two minutes between sweeps. Other phases use fifteen minutes. In Earn, C0 refreshes parked markets and may advance discovery during an active run or after activities yield.'],
             'wind' => ['The final hour begins', 'Recover', 'Only sell aboard', $windDown.' The final-hour restriction still blocks new buys, mining and scouting. Selling happens in Cargo first. A configured sell_aboard activity starts no work on its own.'],
             'idle' => ['No eligible activity starts a run', 'Recheck', 'End this pass', 'C0 returns on a later pass. A trade that yields allows the next eligible activity to try.'.($hasMining ? ' If trade was already attempted, mining is deferred to the next pass and that turn skips trade.' : '')],

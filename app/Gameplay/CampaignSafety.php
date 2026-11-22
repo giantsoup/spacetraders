@@ -63,14 +63,36 @@ class CampaignSafety
             || ! $grant->fresh()->available() || $episode->closed_at || $agent->reset_id !== $episode->reset_id) {
             throw new GameException('Campaign authority is paused, closed or awaiting liquidation.');
         }
-        if (! in_array($command, [null, 'orbit', 'dock', 'navigate', 'mine', 'mine_survey', 'sell', 'buy', 'refuel'], true)) {
+        if (! in_array($command, [null, 'orbit', 'dock', 'navigate', 'mine', 'mine_survey', 'sell', 'buy', 'refuel', 'buy_ship'], true)) {
             throw new GameException('Command is outside the campaign grant.');
         }
         if ($episode->next_reset_at->isPast()) {
             throw new GameException('Awaiting confirmation of the next reset.');
         }
-        if ($this->windDown($episode) && in_array($command, ['buy', 'mine', 'mine_survey'], true)) {
+        if ($this->windDown($episode) && in_array($command, ['buy', 'buy_ship', 'mine', 'mine_survey'], true)) {
             throw new GameException('Wind-down only permits selling aboard.');
+        }
+        if ($command === 'buy_ship') {
+            $probes = CampaignProbeBootstrap::policy($grant, $episode);
+            if (! $probes || $run->strategy !== 'buy_probe' || ($arguments['shipType'] ?? null) !== 'SHIP_PROBE') {
+                throw new GameException('Command is outside the campaign grant.');
+            }
+            $maxTotal = $arguments['maxTotal'] ?? PHP_INT_MAX;
+            $reserve = app(CampaignProbeBootstrap::class)->effectiveReserve($agent, $grant, $probes, $run->id);
+            if ($maxTotal > $probes['max_price'] || $agent->credits - $maxTotal < $reserve) {
+                throw new GameException('Probe purchase exceeds max_price or working-capital reserve.');
+            }
+        }
+        if ($command === 'refuel' && $run->strategy === 'buy_probe' && ! $boundaryOnly) {
+            $probes = CampaignProbeBootstrap::policy($grant, $episode);
+            if (! $probes) {
+                throw new GameException('Command is outside the campaign grant.');
+            }
+            $maxTotal = $arguments['maxTotal'] ?? PHP_INT_MAX;
+            $reserve = app(CampaignProbeBootstrap::class)->effectiveReserve($agent, $grant, $probes, $run->id);
+            if ($agent->credits - $maxTotal < $reserve) {
+                throw new GameException('Probe bootstrap refuel exceeds current working-capital reserve.');
+            }
         }
         if (in_array($command, ['buy', 'sell'], true)) {
             app(FleetClaims::class)->follow($run, $episode, $command, $arguments);

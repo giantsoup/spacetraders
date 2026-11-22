@@ -30,7 +30,7 @@ class CampaignPlaybook
 
     public function validate(array $body): void
     {
-        $this->keys($body, ['name', 'version', 'agent', 'limits', 'trade', 'phases', 'predictions']);
+        $this->keys($body, ['name', 'version', 'agent', 'limits', 'trade', 'probes', 'phases', 'predictions']);
         $this->keys($body['agent'] ?? null, ['symbol', 'faction']);
         $this->keys($body['limits'] ?? null, ['reserve_credits', 'fuel_reserve', 'run_max_minutes']);
         $this->keys($body['trade'] ?? null, ['proof', 'lot', 'losses', 'switch', 'quote_max_age_seconds', 'local_earn']);
@@ -38,6 +38,18 @@ class CampaignPlaybook
         $this->keys($body['trade']['lot'] ?? null, ['max_buyer_batches', 'first_scaled_max_buyer_batches', 'default_batch_decay']);
         $this->keys($body['trade']['losses'] ?? null, ['losing_load', 'pause_after_consecutive_losing_loads']);
         $this->keys($body['trade']['switch'] ?? null, ['bid_below_first_seen', 'better_pair_ratio']);
+        if (array_key_exists('probes', $body)) {
+            $probes = $body['probes'];
+            $this->keys($probes, ['target', 'max_price', 'min_working_capital', 'pool']);
+            foreach (['target' => [1, 10], 'max_price' => [1, 1000000], 'min_working_capital' => [0, 10000000]] as $key => [$minimum, $maximum]) {
+                if (! is_int($probes[$key] ?? null) || $probes[$key] < $minimum || $probes[$key] > $maximum) {
+                    throw new GameException('Invalid probes policy: '.$key);
+                }
+            }
+            if (array_key_exists('pool', $probes) && ! is_bool($probes['pool'])) {
+                throw new GameException('Invalid probes policy: pool');
+            }
+        }
         if (array_key_exists('local_earn', $body['trade'])) {
             $policy = $body['trade']['local_earn'];
             $this->keys($policy, ['projection_limit', 'max_attempts', 'position_evidence_max_age_seconds', 'max_positionings_without_trade']);

@@ -239,6 +239,12 @@ final class FakeSpaceTraders
             }
             if (str_ends_with($path, '/shipyard')) {
                 $symbol = explode('/', $path)[4];
+                if (isset($world['shipyards'][$symbol])) {
+                    $yard = $world['shipyards'][$symbol];
+                    $visible = collect($world['ships'])->contains(fn ($s) => $s['nav']['waypointSymbol'] === $symbol && $s['nav']['status'] !== 'IN_TRANSIT');
+
+                    return [['data' => ['symbol' => $symbol, 'shipTypes' => $yard['shipTypes'], 'transactions' => $world['transactions']] + ($visible && isset($yard['ships']) ? ['ships' => $yard['ships']] : [])], 200];
+                }
 
                 return [['data' => ['symbol' => $symbol, 'shipTypes' => [['type' => 'SHIP_MINING_DRONE']], 'ships' => [$world['offer']], 'transactions' => $world['transactions']]], 200];
             }
@@ -313,14 +319,29 @@ final class FakeSpaceTraders
             }
         }
         if ($path === '/my/ships') {
+            $yardOffer = isset($world['shipyards'][$args['waypointSymbol']]['ships'])
+                ? collect($world['shipyards'][$args['waypointSymbol']]['ships'])->firstWhere('type', $args['shipType'])
+                : null;
+            $offer = $yardOffer ?? $world['offer'];
             $ship = self::ship('LOCAL-'.(count($world['ships']) + 1), $args['waypointSymbol']);
-            if ($world['foundation'] ?? false) {
+            $ship['nav']['systemSymbol'] = implode('-', array_slice(explode('-', $args['waypointSymbol']), 0, 2));
+            if ($yardOffer || ($world['foundation'] ?? false)) {
                 foreach (['frame', 'reactor', 'engine', 'mounts', 'modules', 'crew'] as $field) {
-                    $ship[$field] = $world['offer'][$field];
+                    if (isset($offer[$field])) {
+                        $ship[$field] = $offer[$field];
+                    }
                 }
             }
+            if (($args['shipType'] ?? null) === 'SHIP_PROBE') {
+                $ship['registration']['role'] = 'SATELLITE';
+                $ship['fuel'] = ['current' => 0, 'capacity' => 0];
+                $ship['cargo'] = ['capacity' => 0, 'units' => 0, 'inventory' => []];
+            }
+            if (isset($world['deliver_mismatched_frame'])) {
+                $ship['frame']['symbol'] = $world['deliver_mismatched_frame'];
+            }
             $world['ships'][] = $ship;
-            $price = $world['offer']['purchasePrice'];
+            $price = $offer['purchasePrice'];
             $world['credits'] -= $price;
 
             return [['data' => ['ship' => $ship, 'agent' => ['credits' => $world['credits']], 'transaction' => ['waypointSymbol' => $args['waypointSymbol'], 'shipSymbol' => $world['purchase_transaction_symbol'] ?? $args['shipType'], 'shipType' => $world['purchase_transaction_type'] ?? $args['shipType'], 'price' => $price, 'agentSymbol' => $world['symbol'], 'timestamp' => now()->toIso8601String()]]], 201];

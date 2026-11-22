@@ -82,7 +82,9 @@ class CampaignStatus
         $agent = $episode ? Agent::find($episode->agent_id) : null;
         $revision = $grant?->revision();
         $engine = LocalEngine::find(1);
-        $run = $episode ? AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('active_agent_id')->first() : null;
+        $activeRuns = $episode ? AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('active_agent_id')->orderBy('id')->get() : collect();
+        $commandSymbol = $episode?->state['role_ships']['command'] ?? null;
+        $run = $activeRuns->firstWhere('ship_symbol', $commandSymbol) ?? $activeRuns->first();
         $loads = $episode ? CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])->latest('id')->limit(15)->get() : collect();
         $loadRuns = AutomationRun::whereIn('id', $loads->pluck('data.run_id')->filter())->get()->keyBy('id');
         $ships = $agent ? Ship::where('agent_id', $agent->id)->orderBy('symbol')->get() : collect();
@@ -92,6 +94,11 @@ class CampaignStatus
             $ship->snapshot = $this->projectShipValue($ship->snapshot, self::SHIP_DETAILS, '', $unlistedFields[$ship->id]);
         }
         $roles = array_flip(Arr::only($episode?->state['role_ships'] ?? [], ['command', 'probe']));
+        if ($episode && app(CampaignFleet::class)->poolEnabled($episode)) {
+            foreach (app(CampaignFleet::class)->probes($episode) as $probe) {
+                $roles[$probe['symbol']] = 'probe';
+            }
+        }
         $locations = $ships->unique(fn ($ship) => $ship->snapshot['nav']['systemSymbol'] ?? null)
             ->flatMap(fn ($ship) => collect(app(SystemMapKnowledge::class)->forShip($agent, $ship)['locations'])
                 ->map(fn ($point) => Arr::only($point, ['symbol', 'type', 'traits', 'description'])))->values();
@@ -234,6 +241,7 @@ class CampaignStatus
             'resume' => 'The next decision uses fresh state.',
             'registration' => 'Agent #'.($data['agent_id'] ?? '?').' · '.($data['reset_id'] ?? ''),
             'freshness_hold' => 'Run #'.($data['run_id'] ?? '?'),
+            'probe_purchased' => ($data['ship'] ?? 'SHIP_PROBE').' at '.($data['shipyard'] ?? '?').' · '.number_format((int) ($data['price'] ?? 0)).' CR',
             default => $data['symbol'] ?? $data['reset_id'] ?? $event->kind,
         }), 180);
     }
