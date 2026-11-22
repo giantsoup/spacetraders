@@ -66,6 +66,7 @@ class CampaignFleet
         $homeSystem = $command['nav']['systemSymbol'] ?? null;
 
         return $ships->filter(fn ($ship) => $this->isProbe($ship->snapshot)
+            && empty($ship->stationed_waypoint)
             && ! in_array($ship->symbol, $armShips, true)
             && ($homeSystem === null || ($ship->snapshot['nav']['systemSymbol'] ?? null) === $homeSystem)
             && ! ReconMission::holds($agent, $ship->symbol))
@@ -113,7 +114,7 @@ class CampaignFleet
         }
         $candidates = $ships->filter(fn ($ship) => $role === 'command'
             ? ($ship->snapshot['registration']['role'] ?? null) === 'COMMAND'
-            : $this->isProbe($ship->snapshot));
+            : ($this->isProbe($ship->snapshot) && empty($ship->stationed_waypoint)));
         // Preserve the ship already used by episodes created before role pinning existed.
         $used = AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('started_at')
             ->whereIn('ship_symbol', $candidates->pluck('symbol'))->oldest('id')->value('ship_symbol');

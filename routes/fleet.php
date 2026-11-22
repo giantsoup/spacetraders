@@ -1,8 +1,32 @@
 <?php
 
 use App\Gameplay\FleetMetrics;
+use App\Models\Ship;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Artisan;
+
+Artisan::command('ship:station {ship} {waypoint?} {--clear}', function () {
+    $symbol = strtoupper(trim((string) $this->argument('ship')));
+    $ship = Ship::where('symbol', $symbol)->latest('id')->firstOrFail();
+    if ($this->option('clear')) {
+        $ship->update(['stationed_waypoint' => null]);
+        $this->info("{$ship->symbol} released from station back to fleet.");
+
+        return 0;
+    }
+    $waypoint = strtoupper(trim((string) ($this->argument('waypoint') ?? '')));
+    if ($waypoint === '') {
+        $this->line($ship->stationed_waypoint
+            ? "{$ship->symbol} is stationed at {$ship->stationed_waypoint}."
+            : "{$ship->symbol} is not stationed.");
+
+        return 0;
+    }
+    $ship->update(['stationed_waypoint' => $waypoint]);
+    $this->info("{$ship->symbol} stationed at {$waypoint}.");
+
+    return 0;
+})->purpose('Pin a ship to a waypoint (excluding probes from campaign scouting) or release it with --clear');
 
 Artisan::command('fleet:scorecard {--since=} {--until=} {--reset=} {--json}', function (FleetMetrics $metrics) {
     $card = $metrics->scorecard($this->option('since') ? CarbonImmutable::parse($this->option('since')) : null,

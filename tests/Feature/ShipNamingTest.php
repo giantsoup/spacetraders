@@ -10,6 +10,7 @@ use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignGrant;
+use App\Models\GameObservation;
 use App\Models\Ship;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -310,5 +311,29 @@ class ShipNamingTest extends TestCase
         $this->assertSame('Light Hauler #5 · H1: Medicine (D42→D45)', $hauler->displayName($purposes['OFFLINE-5']));
         $this->assertSame('Standby', $purposes['OFFLINE-6']);
         $this->assertSame('Light Shuttle #6 · Standby', $shuttle->displayName($purposes['OFFLINE-6']));
+
+        // Stationing a probe at a JUMP_GATE renders Gate Watch (and en route when not there yet).
+        GameObservation::create([
+            'agent_id' => $agent->id,
+            'reset_id' => $agent->reset_id,
+            'kind' => 'waypoint',
+            'symbol' => 'X1-SK70-I56',
+            'source' => 'read',
+            'observed_at' => now(),
+            'data' => ['symbol' => 'X1-SK70-I56', 'type' => 'JUMP_GATE', 'systemSymbol' => 'X1-SK70'],
+        ]);
+        $probe3->update(['stationed_waypoint' => 'X1-SK70-I56']);
+        $ships = Ship::where('agent_id', $agent->id)->orderBy('symbol')->get();
+        $purposes = app(ShipPurpose::class)->forAgent($agent, $ships);
+        $this->assertSame('Gate Watch → I56', $purposes['OFFLINE-3']);
+
+        $snap3 = $probe3->snapshot;
+        $snap3['nav']['status'] = 'IN_ORBIT';
+        $snap3['nav']['waypointSymbol'] = 'X1-SK70-I56';
+        $probe3->update(['snapshot' => $snap3]);
+        $ships = Ship::where('agent_id', $agent->id)->orderBy('symbol')->get();
+        $purposes = app(ShipPurpose::class)->forAgent($agent, $ships);
+        $this->assertSame('Gate Watch (I56)', $purposes['OFFLINE-3']);
+        $this->assertSame('Probe #3 · Gate Watch (I56)', $probe3->displayName($purposes['OFFLINE-3']));
     }
 }

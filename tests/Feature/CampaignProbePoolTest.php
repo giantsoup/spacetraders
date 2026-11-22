@@ -1850,6 +1850,47 @@ class CampaignProbePoolTest extends TestCase
         $this->assertSame(0, AutomationRun::where('ship_symbol', 'LOCAL-2')->whereNotNull('active_agent_id')->count());
     }
 
+    public function test_stationed_probe_is_excluded_from_pool_scouting_and_stays_parked(): void
+    {
+        $this->editWorld(function (array &$world) {
+            $world['ships'][] = $this->probeShip('LOCAL-3', 'X1-TEST-GATE');
+            $world['waypoints'] = [
+                ['symbol' => 'X1-TEST-ROCK', 'systemSymbol' => 'X1-TEST', 'type' => 'PLANET', 'x' => 0, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]],
+                ['symbol' => 'X1-TEST-GATE', 'systemSymbol' => 'X1-TEST', 'type' => 'JUMP_GATE', 'x' => 20, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]],
+                ['symbol' => 'X1-TEST-M2', 'systemSymbol' => 'X1-TEST', 'type' => 'PLANET', 'x' => 5, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]],
+                ['symbol' => 'X1-TEST-M3', 'systemSymbol' => 'X1-TEST', 'type' => 'PLANET', 'x' => 0, 'y' => 5, 'traits' => [['symbol' => 'MARKETPLACE']]],
+            ];
+            $world['market_goods'] = [
+                'X1-TEST-ROCK' => [['symbol' => 'FUEL', 'tradeVolume' => 100, 'purchasePrice' => 70, 'sellPrice' => 65]],
+                'X1-TEST-GATE' => [['symbol' => 'ANTIMATTER', 'tradeVolume' => 10, 'purchasePrice' => 5000, 'sellPrice' => 4500]],
+                'X1-TEST-M2' => [['symbol' => 'FUEL', 'tradeVolume' => 100, 'purchasePrice' => 70, 'sellPrice' => 65]],
+                'X1-TEST-M3' => [['symbol' => 'FUEL', 'tradeVolume' => 100, 'purchasePrice' => 70, 'sellPrice' => 65]],
+            ];
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $this->seedDiscoveryDone();
+        Ship::where('agent_id', $this->agent->id)->where('symbol', 'LOCAL-3')->update(['stationed_waypoint' => 'X1-TEST-GATE']);
+
+        $grant = $this->approve($this->bootstrapBody(target: 2, maxPrice: 50000, minWorkingCapital: 75000));
+        $episode = CampaignEpisode::create([
+            'campaign_grant_id' => $grant->id,
+            'agent_id' => $this->agent->id,
+            'reset_id' => $this->agent->reset_id,
+            'start_credits' => 150000,
+            'phase' => 'earn',
+            'opened_at' => now(),
+            'next_reset_at' => now()->addDays(5),
+            'state' => ['last_discovery_at' => now()->toIso8601String(), 'role_ships' => ['command' => 'LOCAL-1', 'probe' => 'LOCAL-2']],
+        ]);
+
+        $poolSymbols = array_column(app(CampaignFleet::class)->probes($episode), 'symbol');
+        $this->assertSame(['LOCAL-2'], $poolSymbols);
+
+        $this->tickDirector();
+        $this->assertSame(1, AutomationRun::where('ship_symbol', 'LOCAL-2')->whereNotNull('active_agent_id')->count());
+        $this->assertSame(0, AutomationRun::where('ship_symbol', 'LOCAL-3')->whereNotNull('active_agent_id')->count());
+    }
+
     private function baseWorld(): array
     {
         $world = FakeSpaceTraders::world();
