@@ -110,7 +110,7 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
                     <template v-if="currentRun">
                         <div><dt>Run state</dt><dd>{{ label(currentRun.state) }}</dd></div>
                         <div><dt>Run phase</dt><dd>{{ label(currentRun.phase) }}<span v-if="currentRun.step !== null"> · Step {{ count(currentRun.step) }}</span></dd></div>
-                        <div><dt>Ship</dt><dd>{{ currentRun.ship }}</dd></div>
+                        <div><dt>Ship</dt><dd>{{ currentRun.ship_name && currentRun.ship_name !== currentRun.ship ? `${currentRun.ship_name} · ${currentRun.ship}` : currentRun.ship }}</dd></div>
                         <div><dt>Started</dt><dd><time v-if="currentRun.started_at" :datetime="currentRun.started_at">{{ formatLocalTime(currentRun.started_at) }}</time><span v-else>Not started</span></dd></div>
                         <div v-if="currentRun.blocked_reason"><dt>Blocked reason</dt><dd>{{ label(currentRun.blocked_reason) }}</dd></div>
                         <template v-if="currentRun.plan">
@@ -164,7 +164,7 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
                 <h2 id="ships-heading">Ships</h2>
                 <ul v-if="ships.length" class="records">
                     <li v-for="ship in shipScenes" :key="ship.symbol">
-                        <h3>{{ ship.symbol }}</h3>
+                        <h3>{{ ship.display_name || ship.symbol }}<span v-if="ship.display_name && ship.display_name !== ship.symbol" class="ship-code"> · {{ ship.symbol }}</span></h3>
                         <ShipScene :location="ship.location" :reset="episode?.reset_id" :pose="ship.presentation.pose" :transit="ship.presentation.transit" :progress="ship.presentation.progress" compact :interactive="false" />
                         <dl>
                             <div><dt>Campaign role</dt><dd>{{ label(ship.role) }}</dd></div>
@@ -228,6 +228,7 @@ const post = action => form.post(route(`campaign.${action}`), { preserveScroll: 
 .status.warning { background: #302819; border-color: #bd9e61; color: #ffe09a; }
 .campaign-status h2 { margin-bottom: 12px; }
 .campaign-status h3 { margin-top: 20px; font-size: 15px; font-weight: 700; }
+.campaign-status .ship-code { color: var(--color-muted); font-weight: 400; font-size: 13px; }
 .campaign-status .ship-scene { margin: 12px 0; }
 .campaign-status dl { display: grid; gap: 14px; margin: 24px 0; font-size: 13px; }
 .campaign-status dl > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 12px; }

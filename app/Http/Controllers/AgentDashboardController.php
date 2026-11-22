@@ -94,6 +94,25 @@ class AgentDashboardController extends Controller
         return response()->json(['actions' => $actions->take(40)->values(), 'has_more' => $actions->count() > 40])->header('Cache-Control', 'no-store');
     }
 
+    public function renameShip(Request $request, Agent $agent, string $ship)
+    {
+        abort_unless($agent->user_id === $request->user()->id, 404);
+        $record = Ship::where('agent_id', $agent->id)->where('symbol', $ship)->firstOrFail();
+        $input = $request->validate(['nickname' => ['nullable', 'string', 'max:60']]);
+        $clean = isset($input['nickname']) ? trim($input['nickname']) : '';
+        $record->update(['nickname' => $clean === '' ? null : $clean]);
+        $display = $record->displayName();
+
+        return response()->json([
+            'symbol' => $record->symbol,
+            'nickname' => $record->nickname,
+            'display_name' => $display,
+            'message' => $record->nickname !== null
+                ? "Renamed {$record->symbol} to {$record->nickname}."
+                : "Reset {$record->symbol} to automatic name ({$display}).",
+        ])->header('Cache-Control', 'no-store');
+    }
+
     public function investment(GameplayRequest $request, Agent $agent, OpportunityEvaluator $evaluator)
     {
         $case = $request->validated();

@@ -1,6 +1,23 @@
 // These labels describe observations. Timers never grant command eligibility.
 export const observedNumber = value => typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : 'Unknown';
 export const meterPercent = (current, capacity) => Number.isFinite(current) && Number.isFinite(capacity) && capacity > 0 ? Math.max(0, Math.min(100, current / capacity * 100)) : 0;
+
+export function shipDisplayName(entry) {
+    if (!entry) return '';
+    if (typeof entry === 'string') return entry;
+    const explicit = typeof entry.display_name === 'string' ? entry.display_name.trim() : '';
+    if (explicit) return explicit;
+    const nickname = typeof entry.nickname === 'string' ? entry.nickname.trim() : '';
+    if (nickname) return nickname;
+    return entry.symbol || '';
+}
+
+export function shipOptionLabel(entry) {
+    if (!entry) return '';
+    const name = shipDisplayName(entry);
+    const symbol = typeof entry === 'string' ? entry : (entry.symbol || '');
+    return name && symbol && name !== symbol ? `${name} (${symbol})` : (name || symbol);
+}
 export function remaining(instant, now) {
     const deadline = Date.parse(instant);
     if (!Number.isFinite(deadline)) return 'Unknown';

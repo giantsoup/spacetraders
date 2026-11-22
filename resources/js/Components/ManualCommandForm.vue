@@ -1,6 +1,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
+import { shipOptionLabel } from '@/shipPresentation.js';
 const props = defineProps({ commands: Object, enums: Object, selected: String, ships: Array, disabled: Boolean, reserveFloor: Number });
 const emit = defineEmits(['preview']);
 const command = ref('orbit');
@@ -32,7 +33,7 @@ function preview() {
                 <select v-else-if="field === 'shipType'" v-model="form[field]" :name="field"><option v-for="type in enums.ShipType" :key="type">{{ type }}</option></select>
                 <select v-else-if="field === 'flightMode'" v-model="form[field]" :name="field"><option value="">Keep current mode</option><option v-for="mode in ['DRIFT', 'STEALTH', 'CRUISE', 'BURN']" :key="mode">{{ mode }}</option></select>
                 <select v-else-if="field === 'question'" v-model="form[field]" :name="field"><option>MARKETPLACE</option><option>SHIPYARD</option></select>
-                <select v-else-if="field === 'targetShip'" v-model="form[field]" :name="field" required><option value="">Select receiving ship</option><option v-for="ship in ships.filter(row => row.symbol !== selected)" :key="ship.symbol">{{ ship.symbol }}</option></select>
+                <select v-else-if="field === 'targetShip'" v-model="form[field]" :name="field" required><option value="">Select receiving ship</option><option v-for="ship in ships.filter(row => row.symbol !== selected)" :key="ship.symbol" :value="ship.symbol">{{ shipOptionLabel(ship) }}</option></select>
                 <input v-else-if="numbers.includes(field)" v-model="form[field]" :name="field" type="number" :min="field === 'units' ? 1 : 0" :max="field === 'term_index' ? 19 : 1000000000" step="1" :required="!['maxFuel', 'maxSeconds', 'maxCargoUnits', 'units'].includes(field) || (field === 'units' && command !== 'refuel')">
                 <input v-else v-model="form[field]" :list="field === 'symbol' ? 'manual-symbols' : undefined" :name="field" :required="!(command === 'mine' && ['surveySignature', 'surveyWaypoint'].includes(field))" :maxlength="field === 'surveySignature' ? 255 : 80">
             </label></div>

@@ -127,7 +127,7 @@ class CampaignStatus
             'currentRun' => $run ? [
                 'id' => $run->id, 'strategy' => $run->strategy, 'state' => $run->state->value,
                 'step' => $run->totals['step_index'] ?? null, 'phase' => $run->totals['phase'] ?? null,
-                'ship' => $run->ship_symbol, 'started_at' => $run->started_at?->toIso8601String(), 'blocked_reason' => $run->blocked_reason,
+                'ship' => $run->ship_symbol, 'ship_name' => $ships->firstWhere('symbol', $run->ship_symbol)?->displayName() ?? $run->ship_symbol, 'started_at' => $run->started_at?->toIso8601String(), 'blocked_reason' => $run->blocked_reason,
                 'plan' => $run->strategy === 'trade' ? ['good' => $run->plan['symbol'] ?? null, 'source' => $run->plan['site'] ?? null,
                     'buyer' => $run->plan['market'] ?? null, 'units' => $run->plan['units'] ?? null] : null,
             ] : null,
@@ -153,6 +153,8 @@ class CampaignStatus
                     'summary' => $this->eventSummary($event)])->all() : [],
             'ships' => $ships
                 ->map(fn ($ship) => ['symbol' => $ship->symbol,
+                    'display_name' => $ship->displayName(),
+                    'nickname' => $ship->nickname,
                     'observed_at' => $ship->observed_at?->toIso8601String(),
                     'details' => $ship->snapshot,
                     'unlisted_fields' => $unlistedFields[$ship->id],

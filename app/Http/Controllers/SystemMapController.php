@@ -21,7 +21,7 @@ class SystemMapController extends Controller
 
         return Inertia::render('Agent/SystemMap', [
             'agent' => $agent->only(['id', 'name', 'reset_id', 'connection_state']),
-            'ships' => $ships->map(fn ($row) => ['symbol' => $row->symbol]),
+            'ships' => $ships->map(fn ($row) => ['symbol' => $row->symbol, 'display_name' => $row->displayName()]),
             'map' => $knowledge->forShip($agent, $ship),
             'selectedLocation' => $input['location'] ?? null,
             'freshnessSeconds' => (int) config('gameplay.snapshot_seconds'),

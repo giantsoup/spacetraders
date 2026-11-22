@@ -5,6 +5,7 @@ import PrimaryButton from '@/Components/PrimaryButton.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
 import { formatLocalTime, localTimeZone } from '@/dateTime.js';
 import { readableLabel } from '@/dataPresentation.js';
+import { shipOptionLabel } from '@/shipPresentation.js';
 
 const props = defineProps({ agent: Object, ships: Array, selected: String, operations: Object, enums: Object, disabled: Boolean });
 const operation = ref('get-status');
@@ -49,7 +50,7 @@ async function read(page = form.page, continuation = false) {
                 <label>Read operation<select v-model="operation"><option v-for="(entry, id) in operations" :key="id" :value="id">{{ entry[0] }}</option></select></label>
                 <div class="fields">
                     <label v-for="field in definition[1]" :key="field">{{ labels[field] }}
-                        <select v-if="field === 'shipSymbol'" v-model="form[field]" required><option value="">Select owned ship</option><option v-for="ship in ships" :key="ship.symbol">{{ ship.symbol }}</option></select>
+                        <select v-if="field === 'shipSymbol'" v-model="form[field]" required><option value="">Select owned ship</option><option v-for="ship in ships" :key="ship.symbol" :value="ship.symbol">{{ shipOptionLabel(ship) }}</option></select>
                         <select v-else-if="field === 'factionSymbol'" v-model="form[field]" required><option v-for="faction in enums.FactionSymbol" :key="faction">{{ faction }}</option></select>
                         <input v-else v-model="form[field]" required maxlength="80" :placeholder="field === 'systemSymbol' ? 'X1-AB12' : field === 'waypointSymbol' ? 'X1-AB12-C3' : ''">
                     </label>
