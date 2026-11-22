@@ -296,8 +296,12 @@ class CampaignLocalEarn
 
             return;
         }
+        $fleet = app(CampaignFleet::class);
+        $validProbe = $fleet->poolEnabled($episode)
+            ? in_array($run->ship_symbol, array_column($fleet->probes($episode), 'symbol'), true)
+            : $run->ship_symbol === ($fleet->role($episode, 'probe')['symbol'] ?? null);
         if ($local['kind'] !== 'free_observation' || ($command['nav']['waypointSymbol'] ?? null) !== $pair['source']
-            || $run->ship_symbol === ($command['symbol'] ?? null) || $run->ship_symbol !== (app(CampaignFleet::class)->role($episode, 'probe')['symbol'] ?? null) || ! app(FuelPlanner::class)->fuelFree($ship)
+            || $run->ship_symbol === ($command['symbol'] ?? null) || ! $validProbe || ! app(FuelPlanner::class)->fuelFree($ship)
             || ReconMission::holds($agent, $run->ship_symbol) || $run->plan['max_spend'] !== 0 || $run->plan['route']['fuel_estimate'] !== 0) {
             throw new GameException('Local Earn buyer observation requires an available fuel-free probe with no spending.');
         }

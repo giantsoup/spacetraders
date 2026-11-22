@@ -79,10 +79,17 @@ class AutomationRunner
             if ($run->expires_at->isPast() || $run->reset_id !== $agent->reset_id || AutomationRun::where('active_agent_id', $agent->id)->where('ship_symbol', $run->ship_symbol)->exists()) {
                 $this->rejectPreview($run, 'Preview expired, reset or another run already owns this ship.');
             }
-            if (! in_array($run->plan_version, [1, 2, 3, 4, 5], true) || ($this->gate->enabled() && ! in_array($run->plan_version, [2, 3, 4, 5], true)) || ($run->plan_version === 3 && ! in_array($run->strategy, ['scout', 'trade'], true)) || ($run->plan_version === 4 && (! $run->campaign_episode_id || $run->strategy !== 'sell_aboard'))) {
+            if (! in_array($run->plan_version, [1, 2, 3, 4, 5, 6], true) || ($this->gate->enabled() && ! in_array($run->plan_version, [2, 3, 4, 5, 6], true)) || ($run->plan_version === 3 && ! in_array($run->strategy, ['scout', 'trade'], true)) || ($run->plan_version === 4 && (! $run->campaign_episode_id || $run->strategy !== 'sell_aboard')) || ($run->plan_version === 6 && (! $run->campaign_episode_id || $run->strategy !== 'buy_probe'))) {
                 throw new GameException('Unsupported or historical plan version. Create a fresh staged preview.');
             }
-            if ($run->plan_version === 5) {
+            if ($run->plan_version === 6) {
+                $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
+                $fresh = app(CampaignProbeBootstrap::class)->compose($agent, $run->ship_symbol, $run->plan['shipyard'], $run->plan, $episode, $run->id);
+                if (! hash_equals($run->fingerprint, $fresh['fingerprint'])) {
+                    $this->rejectPreview($run, 'Probe bootstrap ship, balance, probe count or shipyard changed. Create a fresh preview.');
+                }
+                $plan = $fresh['plan'];
+            } elseif ($run->plan_version === 5) {
                 if ($run->strategy !== 'gate_recon') {
                     throw new GameException('Version 5 is reserved for gate reconnaissance.');
                 }
@@ -152,10 +159,11 @@ class AutomationRunner
             $grant = $episode->grant();
             if (! $grant->available() || $episode->agent_id !== $agent->id || $episode->closed_at || $run->agent_id !== $agent->id
                 || ! hash_equals($grant->revision_hash, $grant->revision()->content_hash)
-                || ! in_array($run->strategy, ['scout', 'trade', 'mining', 'sell_aboard'], true)
+                || ! in_array($run->strategy, ['scout', 'trade', 'mining', 'sell_aboard', 'buy_probe'], true)
+                || ($run->strategy === 'buy_probe' && ! CampaignProbeBootstrap::policy($grant, $episode))
                 || $run->plan['reserve'] < $grant->limits['reserve_credits'] || $run->plan['minutes'] > $grant->limits['run_max_minutes']
                 || $run->plan['cycles'] !== 1
-                || (in_array($run->strategy, ['trade', 'mining'], true) && app(CampaignSafety::class)->windDown($episode))) {
+                || (in_array($run->strategy, ['trade', 'mining', 'buy_probe'], true) && app(CampaignSafety::class)->windDown($episode))) {
                 throw new GameException('Preview exceeds campaign authority.');
             }
             $run->update(['campaign_episode_id' => $episode->id]);
@@ -174,6 +182,23 @@ class AutomationRunner
             }
 
             return $started;
+        });
+    }
+
+    public function previewProbePurchase(Agent $agent, string $symbol, string $shipyard, array $limits, CampaignEpisode $episode): AutomationRun
+    {
+        return $this->executor->locked($agent, function () use ($agent, $symbol, $shipyard, $limits, $episode) {
+            $this->executor->clear($agent, defer: true, ship: $symbol);
+            $fresh = app(CampaignProbeBootstrap::class)->compose($agent, $symbol, $shipyard, $limits, $episode);
+
+            return AutomationRun::create([
+                'agent_id' => $agent->id, 'campaign_episode_id' => $episode->id, 'reset_id' => $agent->reset_id,
+                'engine_session_id' => $this->gate->enabled() ? LocalEngine::find(1)?->session_id : null,
+                'ship_symbol' => $symbol, 'strategy' => 'buy_probe', 'plan_version' => 6, 'state' => RunState::Preview,
+                'expires_at' => now()->addSeconds(config('gameplay.preview_seconds')), 'plan' => $fresh['plan'], 'fingerprint' => $fresh['fingerprint'],
+                'totals' => ['phase' => 'buy_probe', 'purchased_ships' => [], 'cycles' => 0, 'visits' => 0, 'attempts' => 0, 'no_progress' => 0,
+                    'extracted' => [], 'sold' => [], 'sale_proceeds' => 0, 'fuel_cost' => 0, 'fuel_units' => 0, 'travel_fuel' => 0, 'credit_delta' => 0],
+            ]);
         });
     }
 
@@ -254,7 +279,8 @@ class AutomationRunner
                 if ($credits !== $run->plan['initial_credits'] + $run->totals['credit_delta'] + $otherDelta) {
                     throw new GameException('Agent credits changed outside this run. Create a new preview after reconciliation.');
                 }
-                if ($credits < $run->plan['reserve'] || $run->totals['credit_delta'] < -$run->plan['max_loss']) {
+                $probeDelivered = $run->strategy === 'buy_probe' && ! empty($run->totals['purchased_ships']);
+                if (! $probeDelivered && ($credits < $run->plan['reserve'] || $run->totals['credit_delta'] < -$run->plan['max_loss'])) {
                     throw new GameException('Credit reserve or loss limit reached.');
                 }
                 $totals = $run->totals;
@@ -263,6 +289,12 @@ class AutomationRunner
                 $run->update(['totals' => $totals]);
                 if ($run->strategy === 'gate_recon') {
                     $step = app(GateRecon::class)->next($agent, $ship, $run);
+                } elseif ($run->strategy === 'buy_probe') {
+                    if (($run->plan['route']['departure_refuel_ceiling'] ?? 0) > 0 && ($run->totals['travel_fuel'] ?? 0) === 0
+                        && $run->plan['site'] !== $run->plan['shipyard'] && $ship['fuel']['current'] < $ship['fuel']['capacity']) {
+                        $this->refreshBuyer($agent, $run->plan['site'], $run->ship_symbol);
+                    }
+                    $step = app(CampaignProbeBootstrap::class)->next($agent, $ship, $run);
                 } elseif ($run->strategy === 'contracts') {
                     $this->assertContractState($agent, $run, $ship);
                     $step = $this->contracts->next($ship, $run->plan, $run->totals, now()->toImmutable());
@@ -303,7 +335,12 @@ class AutomationRunner
                 match ($step->kind) {
                     'blocked' => $this->executor->block($run, $step->reason),
                     'wait' => $run->update(['state' => RunState::Waiting, 'next_action_at' => $step->until]),
-                    'trip' => $run->strategy === 'gate_recon' ? app(GateRecon::class)->complete($run) : ($run->strategy === 'contracts' ? $this->completeContract($run, $ship) : $this->completeTrip($run, $ship)),
+                    'trip' => match ($run->strategy) {
+                        'gate_recon' => app(GateRecon::class)->complete($run),
+                        'buy_probe' => app(CampaignProbeBootstrap::class)->complete($run, $ship),
+                        'contracts' => $this->completeContract($run, $ship),
+                        default => $this->completeTrip($run, $ship),
+                    },
                     'depart' => $run->update(['totals' => array_merge($run->totals, ['phase' => 'sell']), 'next_action_at' => now(), 'state' => RunState::Running]),
                     'act' => $this->enqueue($run, $step),
                 };
@@ -426,8 +463,9 @@ class AutomationRunner
                 'engine_session_id' => $run->engine_session_id,
                 'agent_id' => $run->agent_id, 'automation_run_id' => $run->id, 'key' => (string) Str::uuid(),
                 'reset_id' => $run->reset_id, 'ship_symbol' => $run->ship_symbol, 'origin' => 'automation',
-                'target_type' => str_starts_with($step->command, 'contract_') ? 'contract' : 'ship', 'target_id' => str_starts_with($step->command, 'contract_') ? $run->plan['contract_plan']['contract']['id'] : $run->ship_symbol,
-                'command' => $step->command, 'arguments' => array_merge($step->arguments, ['reserve' => $run->plan_version === 5 && $run->strategy === 'gate_recon' ? max($run->plan['reserve'], $step->arguments['reserve'] ?? 0) : $run->plan['reserve']]),
+                'target_type' => str_starts_with($step->command, 'contract_') ? 'contract' : ($step->command === 'buy_ship' ? 'fleet' : 'ship'),
+                'target_id' => str_starts_with($step->command, 'contract_') ? $run->plan['contract_plan']['contract']['id'] : ($step->command === 'buy_ship' ? $step->arguments['waypointSymbol'] : $run->ship_symbol),
+                'command' => $step->command, 'arguments' => array_merge($step->arguments, ['reserve' => in_array($run->plan_version, [5, 6], true) && in_array($run->strategy, ['gate_recon', 'buy_probe'], true) ? max($run->plan['reserve'], $step->arguments['reserve'] ?? 0) : $run->plan['reserve']]),
                 'state' => 'pending', 'last_dispatched_at' => now(), 'expires_at' => min($run->expires_at, now()->addMinutes(3)),
             ]);
             if ($run->strategy === 'gate_recon' && $step->command === 'jump') {

@@ -66,6 +66,12 @@ The v1 schema rejects unknown keys, including obsolete loss/exposure settings. R
 command and probe; the latter resolves to a satellite or probe frame. Activities are
 scout, trade, mining, and sell_aboard, tried in file order.
 
+Optional `probes` policy (Tier 1A, e.g. `campaigns/weekly-probe-bootstrap.yaml`):
+- `target` (1..10): total owned probes to bootstrap up to in C0 (never active on arms or in wind-down).
+- `max_price` (1..1,000,000): maximum live-quoted price per `SHIP_PROBE` (checked at compose, arrival, and pre-send; because the SpaceTraders v2 `POST /my/ships` endpoint accepts no server-side price cap, any upstream price jump after the live read is caught post-write as a price discrepancy review hold).
+- `min_working_capital` (0..10,000,000): minimum credits that must remain after buying a probe, added on top of `limits.reserve_credits`, active trade buy-phase spending, and `ReconMission::returnExposure`.
+- `pool` (boolean, default `true`): when enabled, all unheld same-system probes operate concurrently across distinct markets while the command ship trades or scouts, and a `ReconMission` holding one probe leaves remaining home probes active. Playbooks omitting `probes` retain the exact legacy single-probe serialized behavior and scout ordering.
+
 Gates contain one metric, or any with a list of metric gates. Supported metrics are
 minutes_elapsed_gte, hours_to_reset_lte, credits_gte, markets_observed_gte,
 cycles_completed_gte, minutes_without_trade_gte, and positive_spread_gte (the number of trade

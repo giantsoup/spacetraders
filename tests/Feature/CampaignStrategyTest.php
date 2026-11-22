@@ -130,6 +130,19 @@ class CampaignStrategyTest extends TestCase
         $this->assertGraph($graph);
     }
 
+    public function test_probe_bootstrap_revision_describes_probe_limits_and_pool_concurrency(): void
+    {
+        $body = Yaml::parse(file_get_contents(base_path('campaigns/weekly-probe-bootstrap.yaml')));
+        app(CampaignPlaybook::class)->validate($body);
+        $graph = app(CampaignStrategy::class)->graph($body);
+        $this->assertStringContainsString('bootstrap up to 3 probes', $graph['nodes']['phase']['summary']);
+        $this->assertStringContainsString('50,000 CR', $graph['nodes']['phase']['summary']);
+        $this->assertStringContainsString('75,000 CR', $graph['nodes']['phase']['summary']);
+        $this->assertStringContainsString('Active runs settle per ship', $graph['nodes']['safety.active']['summary']);
+        $this->assertStringContainsString('concurrently in one pass', $graph['nodes']['phase.run']['summary']);
+        $this->assertGraph($graph);
+    }
+
     private function readWithoutEffects()
     {
         $before = $this->snapshot();
