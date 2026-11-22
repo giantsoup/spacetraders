@@ -2,15 +2,17 @@
 
 ## Production and development checkouts
 
-- **Production**: `C:\Users\taylo\Herd\spacetraders`, always on `main`. It serves
-  http://spacetraders.test on the PC and https://spacetraders.chimp-hamal.ts.net on the
-  Tailscale tailnet (a Herd nginx site on 127.0.0.1:8081 that `scripts\windows\web.ps1`
-  writes, plus `tailscale serve`). It holds the live
-  `.env`, SQLite database, operator account and engine task. It changes only through
-  `deploy.ps1`.
-- **Development**: `C:\Users\taylo\Projects\spacetraders` and its worktrees. Herd serves this
-  checkout at http://spacetraders-dev.test, with its own `.env` and database and the engine
-  off. All coding, testing and committing happens here.
+- **Production (Mac)**: `/Users/homemac/Sites/spacetraders`, always on `main`. It serves
+  http://spacetraders.test locally and https://spacetraders.chimp-hamal.ts.net on the
+  Tailscale tailnet (via `local.spacetraders.tailnet-web` nginx on 127.0.0.1:8081 plus
+  `tailscale serve`). It holds the live `.env`, SQLite database, operator account, and
+  engine service (`io.spacetraders.engine.*`). It changes only through
+  `./scripts/mac/deploy.sh`.
+- **Development (Mac)**: `/Users/homemac/Sites/spacetraders-dev` and its worktrees. Herd
+  serves this checkout at http://spacetraders-dev.test, with its own `.env` and database and
+  the engine off. All coding, testing and committing happens here.
+- **Production / Development (Windows legacy)**: `C:\Users\taylo\Herd\spacetraders` (deployed
+  via `scripts\windows\deploy.ps1`) and `C:\Users\taylo\Projects\spacetraders`.
 
 ## "Push to main and update production"
 
@@ -22,17 +24,19 @@ or "prod", or to deploy), do these steps in order:
    first. Other sessions commit to the same branches, so ask before shipping commits you
    didn't make.
 2. **Deploy** from the production checkout:
-   `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\deploy.ps1` previews
-   the incoming commits and migrations. Run it again with `-Yes` to apply. The script backs
-   up, fast-forwards to `origin/main`, installs dependencies, migrates, builds, restarts the
-   web server and checks all three addresses. The deploy ends a running engine gracefully
-   and restarts it afterwards. Ending cancels unsent previews and stops active automation
-   runs. An approved, unpaused campaign resumes on its own after the engine is healthy,
-   using fresh state and new previews; plain automation runs still need re-approval.
-   Campaign safety pauses require operator review and `campaign:resume`. The separate campaign
-   watchdog Scheduled Task is installed per checkout and remains independent of engine restarts.
-   A faulted or stopping
-   engine makes the deploy refuse; then ask the user to review it on spacetraders.test.
+   - On Mac: `./scripts/mac/deploy.sh` previews the incoming commits and migrations. Run it
+     again with `--yes` to apply.
+   - On Windows: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\deploy.ps1`
+     previews; run again with `-Yes` to apply.
+   The deploy script backs up, fast-forwards to `origin/main`, installs dependencies,
+   migrates, builds, restarts the tailnet web server and checks all three addresses. The
+   deploy ends a running engine gracefully and restarts it afterwards. Ending cancels unsent
+   previews and stops active automation runs. An approved, unpaused campaign resumes on its
+   own after the engine is healthy, using fresh state and new previews; plain automation runs
+   still need re-approval. Campaign safety pauses require operator review and
+   `campaign:resume`. The separate campaign watchdog is installed per checkout and remains
+   independent of engine restarts. A faulted or stopping engine makes the deploy refuse; then
+   ask the user to review it on spacetraders.test.
 3. **Report** the deployed commit and the script's `OK:` lines.
 
 Keep Herd Settings → AI → **Enable Herd Developer Tools** off. When it's on, Herd injects
