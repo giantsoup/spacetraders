@@ -17,7 +17,13 @@ abstract class TestCase extends BaseTestCase
         parent::setUp();
         FleetMetrics::reset();
         $this->gameLockDirectory = sys_get_temp_dir().'/st-test-locks-'.bin2hex(random_bytes(8));
-        config(['gameplay.request_budget_enabled' => false, 'gameplay.request_budget_path' => $this->gameLockDirectory.'/budget', 'gameplay.lock_path' => $this->gameLockDirectory]);
+        config([
+            'gameplay.request_budget_enabled' => false,
+            'gameplay.inline_execute' => false,
+            'gameplay.reset_cache_seconds' => 0,
+            'gameplay.request_budget_path' => $this->gameLockDirectory.'/budget',
+            'gameplay.lock_path' => $this->gameLockDirectory,
+        ]);
         config(['deployment.path' => $this->gameLockDirectory.'/deployment']);
     }
 

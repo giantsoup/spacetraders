@@ -117,15 +117,20 @@ class CampaignDirector
         $this->localSummary = [];
         $this->marketReads = [];
         $before = FleetMetrics::requestTotal();
+        $agentSymbol = null;
         try {
-            $this->runDirectGrant($grant);
+            $agentSymbol = $grant->revision()->body['agent']['symbol'] ?? null;
+        } catch (\Throwable) {
+        }
+        try {
+            FleetMetrics::forAgent($agentSymbol, fn () => $this->runDirectGrant($grant));
         } finally {
             try {
                 $ship = $grant->arm()['ship'] ?? 'director';
             } catch (\Throwable) {
                 $ship = 'director';
             }
-            FleetMetrics::directorPass($ship, $this->passOutcome, FleetMetrics::requestTotal() - $before);
+            FleetMetrics::forAgent($agentSymbol, fn () => FleetMetrics::directorPass($ship, $this->passOutcome, FleetMetrics::requestTotal() - $before));
         }
     }
 
@@ -271,7 +276,42 @@ class CampaignDirector
                 return;
             }
             $sync = app(AgentSynchronizer::class);
-            $sync->sync($agent, false);
+            if ($arm) {
+                // Phase 3: arm passes avoid full fleet pagination. When a live run exists, stay local
+                // (at most 1 fresh GET /my/agent if synced_at is >60s old). When starting a run, read
+                // only the agent and this arm's ship, reconciling the full fleet only on shipCount drift or every 5 min.
+                $hasLiveRun = $episode !== null && (
+                    AutomationRun::where('active_agent_id', $agent->id)->where('campaign_episode_id', $episode->id)
+                        ->where(fn ($q) => $q->whereIn('state', ['running', 'waiting', 'stopping'])->orWhereNotNull('stop_requested_at'))
+                        ->exists()
+                    || ShipAction::where('agent_id', $agent->id)->where('ship_symbol', $arm['ship'])->whereIn('state', ['pending', 'sending'])->exists()
+                );
+                $freshSeconds = max(1, (int) config('gameplay.agent_balance_fresh_seconds', 60));
+                $balanceStale = ! $agent->synced_at || $agent->synced_at->lt(now()->subSeconds($freshSeconds));
+                if ($hasLiveRun) {
+                    if ($balanceStale) {
+                        $balance = app(SpaceTradersApi::class)->agent($agent);
+                        $agent->update(['credits' => $balance['credits'], 'connection_state' => 'connected', 'synced_at' => now()]);
+                        if (isset($balance['shipCount']) && (int) $balance['shipCount'] !== Ship::where('agent_id', $agent->id)->count()) {
+                            $sync->sync($agent, false);
+                        }
+                    }
+                } else {
+                    $balance = app(SpaceTradersApi::class)->agent($agent);
+                    $agent->update(['credits' => $balance['credits'], 'connection_state' => 'connected', 'synced_at' => now()]);
+                    $lastFleetSync = \Illuminate\Support\Facades\DB::table('game_runtime')->where('key', 'fleet_sync_at:'.$agent->id)->value('value');
+                    $fleetSyncDue = ! is_string($lastFleetSync) || CarbonImmutable::parse($lastFleetSync)->lt(now()->subSeconds((int) config('gameplay.fleet_sync_interval_seconds', 300)));
+                    $countDrift = isset($balance['shipCount']) && (int) $balance['shipCount'] !== Ship::where('agent_id', $agent->id)->count();
+                    $shipKnown = Ship::where('agent_id', $agent->id)->where('symbol', $arm['ship'])->exists();
+                    if ($countDrift || ! $shipKnown || $fleetSyncDue) {
+                        $sync->sync($agent, false);
+                    } else {
+                        $sync->refreshShip($agent, $arm['ship']);
+                    }
+                }
+            } else {
+                $sync->sync($agent, false);
+            }
             $episode = CampaignEpisode::firstOrCreate(['campaign_grant_id' => $grant->id, 'reset_id' => $schedule['reset_id']],
                 ['agent_id' => $agent->id, 'start_credits' => $agent->credits, 'phase' => $arm ? 'earn' : $grant->revision()->body['phases'][0]['id'], 'opened_at' => now(), 'next_reset_at' => $next]
                     + ($arm ? ['state' => ['arm' => $arm['label'], 'role_ships' => ['command' => $arm['ship']]]] : []));

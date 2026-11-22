@@ -1,0 +1,304 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Gameplay\AgentSynchronizer;
+use App\Gameplay\AutomationRunner;
+use App\Gameplay\CampaignControl;
+use App\Gameplay\CampaignDirector;
+use App\Gameplay\CampaignPlaybook;
+use App\Gameplay\Engine\EngineHost;
+use App\Gameplay\FleetMetrics;
+use App\Gameplay\GameException;
+use App\Gameplay\RequestBudget;
+use App\Gameplay\RequestDeferred;
+use App\Gameplay\ShipCommandExecutor;
+use App\Gameplay\SpaceTradersApi;
+use App\Jobs\AdvanceAutomationRun;
+use App\Jobs\ExecuteShipCommand;
+use App\Models\Agent;
+use App\Models\AutomationRun;
+use App\Models\CampaignEpisode;
+use App\Models\CampaignEvent;
+use App\Models\LocalEngine;
+use App\Models\Ship;
+use App\Models\ShipAction;
+use App\Models\User;
+use Carbon\CarbonImmutable;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+use Tests\Support\EngineFixture;
+use Tests\Support\FakeEngineHost;
+use Tests\Support\FakeSpaceTraders;
+use Tests\TestCase;
+
+class RequestBudgetPhasesAndAgentCapsTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private string $file;
+
+    private User $user;
+
+    private Agent $agent;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->travelTo(CarbonImmutable::parse('2026-11-22 14:00:00'));
+        config(['gameplay.enabled' => true, 'gameplay.local_engine_enabled' => true, 'gameplay.inline_execute' => true, 'gameplay.reset_cache_seconds' => 60]);
+        $this->app->instance(EngineHost::class, new FakeEngineHost);
+        $this->file = tempnam(sys_get_temp_dir(), 'st-rbp-');
+        $world = FakeSpaceTraders::world();
+        $world['next_reset'] = now()->addHours(17)->toIso8601String();
+        $world['ships'][0]['registration']['role'] = 'COMMAND';
+        $probe = FakeSpaceTraders::ship('LOCAL-2', 'X1-TEST-PORT');
+        $probe['registration']['role'] = 'SATELLITE';
+        $probe['frame']['symbol'] = 'FRAME_PROBE';
+        $world['ships'][] = $probe;
+        $world['ships'][] = FakeSpaceTraders::ship('LOCAL-3');
+        $world['market_goods']['X1-TEST-PORT'] = $world['goods'];
+        $world['market_goods']['X1-TEST-PORT'][0]['sellPrice'] = 200;
+        file_put_contents($this->file, json_encode($world));
+        FakeSpaceTraders::install($this->file);
+        $this->user = User::factory()->create();
+        $this->user->rememberAccountToken('synthetic-account-token');
+        $this->agent = $this->user->agents()->create(['name' => 'LOCAL', 'token' => 'synthetic-only', 'faction' => 'VOID',
+            'reset_id' => $world['reset'], 'canonical_identity' => AgentSynchronizer::identity($world['reset'], 'LOCAL')]);
+        app(AgentSynchronizer::class)->sync($this->agent);
+        Queue::fake();
+        EngineFixture::healthy();
+    }
+
+    protected function tearDown(): void
+    {
+        FleetMetrics::flush();
+        unlink($this->file);
+        parent::tearDown();
+    }
+
+    private function calls(): array
+    {
+        return json_decode(file_get_contents($this->file), true)['calls'];
+    }
+
+    public function test_phase1_inline_execute_confirms_immediately_and_fallback_job_is_noop(): void
+    {
+        $revision = app(CampaignPlaybook::class)->import(str_replace(['GIANTSOUP', 'max_credits: 60000'], ['LOCAL', 'max_credits: 100000'], file_get_contents(base_path('campaigns/arm-trade.yaml'))));
+        app(CampaignControl::class)->approveArm($revision, $this->user, ['label' => 'T1a', 'ship' => 'LOCAL-3'], CarbonImmutable::now()->addHours(12));
+        app(CampaignDirector::class)->tickArms();
+        $run = AutomationRun::whereNotNull('active_agent_id')->sole();
+
+        $before = count($this->calls());
+        (new AdvanceAutomationRun($run->id))->handle(app(AutomationRunner::class));
+        $action = ShipAction::where('automation_run_id', $run->id)->sole();
+        $this->assertSame('confirmed', $action->state->value);
+
+        // Fallback job finds action already confirmed and sends zero extra API calls.
+        $afterAdvance = count($this->calls());
+        (new ExecuteShipCommand($action->id))->handle(app(ShipCommandExecutor::class));
+        $this->assertSame($afterAdvance, count($this->calls()));
+        $this->assertGreaterThan($before, $afterAdvance);
+    }
+
+    public function test_phase2_reset_cache_hits_within_60s_and_reads_fresh_within_10m_of_reset_or_on_reconcile(): void
+    {
+        $api = app(SpaceTradersApi::class);
+        $api->clearResetCache();
+        $start = count($this->calls());
+
+        $first = $api->resetSchedule();
+        $second = $api->resetSchedule();
+        $this->assertSame($first, $second);
+        $this->assertSame(1, count($this->calls()) - $start, 'Second read within 60s hits cache');
+
+        // Reconcile / fresh bypasses cache.
+        $api->resetSchedule(fresh: true);
+        $this->assertSame(2, count($this->calls()) - $start);
+
+        // After 61s, cache expires and reads fresh.
+        $this->travel(61)->seconds();
+        $api->resetSchedule();
+        $this->assertSame(3, count($this->calls()) - $start);
+
+        // Corrupt cache fails closed and reads fresh.
+        DB::table('game_runtime')->where('key', 'like', 'reset_schedule:%')->update(['value' => '{corrupt']);
+        $api->resetSchedule();
+        $this->assertSame(4, count($this->calls()) - $start);
+
+        // Within 10 minutes of next_reset forces fresh reads.
+        $this->travelTo(CarbonImmutable::parse($first['next_reset'])->subMinutes(9));
+        $api->resetSchedule();
+        $api->resetSchedule();
+        $this->assertSame(6, count($this->calls()) - $start);
+    }
+
+    public function test_phase2_4113_rejection_clears_reset_cache_and_archives_agent(): void
+    {
+        $api = app(SpaceTradersApi::class);
+        $api->resetSchedule();
+        $this->assertTrue(DB::table('game_runtime')->where('key', 'like', 'reset_schedule:%')->exists());
+
+        \Illuminate\Support\Facades\Http::swap(new \Illuminate\Http\Client\Factory);
+        Http::fake([
+            'https://api.spacetraders.io/v2/my/agent' => Http::response(['error' => ['code' => 4113, 'message' => 'Token reset date mismatch']], 401),
+            'https://api.spacetraders.io/v2/' => Http::response(['resetDate' => '2026-11-29', 'version' => 'v2', 'serverResets' => ['next' => '2026-12-06T13:00:00Z']], 200),
+        ]);
+
+        try {
+            $api->agent($this->agent);
+            $this->fail('Expected 4113 rejection');
+        } catch (GameException $e) {
+            $this->assertSame(4113, $e->apiCode);
+            $this->assertFalse($e->uncertain);
+        }
+        $this->assertFalse(DB::table('game_runtime')->where('key', 'like', 'reset_schedule:%')->exists());
+
+        try {
+            app(AgentSynchronizer::class)->guardReset($this->agent->fresh(), fresh: true);
+            $this->fail('Expected archive on reset mismatch');
+        } catch (GameException) {
+            $this->assertSame('reset', $this->agent->fresh()->connection_state);
+        }
+    }
+
+    public function test_phase3_local_arm_director_pass_uses_zero_api_calls_when_balance_is_fresh(): void
+    {
+        $revision = app(CampaignPlaybook::class)->import(str_replace(['GIANTSOUP', 'max_credits: 60000'], ['LOCAL', 'max_credits: 100000'], file_get_contents(base_path('campaigns/arm-trade.yaml'))));
+        app(CampaignControl::class)->approveArm($revision, $this->user, ['label' => 'T1a', 'ship' => 'LOCAL-3'], CarbonImmutable::now()->addHours(12));
+        app(CampaignDirector::class)->tickArms();
+        $this->assertTrue(AutomationRun::whereNotNull('active_agent_id')->exists());
+
+        // Advance 31s: reset cache (60s) and synced_at (60s) are both still fresh -> 0 API calls!
+        $this->travel(31)->seconds();
+        LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+        $before = count($this->calls());
+        app(CampaignDirector::class)->tickArms();
+        $this->assertSame($before, count($this->calls()), 'Local arm pass with fresh balance and cached reset makes 0 API calls');
+
+        // Advance another 35s (>60s since synced_at): reads reset + fresh GET /my/agent (no ships_page).
+        $this->travel(35)->seconds();
+        LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+        $beforeStale = count($this->calls());
+        app(CampaignDirector::class)->tickArms();
+        $newCalls = array_slice($this->calls(), $beforeStale);
+        $categories = array_map(fn ($c) => FleetMetrics::category($c['method'], $c['path']), $newCalls);
+        $this->assertContains('agent', $categories);
+        $this->assertNotContains('ships_page', $categories);
+    }
+
+    public function test_per_agent_buckets_isolate_agents_on_one_account_and_preserve_tier1_settlement_under_saturation(): void
+    {
+        $dir = sys_get_temp_dir().'/st-rb-agent-'.uniqid();
+        config([
+            'gameplay.request_budget_enabled' => true,
+            'gameplay.request_budget_path' => $dir,
+            'gameplay.host_tier2_4_per_minute' => 6,
+            'gameplay.host_tier1_reserve_per_minute' => 4,
+            'gameplay.agent_tier1_reserve_per_hour' => 3,
+            'gameplay.agent_request_caps' => ['GIANTSOUP' => 4, 'SOUPBURN' => 2],
+        ]);
+        $budget = new class extends RequestBudget
+        {
+            public float $clock = 1_700_000_000.0;
+
+            protected function now(): float
+            {
+                return $this->clock;
+            }
+
+            protected function pause(float $seconds): void
+            {
+                $this->clock += $seconds;
+            }
+        };
+
+        // Both agents share ONE account_id; SOUPBURN hits its 2/hr Tiers 2-4 cap while GIANTSOUP still runs freely.
+        RequestBudget::forAgent('SOUPBURN', fn () => $budget->reserve('tok-burn', 'shared-account', 'critical', 0));
+        RequestBudget::forAgent('SOUPBURN', fn () => $budget->reserve('tok-burn', 'shared-account', 'critical', 0));
+        try {
+            RequestBudget::forAgent('SOUPBURN', fn () => $budget->reserve('tok-burn', 'shared-account', 'critical', 0));
+            $this->fail('SOUPBURN should be capped at 2 Tiers 2-4 requests');
+        } catch (RequestDeferred) {
+        }
+
+        // GIANTSOUP on the same account is NOT blocked by SOUPBURN's cap.
+        RequestBudget::forAgent('GIANTSOUP', fn () => $budget->reserve('tok-giant', 'shared-account', 'critical', 0));
+        RequestBudget::forAgent('GIANTSOUP', fn () => $budget->reserve('tok-giant', 'shared-account', 'critical', 0));
+        RequestBudget::forAgent('GIANTSOUP', fn () => $budget->reserve('tok-giant', 'shared-account', 'critical', 0));
+        RequestBudget::forAgent('GIANTSOUP', fn () => $budget->reserve('tok-giant', 'shared-account', 'critical', 0));
+
+        // Now BOTH agents AND the host Tiers 2-4 envelope (6/min) are 100% saturated.
+        try {
+            RequestBudget::forAgent('GIANTSOUP', fn () => $budget->reserve('tok-giant', 'shared-account', 'critical', 0));
+            $this->fail('Host Tiers 2-4 envelope is saturated');
+        } catch (RequestDeferred) {
+        }
+
+        // Tier-1 settlement reserve STILL admits sell_aboard / BURN->CRUISE recovery for BOTH agents under saturation!
+        $budget->clock += 2.0; // refill token-bucket burst tokens while remaining in same 60s window
+        RequestBudget::forAgent('SOUPBURN', fn () => $budget->reserve('tok-burn', 'shared-account', 'settlement', 0));
+        RequestBudget::forAgent('GIANTSOUP', fn () => $budget->reserve('tok-giant', 'shared-account', 'settlement', 0));
+
+        $burnUsage = $budget->usage('tok-burn', 'shared-account', 'SOUPBURN');
+        $this->assertSame(2, $burnUsage['agent']['tier2_4_last_hour']);
+        $this->assertSame(1, $burnUsage['agent']['tier1_last_hour']);
+        $this->assertSame(6, $burnUsage['host']['tier2_4_last_60_seconds']);
+        $this->assertSame(2, $burnUsage['host']['tier1_last_60_seconds']);
+    }
+
+    public function test_fleet_metrics_records_host_scope_collection_time_attribution_and_split_rates(): void
+    {
+        config(['gameplay.agent_request_caps' => ['LOCAL' => 1800]]);
+        $revision = app(CampaignPlaybook::class)->import(str_replace('GIANTSOUP', 'LOCAL', file_get_contents(base_path('campaigns/weekly-default.yaml'))));
+        $grant = app(CampaignControl::class)->approve($revision, $this->user);
+        $opened = CarbonImmutable::now()->subHours(2);
+        $episode = CampaignEpisode::create([
+            'campaign_grant_id' => $grant->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
+            'start_credits' => 175000, 'phase' => 'earn', 'opened_at' => $opened, 'next_reset_at' => now()->addHours(15),
+            'state' => ['role_ships' => ['command' => 'LOCAL-1', 'probe' => 'LOCAL-2']],
+        ]);
+        CampaignEvent::create([
+            'campaign_grant_id' => $grant->id, 'campaign_episode_id' => $episode->id, 'kind' => 'load_result',
+            'data' => ['run_id' => 1, 'ship' => 'LOCAL-1', 'good' => 'IRON_ORE', 'buyer' => 'X1-TEST-PORT', 'net' => 10000, 'finished_at' => $opened->toIso8601String()],
+        ]);
+        CampaignEvent::create([
+            'campaign_grant_id' => $grant->id, 'campaign_episode_id' => $episode->id, 'kind' => 'load_result',
+            'data' => ['run_id' => 2, 'ship' => 'LOCAL-1', 'good' => 'IRON_ORE', 'buyer' => 'X1-TEST-PORT', 'net' => 12000, 'finished_at' => now()->subMinutes(10)->toIso8601String()],
+        ]);
+
+        FleetMetrics::reset();
+        // Scheduler pass is explicitly host-scoped.
+        app(FleetMetrics::class)->schedulerPass(['director' => 0.1, 'arms' => 0.0, 'dispatch' => 0.1, 'lags' => [1]]);
+        $this->assertSame('host', DB::table('fleet_metrics')->where('kind', 'scheduler')->value('scope'));
+
+        // Record 400 trader requests + 200 probe/director overhead requests for LOCAL over 2 active trader-hours.
+        DB::table('fleet_metrics')->insert([
+            ['kind' => 'requests', 'ship' => 'LOCAL-1', 'agent_symbol' => 'LOCAL', 'scope' => 'agent', 'value' => 400, 'data' => json_encode(['reads' => 380, 'writes' => 20]), 'created_at' => now()->subMinutes(30)->toDateTimeString()],
+            ['kind' => 'requests', 'ship' => 'LOCAL-2', 'agent_symbol' => 'LOCAL', 'scope' => 'agent', 'value' => 150, 'data' => json_encode(['reads' => 150, 'writes' => 0]), 'created_at' => now()->subMinutes(30)->toDateTimeString()],
+            ['kind' => 'requests', 'ship' => 'director', 'agent_symbol' => 'LOCAL', 'scope' => 'agent', 'value' => 50, 'data' => json_encode(['reads' => 50, 'writes' => 0]), 'created_at' => now()->subMinutes(30)->toDateTimeString()],
+        ]);
+
+        $card = app(FleetMetrics::class)->scorecard($opened, now()->toImmutable(), $this->agent->reset_id);
+        $local = $card['by_agent']['LOCAL'];
+        $this->assertTrue($local['attribution_complete']);
+        $this->assertEqualsWithDelta(2.0, $local['active_trader_hours'], 0.01);
+        $this->assertEqualsWithDelta(300.0, $local['all_in_req_per_active_trader_hr'], 1.0);
+        $this->assertEqualsWithDelta(200.0, $local['trader_only_req_per_active_trader_hr'], 1.0);
+        $this->assertEqualsWithDelta(100.0, $local['agent_overhead_req_hr'], 1.0);
+        // Formula: floor((1800 - 100) / 200) = 8 traders (zero double counting of probe/director overhead).
+        $this->assertSame(8, $local['formula_max_traders']);
+        $this->assertNull($local['purchase_hold_reason']);
+
+        // Unattributed agent-scoped request row triggers purchase hold (host rows do NOT).
+        DB::table('fleet_metrics')->insert([
+            'kind' => 'requests', 'ship' => 'shared', 'agent_symbol' => null, 'scope' => 'agent', 'value' => 10, 'data' => json_encode(['reads' => 10, 'writes' => 0]), 'created_at' => now()->subMinutes(20)->toDateTimeString(),
+        ]);
+        $held = app(FleetMetrics::class)->scorecard($opened, now()->toImmutable(), $this->agent->reset_id)['by_agent']['LOCAL'];
+        $this->assertFalse($held['attribution_complete']);
+        $this->assertNull($held['formula_max_traders']);
+        $this->assertSame('incomplete_agent_attribution', $held['purchase_hold_reason']);
+    }
+}

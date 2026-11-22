@@ -63,10 +63,14 @@ class AgentRegistration
                         }
                         $existing->update($attributes);
                     });
+                    app(SpaceTradersApi::class)->clearResetCache();
 
                     return $existing;
                 } else {
-                    return $user->agents()->create($attributes);
+                    $created = $user->agents()->create($attributes);
+                    app(SpaceTradersApi::class)->clearResetCache();
+
+                    return $created;
                 }
             });
         } catch (GameException $e) {

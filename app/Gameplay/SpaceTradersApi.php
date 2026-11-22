@@ -160,20 +160,90 @@ class SpaceTradersApi
         return Arr::only($data, ['id', 'factionSymbol', 'type', 'accepted', 'fulfilled', 'terms', 'deadlineToAccept', 'expiration']);
     }
 
-    public function status(): string
+    public function status(bool $fresh = false): string
     {
-        $body = $this->call('get', '/');
-        $this->validate($body, ['resetDate' => 'required|string|max:80', 'version' => 'required|string|max:80']);
-
-        return $body['resetDate'];
+        return $this->fetchResetSchedule($fresh)['reset_id'];
     }
 
-    public function resetSchedule(): array
+    public function resetSchedule(bool $fresh = false): array
     {
+        return $this->fetchResetSchedule($fresh);
+    }
+
+    private function fetchResetSchedule(bool $fresh = false): array
+    {
+        $ttl = max(0, (int) config('gameplay.reset_cache_seconds', 60));
+        if (! $fresh && $ttl > 0) {
+            $cached = $this->readResetCache($ttl);
+            if ($cached !== null) {
+                return $cached;
+            }
+        }
         $body = $this->call('get', '/');
         $this->validate($body, ['resetDate' => 'required|string|max:80', 'version' => 'required|string|max:80']);
+        $schedule = ['reset_id' => $body['resetDate'], 'next_reset' => $body['serverResets']['next'] ?? null];
+        $this->writeResetCache($schedule);
 
-        return ['reset_id' => $body['resetDate'], 'next_reset' => $body['serverResets']['next'] ?? null];
+        return $schedule;
+    }
+
+    public function clearResetCache(): void
+    {
+        try {
+            \Illuminate\Support\Facades\DB::table('game_runtime')->where('key', $this->resetCacheKey())->delete();
+        } catch (\Throwable) {
+        }
+    }
+
+    private function resetCacheKey(): string
+    {
+        return 'reset_schedule:'.hash('sha256', SpaceTradersClient::BASE_URL);
+    }
+
+    private function readResetCache(int $ttl): ?array
+    {
+        try {
+            $raw = \Illuminate\Support\Facades\DB::table('game_runtime')->where('key', $this->resetCacheKey())->value('value');
+            if (! is_string($raw) || $raw === '') {
+                return null;
+            }
+            $data = json_decode($raw, true, flags: JSON_THROW_ON_ERROR);
+            if (! is_array($data) || ! is_string($data['reset_id'] ?? null) || $data['reset_id'] === ''
+                || ! is_string($data['next_reset'] ?? null) || $data['next_reset'] === ''
+                || ! is_string($data['observed_at'] ?? null)) {
+                return null;
+            }
+            $observed = CarbonImmutable::parse($data['observed_at']);
+            $next = CarbonImmutable::parse($data['next_reset']);
+            $now = CarbonImmutable::now();
+            if ($observed->gt($now) || $observed->lt($now->subSeconds($ttl))) {
+                return null;
+            }
+            $guardMinutes = max(1, (int) config('gameplay.reset_cache_guard_minutes', 10));
+            if ($next->lte($now->addMinutes($guardMinutes))) {
+                return null;
+            }
+
+            return ['reset_id' => $data['reset_id'], 'next_reset' => $data['next_reset']];
+        } catch (\Throwable) {
+            // Fail closed: read fresh on any cache corruption or DB failure.
+            return null;
+        }
+    }
+
+    private function writeResetCache(array $schedule): void
+    {
+        try {
+            \Illuminate\Support\Facades\DB::table('game_runtime')->upsert([[
+                'key' => $this->resetCacheKey(),
+                'value' => json_encode([
+                    'reset_id' => $schedule['reset_id'],
+                    'next_reset' => $schedule['next_reset'],
+                    'observed_at' => CarbonImmutable::now()->toIso8601String(),
+                ], JSON_THROW_ON_ERROR),
+            ]], ['key'], ['value']);
+        } catch (\Throwable) {
+        }
     }
 
     /** Anonymous server status with validated leaderboards, for leaderboard history. */
@@ -212,12 +282,12 @@ class SpaceTradersApi
     public function agent(Agent $agent): array
     {
         $data = $this->payload($this->call('get', '/my/agent', [], $agent));
-        $this->validate($data, ['symbol' => 'required|string|max:80', 'credits' => 'required|integer|min:0']);
+        $this->validate($data, ['symbol' => 'required|string|max:80', 'credits' => 'required|integer|min:0', 'shipCount' => 'sometimes|integer|min:0']);
         if ($data['symbol'] !== $agent->name) {
             throw new GameException('Credential belongs to a different agent. Re-import it.');
         }
 
-        return Arr::only($data, ['symbol', 'credits']);
+        return Arr::only($data, ['symbol', 'credits', 'shipCount']);
     }
 
     public function ships(Agent $agent): array
@@ -597,7 +667,7 @@ class SpaceTradersApi
             $deadline = ($this->readGuard)();
         }
         try {
-            $response = $this->client->request($method, $path, $body, $agent?->credential(), $deadline, $agent?->account_id, $beforeTransport);
+            $response = $this->client->request($method, $path, $body, $agent?->credential(), $deadline, $agent?->account_id, $beforeTransport, $agent?->name);
         } catch (ConnectionException) {
             throw new GameException('SpaceTraders connection failed.', uncertain: $method !== 'get', retryAfter: 10);
         }
@@ -606,11 +676,15 @@ class SpaceTradersApi
             if ($response->status() === 401 && $inheritedAuth) {
                 throw new GameException('Operation authorization is unresolved for this inherited-auth endpoint, HTTP 401. The saved agent credential was not reclassified.', is_int($code) && $code > 0 ? $code : null);
             }
+            $resetRejection = ($response->status() === 401 && $agent) || (is_int($code) && $code === 4113);
+            if ($resetRejection) {
+                $this->clearResetCache();
+            }
             if ($response->status() === 401 && $agent) {
                 $agent->update(['connection_state' => 'invalid_credential']);
             }
             throw new GameException('SpaceTraders rejected the request, HTTP '.$response->status().'.', is_int($code) && $code > 0 ? $code : null,
-                $method !== 'get' && ($response->serverError() || $response->status() === 429), max(5, (int) $response->header('Retry-After')));
+                ! $resetRejection && $method !== 'get' && ($response->serverError() || $response->status() === 429), max(5, (int) $response->header('Retry-After')));
         }
         if (strlen($response->body()) > 2 * 1024 * 1024) {
             throw $method === 'get' ? new ReadStateUnavailable('SpaceTraders response exceeds the local state limit.') : new GameException('SpaceTraders response exceeds the local state limit.', uncertain: true);

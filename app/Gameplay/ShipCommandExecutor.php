@@ -171,25 +171,35 @@ class ShipCommandExecutor
         if (! $agent) {
             return;
         }
-        $this->locked($agent, function () use ($action, $agent) {
-            $action->refresh();
-            if ($action->state !== ActionState::Pending) {
-                return;
-            }
-            $run = $action->automation_run_id ? AutomationRun::find($action->automation_run_id) : null;
-            if (isset($action->outcome['body_sha256']) || isset($action->outcome['response_received_at'])) {
-                $action->update(['state' => ActionState::Uncertain, 'message' => 'A write receipt already exists on this pending intent. Reconcile without replay.', 'settled_at' => now()]);
-                if ($run) {
-                    $this->block($run, 'Retained write receipt requires reconciliation before further work.');
-                }
+        $this->locked($agent, fn () => $this->executeLocked($agent, $action));
+    }
 
-                return;
+    /**
+     * Core execution path. Caller must hold the agent lock and must NOT be inside a DB transaction.
+     * Optional $prefetched carries verified pre-write reads from AutomationRunner::advance (<=10s old).
+     */
+    public function executeLocked(Agent $agent, ShipAction $action, ?array $prefetched = null): void
+    {
+        $action->refresh();
+        if ($action->state !== ActionState::Pending) {
+            return;
+        }
+        $run = $action->automation_run_id ? AutomationRun::find($action->automation_run_id) : null;
+        if (isset($action->outcome['body_sha256']) || isset($action->outcome['response_received_at'])) {
+            $action->update(['state' => ActionState::Uncertain, 'message' => 'A write receipt already exists on this pending intent. Reconcile without replay.', 'settled_at' => now()]);
+            if ($run) {
+                $this->block($run, 'Retained write receipt requires reconciliation before further work.');
             }
-            $received = false;
-            $reserved = false;
-            $recon = $run?->strategy === 'gate_recon';
-            $outbound = $recon && isset($action->arguments['recon_outbound_hash']);
-            $refusedBeforeTransport = false;
+
+            return;
+        }
+        $received = false;
+        $reserved = false;
+        $recon = $run?->strategy === 'gate_recon';
+        $outbound = $recon && isset($action->arguments['recon_outbound_hash']);
+        $refusedBeforeTransport = false;
+        $settlementScope = $run && (! empty($run->plan['sell_only']) || $action->command === 'sell');
+        $work = function () use ($agent, $action, $run, $prefetched, &$received, &$reserved, $recon, $outbound, &$refusedBeforeTransport) {
             try {
                 $this->gate->check($action->engine_session_id);
                 $this->clear($agent, $action->id, defer: $run !== null, ship: $run ? $action->ship_symbol : null);
@@ -199,7 +209,7 @@ class ShipCommandExecutor
                 if ($outbound) {
                     app(GateRecon::class)->validateOutboundIntent($run, $action);
                 }
-                $fresh = $this->rules->refresh($agent, $action->ship_symbol, $action->command, $action->arguments, $run);
+                $fresh = $this->rules->refresh($agent, $action->ship_symbol, $action->command, $action->arguments, $run, $prefetched);
                 if ($run && $action->command === 'buy') {
                     app(CampaignSafety::class)->check($run, $agent);
                     $finished = DB::transaction(function () use ($agent, $run, $action) {
@@ -284,12 +294,18 @@ class ShipCommandExecutor
                 }
             } catch (GameException $e) {
                 FleetMetrics::as($action->ship_symbol ?: null, fn () => FleetMetrics::observe($e));
+                if ($e->apiCode === 4113 || ($agent->fresh()?->connection_state === 'invalid_credential')) {
+                    try {
+                        $this->sync->guardReset($agent->fresh(), fresh: true);
+                    } catch (GameException) {
+                    }
+                }
                 $action->refresh();
                 if (in_array($action->command, ['mine', 'mine_survey'], true) && isset($action->arguments['surveySignature']) && in_array($e->apiCode, [4221, 4224], true)) {
                     app(SurveyPool::class)->invalidate($agent, $action->arguments['surveySignature'], $e->apiCode === 4224);
                 }
                 // Rate-budget failure before transport is safe to retry only while pending.
-                if ($action->state === ActionState::Pending && ! ExplorationPolicy::command($action->command) && $e->retryAfter > 0 && $action->expires_at->isFuture()) {
+                if ($action->state === ActionState::Pending && ! ExplorationPolicy::command($action->command) && $e->retryAfter > 0 && $action->expires_at->isFuture() && $e->apiCode !== 4113 && $agent->fresh()?->connection_state !== 'invalid_credential') {
                     $action->update(['message' => $e->getMessage()]);
 
                     return;
@@ -325,7 +341,12 @@ class ShipCommandExecutor
                     app(GateRecon::class)->reconcileSettlement($mission);
                 }
             }
-        });
+        };
+        if ($settlementScope) {
+            app(SpaceTradersClient::class)->scope($work, priority: 'settlement');
+        } else {
+            $work();
+        }
     }
 
     private function localRefusal(string $stage, string $message): array
@@ -497,7 +518,12 @@ class ShipCommandExecutor
                     app(SurveyPool::class)->save($agent, $signed, $actualShip['symbol']);
                 }
             }
-            $agent->update(['credits' => $credits, 'synced_at' => now()]);
+            // Phase 3 agent freshness: stamp synced_at only when the response contains an authoritative agent object.
+            $agentUpdate = ['credits' => $credits];
+            if (isset($data['agent'])) {
+                $agentUpdate['synced_at'] = now();
+            }
+            $agent->update($agentUpdate);
             if (in_array($action->command, ['buy', 'sell', 'refuel'], true) && ! ($action->command === 'refuel' && ($action->arguments['fromCargo'] ?? false))) {
                 $this->sync->invalidateMarket($agent, $actualShip['nav']['waypointSymbol'], $action->id);
             }
@@ -579,7 +605,12 @@ class ShipCommandExecutor
         DB::transaction(function () use ($agent, $action, $data, $credits, $price, $delta, $review, $before) {
             Ship::where('agent_id', $agent->id)->where('symbol', $action->ship_symbol)->delete();
             ShipAction::where('agent_id', $agent->id)->where('ship_symbol', $action->ship_symbol)->where('state', 'preview')->update(['state' => 'rejected', 'settled_at' => now(), 'message' => 'Ship was scrapped. This preview cannot be approved.']);
-            $agent->update(['credits' => $credits, 'synced_at' => now()]);
+            // Phase 3 agent freshness: stamp synced_at only when the response contains an authoritative agent object.
+            $agentUpdate = ['credits' => $credits];
+            if (isset($data['agent'])) {
+                $agentUpdate['synced_at'] = now();
+            }
+            $agent->update($agentUpdate);
             $this->sync->observe($agent, 'scrap', $action->ship_symbol, ['transaction' => $data['transaction'], 'removed_ship' => $action->ship_symbol, 'cargo_before' => $before['ship']['cargo'], 'equipment_before' => ['mounts' => $before['ship']['mounts'], 'modules' => $before['ship']['modules']]], 'scrap', $action->ship_symbol);
             $action->update(['state' => ActionState::Confirmed, 'review_required' => $review, 'settled_at' => now(),
                 'outcome' => array_merge($action->fresh()->outcome ?? [], ['credit_delta' => $delta, 'transaction_total' => $price, 'removed_ship' => $action->ship_symbol, 'price_discrepancy' => $review]),
@@ -610,7 +641,9 @@ class ShipCommandExecutor
             if (! $knownOutcome) {
                 $action->update(['state' => ActionState::Uncertain]);
             }
-            $this->sync->sync($agent, false);
+            app(SpaceTradersClient::class)->scope(function () use ($agent) {
+                $this->sync->sync($agent, false, freshReset: true);
+            }, priority: 'settlement');
             $fleet = $this->api->ships($agent);
             $ship = collect($fleet)->firstWhere('symbol', $action->ship_symbol);
             if ($ship) {

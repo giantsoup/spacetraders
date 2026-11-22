@@ -39,4 +39,14 @@ return [
     'evidence_travel_limit' => 2000,
     'evidence_run_limit' => 500,
     'campaign_claims' => (bool) env('SPACETRADERS_CAMPAIGN_CLAIMS', true),
+    // Request-budget optimization & multi-agent per-agent caps (empty = unlimited single-agent default).
+    'inline_execute' => true,
+    'reset_cache_seconds' => 60,
+    'reset_cache_guard_minutes' => 10,
+    'fleet_sync_interval_seconds' => 300,
+    'agent_balance_fresh_seconds' => 60,
+    'host_tier2_4_per_minute' => 96,
+    'host_tier1_reserve_per_minute' => 18,
+    'agent_tier1_reserve_per_hour' => 300,
+    'agent_request_caps' => [],
 ];

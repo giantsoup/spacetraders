@@ -18,16 +18,29 @@ class CommandRules
         return $this->validate($agent, $symbol, $command, $arguments, $this->refresh($agent, $symbol, $command, $arguments, $run), $run);
     }
 
-    public function refresh(Agent $agent, string $symbol, string $command, array $arguments, ?AutomationRun $run = null): array
+    public function refresh(Agent $agent, string $symbol, string $command, array $arguments, ?AutomationRun $run = null, ?array $prefetched = null): array
     {
         $fleetPurchase = $command === 'buy_ship' && ! isset($arguments['site'], $arguments['market']);
         $agentCommand = ! $run && in_array($command, ['contract_accept', 'contract_fulfill'], true);
         if (! $agentCommand && ! Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->exists()) {
             throw new GameException('Ship is not in the saved owned fleet. Synchronize first.');
         }
-        $this->sync->guardReset($agent);
-        $agent->update(['credits' => $this->api->agent($agent)['credits']]);
-        $ship = $agentCommand ? null : $this->sync->refreshShip($agent, $symbol)->snapshot;
+        $usablePrefetch = $this->usablePrefetch($agent, $prefetched);
+        if (! ($usablePrefetch && ($prefetched['reset_verified'] ?? false))) {
+            $this->sync->guardReset($agent);
+        }
+        if ($usablePrefetch && isset($prefetched['agent_credits']) && is_int($prefetched['agent_credits'])) {
+            $agent->credits = $prefetched['agent_credits'];
+        } else {
+            $agent->update(['credits' => $this->api->agent($agent)['credits'], 'synced_at' => now()]);
+        }
+        if ($agentCommand) {
+            $ship = null;
+        } elseif ($usablePrefetch && is_array($prefetched['ship'] ?? null) && ($prefetched['ship']['symbol'] ?? null) === $symbol) {
+            $ship = $prefetched['ship'];
+        } else {
+            $ship = $this->sync->refreshShip($agent, $symbol)->snapshot;
+        }
         if ($ship && $ship['nav']['status'] === 'IN_TRANSIT' && $command !== 'flight_mode') {
             throw new GameException('Ship is in transit. Reconcile after the reported arrival.');
         }
@@ -69,11 +82,46 @@ class CommandRules
         }
         $market = null;
         if ($run?->strategy === 'trade' && $command === 'buy') {
-            $market = $this->api->market($agent, $ship['nav']['waypointSymbol']);
-            $this->sync->observe($agent, 'market', $ship['nav']['waypointSymbol'], $market);
+            $waypoint = $ship['nav']['waypointSymbol'];
+            if ($usablePrefetch && ($prefetched['market_symbol'] ?? null) === $waypoint && is_array($prefetched['market'] ?? null)) {
+                $savedQuote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+                    ->where('kind', 'market')->where('symbol', $waypoint)->first();
+                if ($savedQuote && empty($savedQuote->data['invalidated_by_action'])
+                    && $savedQuote->observed_at->gte(now()->subSeconds((int) config('gameplay.snapshot_seconds')))) {
+                    $market = $prefetched['market'];
+                }
+            }
+            if ($market === null) {
+                $market = $this->api->market($agent, $waypoint);
+                $this->sync->observe($agent, 'market', $waypoint, $market);
+            }
         }
 
         return ['ship' => $ship, 'active' => $active, 'market' => $market];
+    }
+
+    /**
+     * Phase 1 pre-write read reuse: valid only when <= 10s old on the app clock and no write has settled
+     * for this agent since the reads were captured (checked under the held agent lock).
+     */
+    private function usablePrefetch(Agent $agent, ?array $prefetched): bool
+    {
+        if (! is_array($prefetched) || ! ($prefetched['observed_at'] ?? null) instanceof \Carbon\CarbonInterface) {
+            return false;
+        }
+        $observedAt = $prefetched['observed_at'];
+        $now = now();
+        if ($observedAt->gt($now) || $observedAt->lt($now->copy()->subSeconds(10))) {
+            return false;
+        }
+        $lastActionId = $prefetched['last_confirmed_action_id'] ?? null;
+        $currentMaxId = (int) (ShipAction::where('agent_id', $agent->id)->whereIn('state', ['confirmed', 'uncertain'])->max('id') ?? 0);
+        if (is_int($lastActionId) && $currentMaxId !== $lastActionId) {
+            return false;
+        }
+
+        return ! ShipAction::where('agent_id', $agent->id)->whereIn('state', ['confirmed', 'uncertain'])
+            ->where('settled_at', '>', $observedAt)->exists();
     }
 
     public function validate(Agent $agent, string $symbol, string $command, array $arguments, array $fresh, ?AutomationRun $run = null): array
