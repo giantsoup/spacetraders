@@ -38,8 +38,11 @@ class CampaignDirector
     /** The ranked candidate behind the run trade() returned, claimed once that run starts. */
     private ?array $candidate = null;
 
-    /** Set when an arm's committed pair waits for a usable buyer quote this pass. */
+    /** Set when an arm's committed pair or C0's top pair waits for a usable buyer quote this pass. */
     private bool $awaitingQuote = false;
+
+    /** Buyer waypoint C0 is waiting to observe this pass, so pool probes hold or target it. */
+    private ?string $awaitedBuyer = null;
 
     private float $deadline = INF;
 
@@ -447,6 +450,7 @@ class CampaignDirector
             }
             $tradeAttempted = false;
             $this->awaitingQuote = false;
+            $this->awaitedBuyer = null;
             $miningTurn = ! empty($episode->state['mining_deferred']);
             if ($miningTurn) {
                 $state = $episode->state;
@@ -811,12 +815,18 @@ class CampaignDirector
         if ($arm) {
             $ranked = $this->preferCommitted($grant, $episode, $ranked);
         }
+        $blockedAtCurrentSource = false;
         foreach ($ranked as $candidate) {
             $this->candidate = $candidate;
             $commit = $arm ? ($episode->state['commit'] ?? null) : null;
             $committed = $commit && $candidate['key'] === $commit['key'] && $candidate['source'] === $commit['source'] && $candidate['source'] === $ship['nav']['waypointSymbol'];
             try {
                 if ($candidate['source'] !== $ship['nav']['waypointSymbol']) {
+                    if (! $arm && $blockedAtCurrentSource) {
+                        $considered[] = $candidate + ['rejected' => 'Awaiting buyer quote for higher-ranked pair at current source.'];
+
+                        continue;
+                    }
                     // An arm flies to a source only if it can buy there: the buyer quote will still be
                     // within the commitment bound on arrival, or one of our ships can read the buyer.
                     if ($arm && ! $this->buyerObservable($agent, $candidate['buyer'])) {
@@ -834,6 +844,8 @@ class CampaignDirector
                 $pool = app(CampaignFleet::class)->poolEnabled($episode);
                 if ($pool && ! $this->parked($agent, $candidate['buyer']) && in_array($candidate['buyer'], $this->probeTargets($episode), true)) {
                     $this->awaitingQuote = true;
+                    $this->awaitedBuyer ??= $candidate['buyer'];
+                    $blockedAtCurrentSource = true;
                     $this->candidate = null;
                     $considered[] = $candidate + ['rejected' => 'Probe already en route to buyer '.$candidate['buyer'].'.'];
 
@@ -918,6 +930,12 @@ class CampaignDirector
                     throw $exception;
                 }
                 $considered[] = $candidate + ['rejected' => $exception->getMessage()];
+                if (! $arm && $exception instanceof StaleQuote
+                    && ($this->buyerObservable($agent, $candidate['buyer']) || app(CampaignFleet::class)->probes($episode) !== [])) {
+                    $this->awaitingQuote = true;
+                    $this->awaitedBuyer ??= $candidate['buyer'];
+                    $blockedAtCurrentSource = true;
+                }
                 if ($committed && ! empty($episode->refresh()->state['commit'])) {
                     // A stale-quote failure waits on the committed pair while a ship can read the buyer;
                     // any other failure ends the commitment and the next candidate is tried.
@@ -1380,7 +1398,36 @@ class CampaignDirector
     }
 
     /**
-     * Dispatches every idle, stationary pool probe to a distinct market.
+     * The buyer waypoint C0 is currently trading, positioning for, or awaiting a quote on in earn.
+     * Pool mode keeps one probe stationed here so buyer quotes stay fresh across trade loads.
+     */
+    private function activeBuyer(CampaignEpisode $episode): ?string
+    {
+        if ($episode->phase !== 'earn' || app(CampaignSafety::class)->windDown($episode)) {
+            return null;
+        }
+        $command = app(CampaignFleet::class)->role($episode, 'command')['symbol'] ?? null;
+        if ($command !== null) {
+            $tradeBuyer = AutomationRun::where('active_agent_id', $episode->agent_id)
+                ->where('campaign_episode_id', $episode->id)
+                ->where('ship_symbol', $command)
+                ->where('strategy', 'trade')
+                ->first()?->plan['market'] ?? null;
+            if (is_string($tradeBuyer) && $tradeBuyer !== '') {
+                return $tradeBuyer;
+            }
+        }
+        $claimBuyer = $episode->state['claim']['buyer'] ?? null;
+        if (is_string($claimBuyer) && $claimBuyer !== '') {
+            return $claimBuyer;
+        }
+
+        return $this->awaitedBuyer;
+    }
+
+    /**
+     * Dispatches every idle, stationary pool probe to a distinct market, while holding one probe at
+     * C0's active earn buyer (or routing an idle probe there first) so trade quotes stay fresh.
      *
      * @param  list<string>  $busyShips
      * @param  list<string>  $assignedTargets
@@ -1389,17 +1436,65 @@ class CampaignDirector
     {
         $started = false;
         $localEarn = CampaignLocalEarn::policy($grant, $episode);
-        foreach (app(CampaignFleet::class)->probes($episode) as $probe) {
+        $probes = app(CampaignFleet::class)->probes($episode);
+        $activeBuyer = $this->activeBuyer($episode);
+        $heldProbe = null;
+        $buyerCovered = $activeBuyer === null;
+        $buyerTargeted = $activeBuyer !== null && in_array($activeBuyer, $assignedTargets, true);
+        if ($activeBuyer !== null) {
+            foreach ($probes as $probe) {
+                if (($probe['nav']['status'] ?? null) !== 'IN_TRANSIT'
+                    && ($probe['nav']['waypointSymbol'] ?? null) === $activeBuyer
+                    && ($probe['cargo']['units'] ?? 0) === 0
+                    && ! in_array($probe['symbol'], $busyShips, true)) {
+                    $heldProbe = $probe['symbol'];
+                    $buyerCovered = true;
+                    if (! in_array($activeBuyer, $assignedTargets, true)) {
+                        $assignedTargets[] = $activeBuyer;
+                    }
+                    break;
+                }
+            }
+        }
+        $probeBackoff = $episode->state['probe_position_failed'] ?? null;
+        $buyerQuote = $activeBuyer !== null
+            ? GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'market')->where('symbol', $activeBuyer)->first()
+            : null;
+        $buyerNeedsRefresh = $activeBuyer !== null
+            && (! $buyerQuote || ! empty($buyerQuote->data['invalidated_by_action']) || empty($buyerQuote->data['tradeGoods'])
+                || $buyerQuote->observed_at->lte(now()->subSeconds(min(60, (int) config('gameplay.snapshot_seconds')))));
+        $canPositionBuyer = ! $buyerCovered && ! $buyerTargeted && $buyerNeedsRefresh
+            && ! $this->parked($agent, $activeBuyer)
+            && (! is_string($probeBackoff) || CarbonImmutable::parse($probeBackoff)->lt(now()->subMinutes(30)));
+        foreach ($probes as $probe) {
             if (($probe['nav']['status'] ?? null) === 'IN_TRANSIT'
                 || ($probe['cargo']['units'] ?? 0) !== 0
-                || in_array($probe['symbol'], $busyShips, true)) {
+                || in_array($probe['symbol'], $busyShips, true)
+                || $probe['symbol'] === $heldProbe) {
                 continue;
             }
             try {
                 if ($localEarn) {
                     app(CampaignLocalEarn::class)->reserve($this->deadline);
                 }
-                $run = $this->scout($grant, $episode, $agent, $probe, $considered, false, $assignedTargets);
+                $run = null;
+                if ($canPositionBuyer && app(FuelPlanner::class)->fuelFree($probe) && ($probe['nav']['waypointSymbol'] ?? null) !== $activeBuyer) {
+                    try {
+                        $run = $this->position($grant, $episode, $agent, $probe, $activeBuyer);
+                        $canPositionBuyer = false;
+                        $buyerTargeted = true;
+                    } catch (GameException $exception) {
+                        if ($exception instanceof LocalEarnBudget || $exception->retryAfter > 0) {
+                            throw $exception;
+                        }
+                        if (! $exception->uncertain && $exception->apiCode === null) {
+                            $episode->update(['state' => array_merge($episode->refresh()->state ?? [], ['probe_position_failed' => now()->toIso8601String()])]);
+                            $canPositionBuyer = false;
+                        }
+                        $considered[] = ['role' => 'probe', 'strategy' => 'scout', 'ship' => $probe['symbol'], 'destination' => $activeBuyer, 'rejected' => $exception->getMessage()];
+                    }
+                }
+                $run ??= $this->scout($grant, $episode, $agent, $probe, $considered, false, $assignedTargets);
                 if (! $run) {
                     continue;
                 }

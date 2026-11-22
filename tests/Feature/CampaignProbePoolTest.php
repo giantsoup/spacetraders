@@ -1607,6 +1607,249 @@ class CampaignProbePoolTest extends TestCase
         return [$action, $episode];
     }
 
+    public function test_pool_holds_one_probe_at_active_trade_buyer_while_other_probes_roam(): void
+    {
+        $this->editWorld(function (array &$world) {
+            $world['ships'][1]['nav']['waypointSymbol'] = 'X1-TEST-M1';
+            $world['ships'][] = $this->probeShip('LOCAL-3', 'X1-TEST-M1');
+            $world['ships'][] = $this->probeShip('LOCAL-4', 'X1-TEST-ROCK');
+            $world['waypoints'] = [
+                ['symbol' => 'X1-TEST-ROCK', 'systemSymbol' => 'X1-TEST', 'type' => 'PLANET', 'x' => 0, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]],
+                ['symbol' => 'X1-TEST-M1', 'systemSymbol' => 'X1-TEST', 'type' => 'PLANET', 'x' => 5, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]],
+                ['symbol' => 'X1-TEST-M2', 'systemSymbol' => 'X1-TEST', 'type' => 'ORBITAL_STATION', 'x' => 0, 'y' => 5, 'traits' => [['symbol' => 'MARKETPLACE']]],
+                ['symbol' => 'X1-TEST-M3', 'systemSymbol' => 'X1-TEST', 'type' => 'MOON', 'x' => -5, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]],
+            ];
+            $world['market_goods'] = [
+                'X1-TEST-M1' => [
+                    ['symbol' => 'IRON_ORE', 'tradeVolume' => 10, 'purchasePrice' => 200, 'sellPrice' => 150],
+                    ['symbol' => 'FUEL', 'tradeVolume' => 10, 'purchasePrice' => 5, 'sellPrice' => 3],
+                ],
+            ];
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $sync = app(AgentSynchronizer::class);
+        $dir = ['imports' => [['symbol' => 'IRON_ORE']], 'exports' => [], 'exchange' => [['symbol' => 'FUEL']]];
+        foreach (['X1-TEST-M1', 'X1-TEST-M2', 'X1-TEST-M3'] as $market) {
+            $sync->observe($this->agent, 'market_listing', $market, ['symbol' => $market] + $dir);
+        }
+        $grant = $this->approve($this->bootstrapBody(target: 3, maxPrice: 50000, minWorkingCapital: 75000));
+        $episode = CampaignEpisode::create([
+            'campaign_grant_id' => $grant->id,
+            'agent_id' => $this->agent->id,
+            'reset_id' => $this->agent->reset_id,
+            'start_credits' => 150000,
+            'phase' => 'earn',
+            'opened_at' => now(),
+            'next_reset_at' => now()->addDays(5),
+            'state' => ['last_discovery_at' => now()->toIso8601String(), 'role_ships' => ['command' => 'LOCAL-1', 'probe' => 'LOCAL-2']],
+        ]);
+
+        // Command ship actively trading to buyer X1-TEST-M1; both LOCAL-2 and LOCAL-3 sit at X1-TEST-M1.
+        AutomationRun::create([
+            'agent_id' => $this->agent->id,
+            'active_agent_id' => $this->agent->id,
+            'campaign_episode_id' => $episode->id,
+            'reset_id' => $this->agent->reset_id,
+            'ship_symbol' => 'LOCAL-1',
+            'strategy' => 'trade',
+            'plan_version' => 3,
+            'state' => 'running',
+            'started_at' => now(),
+            'expires_at' => now()->addMinutes(15),
+            'plan' => ['strategy' => 'trade', 'site' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-M1', 'symbol' => 'IRON_ORE', 'units' => 10, 'reserve' => 0, 'max_spend' => 1000, 'max_loss' => 1000, 'cycles' => 1, 'minutes' => 15],
+            'totals' => ['phase' => 'buy', 'credit_delta' => 0, 'spending' => 0],
+        ]);
+
+        // Exactly ONE probe (LOCAL-2) stays parked at X1-TEST-M1 to keep its quote fresh; LOCAL-3 and LOCAL-4 roam to M2 and M3.
+        $this->tickDirector();
+        $probeRuns = AutomationRun::where('active_agent_id', $this->agent->id)
+            ->where('campaign_episode_id', $episode->id)
+            ->where('strategy', 'scout')
+            ->orderBy('ship_symbol')
+            ->get();
+        $this->assertSame(['LOCAL-3', 'LOCAL-4'], $probeRuns->pluck('ship_symbol')->all());
+        $this->assertSame(['X1-TEST-M2', 'X1-TEST-M3'], $probeRuns->map(fn ($run) => $run->plan['destination'])->sort()->values()->all());
+        $buyerObs = GameObservation::where('agent_id', $this->agent->id)->where('kind', 'market')->where('symbol', 'X1-TEST-M1')->first();
+        $this->assertNotNull($buyerObs);
+        $this->assertNotEmpty($buyerObs->data['tradeGoods']);
+    }
+
+    public function test_pool_dispatches_idle_probe_to_claimed_buyer_while_command_ship_positions(): void
+    {
+        $this->editWorld(function (array &$world) {
+            $world['ships'][] = $this->probeShip('LOCAL-3', 'X1-TEST-ROCK');
+            $world['waypoints'] = [
+                ['symbol' => 'X1-TEST-ROCK', 'systemSymbol' => 'X1-TEST', 'type' => 'PLANET', 'x' => 0, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]],
+                ['symbol' => 'X1-TEST-BUYER', 'systemSymbol' => 'X1-TEST', 'type' => 'PLANET', 'x' => 5, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]],
+                ['symbol' => 'X1-TEST-OTHER', 'systemSymbol' => 'X1-TEST', 'type' => 'ORBITAL_STATION', 'x' => 0, 'y' => 5, 'traits' => [['symbol' => 'MARKETPLACE']]],
+            ];
+            $world['market_goods'] = [
+                'X1-TEST-BUYER' => [
+                    ['symbol' => 'IRON_ORE', 'tradeVolume' => 10, 'purchasePrice' => 200, 'sellPrice' => 150],
+                    ['symbol' => 'FUEL', 'tradeVolume' => 10, 'purchasePrice' => 5, 'sellPrice' => 3],
+                ],
+            ];
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $sync = app(AgentSynchronizer::class);
+        $dir = ['imports' => [['symbol' => 'IRON_ORE']], 'exports' => [], 'exchange' => [['symbol' => 'FUEL']]];
+        foreach (['X1-TEST-BUYER', 'X1-TEST-OTHER'] as $market) {
+            $sync->observe($this->agent, 'market_listing', $market, ['symbol' => $market] + $dir);
+        }
+        // X1-TEST-BUYER already has a stale quote (whereas X1-TEST-OTHER is unpriced), so normal scout order would ignore BUYER.
+        $this->travel(-300)->seconds();
+        $sync->observe($this->agent, 'market', 'X1-TEST-BUYER', ['symbol' => 'X1-TEST-BUYER', 'tradeGoods' => $this->world()['market_goods']['X1-TEST-BUYER']] + $dir);
+        $this->travel(300)->seconds();
+
+        $grant = $this->approve($this->bootstrapBody(target: 2, maxPrice: 50000, minWorkingCapital: 75000));
+        $episode = CampaignEpisode::create([
+            'campaign_grant_id' => $grant->id,
+            'agent_id' => $this->agent->id,
+            'reset_id' => $this->agent->reset_id,
+            'start_credits' => 150000,
+            'phase' => 'earn',
+            'opened_at' => now(),
+            'next_reset_at' => now()->addDays(5),
+            'state' => [
+                'last_discovery_at' => now()->toIso8601String(),
+                'role_ships' => ['command' => 'LOCAL-1', 'probe' => 'LOCAL-2'],
+                'claim' => ['good' => 'IRON_ORE', 'source' => 'X1-TEST-ROCK', 'buyer' => 'X1-TEST-BUYER', 'key' => 'IRON_ORE@X1-TEST-BUYER', 'ship' => 'LOCAL-1', 'at' => now()->toIso8601String()],
+            ],
+        ]);
+
+        // Command ship busy positioning to source; one probe must go to X1-TEST-BUYER, the other to X1-TEST-OTHER.
+        AutomationRun::create([
+            'agent_id' => $this->agent->id,
+            'active_agent_id' => $this->agent->id,
+            'campaign_episode_id' => $episode->id,
+            'reset_id' => $this->agent->reset_id,
+            'ship_symbol' => 'LOCAL-1',
+            'strategy' => 'scout',
+            'plan_version' => 3,
+            'state' => 'running',
+            'started_at' => now(),
+            'expires_at' => now()->addMinutes(15),
+            'plan' => ['strategy' => 'scout', 'site' => 'X1-TEST-OTHER', 'destination' => 'X1-TEST-ROCK', 'market' => 'X1-TEST-ROCK', 'one_way' => true, 'reserve' => 0, 'max_spend' => 0, 'max_loss' => 0, 'cycles' => 1, 'minutes' => 15],
+            'totals' => ['phase' => 'travel', 'credit_delta' => 0, 'spending' => 0],
+        ]);
+
+        $this->tickDirector();
+        $probeRuns = AutomationRun::where('active_agent_id', $this->agent->id)
+            ->where('campaign_episode_id', $episode->id)
+            ->whereIn('ship_symbol', ['LOCAL-2', 'LOCAL-3'])
+            ->orderBy('ship_symbol')
+            ->get();
+        $this->assertCount(2, $probeRuns);
+        $this->assertSame(['X1-TEST-BUYER', 'X1-TEST-OTHER'], $probeRuns->map(fn ($run) => $run->plan['destination'])->sort()->values()->all());
+    }
+
+    public function test_c0_trade_does_not_ping_pong_to_second_source_while_awaiting_buyer_quote_for_top_pair(): void
+    {
+        $this->editWorld(function (array &$world) {
+            $world['credits'] = 200000;
+            $world['ships'][0]['nav']['waypointSymbol'] = 'X1-TEST-S1';
+            $world['ships'][1]['nav']['waypointSymbol'] = 'X1-TEST-M3';
+            $world['ships'][1]['nav']['status'] = 'IN_TRANSIT';
+            $world['ships'][1]['nav']['route'] = [
+                'origin' => ['symbol' => 'X1-TEST-S1'],
+                'destination' => ['symbol' => 'X1-TEST-B1'],
+                'arrival' => now()->addMinutes(3)->toIso8601String(),
+            ];
+            $world['ships'][] = $this->probeShip('LOCAL-3', 'X1-TEST-S1');
+            $world['waypoints'] = [
+                ['symbol' => 'X1-TEST-S1', 'systemSymbol' => 'X1-TEST', 'type' => 'PLANET', 'x' => 0, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]],
+                ['symbol' => 'X1-TEST-B1', 'systemSymbol' => 'X1-TEST', 'type' => 'MOON', 'x' => 0, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]],
+                ['symbol' => 'X1-TEST-S2', 'systemSymbol' => 'X1-TEST', 'type' => 'MOON', 'x' => 0, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]],
+                ['symbol' => 'X1-TEST-B2', 'systemSymbol' => 'X1-TEST', 'type' => 'PLANET', 'x' => 5, 'y' => 0, 'traits' => [['symbol' => 'MARKETPLACE']]],
+                ['symbol' => 'X1-TEST-M3', 'systemSymbol' => 'X1-TEST', 'type' => 'ORBITAL_STATION', 'x' => 0, 'y' => 5, 'traits' => [['symbol' => 'MARKETPLACE']]],
+            ];
+            $world['market_goods'] = [
+                'X1-TEST-S1' => [
+                    ['symbol' => 'MEDICINE', 'tradeVolume' => 20, 'purchasePrice' => 3000, 'sellPrice' => 1500],
+                    ['symbol' => 'FUEL', 'tradeVolume' => 100, 'purchasePrice' => 70, 'sellPrice' => 65],
+                ],
+                'X1-TEST-B1' => [
+                    ['symbol' => 'MEDICINE', 'tradeVolume' => 20, 'purchasePrice' => 9000, 'sellPrice' => 4800],
+                    ['symbol' => 'FUEL', 'tradeVolume' => 100, 'purchasePrice' => 70, 'sellPrice' => 65],
+                ],
+                'X1-TEST-S2' => [
+                    ['symbol' => 'ADVANCED_CIRCUITRY', 'tradeVolume' => 20, 'purchasePrice' => 3500, 'sellPrice' => 1700],
+                    ['symbol' => 'FUEL', 'tradeVolume' => 100, 'purchasePrice' => 70, 'sellPrice' => 65],
+                ],
+                'X1-TEST-B2' => [
+                    ['symbol' => 'ADVANCED_CIRCUITRY', 'tradeVolume' => 20, 'purchasePrice' => 12000, 'sellPrice' => 5000],
+                    ['symbol' => 'FUEL', 'tradeVolume' => 100, 'purchasePrice' => 70, 'sellPrice' => 65],
+                ],
+                'X1-TEST-M3' => [
+                    ['symbol' => 'FUEL', 'tradeVolume' => 100, 'purchasePrice' => 70, 'sellPrice' => 65],
+                ],
+            ];
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $this->setBalance(200000);
+        $sync = app(AgentSynchronizer::class);
+        $listings = [
+            'X1-TEST-S1' => ['exports' => [['symbol' => 'MEDICINE']], 'imports' => [], 'exchange' => [['symbol' => 'FUEL']]],
+            'X1-TEST-B1' => ['exports' => [], 'imports' => [['symbol' => 'MEDICINE']], 'exchange' => [['symbol' => 'FUEL']]],
+            'X1-TEST-S2' => ['exports' => [['symbol' => 'ADVANCED_CIRCUITRY']], 'imports' => [], 'exchange' => [['symbol' => 'FUEL']]],
+            'X1-TEST-B2' => ['exports' => [], 'imports' => [['symbol' => 'ADVANCED_CIRCUITRY']], 'exchange' => [['symbol' => 'FUEL']]],
+            'X1-TEST-M3' => ['exports' => [], 'imports' => [], 'exchange' => [['symbol' => 'FUEL']]],
+        ];
+        foreach ($listings as $sym => $dir) {
+            $sync->observe($this->agent, 'market_listing', $sym, ['symbol' => $sym] + $dir);
+        }
+        // Stale quotes for B1, S2, B2 (5 minutes old); fresh quote for S1 where LOCAL-1 sits.
+        $this->travel(-300)->seconds();
+        foreach (['X1-TEST-B1', 'X1-TEST-S2', 'X1-TEST-B2'] as $sym) {
+            $sync->observe($this->agent, 'market', $sym, ['symbol' => $sym, 'tradeGoods' => $this->world()['market_goods'][$sym]] + $listings[$sym]);
+        }
+        $this->travel(300)->seconds();
+        $sync->observe($this->agent, 'market', 'X1-TEST-S1', ['symbol' => 'X1-TEST-S1', 'tradeGoods' => $this->world()['market_goods']['X1-TEST-S1']] + $listings['X1-TEST-S1']);
+
+        $grant = $this->approve($this->bootstrapBody(target: 2, maxPrice: 50000, minWorkingCapital: 75000));
+        $episode = CampaignEpisode::create([
+            'campaign_grant_id' => $grant->id,
+            'agent_id' => $this->agent->id,
+            'reset_id' => $this->agent->reset_id,
+            'start_credits' => 200000,
+            'phase' => 'earn',
+            'opened_at' => now(),
+            'next_reset_at' => now()->addDays(5),
+            'state' => ['last_discovery_at' => now()->toIso8601String(), 'role_ships' => ['command' => 'LOCAL-1', 'probe' => 'LOCAL-2']],
+        ]);
+
+        // Case 1: LOCAL-2 is en route to X1-TEST-B1. LOCAL-1 MUST stay at S1 (not ping-pong to S2), while LOCAL-3 roams to M3.
+        $this->tickDirector();
+        $this->assertNull($grant->fresh()->paused_at, $grant->fresh()->pause_reason ?? '');
+        $this->assertSame(0, AutomationRun::where('ship_symbol', 'LOCAL-1')->whereNotNull('active_agent_id')->count());
+        $roam = AutomationRun::where('ship_symbol', 'LOCAL-3')->whereNotNull('active_agent_id')->sole();
+        $this->assertSame('scout', $roam->strategy);
+        $this->assertNotSame('X1-TEST-B1', $roam->plan['destination']);
+
+        // Case 2: All probes busy elsewhere (LOCAL-2 flying to M3 instead of B1, LOCAL-3 still active).
+        // StaleQuote at B1 MUST STILL keep LOCAL-1 at S1 instead of ping-ponging to S2!
+        $this->editWorld(function (array &$world) {
+            $world['ships'][1]['nav']['route']['destination']['symbol'] = 'X1-TEST-M3';
+        });
+        $this->tickDirector();
+        $this->assertSame(0, AutomationRun::where('ship_symbol', 'LOCAL-1')->whereNotNull('active_agent_id')->count());
+        $decision = CampaignEvent::where('kind', 'decision')->latest('id')->firstOrFail();
+        $this->assertSame('awaiting_buyer_quote', $decision->data['choice']);
+
+        // Case 3: Once LOCAL-2 arrives at X1-TEST-B1, LOCAL-1 immediately starts trading MEDICINE S1 -> B1,
+        // and LOCAL-2 stays parked at X1-TEST-B1 (not dispatched away!).
+        $this->editWorld(function (array &$world) {
+            $world['ships'][1]['nav']['waypointSymbol'] = 'X1-TEST-B1';
+            $world['ships'][1]['nav']['status'] = 'IN_ORBIT';
+        });
+        $this->tickDirector();
+        $trade = AutomationRun::where('ship_symbol', 'LOCAL-1')->whereNotNull('active_agent_id')->sole();
+        $this->assertSame('trade', $trade->strategy);
+        $this->assertSame('MEDICINE', $trade->plan['symbol']);
+        $this->assertSame('X1-TEST-B1', $trade->plan['market']);
+        $this->assertSame(0, AutomationRun::where('ship_symbol', 'LOCAL-2')->whereNotNull('active_agent_id')->count());
+    }
+
     private function baseWorld(): array
     {
         $world = FakeSpaceTraders::world();
