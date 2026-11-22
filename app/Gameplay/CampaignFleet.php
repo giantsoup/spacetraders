@@ -61,7 +61,7 @@ class CampaignFleet
         }
         $agent = Agent::findOrFail($episode->agent_id);
         $ships = Ship::where('agent_id', $episode->agent_id)->orderBy('symbol')->get();
-        $armShips = CampaignGrant::liveArms()->get()->map(fn ($grant) => $grant->arm()['ship'] ?? null)->filter()->all();
+        $armShips = CampaignGrant::liveArms($agent->name)->where('user_id', $agent->user_id)->get()->map(fn ($grant) => $grant->arm()['ship'] ?? null)->filter()->all();
         $command = $this->role($episode, 'command');
         $homeSystem = $command['nav']['systemSymbol'] ?? null;
 

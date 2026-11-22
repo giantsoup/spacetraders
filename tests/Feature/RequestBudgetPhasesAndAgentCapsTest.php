@@ -9,6 +9,7 @@ use App\Gameplay\CampaignDirector;
 use App\Gameplay\CampaignPlaybook;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\FleetMetrics;
+use App\Gameplay\FuelPlanner;
 use App\Gameplay\GameException;
 use App\Gameplay\RequestBudget;
 use App\Gameplay\RequestDeferred;
@@ -26,6 +27,7 @@ use App\Models\ShipAction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -141,7 +143,7 @@ class RequestBudgetPhasesAndAgentCapsTest extends TestCase
         $api->resetSchedule();
         $this->assertTrue(DB::table('game_runtime')->where('key', 'like', 'reset_schedule:%')->exists());
 
-        \Illuminate\Support\Facades\Http::swap(new \Illuminate\Http\Client\Factory);
+        Http::swap(new Factory);
         Http::fake([
             'https://api.spacetraders.io/v2/my/agent' => Http::response(['error' => ['code' => 4113, 'message' => 'Token reset date mismatch']], 401),
             'https://api.spacetraders.io/v2/' => Http::response(['resetDate' => '2026-11-29', 'version' => 'v2', 'serverResets' => ['next' => '2026-12-06T13:00:00Z']], 200),
@@ -247,6 +249,74 @@ class RequestBudgetPhasesAndAgentCapsTest extends TestCase
         $this->assertSame(1, $burnUsage['agent']['tier1_last_hour']);
         $this->assertSame(6, $burnUsage['host']['tier2_4_last_60_seconds']);
         $this->assertSame(2, $burnUsage['host']['tier1_last_60_seconds']);
+    }
+
+    public function test_burn_cargo_settles_through_cruise_under_multi_agent_host_saturation(): void
+    {
+        $world = json_decode(file_get_contents($this->file), true);
+        $world['ships'][0]['nav']['flightMode'] = 'BURN';
+        $world['ships'][0]['cargo'] = ['capacity' => 40, 'units' => 3, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 3]]];
+        file_put_contents($this->file, json_encode($world));
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $revision = app(CampaignPlaybook::class)->import(str_replace('GIANTSOUP', 'LOCAL', file_get_contents(base_path('campaigns/weekly-default.yaml'))));
+        $grant = app(CampaignControl::class)->approve($revision, $this->user);
+        $episode = CampaignEpisode::create(['campaign_grant_id' => $grant->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
+            'start_credits' => $this->agent->fresh()->credits, 'phase' => 'earn', 'opened_at' => now(), 'next_reset_at' => now()->addDay(),
+            'state' => ['role_ships' => ['command' => 'LOCAL-1']]]);
+        $runner = app(AutomationRunner::class);
+        $run = $runner->previewRecovery($this->agent, 'LOCAL-1', 'X1-TEST-PORT', ['reserve' => 0, 'max_loss' => 10000, 'max_spend' => 10000,
+            'minutes' => $grant->limits['run_max_minutes'], 'recovery_started_at' => now()->toIso8601String()], $episode);
+        $beforeConfiguration = $run->plan['initial_configuration'];
+        $runner->startCampaign($this->agent, $run, $episode);
+        $budget = new class extends RequestBudget
+        {
+            public float $clock = 1700000000;
+
+            protected function now(): float
+            {
+                return $this->clock;
+            }
+
+            protected function pause(float $seconds): void
+            {
+                $this->clock += $seconds;
+            }
+        };
+        $this->app->instance(RequestBudget::class, $budget);
+        config(['gameplay.request_budget_enabled' => true, 'gameplay.host_tier2_4_per_minute' => 6,
+            'gameplay.host_tier1_reserve_per_minute' => 18, 'gameplay.agent_tier1_reserve_per_hour' => 500,
+            'gameplay.agent_request_caps' => ['LOCAL' => 3, 'OTHER' => 3]]);
+        @unlink(config('gameplay.request_budget_path').'/budget.json');
+        foreach (['LOCAL', 'OTHER'] as $symbol) {
+            for ($i = 0; $i < 3; $i++) {
+                RequestBudget::forAgent($symbol, fn () => $budget->reserve(priority: 'critical', maxWait: 0));
+            }
+        }
+        app(CampaignControl::class)->drainPause($grant, 'test_pressure', $episode);
+        $commands = [];
+        for ($i = 0; $i < 80 && $run->fresh()->active_agent_id; $i++) {
+            $budget->clock += 2;
+            // Other routine traffic keeps the host envelope saturated while settlement is paced.
+            $path = config('gameplay.request_budget_path').'/budget.json';
+            $state = json_decode(file_get_contents($path), true);
+            $state['host_tiers']['t24'] = array_fill(0, 6, $budget->clock);
+            file_put_contents($path, json_encode($state));
+            LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+            $run->update(['next_action_at' => now()]);
+            $runner->advance($run->id);
+            $commands = ShipAction::where('automation_run_id', $run->id)->where('state', 'confirmed')->pluck('command')->all();
+            $this->travel(1)->seconds();
+        }
+        $this->assertSame(['flight_mode', 'orbit', 'navigate', 'dock', 'refuel', 'sell'], $commands, $run->fresh()->blocked_reason ?? '');
+        $writes = json_decode(file_get_contents($this->file), true)['writes'];
+        $this->assertSame('CRUISE', $writes[0]['arguments']['flightMode'] ?? null);
+        $ship = Ship::where('agent_id', $this->agent->id)->where('symbol', 'LOCAL-1')->firstOrFail()->snapshot;
+        $this->assertSame(0, $ship['cargo']['units']);
+        $this->assertSame('CRUISE', $ship['nav']['flightMode']);
+        $this->assertNotSame($beforeConfiguration, $run->fresh()->plan['initial_configuration']);
+        $this->assertSame(FuelPlanner::configuration($ship), $run->fresh()->plan['initial_configuration']);
+        $this->assertSame(6, $budget->usage()['host']['tier2_4_last_60_seconds']);
+        $this->assertNull($run->fresh()->active_agent_id);
     }
 
     public function test_fleet_metrics_records_host_scope_collection_time_attribution_and_split_rates(): void

@@ -13,6 +13,14 @@ class CampaignWatchdog
             $previous = is_file($path) ? json_decode(File::get($path), true) : [];
             $previous = is_array($previous) ? $previous : [];
             $problems = app(CampaignHealth::class)->problems();
+            // Preserve an existing alert's timer when a second primary adds the symbol prefix.
+            foreach (array_keys($problems) as $key) {
+                $legacy = preg_replace('/^[A-Z0-9_]+:/', '', $key);
+                if ($legacy !== $key && array_key_exists($legacy, $previous)) {
+                    $previous[$key] ??= $previous[$legacy];
+                    unset($previous[$legacy]);
+                }
+            }
             $state = [];
             foreach ($problems as $key => $message) {
                 // State was {key: lastAlertTs}; it is now {key: {last, first}}. Read both.

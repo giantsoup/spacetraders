@@ -397,6 +397,11 @@ final class FakeSpaceTraders
                     }
                 }
             }
+            if ($command === 'nav' && $request->method() === 'PATCH') {
+                $ship['nav']['flightMode'] = $args['flightMode'];
+
+                return [['data' => ['nav' => $ship['nav'], 'fuel' => $ship['fuel'], 'events' => []]], 200];
+            }
             if (in_array($command, ['orbit', 'dock'], true)) {
                 $ship['nav']['status'] = $command === 'orbit' ? 'IN_ORBIT' : 'DOCKED';
 

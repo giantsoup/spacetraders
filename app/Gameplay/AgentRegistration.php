@@ -4,6 +4,8 @@ namespace App\Gameplay;
 
 use App\Models\Agent;
 use App\Models\AutomationRun;
+use App\Models\GameObservation;
+use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
 use App\Services\SpaceTradersClient;
@@ -25,7 +27,24 @@ class AgentRegistration
             throw $exception;
         }
 
-        return $this->save($user, $payload['agent'], $payload['token'], $reset, $data['email'] ?? null);
+        $agent = $this->save($user, $payload['agent'], $payload['token'], $reset, $data['email'] ?? null);
+        $hq = $payload['agent']['headquarters'] ?? null;
+        $system = FleetClaims::systemOf(is_string($hq) ? $hq : null);
+        if ($campaign && $system) {
+            $otherAgents = $user->agents()->unarchived()->where('reset_id', $reset)->whereKeyNot($agent->id);
+            $overlap = Ship::whereIn('agent_id', $otherAgents->select('id'))->where('snapshot->nav->systemSymbol', $system)->exists();
+            $markets = GameObservation::whereIn('agent_id', $otherAgents->select('id'))->where('reset_id', $reset)
+                ->where('kind', 'market_listing')->where('symbol', 'like', $system.'-%')->latest('observed_at')->limit(50)
+                ->get()->unique('symbol')->map(fn ($market) => ['waypoint' => $market->symbol, 'observed_at' => $market->observed_at->toIso8601String(),
+                    'imports' => array_column($market->data['imports'] ?? [], 'symbol'), 'exports' => array_column($market->data['exports'] ?? [], 'symbol'),
+                    'exchange' => array_column($market->data['exchange'] ?? [], 'symbol')])->values()->all();
+            app(AgentSynchronizer::class)->observe($agent, 'registration', $agent->name, [
+                'headquarters' => $hq, 'system' => $system, 'shared_system' => $overlap, 'giantsoup_control_system' => $system === 'X1-SK70',
+                'known_markets' => $markets,
+            ], 'registration');
+        }
+
+        return $agent;
     }
 
     public function reset(User $user): string

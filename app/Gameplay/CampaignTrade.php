@@ -370,7 +370,7 @@ class CampaignTrade
         $learning = [];
         $claims = app(FleetClaims::class);
         $arm = FleetClaims::arm($grant);
-        $taken = $arm || config('gameplay.campaign_claims', true) ? $claims->taken($episode) : [];
+        $taken = $arm || config('gameplay.campaign_claims', true) ? $claims->taken($episode, $ship['nav']['systemSymbol'] ?? null) : [];
         // A follower works only its leader's current pair, claims aside, and waits without one.
         if ($arm['follow'] ?? null) {
             $leader = $claims->leader($episode, $arm['follow']);
@@ -415,7 +415,9 @@ class CampaignTrade
                     $available = $candidate;
                 }
                 if (isset($taken[$pair['good'].'@'.$pair['source']]) || isset($taken[$pair['good'].'@'.$pair['market']])) {
-                    $considered[] = $candidate + ['rejected' => 'Claimed by another ship.', 'claimed_by' => $taken[$pair['good'].'@'.$pair['source']] ?? $taken[$pair['good'].'@'.$pair['market']]];
+                    $holder = $taken[$pair['good'].'@'.$pair['source']] ?? $taken[$pair['good'].'@'.$pair['market']];
+                    $considered[] = $candidate + ['rejected' => 'Claimed by another ship.', 'claimed_by' => $holder]
+                        + (str_contains($holder, ':') ? ['incoming_cargo' => $claims->inFlight($episode, $pair['good'], $pair['market'])] : []);
 
                     continue;
                 }

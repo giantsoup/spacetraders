@@ -41,6 +41,10 @@ php artisan campaign:resume
 php artisan campaign:revoke
 ~~~
 
+With more than one primary campaign, pass `--agent=<symbol>` to pause, resume,
+show status, or revoke. Paused primaries still count. Use `campaign:revoke --all`
+to revoke all of the operator’s campaign grants.
+
 Pause prevents further authority and stops pending campaign work. It cannot undo a
 request already sent. Resume requires operator review; it does not replay an old preview
 or uncertain write. Revocation or expiry requires a new approval.

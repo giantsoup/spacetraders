@@ -899,6 +899,19 @@ class CampaignLocalEarnTest extends TestCase
         $this->assertFalse(CampaignGrant::where('slot', 2)->exists());
     }
 
+    public function test_local_earn_replacement_ignores_another_agents_pending_grant(): void
+    {
+        $other = app(CampaignPlaybook::class)->import(str_replace('GIANTSOUP', 'SOUPBURN', file_get_contents(base_path('campaigns/weekly-default.yaml'))));
+        $otherPrimary = app(CampaignControl::class)->approve($other, $this->user);
+        $otherPending = $otherPrimary->replicate();
+        $otherPending->slot = 2;
+        $otherPending->save();
+
+        $this->assertSame(1, $this->replacement()->slot);
+        $this->assertSame(1, $otherPrimary->fresh()->slot);
+        $this->assertSame(2, $otherPending->fresh()->slot);
+    }
+
     #[DataProvider('replacementBlockers')]
     public function test_replacement_refuses_before_clearing_or_staging_and_preserves_original_authority(string $blocker): void
     {

@@ -14,6 +14,7 @@ use App\Models\LocalEngine;
 use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
+use App\Services\SpaceTradersClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -158,6 +159,7 @@ class AutomationRunner
         return app(HostLock::class)->scoped('agent-'.$agent->id, function () use ($agent, $run, $episode) {
             $grant = $episode->grant();
             if (! $grant->available() || $episode->agent_id !== $agent->id || $episode->closed_at || $run->agent_id !== $agent->id
+                || ($grant->isDraining() && $run->strategy !== 'sell_aboard')
                 || ! hash_equals($grant->revision_hash, $grant->revision()->content_hash)
                 || ! in_array($run->strategy, ['scout', 'trade', 'mining', 'sell_aboard', 'buy_probe'], true)
                 || ($run->strategy === 'buy_probe' && ! CampaignProbeBootstrap::policy($grant, $episode))
@@ -303,6 +305,8 @@ class AutomationRunner
                 } elseif ($run->strategy === 'contracts') {
                     $this->assertContractState($agent, $run, $ship);
                     $step = $this->contracts->next($ship, $run->plan, $run->totals, now()->toImmutable());
+                } elseif (! empty($run->plan['sell_only']) && ! empty($run->plan['restore_cruise']) && $ship['nav']['flightMode'] === 'BURN') {
+                    $step = app(CampaignRecovery::class)->next($agent, $ship, $run);
                 } elseif (! empty($run->plan['sell_only'])) {
                     $this->refreshBuyer($agent, $run->plan['market'], $run->ship_symbol);
                     if (($run->plan['route']['departure_refuel_ceiling'] ?? 0) > 0 && ($run->totals['travel_fuel'] ?? 0) === 0 && $run->plan['site'] !== $run->plan['market']
@@ -381,7 +385,7 @@ class AutomationRunner
             try {
                 FleetMetrics::forAgent($agent->name, function () use ($settlementScope, $work) {
                     if ($settlementScope) {
-                        app(\App\Services\SpaceTradersClient::class)->scope($work, priority: 'settlement');
+                        app(SpaceTradersClient::class)->scope($work, priority: 'settlement');
                     } else {
                         $work();
                     }

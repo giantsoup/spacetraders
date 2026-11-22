@@ -26,7 +26,9 @@ class ShipPurpose
             return [];
         }
 
-        $grant = CampaignGrant::where('slot', 1)->first() ?? CampaignGrant::latest('id')->first();
+        $symbol = strtoupper($agent->name);
+        $grant = CampaignGrant::primaryFor($agent->user_id, $symbol)->first()
+            ?? CampaignGrant::where('user_id', $agent->user_id)->where('agent_symbol', $symbol)->latest('id')->first();
         $episode = $grant
             ? CampaignEpisode::where('campaign_grant_id', $grant->id)
                 ->where('agent_id', $agent->id)
@@ -41,7 +43,7 @@ class ShipPurpose
             ->keyBy('ship_symbol');
 
         $arms = [];
-        foreach (CampaignGrant::liveArms()->get() as $armGrant) {
+        foreach (CampaignGrant::liveArms($symbol)->where('user_id', $agent->user_id)->get() as $armGrant) {
             $arm = $armGrant->arm();
             if (! empty($arm['ship']) && ! empty($arm['label'])) {
                 $armEpisode = CampaignEpisode::where('campaign_grant_id', $armGrant->id)

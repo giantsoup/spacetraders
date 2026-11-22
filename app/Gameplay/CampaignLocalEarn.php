@@ -22,7 +22,7 @@ class CampaignLocalEarn
 
     public static function policy(CampaignGrant $grant, CampaignEpisode $episode): ?array
     {
-        return $grant->slot === 1 && ! $grant->arm() && $grant->available() && ! $episode->closed_at && $episode->phase === 'earn'
+        return ! $grant->isDraining() && $grant->slot === 1 && ! $grant->arm() && $grant->available() && ! $episode->closed_at && $episode->phase === 'earn'
             && $episode->campaign_grant_id === $grant->id && hash_equals($grant->revision_hash, $grant->revision()->content_hash)
             ? ($grant->revision()->body['trade']['local_earn'] ?? null) : null;
     }

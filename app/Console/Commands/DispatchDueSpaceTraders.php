@@ -4,11 +4,13 @@ namespace App\Console\Commands;
 
 use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignDirector;
+use App\Gameplay\CampaignHealth;
 use App\Gameplay\DeploymentGate;
 use App\Gameplay\EngineGate;
 use App\Gameplay\FleetMetrics;
 use App\Gameplay\GameException;
 use App\Gameplay\GateRecon;
+use App\Gameplay\GateWatch;
 use App\Gameplay\HostLock;
 use App\Gameplay\ShipCommandExecutor;
 use App\Jobs\AdvanceAutomationRun;
@@ -19,6 +21,8 @@ use App\Models\CampaignGrant;
 use App\Models\ReconMission;
 use App\Models\ShipAction;
 use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -71,6 +75,13 @@ class DispatchDueSpaceTraders extends Command
                 // The owner is still working; retry on the next bounded sweep.
             }
         }
+        try {
+            app(CampaignHealth::class)->evaluateKillSwitch();
+        } catch (GameException) {
+            // Another pass owns campaign authority, or local budget telemetry is unavailable.
+        } catch (\Throwable $exception) {
+            Log::error('Campaign kill switch evaluation failed.', ['exception_class' => get_class($exception)]);
+        }
         $timing = ['lags' => [], 'director' => 0, 'arms' => 0];
         $director = app(CampaignDirector::class);
         $turns = DB::table('game_runtime')->where('key', 'director_turn')->value('value') === 'arms' ? ['arms', 'director'] : ['director', 'arms'];
@@ -95,9 +106,13 @@ class DispatchDueSpaceTraders extends Command
                 return self::SUCCESS;
             }
         }
-        foreach (ShipAction::where('state', 'pending')->where(function ($q) {
-            $q->whereNull('last_dispatched_at')->orWhere('last_dispatched_at', '<=', now()->subSeconds(30));
-        })->limit(50)->get() as $action) {
+        $pendingActions = $this->fairSlice(
+            ShipAction::where('state', 'pending')->where(function ($q) {
+                $q->whereNull('last_dispatched_at')->orWhere('last_dispatched_at', '<=', now()->subSeconds(30));
+            }),
+            'agent_id',
+        );
+        foreach ($pendingActions as $action) {
             if (hrtime(true) >= $deadline) {
                 break;
             }
@@ -107,11 +122,15 @@ class DispatchDueSpaceTraders extends Command
                 ExecuteShipCommand::dispatch($action->id);
             }
         }
-        foreach (AutomationRun::whereNotNull('active_agent_id')->where('next_action_at', '<=', now())->where(function ($q) {
-            $q->whereIn('state', ['running', 'waiting', 'stopping'])->orWhereNotNull('stop_requested_at');
-        })->where(function ($q) {
-            $q->whereNull('last_dispatched_at')->orWhere('last_dispatched_at', '<=', now()->subSeconds(30));
-        })->limit(50)->get() as $run) {
+        $dueRuns = $this->fairSlice(
+            AutomationRun::whereNotNull('active_agent_id')->where('next_action_at', '<=', now())->where(function ($q) {
+                $q->whereIn('state', ['running', 'waiting', 'stopping'])->orWhereNotNull('stop_requested_at');
+            })->where(function ($q) {
+                $q->whereNull('last_dispatched_at')->orWhere('last_dispatched_at', '<=', now()->subSeconds(30));
+            }),
+            'active_agent_id',
+        );
+        foreach ($dueRuns as $run) {
             if (hrtime(true) >= $deadline) {
                 break;
             }
@@ -123,8 +142,35 @@ class DispatchDueSpaceTraders extends Command
             }
         }
         $this->metrics($timing + ['dispatch' => microtime(true) - $started]);
+        $this->watchGate();
 
         return self::SUCCESS;
+    }
+
+    private function watchGate(): void
+    {
+        $waypoint = config('campaign.gate_watch.waypoint');
+        if (! is_string($waypoint) || $waypoint === '') {
+            return;
+        }
+        $agent = Agent::where('user_id', config('gameplay.operator_id'))->where('name', 'GIANTSOUP')
+            ->unarchived()->whereNotNull('reset_id')->latest('id')->first();
+        if ($agent) {
+            try {
+                app(GateWatch::class)->pollGate($agent, $waypoint, config('campaign.gate_watch.progress'));
+            } catch (GameException) {
+                // Another sweep owns the poll, the request was shed, or the waypoint is unavailable.
+            }
+        }
+    }
+
+    /** Rank before the limit so arbitrarily large backlogs cannot hide another agent. */
+    private function fairSlice(Builder $query, string $agentKey): Collection
+    {
+        $ranked = $query->select('*')->selectRaw('ROW_NUMBER() OVER (PARTITION BY '.$agentKey.' ORDER BY id) AS dispatch_round');
+
+        return $query->getModel()->newQuery()->fromSub($ranked, $query->getModel()->getTable())
+            ->orderBy('dispatch_round')->orderBy('id')->limit(50)->get();
     }
 
     private function tickDirector(CampaignDirector $director): bool
@@ -132,20 +178,31 @@ class DispatchDueSpaceTraders extends Command
         try {
             $attempted = $director->tick();
             if ($attempted) {
-                DB::table('game_runtime')->upsert([['key' => 'campaign_director_failures', 'value' => '0']], ['key'], ['value']);
+                $rows = [['key' => 'campaign_director_failures', 'value' => '0']];
+                if ($director->primaryGrantId !== null) {
+                    $rows[] = ['key' => 'campaign_director_failures:'.$director->primaryGrantId, 'value' => '0'];
+                }
+                DB::table('game_runtime')->upsert($rows, ['key'], ['value']);
             }
 
             return $attempted;
         } catch (\Throwable $exception) {
             $message = 'Campaign director failed; exception details redacted.';
-            Log::error($message, ['exception_class' => get_class($exception)]);
+            Log::error($message, ['exception_class' => get_class($exception), 'grant' => $director->primaryGrantId]);
             try {
-                $failures = (int) DB::table('game_runtime')->where('key', 'campaign_director_failures')->value('value') + 1;
-                DB::table('game_runtime')->upsert([['key' => 'campaign_director_failures', 'value' => (string) $failures]], ['key'], ['value']);
-                $grant = CampaignGrant::where('slot', 1)->first();
+                if ($director->primaryGrantId !== null) {
+                    $grant = CampaignGrant::find($director->primaryGrantId);
+                } else {
+                    // A failure before selection has no safe target when multiple primaries exist.
+                    $primaries = CampaignGrant::allPrimaries()->limit(2)->get();
+                    $grant = $primaries->count() === 1 ? $primaries->first() : null;
+                }
+                $key = $grant ? 'campaign_director_failures:'.$grant->id : 'campaign_director_failures';
+                $failures = (int) DB::table('game_runtime')->where('key', $key)->value('value') + 1;
+                DB::table('game_runtime')->upsert([['key' => $key, 'value' => (string) $failures]], ['key'], ['value']);
                 if ($grant) {
                     $control = app(CampaignControl::class);
-                    $control->event($grant, null, 'director_error', ['exception_class' => get_class($exception), 'message' => $message, 'consecutive' => $failures]);
+                    $control->event($grant, null, 'director_error', ['exception_class' => get_class($exception), 'message' => $message, 'consecutive' => $failures, 'agent_symbol' => $grant->resolvedAgentSymbol()]);
                     if ($failures >= 5) {
                         $control->pause($grant, 'director_error');
                     }

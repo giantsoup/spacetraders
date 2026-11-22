@@ -8,6 +8,7 @@ use App\Services\SpaceTradersClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 class SpaceTradersApi
@@ -179,7 +180,9 @@ class SpaceTradersApi
                 return $cached;
             }
         }
-        $body = $this->call('get', '/');
+        $body = $fresh
+            ? $this->client->scope(fn () => $this->call('get', '/'), priority: 'safety')
+            : $this->call('get', '/');
         $this->validate($body, ['resetDate' => 'required|string|max:80', 'version' => 'required|string|max:80']);
         $schedule = ['reset_id' => $body['resetDate'], 'next_reset' => $body['serverResets']['next'] ?? null];
         $this->writeResetCache($schedule);
@@ -190,7 +193,7 @@ class SpaceTradersApi
     public function clearResetCache(): void
     {
         try {
-            \Illuminate\Support\Facades\DB::table('game_runtime')->where('key', $this->resetCacheKey())->delete();
+            DB::table('game_runtime')->where('key', $this->resetCacheKey())->delete();
         } catch (\Throwable) {
         }
     }
@@ -203,7 +206,7 @@ class SpaceTradersApi
     private function readResetCache(int $ttl): ?array
     {
         try {
-            $raw = \Illuminate\Support\Facades\DB::table('game_runtime')->where('key', $this->resetCacheKey())->value('value');
+            $raw = DB::table('game_runtime')->where('key', $this->resetCacheKey())->value('value');
             if (! is_string($raw) || $raw === '') {
                 return null;
             }
@@ -234,7 +237,7 @@ class SpaceTradersApi
     private function writeResetCache(array $schedule): void
     {
         try {
-            \Illuminate\Support\Facades\DB::table('game_runtime')->upsert([[
+            DB::table('game_runtime')->upsert([[
                 'key' => $this->resetCacheKey(),
                 'value' => json_encode([
                     'reset_id' => $schedule['reset_id'],

@@ -67,23 +67,35 @@ Artisan::command('campaign:release-probe-purchase {action} {--user=} {--dry-run}
     $this->line(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 })->purpose('Release a probe purchase only after syncing the agent and reviewing that it never reached the server; uses stored evidence only');
 
-Artisan::command('campaign:pause', function (CampaignControl $control, HostLock $lock) {
-    $lock->retry('campaign', fn () => $control->pause(CampaignGrant::where('slot', 1)->firstOrFail(), 'operator_pause'));
+$operatorId = function ($command): ?int {
+    $id = $command->option('user') ?: config('gameplay.operator_id');
+    if ($id) {
+        return User::findOrFail($id)->id;
+    }
+    if (User::count() > 1) {
+        throw new GameException('Select the operator with --user=<id>.');
+    }
+
+    return User::value('id');
+};
+
+Artisan::command('campaign:pause {--agent=} {--user=}', function (CampaignControl $control, HostLock $lock) use ($operatorId) {
+    $lock->retry('campaign', fn () => $control->pause($control->resolvePrimary($operatorId($this), $this->option('agent')), 'operator_pause'));
     $this->info('Campaign paused.');
 })->purpose('Pause campaign authority and stop its runs');
 
-Artisan::command('campaign:resume', function (CampaignControl $control) {
-    $control->resume();
+Artisan::command('campaign:resume {--agent=} {--user=}', function (CampaignControl $control) use ($operatorId) {
+    $control->resume(userId: $operatorId($this), agentSymbol: $this->option('agent'));
     $this->info('Campaign resumed; the next decision uses fresh state.');
 })->purpose('Resume a paused campaign after operator review');
 
-Artisan::command('campaign:revoke', function (CampaignControl $control) {
-    $control->revoke();
+Artisan::command('campaign:revoke {--agent=} {--user=} {--all}', function (CampaignControl $control) use ($operatorId) {
+    $control->revoke(userId: $operatorId($this), agentSymbol: $this->option('agent'), all: (bool) $this->option('all'));
     $this->info('Campaign grants revoked.');
 })->purpose('Revoke active and pending campaign authority');
 
-Artisan::command('campaign:status', function (CampaignStatus $status) {
-    ['grant' => $grant, 'episode' => $episode, 'decision' => $event, 'problems' => $problems, 'pending_grant' => $pending] = $status->authority();
+Artisan::command('campaign:status {--agent=} {--user=}', function (CampaignStatus $status) use ($operatorId) {
+    ['grant' => $grant, 'episode' => $episode, 'decision' => $event, 'problems' => $problems, 'pending_grant' => $pending] = $status->authority($operatorId($this), $this->option('agent'));
     if (! $grant) {
         $this->line('No campaign grant.');
 

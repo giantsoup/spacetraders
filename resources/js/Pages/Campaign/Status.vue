@@ -13,6 +13,8 @@ import { Head, useForm, usePoll } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 const props = defineProps({
+    selectedAgent: String,
+    campaignAgents: Array,
     grant: { type: Object, default: null },
     episode: { type: Object, default: null },
     health: { type: Object, required: true },
@@ -56,13 +58,13 @@ const state = computed(() => {
 });
 const problems = computed(() => props.health.problems.filter(problem => !(props.grant?.paused_at && problem.key.startsWith('campaign_paused:'))));
 const recentCredits = computed(() => props.credits.slice(-8));
-const post = action => form.post(route(`campaign.${action}`), { preserveScroll: true });
+const post = action => form.post(route(`campaign.${action}`, props.selectedAgent ? { agent: props.selectedAgent } : {}), { preserveScroll: true });
 </script>
 
 <template>
     <Head title="Campaign status" />
     <AuthenticatedLayout>
-        <CampaignNavigation />
+        <CampaignNavigation :campaign-agents="campaignAgents" :selected-agent="selectedAgent" />
         <template #header>
             <p class="app-eyebrow">CAMPAIGN AUTOPILOT</p>
             <h1>Campaign status</h1>

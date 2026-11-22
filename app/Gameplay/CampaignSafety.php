@@ -63,8 +63,14 @@ class CampaignSafety
             || ! $grant->fresh()->available() || $episode->closed_at || $agent->reset_id !== $episode->reset_id) {
             throw new GameException('Campaign authority is paused, closed or awaiting liquidation.');
         }
-        if (! in_array($command, [null, 'orbit', 'dock', 'navigate', 'mine', 'mine_survey', 'sell', 'buy', 'refuel', 'buy_ship'], true)) {
+        if (! in_array($command, [null, 'flight_mode', 'orbit', 'dock', 'navigate', 'mine', 'mine_survey', 'sell', 'buy', 'refuel', 'buy_ship'], true)) {
             throw new GameException('Command is outside the campaign grant.');
+        }
+        if ($grant->isDraining() && (empty($run->plan['sell_only']) || in_array($command, ['buy', 'buy_ship', 'mine', 'mine_survey'], true))) {
+            throw new GameException('Drain pause only permits settling cargo aboard.');
+        }
+        if ($command === 'flight_mode' && ($run->strategy !== 'sell_aboard' || empty($run->plan['restore_cruise']) || empty($run->plan['sell_only']) || ($arguments['flightMode'] ?? null) !== 'CRUISE')) {
+            throw new GameException('Campaign flight mode only permits CRUISE cargo recovery.');
         }
         if ($episode->next_reset_at->isPast()) {
             throw new GameException('Awaiting confirmation of the next reset.');

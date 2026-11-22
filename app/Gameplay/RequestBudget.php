@@ -17,12 +17,24 @@ class RequestBudget
     public static function forAgent(?string $agentSymbol, callable $fn): mixed
     {
         $previous = self::$currentAgent;
-        self::$currentAgent = $agentSymbol !== null && $agentSymbol !== '' ? strtoupper($agentSymbol) : null;
+        self::$currentAgent = $agentSymbol !== null && $agentSymbol !== '' ? strtoupper($agentSymbol) : $previous;
         try {
             return $fn();
         } finally {
             self::$currentAgent = $previous;
         }
+    }
+
+    public function drainAgent(string $symbol, bool $draining): void
+    {
+        $this->change(function (&$state) use ($symbol, $draining) {
+            $key = hash('sha256', base_path()).':'.strtoupper($symbol);
+            if ($draining) {
+                $state['draining'][$key] = true;
+            } else {
+                unset($state['draining'][$key]);
+            }
+        });
     }
 
     public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75): void
@@ -46,7 +58,7 @@ class RequestBudget
                     3 => 2,
                     default => 3,
                 };
-                $delay = 0.0;
+                $delay = $tier > 1 && $agentSymbol && ! empty($state['draining'][hash('sha256', base_path()).':'.strtoupper($agentSymbol)]) ? 60.0 : 0.0;
                 foreach ($keys as $key) {
                     $bucket = $this->refill($state['buckets'][$key] ?? [], $now);
                     $state['buckets'][$key] = $bucket;
@@ -105,6 +117,7 @@ class RequestBudget
                             $stats['deferred_seconds'] += $delay;
                         }
                         if ($agentKey !== null) {
+                            $state['agents'][$agentKey]['deferred_at'][] = $now;
                             $state['agents'][$agentKey]['deferrals'] = ($state['agents'][$agentKey]['deferrals'] ?? 0) + 1;
                         }
                     }
@@ -173,7 +186,8 @@ class RequestBudget
 
     private function pruneAgentWindow(array $entry, float $now): array
     {
-        $entry += ['t1' => [], 't24' => [], 'deferrals' => 0];
+        $entry += ['t1' => [], 't24' => [], 'deferrals' => 0, 'deferred_at' => []];
+        $entry['deferred_at'] = array_values(array_filter($entry['deferred_at'], fn ($at) => $at > $now - 3600));
         $entry['t1'] = array_values(array_filter($entry['t1'], fn ($at) => $at > $now - 3600));
         $entry['t24'] = array_values(array_filter($entry['t24'], fn ($at) => $at > $now - 3600));
 
@@ -200,6 +214,10 @@ class RequestBudget
                 $stats['responses']++;
                 $stats['rate_limits'] += (int) ($response->status() === 429);
                 $stats['server_errors'] += (int) $response->serverError();
+            }
+            $state['host_rate_limits'] = array_values(array_filter($state['host_rate_limits'] ?? [], fn ($at) => $at > $now - 900));
+            if ($response->status() === 429) {
+                $state['host_rate_limits'][] = $now;
             }
             $type = strtolower(trim($response->header('X-RateLimit-Type') ?? ''));
             $scope = $type === 'account' && count($keys) > 1 ? $keys[1] : 'host';
@@ -265,6 +283,7 @@ class RequestBudget
         $tiers = $this->pruneHostTiers($state['host_tiers'] ?? [], $now);
         $result['host']['tier2_4_last_60_seconds'] = count($tiers['t24']);
         $result['host']['tier1_last_60_seconds'] = count($tiers['t1']);
+        $result['host']['rate_limits_last_15_minutes'] = count(array_filter($state['host_rate_limits'] ?? [], fn ($at) => $at > $now - 900));
         if ($agentSymbol !== null && $agentSymbol !== '') {
             $symbol = strtoupper($agentSymbol);
             $entry = $this->pruneAgentWindow($state['agents']['agent:'.$symbol] ?? [], $now);
@@ -276,6 +295,7 @@ class RequestBudget
                 'cap_per_hour' => $caps[$symbol] ?? null,
                 'tier1_reserve_per_hour' => (int) config('gameplay.agent_tier1_reserve_per_hour', 300),
                 'deferrals' => $entry['deferrals'] ?? 0,
+                'deferrals_last_hour' => count($entry['deferred_at']),
             ];
         }
 

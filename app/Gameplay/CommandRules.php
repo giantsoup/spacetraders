@@ -8,6 +8,7 @@ use App\Models\GameObservation;
 use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
+use Carbon\CarbonInterface;
 
 class CommandRules
 {
@@ -60,7 +61,10 @@ class CommandRules
                     throw new GameException('Ship condition or integrity fell below the operating floor.');
                 }
             }
-            if ($ship['crew']['current'] < $ship['crew']['required'] || $ship['nav']['flightMode'] !== 'CRUISE') {
+            $cruiseRecovery = $command === 'flight_mode' && ($arguments['flightMode'] ?? null) === 'CRUISE'
+                && $run->strategy === 'sell_aboard' && ! empty($run->plan['sell_only']) && ! empty($run->plan['restore_cruise'])
+                && $ship['nav']['flightMode'] === 'BURN' && FuelPlanner::configuration($ship) === $run->plan['initial_configuration'];
+            if ($ship['crew']['current'] < $ship['crew']['required'] || ($ship['nav']['flightMode'] !== 'CRUISE' && ! $cruiseRecovery)) {
                 throw new GameException('Crew or flight mode changed outside the approved run.');
             }
             $expected = $run->totals['expected_state'] ?? ['waypoint' => $run->plan['initial_waypoint'], 'status' => $run->plan['initial_status'], 'fuel' => $run->plan['initial_fuel']];
@@ -106,7 +110,7 @@ class CommandRules
      */
     private function usablePrefetch(Agent $agent, ?array $prefetched): bool
     {
-        if (! is_array($prefetched) || ! ($prefetched['observed_at'] ?? null) instanceof \Carbon\CarbonInterface) {
+        if (! is_array($prefetched) || ! ($prefetched['observed_at'] ?? null) instanceof CarbonInterface) {
             return false;
         }
         $observedAt = $prefetched['observed_at'];

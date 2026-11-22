@@ -18,6 +18,12 @@ class CampaignRecovery
         if ($ship['nav']['status'] === 'IN_TRANSIT' || $ship['cargo']['units'] < 1) {
             throw new GameException('Recovery requires stationary owned cargo.');
         }
+        $initialConfiguration = FuelPlanner::configuration($ship);
+        $restoreCruise = $ship['nav']['flightMode'] === 'BURN';
+        if ($restoreCruise) {
+            // Plan the safe leg now; the run must confirm the mode write before it can navigate.
+            $ship['nav']['flightMode'] = 'CRUISE';
+        }
         $market = app(SpaceTradersApi::class)->market($agent, $buyer);
         app(AgentSynchronizer::class)->observe($agent, 'market', $buyer, $market);
         $good = array_key_first(MiningPlanner::inventory($ship));
@@ -69,7 +75,7 @@ class CampaignRecovery
         $plan = array_merge($limits, ['strategy' => 'sell_aboard', 'recovery_good' => $good, 'sale_floor' => (int) ceil($cost), 'cargo_cost' => $cost * MiningPlanner::inventory($ship)[$good], 'sell_only' => true, 'cycles' => 1, 'site' => $ship['nav']['waypointSymbol'], 'market' => $buyer,
             'initial_credits' => $agent->credits, 'initial_inventory' => MiningPlanner::inventory($ship), 'initial_fuel' => $ship['fuel']['current'],
             'initial_waypoint' => $ship['nav']['waypointSymbol'], 'initial_status' => $ship['nav']['status'],
-            'initial_configuration' => FuelPlanner::configuration($ship), 'equipment' => OpportunityEvaluator::equipment($ship),
+            'initial_configuration' => $initialConfiguration, 'restore_cruise' => $restoreCruise, 'equipment' => OpportunityEvaluator::equipment($ship),
             'participating_ships' => [$symbol], 'route' => $route,
             'quote_signature' => OpportunityEvaluator::quoteSignature($market)]);
         $fingerprint = hash('sha256', json_encode(array_intersect_key($plan, array_flip(['initial_credits', 'initial_inventory', 'initial_fuel', 'initial_waypoint', 'initial_status', 'initial_configuration', 'equipment', 'quote_signature']))));
@@ -81,6 +87,9 @@ class CampaignRecovery
     {
         if ($ship['nav']['status'] === 'IN_TRANSIT') {
             return AutomationStep::wait(max(CarbonImmutable::parse($ship['nav']['route']['arrival']), CarbonImmutable::now()->addSeconds(5)));
+        }
+        if (! empty($run->plan['restore_cruise']) && $ship['nav']['flightMode'] === 'BURN') {
+            return AutomationStep::act('flight_mode', ['flightMode' => 'CRUISE']);
         }
         $fuelCost = $run->totals['fuel_cost'] ?? 0;
         $missing = $ship['fuel']['capacity'] - $ship['fuel']['current'];
@@ -112,6 +121,14 @@ class CampaignRecovery
         }
         if ($ship['nav']['status'] !== 'DOCKED') {
             return AutomationStep::act('dock');
+        }
+        if (! empty($run->plan['restored_cruise']) && $missing > 0
+            && ! app(CampaignSafety::class)->windDown(CampaignEpisode::findOrFail($run->campaign_episode_id))) {
+            $quote = app(FuelPlanner::class)->sellerQuote($agent, $run->plan['market']);
+            $room = min(($run->plan['route']['fuel_ceiling'] ?? 0) - $fuelCost, $agent->credits - $run->plan['reserve']);
+            if ($quote && ($step = $this->refuel($run, $missing, $quote, $room))) {
+                return $step;
+            }
         }
         $good = $run->plan['recovery_good'];
         $quote = app(OperationPlanner::class)->quote($agent, $run->plan['market'], $good);

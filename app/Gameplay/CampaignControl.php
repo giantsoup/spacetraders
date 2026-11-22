@@ -10,6 +10,7 @@ use App\Models\CampaignRevision;
 use App\Models\Ship;
 use App\Models\User;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 
 class CampaignControl
@@ -21,7 +22,8 @@ class CampaignControl
     {
         return app(HostLock::class)->scoped('campaign', function () use ($revision, $user, $expires, $replacement) {
             app(CampaignPlaybook::class)->validate($revision->body);
-            $current = CampaignGrant::where('slot', 1)->first();
+            $symbol = strtoupper((string) $revision->body['agent']['symbol']);
+            $current = CampaignGrant::primaryFor($user->id, $symbol)->first();
             if (isset($revision->body['trade']['local_earn']) && $current) {
                 try {
                     return app(CampaignLocalEarnReplacement::class)->approve($this, $current, $revision, $user, $expires, $replacement);
@@ -37,17 +39,17 @@ class CampaignControl
                 throw new GameException('Local Earn approval requires an Earn-first revision and an explicit expiry.');
             }
 
-            return DB::transaction(function () use ($revision, $user, $expires) {
+            return DB::transaction(function () use ($revision, $user, $expires, $symbol) {
                 app(CampaignPlaybook::class)->validate($revision->body);
-                CampaignGrant::where('slot', 2)->get()->each(fn ($grant) => $grant->update(['slot' => null, 'superseded_at' => now()]));
-                $current = CampaignGrant::where('slot', 1)->first();
-                $busy = $current && $this->busy($current);
+                CampaignGrant::pendingFor($user->id, $symbol)->get()->each(fn ($grant) => $grant->update(['slot' => null, 'superseded_at' => now()]));
+                $current = CampaignGrant::primaryFor($user->id, $symbol)->first();
+                $busy = $current && ($current->isDraining() || str_starts_with($current->pause_reason ?? '', 'drain_pause:') || $this->busy($current));
                 if ($current && ! $busy) {
                     $this->supersede($current);
                 }
                 $grant = CampaignGrant::create(['campaign_revision_id' => $revision->id, 'revision_hash' => $revision->content_hash,
-                    'user_id' => $user->id, 'limits' => $revision->body['limits'], 'expires_at' => $expires, 'slot' => $busy ? 2 : 1]);
-                $this->event($grant, null, 'approval', ['revision' => $revision->id, 'pending' => $busy]);
+                    'user_id' => $user->id, 'agent_symbol' => $symbol, 'limits' => $revision->body['limits'], 'expires_at' => $expires, 'slot' => $busy ? 2 : 1]);
+                $this->event($grant, null, 'approval', ['revision' => $revision->id, 'agent_symbol' => $symbol, 'pending' => $busy]);
 
                 return $grant;
             });
@@ -75,7 +77,8 @@ class CampaignControl
             if (isset($revision->body['trade']['local_earn'])) {
                 throw new GameException('Local Earn is C0-specific and cannot authorize an arm.');
             }
-            $live = CampaignGrant::liveArms()->get();
+            $symbol = strtoupper((string) $revision->body['agent']['symbol']);
+            $live = CampaignGrant::liveArms($symbol)->where('user_id', $user->id)->get();
             if ($live->contains(fn ($grant) => $grant->arm()['label'] === $arm['label'])) {
                 throw new GameException('Arm label '.$arm['label'].' is already live.');
             }
@@ -85,11 +88,11 @@ class CampaignControl
             if ($arm['follow'] !== null && ($arm['follow'] === $arm['label'] || ! $live->contains(fn ($grant) => $grant->arm()['label'] === $arm['follow']))) {
                 throw new GameException('Follow label '.$arm['follow'].' is not a live arm.');
             }
-            $agent = $user->agents()->where('name', $revision->body['agent']['symbol'])->unarchived()->latest('id')->first();
+            $agent = $user->agents()->where('name', $symbol)->unarchived()->latest('id')->first();
             if (! $agent || ! Ship::where('agent_id', $agent->id)->where('symbol', $arm['ship'])->exists()) {
                 throw new GameException('Ship '.$arm['ship'].' is not in the agent\'s synced fleet.');
             }
-            $c0 = CampaignGrant::where('slot', 1)->first();
+            $c0 = CampaignGrant::primaryFor($user->id, $symbol)->first();
             $roles = Ship::where('agent_id', $agent->id)->get()->filter(fn ($ship) => in_array($ship->snapshot['registration']['role'] ?? null, ['COMMAND', 'SATELLITE', 'PROBE'], true)
                 || ($ship->snapshot['frame']['symbol'] ?? null) === 'FRAME_PROBE')->pluck('symbol')->all();
             if (in_array($arm['ship'], $roles, true)) {
@@ -101,8 +104,8 @@ class CampaignControl
                 }
             }
             $grant = CampaignGrant::create(['campaign_revision_id' => $revision->id, 'revision_hash' => $revision->content_hash,
-                'user_id' => $user->id, 'limits' => $revision->body['limits'] + ['arm' => $arm], 'expires_at' => $expires, 'slot' => null]);
-            $this->event($grant, null, 'approval', ['revision' => $revision->id, 'arm' => $arm]);
+                'user_id' => $user->id, 'agent_symbol' => $symbol, 'limits' => $revision->body['limits'] + ['arm' => $arm], 'expires_at' => $expires, 'slot' => null]);
+            $this->event($grant, null, 'approval', ['revision' => $revision->id, 'agent_symbol' => $symbol, 'arm' => $arm]);
 
             return $grant;
         }));
@@ -151,6 +154,9 @@ class CampaignControl
 
     private function close(CampaignGrant $grant): void
     {
+        if ($grant->slot === 1 && ($grant->isDraining() || str_starts_with($grant->pause_reason ?? '', 'drain_pause:'))) {
+            app(RequestBudget::class)->drainAgent($grant->resolvedAgentSymbol(), false);
+        }
         $grant->update(['slot' => null, 'revoked_at' => now()]);
         $this->stopRuns($grant);
         CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->update(['closed_at' => now()]);
@@ -172,19 +178,26 @@ class CampaignControl
         return false;
     }
 
-    public function activatePending(): void
+    public function activatePending(?int $userId = null, ?string $agentSymbol = null): void
     {
-        DB::transaction(function () {
-            $pending = CampaignGrant::where('slot', 2)->first();
-            $current = CampaignGrant::where('slot', 1)->first();
-            if (! $pending || ($current && (($current->paused_at && $current->pause_reason !== 'grant_expired' && ! $current->expires_at?->isPast()) || $this->busy($current)))) {
-                return;
+        DB::transaction(function () use ($userId, $agentSymbol) {
+            $pendings = CampaignGrant::where('slot', 2)
+                ->when($userId !== null, fn ($q) => $q->where('user_id', $userId))
+                ->when($agentSymbol !== null && $agentSymbol !== '', fn ($q) => $q->where('agent_symbol', strtoupper($agentSymbol)))
+                ->orderBy('id')
+                ->get();
+            foreach ($pendings as $pending) {
+                $symbol = $pending->resolvedAgentSymbol();
+                $current = CampaignGrant::primaryFor($pending->user_id, $symbol)->first();
+                if ($current && ((($current->isDraining() || $current->paused_at) && $current->pause_reason !== 'grant_expired' && ! $current->expires_at?->isPast()) || $this->busy($current))) {
+                    continue;
+                }
+                if ($current) {
+                    $this->supersede($current);
+                }
+                $pending->update(['slot' => 1]);
+                $this->event($pending, null, 'activated', ['agent_symbol' => $symbol]);
             }
-            if ($current) {
-                $this->supersede($current);
-            }
-            $pending->update(['slot' => 1]);
-            $this->event($pending, null, 'activated', []);
         });
     }
 
@@ -195,11 +208,50 @@ class CampaignControl
         $this->event($grant, null, 'superseded', []);
     }
 
+    /**
+     * Cargo-safe drain pause for host/budget pressure or cannibalization: immediately stops new
+     * Tiers 2-4 exposure (buys, scouts, positioning, ship buys) while keeping active Tier-1
+     * sell_aboard recovery alive until cargo aboard and unsettled actions finish settling.
+     */
+    public function drainPause(CampaignGrant $grant, string $reason, ?CampaignEpisode $episode = null): void
+    {
+        DB::transaction(function () use ($grant, $reason, $episode) {
+            $grant->refresh();
+            if ($grant->paused_at) {
+                return;
+            }
+            app(RequestBudget::class)->drainAgent($grant->resolvedAgentSymbol(), true);
+            $episode ??= CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->latest('id')->first();
+            if (! $grant->isDraining()) {
+                $grant->update(['wait_reason' => 'drain_pause:'.$reason]);
+                if ($episode) {
+                    $state = $episode->state ?? [];
+                    $state['draining'] = $reason;
+                    $episode->update(['state' => $state]);
+                }
+                $this->event($grant, $episode, 'drain_pause', ['reason' => $reason, 'agent_symbol' => $grant->resolvedAgentSymbol()]);
+            }
+            // Stop non-sell-only runs immediately; preserve active sell_aboard recovery runs.
+            $episodes = CampaignEpisode::where('campaign_grant_id', $grant->id)->select('id');
+            AutomationRun::whereIn('campaign_episode_id', $episodes)->where('state', 'preview')
+                ->where('strategy', '!=', 'sell_aboard')
+                ->update(['state' => 'stopped', 'blocked_reason' => 'Drain pause: stopping new exposure.']);
+            foreach (AutomationRun::whereIn('campaign_episode_id', $episodes)->whereNotNull('active_agent_id')->get() as $run) {
+                if (empty($run->plan['sell_only'])) {
+                    app(AutomationRunner::class)->stop($run);
+                }
+            }
+        });
+    }
+
     public function pause(CampaignGrant $grant, string $reason, ?CampaignEpisode $episode = null): void
     {
         DB::transaction(function () use ($grant, $reason, $episode) {
             $grant->refresh();
             if (! $grant->paused_at) {
+                if ($grant->isDraining() && $reason !== $grant->wait_reason) {
+                    app(RequestBudget::class)->drainAgent($grant->resolvedAgentSymbol(), false);
+                }
                 $grant->update(['paused_at' => now(), 'pause_reason' => $reason, 'wait_reason' => null]);
                 $this->event($grant, $episode, 'pause', ['reason' => $reason, 'start_credits' => $episode?->start_credits, 'limits' => $grant->limits]);
             }
@@ -207,30 +259,84 @@ class CampaignControl
         });
     }
 
-    public function resume(): void
+    /** Resolve a single primary grant for an operator, requiring explicit agent symbol when >1 primary (including paused) exists. */
+    public function resolvePrimary(?int $userId = null, ?string $agentSymbol = null): CampaignGrant
     {
-        app(HostLock::class)->retry('campaign', function () {
-            $grant = CampaignGrant::where('slot', 1)->firstOrFail();
+        $query = CampaignGrant::allPrimaries($userId);
+        if ($agentSymbol !== null && $agentSymbol !== '') {
+            return (clone $query)->where('agent_symbol', strtoupper($agentSymbol))->firstOrFail();
+        }
+        $primaries = $query->orderBy('id')->get();
+        if ($primaries->count() > 1) {
+            $names = $primaries->map(fn ($g) => $g->resolvedAgentSymbol())->implode(', ');
+            throw new GameException('Multiple primary campaigns exist ('.$names.'). Specify --agent=<symbol>.');
+        }
+
+        if ($primaries->isEmpty()) {
+            throw (new ModelNotFoundException)->setModel(CampaignGrant::class);
+        }
+
+        return $primaries->first();
+    }
+
+    public function resume(?CampaignGrant $grant = null, ?int $userId = null, ?string $agentSymbol = null): void
+    {
+        app(HostLock::class)->retry('campaign', function () use ($grant, $userId, $agentSymbol) {
+            $grant = $grant ? $grant->fresh() : $this->resolvePrimary($userId, $agentSymbol);
             if ($grant->expires_at?->isPast()) {
                 throw new GameException('Grant expired. Approve a new grant.');
+            }
+            if ($grant->isDraining() || str_starts_with($grant->pause_reason ?? '', 'drain_pause:')) {
+                app(RequestBudget::class)->drainAgent($grant->resolvedAgentSymbol(), false);
             }
             $grant->update(['paused_at' => null, 'pause_reason' => null, 'wait_reason' => null, 'last_directed_at' => null]);
             foreach (CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->get() as $episode) {
                 $state = $episode->state ?? [];
-                unset($state['pending_pause'], $state['recovery_attempts_since']);
+                unset($state['pending_pause'], $state['recovery_attempts_since'], $state['draining']);
                 $state['losses_reviewed_at'] = now()->toIso8601String();
                 $episode->update(['state' => $state]);
             }
-            DB::table('game_runtime')->upsert([['key' => 'campaign_director_failures', 'value' => '0']], ['key'], ['value']);
-            $this->event($grant, null, 'resume', []);
+            DB::table('game_runtime')->upsert([
+                ['key' => 'campaign_director_failures', 'value' => '0'],
+                ['key' => 'campaign_director_failures:'.$grant->id, 'value' => '0'],
+            ], ['key'], ['value']);
+            $this->event($grant, null, 'resume', ['agent_symbol' => $grant->resolvedAgentSymbol()]);
         });
     }
 
-    public function revoke(): void
+    public function revoke(?CampaignGrant $grant = null, ?int $userId = null, ?string $agentSymbol = null, bool $all = false): void
     {
-        app(HostLock::class)->retry('campaign', fn () => DB::transaction(function () {
-            foreach (CampaignGrant::whereNotNull('slot')->get()->merge(CampaignGrant::liveArms()->get()) as $grant) {
-                $this->close($grant);
+        app(HostLock::class)->retry('campaign', fn () => DB::transaction(function () use ($grant, $userId, $agentSymbol, $all) {
+            if ($all) {
+                $slotted = CampaignGrant::whereNotNull('slot')->when($userId !== null, fn ($q) => $q->where('user_id', $userId))->get();
+                $arms = CampaignGrant::liveArms()->when($userId !== null, fn ($q) => $q->where('user_id', $userId))->get();
+                foreach ($slotted->merge($arms) as $item) {
+                    $this->close($item);
+                }
+
+                return;
+            }
+            if ($grant === null && ($agentSymbol === null || $agentSymbol === '')) {
+                $primaries = CampaignGrant::allPrimaries($userId)->get();
+                if ($primaries->count() > 1) {
+                    $names = $primaries->map(fn ($g) => $g->resolvedAgentSymbol())->implode(', ');
+                    throw new GameException('Multiple primary campaigns exist ('.$names.'). Specify --agent=<symbol> or --all.');
+                }
+                $slotted = CampaignGrant::whereNotNull('slot')->when($userId !== null, fn ($q) => $q->where('user_id', $userId))->get();
+                $arms = CampaignGrant::liveArms()->when($userId !== null, fn ($q) => $q->where('user_id', $userId))->get();
+                foreach ($slotted->merge($arms) as $item) {
+                    $this->close($item);
+                }
+
+                return;
+            }
+            $target = $grant ? $grant->fresh() : $this->resolvePrimary($userId, $agentSymbol);
+            $symbol = $target->resolvedAgentSymbol();
+            $toClose = CampaignGrant::where('user_id', $target->user_id)->where('agent_symbol', $symbol)
+                ->where(fn ($q) => $q->whereNotNull('slot')->orWhere(fn ($arms) => $arms->whereNull('slot')->whereNotNull('limits->arm')->whereNull('revoked_at')->whereNull('superseded_at')))
+                ->get();
+            foreach ($toClose as $item) {
+                $this->close($item);
             }
         }));
     }

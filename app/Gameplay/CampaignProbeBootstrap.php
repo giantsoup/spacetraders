@@ -25,7 +25,7 @@ class CampaignProbeBootstrap
 
     public static function policy(CampaignGrant $grant, CampaignEpisode $episode): ?array
     {
-        if ($grant->slot !== 1 || $grant->arm() || ! $grant->available() || $episode->closed_at
+        if ($grant->isDraining() || $grant->slot !== 1 || $grant->arm() || ! $grant->available() || $episode->closed_at
             || $episode->campaign_grant_id !== $grant->id || ! hash_equals($grant->revision_hash, $grant->revision()->content_hash)
             || app(CampaignSafety::class)->windDown($episode)) {
             return null;

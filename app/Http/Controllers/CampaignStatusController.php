@@ -20,38 +20,54 @@ class CampaignStatusController extends Controller
     {
         $this->authorizeOperator($request);
 
-        return Inertia::render('Campaign/Status', $status->read() + ['status' => $request->session()->get('status')]);
+        $selection = $this->selection($request);
+
+        return Inertia::render('Campaign/Status', $status->read($request->user()->id, $selection['selectedAgent']) + $selection + ['status' => $request->session()->get('status')]);
     }
 
     public function strategy(Request $request, CampaignStrategy $strategy): Response
     {
         $this->authorizeOperator($request);
 
-        return Inertia::render('Campaign/Strategy', $strategy->read());
+        $selection = $this->selection($request);
+
+        return Inertia::render('Campaign/Strategy', $strategy->read($request->user()->id, $selection['selectedAgent']) + $selection);
     }
 
     public function pause(Request $request, CampaignControl $control, HostLock $lock): RedirectResponse
     {
         $this->authorizeOperator($request);
+        $agent = $request->validate(['agent' => 'nullable|string|max:32'])['agent'] ?? null;
         try {
-            $lock->retry('campaign', fn () => $control->pause(CampaignGrant::where('slot', 1)->firstOrFail(), 'operator_pause'));
+            $lock->retry('campaign', fn () => $control->pause($control->resolvePrimary($request->user()->id, $agent), 'operator_pause'));
         } catch (GameException $exception) {
             throw ValidationException::withMessages(['campaign' => $exception->getMessage()]);
         }
 
-        return to_route('campaign.show')->with('status', 'Campaign paused.');
+        return to_route('campaign.show', array_filter(['agent' => $agent]))->with('status', 'Campaign paused.');
     }
 
     public function resume(Request $request, CampaignControl $control): RedirectResponse
     {
         $this->authorizeOperator($request);
+        $agent = $request->validate(['agent' => 'nullable|string|max:32'])['agent'] ?? null;
         try {
-            $control->resume();
+            $control->resume(userId: $request->user()->id, agentSymbol: $agent);
         } catch (GameException $exception) {
             throw ValidationException::withMessages(['campaign' => $exception->getMessage()]);
         }
 
-        return to_route('campaign.show')->with('status', 'Campaign resumed; the next decision uses fresh state.');
+        return to_route('campaign.show', array_filter(['agent' => $agent]))->with('status', 'Campaign resumed; the next decision uses fresh state.');
+    }
+
+    private function selection(Request $request): array
+    {
+        $symbols = CampaignGrant::allPrimaries($request->user()->id)->orderBy('id')->pluck('agent_symbol')->all();
+        $selected = $request->validate(['agent' => 'nullable|string|max:32'])['agent'] ?? null;
+        $selected = $selected ? strtoupper($selected) : null;
+        abort_if($selected && ! in_array($selected, $symbols, true), 404);
+
+        return ['campaignAgents' => $symbols, 'selectedAgent' => $selected ?? (count($symbols) > 1 ? $symbols[0] : null)];
     }
 
     private function authorizeOperator(Request $request): void

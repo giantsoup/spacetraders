@@ -49,9 +49,9 @@ class CampaignStrategyTest extends TestCase
         ['grant' => $grant] = CampaignStatusFixture::seed($this->operator);
         // Expiry is immutable, so set it as fixture data rather than updating the model.
         DB::table('campaign_grants')->where('id', $grant->id)->update(['paused_at' => now(), 'pause_reason' => 'operator_pause', 'expires_at' => now()->subHour()]);
-        $pending = $this->revision('queued-only');
+        $pending = $this->revision('queued-only', $grant->agent_symbol);
         $this->grant($pending, 2);
-        $this->grant($this->revision('arm-only'), null, ['arm' => ['label' => 'test', 'ship' => 'OFFLINE-2']]);
+        $this->grant($this->revision('arm-only', $grant->agent_symbol), null, ['arm' => ['label' => 'test', 'ship' => 'OFFLINE-2']]);
         $this->grant($this->revision('historical-only'), null);
         $response = $this->readWithoutEffects();
         $response->assertInertia(fn (Assert $page) => $page->component('Campaign/Strategy')
@@ -176,10 +176,11 @@ class CampaignStrategyTest extends TestCase
         return Yaml::parse(file_get_contents(base_path('campaigns/weekly-default.yaml')));
     }
 
-    private function revision(string $name): CampaignRevision
+    private function revision(string $name, string $symbol = 'GIANTSOUP'): CampaignRevision
     {
         $body = $this->body();
         $body['name'] = $name;
+        $body['agent']['symbol'] = $symbol;
 
         return CampaignRevision::create(['name' => $name, 'content_hash' => hash('sha256', $name), 'body' => $body, 'source' => 'synthetic']);
     }

@@ -513,6 +513,14 @@ class ShipCommandExecutor
             if ($target) {
                 $this->sync->saveShip($agent, $target);
             }
+            if ($action->command === 'flight_mode' && $run?->strategy === 'sell_aboard' && ! empty($run->plan['restore_cruise'])
+                && $actualShip['nav']['flightMode'] === 'CRUISE') {
+                $plan = $run->fresh()->plan;
+                $plan['initial_configuration'] = FuelPlanner::configuration($actualShip);
+                $plan['restore_cruise'] = false;
+                $plan['restored_cruise'] = true;
+                $run->update(['plan' => $plan]);
+            }
             if ($action->command === 'survey') {
                 foreach ($data['surveys'] as $signed) {
                     app(SurveyPool::class)->save($agent, $signed, $actualShip['symbol']);

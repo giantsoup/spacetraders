@@ -2361,6 +2361,49 @@ class CampaignAutopilotTest extends TestCase
         $this->assertCount(2, array_filter($world['writes'], fn ($call) => $call['path'] === '/register'));
     }
 
+    public function test_director_failure_streak_does_not_pause_another_primary(): void
+    {
+        $local = $this->approve();
+        $other = $this->approve(str_replace('LOCAL', 'OTHER', $this->body()));
+        $other->update(['paused_at' => now(), 'pause_reason' => 'operator_pause']);
+        $this->partialMock(SpaceTradersApi::class)->shouldReceive('resetSchedule')->times(5)->andThrow(new \TypeError('Synthetic director failure.'));
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $this->artisan('spacetraders:dispatch-due')->assertSuccessful();
+            $this->travel(31)->seconds();
+            LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+        }
+        $this->assertSame('director_error', $local->fresh()->pause_reason);
+        $this->assertSame('operator_pause', $other->fresh()->pause_reason);
+        $this->assertSame(0, CampaignEvent::where('campaign_grant_id', $other->id)->where('kind', 'director_error')->count());
+    }
+
+    public function test_ambiguous_registration_retry_identity_survives_primary_replacement_and_isolates_symbols(): void
+    {
+        $old = $this->approve();
+        $this->tick();
+        $this->editWorld(function (&$world) {
+            $world['reset'] = now()->subHour()->toIso8601String();
+            $world['campaign_registration'] = true;
+            $world['failure'] = 'timeout_after';
+        });
+        $this->tick();
+        $intent = CampaignEvent::where('kind', 'registration_intent')->latest('id')->firstOrFail();
+        $this->assertSame(1, $intent->data['attempt']);
+        $replacement = $this->approve();
+        $this->assertNotSame($old->id, $replacement->id);
+        // An unrelated symbol's exhausted retry must never be mistaken for LOCAL's retry.
+        app(CampaignControl::class)->event($replacement, null, 'registration_intent', array_merge($intent->data, ['symbol' => 'OTHER', 'attempt' => 2, 'outcome' => 'conflict']));
+        $this->tick();
+        $this->assertNull($replacement->fresh()->paused_at);
+        $this->editWorld(fn (&$world) => $world['failure'] = 'timeout_after');
+        $this->tick();
+        $last = CampaignEvent::where('kind', 'registration_intent')->where('data->symbol', 'LOCAL')->latest('id')->firstOrFail();
+        $this->assertSame(2, $last->data['attempt']);
+        $this->assertSame($replacement->id, $last->campaign_grant_id);
+        $this->assertSame('registration_unknown', $replacement->fresh()->pause_reason);
+        $this->assertCount(2, array_filter(json_decode(file_get_contents($this->file), true)['writes'], fn ($call) => $call['path'] === '/register'));
+    }
+
     public function test_cargo_without_known_buyer_pauses_and_preserves_inventory(): void
     {
         $grant = $this->approve();

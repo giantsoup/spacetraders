@@ -64,21 +64,30 @@ class CampaignStatus
         'fuel' => ['current' => 'integer', 'capacity' => 'integer', 'consumed' => ['amount' => 'integer', 'timestamp' => 'string']],
     ];
 
-    public function authority(): array
+    public function authority(?int $userId = null, ?string $agentSymbol = null): array
     {
-        $grant = CampaignGrant::where('slot', 1)->first() ?? CampaignGrant::latest('id')->first();
+        $primaries = CampaignGrant::allPrimaries($userId);
+        if ($agentSymbol) {
+            $primaries->where('agent_symbol', strtoupper($agentSymbol));
+        } elseif ((clone $primaries)->count() > 1) {
+            throw new GameException('Multiple primary campaigns exist. Specify --agent=<symbol>.');
+        }
+        $grant = $primaries->first() ?? CampaignGrant::query()
+            ->when($userId !== null, fn ($q) => $q->where('user_id', $userId))
+            ->when($agentSymbol, fn ($q) => $q->where('agent_symbol', strtoupper($agentSymbol)))
+            ->latest('id')->first();
         $episode = $grant ? CampaignEpisode::where('campaign_grant_id', $grant->id)->latest('id')->first() : null;
         $decision = $grant ? CampaignEvent::where('campaign_grant_id', $grant->id)->where('kind', 'decision')->latest('id')->first() : null;
 
         return compact('grant', 'episode', 'decision') + [
-            'problems' => app(CampaignHealth::class)->problems(),
-            'pending_grant' => CampaignGrant::where('slot', 2)->value('id'),
+            'problems' => $grant?->slot === 1 ? app(CampaignHealth::class)->problems($grant) : [],
+            'pending_grant' => $grant ? CampaignGrant::pendingFor($grant->user_id, $grant->resolvedAgentSymbol())->value('id') : null,
         ];
     }
 
-    public function read(): array
+    public function read(?int $userId = null, ?string $agentSymbol = null): array
     {
-        ['grant' => $grant, 'episode' => $episode, 'decision' => $decision, 'problems' => $problems, 'pending_grant' => $pending] = $this->authority();
+        ['grant' => $grant, 'episode' => $episode, 'decision' => $decision, 'problems' => $problems, 'pending_grant' => $pending] = $this->authority($userId, $agentSymbol);
         $agent = $episode ? Agent::find($episode->agent_id) : null;
         $revision = $grant?->revision();
         $engine = LocalEngine::find(1);
