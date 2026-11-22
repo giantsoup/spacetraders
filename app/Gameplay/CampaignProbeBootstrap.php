@@ -8,10 +8,13 @@ use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignGrant;
 use App\Models\GameObservation;
+use App\Models\ObservationHistory;
 use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
+use App\Models\User;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 
 /** Minute-0 probe bootstrap: bounded SHIP_PROBE purchases under opt-in C0 playbook authority. */
 class CampaignProbeBootstrap
@@ -115,27 +118,7 @@ class CampaignProbeBootstrap
                         is_array($action->outcome['transactions'] ?? null) ? $action->outcome['transactions'] : [],
                         is_array($shipyardObs->get($shipyard)?->data['transactions'] ?? null) ? $shipyardObs->get($shipyard)->data['transactions'] : [],
                     );
-                    $matchingTx = collect($transactions)->first(function ($tx) use ($agent, $shipyard, $action) {
-                        if (! is_array($tx)
-                            || ($tx['waypointSymbol'] ?? null) !== $shipyard
-                            || (($tx['shipType'] ?? $tx['shipSymbol'] ?? null) !== 'SHIP_PROBE')
-                            || ($tx['agentSymbol'] ?? null) !== $agent->name
-                            || ! is_string($tx['timestamp'] ?? null)
-                            || ! preg_match('/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\z/', $tx['timestamp'])) {
-                            return false;
-                        }
-                        if (! checkdate((int) substr($tx['timestamp'], 5, 2), (int) substr($tx['timestamp'], 8, 2), (int) substr($tx['timestamp'], 0, 4))
-                            || (int) substr($tx['timestamp'], 11, 2) > 23
-                            || (int) substr($tx['timestamp'], 14, 2) > 59
-                            || (int) substr($tx['timestamp'], 17, 2) > 59) {
-                            return false;
-                        }
-                        try {
-                            return CarbonImmutable::parse($tx['timestamp'])->gte($action->sent_at->subSeconds(5));
-                        } catch (\Throwable) {
-                            return false;
-                        }
-                    });
+                    $matchingTx = $this->matchingProbeTransaction($agent, $action, $transactions);
                     if ($matchingTx) {
                         foreach ($deliveryCandidates as $symbol) {
                             if ($ownedProbes->has($symbol)
@@ -160,6 +143,103 @@ class CampaignProbeBootstrap
         return $activeRuns + $pendingActions;
     }
 
+    private function matchingProbeTransaction(Agent $agent, ShipAction $action, array $transactions): ?array
+    {
+        $shipyard = $action->arguments['waypointSymbol'] ?? null;
+        if (! is_string($shipyard) || ! $action->sent_at) {
+            return null;
+        }
+
+        return collect($transactions)->first(function ($tx) use ($agent, $shipyard, $action) {
+            if (! is_array($tx)
+                || ($tx['waypointSymbol'] ?? null) !== $shipyard
+                || (($tx['shipType'] ?? $tx['shipSymbol'] ?? null) !== 'SHIP_PROBE')
+                || ($tx['agentSymbol'] ?? null) !== $agent->name
+                || ! is_string($tx['timestamp'] ?? null)
+                || ! preg_match('/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\z/', $tx['timestamp'])) {
+                return false;
+            }
+            if (! checkdate((int) substr($tx['timestamp'], 5, 2), (int) substr($tx['timestamp'], 8, 2), (int) substr($tx['timestamp'], 0, 4))
+                || (int) substr($tx['timestamp'], 11, 2) > 23
+                || (int) substr($tx['timestamp'], 14, 2) > 59
+                || (int) substr($tx['timestamp'], 17, 2) > 59) {
+                return false;
+            }
+            try {
+                return CarbonImmutable::parse($tx['timestamp'])->gte($action->sent_at->subSeconds(5));
+            } catch (\Throwable) {
+                return false;
+            }
+        });
+    }
+
+    public function releasePurchase(ShipAction $action, User $user, bool $dryRun = false): array
+    {
+        return app(HostLock::class)->scoped('agent-'.$action->agent_id, fn () => DB::transaction(function () use ($action, $user, $dryRun) {
+            $action->refresh();
+            $agent = $user->agents()->find($action->agent_id);
+            if (! $agent) {
+                throw new GameException('This operator does not operate the action agent.');
+            }
+            if ($action->reset_id !== $agent->reset_id || $action->command !== 'buy_ship'
+                || ($action->arguments['shipType'] ?? null) !== 'SHIP_PROBE' || $action->state->value !== 'acknowledged') {
+                throw new GameException('Only an acknowledged SHIP_PROBE buy_ship action in the current reset can be released.');
+            }
+            if (isset($action->outcome['confirmed_not_sent'])) {
+                throw new GameException('This purchase was already released.');
+            }
+            if (! empty($action->outcome['delivered_ship']) || ! empty($action->outcome['bootstrap_delivered_probe'])) {
+                throw new GameException('The purchase already has delivery evidence.');
+            }
+            // Successful write receipt markers are stored before validation, even when sanitized data is empty.
+            $outcome = $action->outcome ?? [];
+            if (array_key_exists('response', $outcome) || array_key_exists('body_sha256', $outcome)
+                || array_key_exists('response_received_at', $outcome) || array_key_exists('http_status', $outcome)
+                || array_key_exists('response_validated', $outcome)) {
+                throw new GameException('The slot stays held because stored receipt evidence shows the purchase may have happened. Syncing cannot clear this evidence.');
+            }
+            $beforeFleet = $action->before_state['estimate']['fleet_symbols'] ?? null;
+            $shipyard = $action->arguments['waypointSymbol'] ?? null;
+            if (! is_array($beforeFleet) || ! is_string($shipyard) || ! $action->sent_at) {
+                throw new GameException('Purchase baseline is incomplete; cannot rule out a delivery. Sync the agent first.');
+            }
+            $transactions = is_array($action->outcome['transactions'] ?? null) ? $action->outcome['transactions'] : [];
+            foreach ([GameObservation::class, ObservationHistory::class] as $observations) {
+                foreach ($observations::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+                    ->where('kind', 'shipyard')->where('symbol', $shipyard)->cursor() as $observation) {
+                    $transactions = array_merge($transactions, is_array($observation->data['transactions'] ?? null) ? $observation->data['transactions'] : []);
+                }
+            }
+            if ($this->matchingProbeTransaction($agent, $action, $transactions)) {
+                throw new GameException('A matching shipyard transaction was recorded; the slot stays held because stored evidence shows the purchase may have happened. Syncing cannot clear this evidence.');
+            }
+            $attributed = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+                ->where('command', 'buy_ship')->whereIn('state', ['confirmed', 'acknowledged'])->get()
+                ->flatMap(fn ($purchase) => [$purchase->outcome['delivered_ship'] ?? null, $purchase->outcome['bootstrap_delivered_probe'] ?? null])
+                ->filter()->all();
+            $fleet = app(CampaignFleet::class);
+            $newProbe = Ship::where('agent_id', $agent->id)->get()->first(fn ($ship) => $fleet->isProbe($ship->snapshot)
+                && ! in_array($ship->symbol, $beforeFleet, true) && ! in_array($ship->symbol, $attributed, true));
+            if ($newProbe) {
+                throw new GameException('Unattributed new probe '.$newProbe->symbol.' may be this delivery. Sync the agent first.');
+            }
+            $confirmation = ['user_id' => $user->id, 'at' => now()->toIso8601String(), 'reason' => 'operator release'];
+            if (! $dryRun) {
+                $action->update(['outcome' => array_merge($action->outcome ?? [], ['confirmed_not_sent' => $confirmation])]);
+                $run = AutomationRun::find($action->automation_run_id);
+                $episode = $run ? CampaignEpisode::find($run->campaign_episode_id) : null;
+                if ($episode) {
+                    $grant = CampaignGrant::find($episode->campaign_grant_id)
+                        ?? throw new GameException('Campaign grant not found; the purchase cannot be released.');
+                    app(CampaignControl::class)->event($grant, $episode,
+                        'probe_purchase_released', ['action_id' => $action->id] + $confirmation);
+                }
+            }
+
+            return ['action_id' => $action->id, 'released' => ! $dryRun, 'dry_run' => $dryRun, 'confirmed_not_sent' => $confirmation];
+        }));
+    }
+
     public function effectiveReserve(Agent $agent, CampaignGrant $grant, array $policy, ?int $ignoreRunId = null): int
     {
         $commitments = AutomationRun::where('active_agent_id', $agent->id)
@@ -181,7 +261,7 @@ class CampaignProbeBootstrap
                     $planned = $run->plan['campaign_trade'] ?? [];
                     if (! isset($planned['fuel_reserve']) && ! isset($planned['fuel_safety_ceiling'])
                         && ! isset($run->plan['route']['fuel_ceiling'])) {
-                        throw new GameException('Ship '.$run->ship_symbol.' carries cargo and its delivery fuel reserve cannot be verified right now ('.$e->getMessage().'). Retry after its fuel quotes refresh.');
+                        throw new GameException('Ship '.$run->ship_symbol.' carries cargo and its delivery fuel reserve cannot be verified right now ('.$e->getMessage().'). Retry once its fuel quotes are re-read.');
                     }
 
                     return (int) max($planned['fuel_reserve'] ?? 0, $planned['fuel_safety_ceiling'] ?? 0, $run->plan['route']['fuel_ceiling'] ?? 0);
