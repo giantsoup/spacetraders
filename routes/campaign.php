@@ -2,6 +2,7 @@
 
 use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignPlaybook;
+use App\Gameplay\CampaignProbeBootstrap;
 use App\Gameplay\CampaignReport;
 use App\Gameplay\CampaignStatus;
 use App\Gameplay\CampaignWatchdog;
@@ -15,6 +16,7 @@ use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\CampaignRevision;
 use App\Models\ReconMission;
+use App\Models\ShipAction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Artisan;
@@ -41,6 +43,29 @@ Artisan::command('campaign:approve {revision} {--user=} {--expires=} {--replace-
         $this->option('replace-grant') !== null ? ['grant' => (int) $this->option('replace-grant'), 'hash' => (string) $this->option('replace-hash'), 'episode' => (int) $this->option('replace-episode')] : null);
     $this->info('Grant: '.$grant->id.($grant->slot === 2 ? ' (pending safe point)' : ' (active)'));
 })->purpose('Approve a revision for unattended execution');
+
+Artisan::command('campaign:release-probe-purchase {action} {--user=} {--dry-run}', function (CampaignProbeBootstrap $bootstrap) {
+    try {
+        $userId = $this->option('user') ?: config('gameplay.operator_id');
+        if (! $userId && User::count() !== 1) {
+            throw new GameException('Select the operator with --user=<id>.');
+        }
+        $user = $userId ? User::find($userId) : User::first();
+        if (! $user) {
+            throw new GameException('Operator not found.');
+        }
+        $action = ShipAction::find($this->argument('action'));
+        if (! $action) {
+            throw new GameException('Action not found.');
+        }
+        $result = $bootstrap->releasePurchase($action, $user, (bool) $this->option('dry-run'));
+    } catch (GameException $exception) {
+        $this->line(json_encode(['released' => false, 'reason' => $exception->getMessage()], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+
+        return 1;
+    }
+    $this->line(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+})->purpose('Release a probe purchase only after syncing the agent and reviewing that it never reached the server; uses stored evidence only');
 
 Artisan::command('campaign:pause', function (CampaignControl $control, HostLock $lock) {
     $lock->retry('campaign', fn () => $control->pause(CampaignGrant::where('slot', 1)->firstOrFail(), 'operator_pause'));

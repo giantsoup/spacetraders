@@ -11,6 +11,7 @@ use App\Gameplay\CampaignPlaybook;
 use App\Gameplay\CampaignProbeBootstrap;
 use App\Gameplay\CampaignSafety;
 use App\Gameplay\CampaignStatus;
+use App\Gameplay\CampaignTrade;
 use App\Gameplay\CreditAccounting;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\FuelPlanner;
@@ -28,6 +29,7 @@ use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -1259,6 +1261,350 @@ class CampaignProbePoolTest extends TestCase
         $this->assertSame('blocked', $buy->fresh()->state->value);
         $this->assertStringContainsString('additive reserve', $buy->fresh()->blocked_reason);
         $this->assertSame(0, ShipAction::where('automation_run_id', $buy->id)->where('command', 'refuel')->count());
+    }
+
+    public function test_operator_release_frees_probe_slot_and_allows_planning(): void
+    {
+        [$action, $episode] = $this->releasablePurchase();
+        $bootstrap = app(CampaignProbeBootstrap::class);
+        $this->assertSame(1, $bootstrap->inFlightProbePurchases($this->agent, $episode));
+        $calls = $this->world()['calls'];
+
+        $this->assertSame(0, Artisan::call('campaign:release-probe-purchase', ['action' => $action->id, '--user' => $this->user->id]));
+        $result = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertTrue($result['released']);
+        $this->assertFalse($result['dry_run']);
+        $this->assertSame($action->id, $result['action_id']);
+        $this->assertSame('operator release', $result['confirmed_not_sent']['reason']);
+
+        $this->assertSame($calls, $this->world()['calls'], 'Release must use local evidence only.');
+        $this->assertSame(['user_id' => $this->user->id, 'at' => now()->toIso8601String(), 'reason' => 'operator release'], $action->fresh()->outcome['confirmed_not_sent'] ?? null);
+        $this->assertSame(0, $bootstrap->inFlightProbePurchases($this->agent, $episode));
+        $event = CampaignEvent::where('kind', 'probe_purchase_released')->sole();
+        $this->assertSame($action->id, $event->data['action_id']);
+        $this->assertSame($this->user->id, $event->data['user_id']);
+        $this->tickDirector();
+        $this->assertSame(1, AutomationRun::where('strategy', 'buy_probe')->whereNotNull('active_agent_id')->count());
+    }
+
+    public function test_operator_release_dry_run_writes_nothing(): void
+    {
+        [$action, $episode] = $this->releasablePurchase();
+        $before = $action->fresh()->getAttributes();
+        $events = CampaignEvent::count();
+        $calls = $this->world()['calls'];
+
+        $this->assertSame(0, Artisan::call('campaign:release-probe-purchase', ['action' => $action->id, '--user' => $this->user->id, '--dry-run' => true]));
+        $result = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertFalse($result['released']);
+        $this->assertTrue($result['dry_run']);
+        $this->assertSame($action->id, $result['action_id']);
+
+        $this->assertSame($before, $action->fresh()->getAttributes());
+        $this->assertSame($events, CampaignEvent::count());
+        $this->assertSame($calls, $this->world()['calls']);
+        $this->assertSame(1, app(CampaignProbeBootstrap::class)->inFlightProbePurchases($this->agent, $episode));
+    }
+
+    public static function retainedPurchaseReceipts(): array
+    {
+        return [
+            '201 empty sanitized response' => [['http_status' => 201, 'body_sha256' => 'x', 'response' => []]],
+            '201 agent-only sanitized response' => [['http_status' => 201, 'body_sha256' => 'x', 'response_received_at' => '2026-11-21T12:00:00Z', 'response' => ['agent' => ['symbol' => 'LOCAL', 'credits' => 126000]]]],
+            'receipt markers without response' => [['body_sha256' => 'x', 'response_received_at' => '2026-11-21T12:00:00Z']],
+            'empty response alone' => [['response' => []]],
+            'null response alone' => [['response' => null]],
+            'body hash alone' => [['body_sha256' => 'x']],
+            'receipt timestamp alone' => [['response_received_at' => '2026-11-21T12:00:00Z']],
+            'http status alone' => [['http_status' => 201]],
+            'validation marker alone' => [['response_validated' => true]],
+            'incomplete 201 transaction' => [['http_status' => 201, 'response' => ['transaction' => ['waypointSymbol' => 'X1-TEST-YARDB', 'shipSymbol' => 'SHIP_PROBE', 'agentSymbol' => 'LOCAL']]]],
+            'incomplete 201 ship' => [['http_status' => 201, 'response' => ['ship' => ['symbol' => 'LOCAL-3']]]],
+            '200 empty transaction' => [['http_status' => 200, 'response' => ['transaction' => []]]],
+            '299 malformed transaction' => [['http_status' => 299, 'response' => ['transaction' => 'incomplete']]],
+            '201 empty ship' => [['http_status' => 201, 'response' => ['ship' => []]]],
+            '201 malformed ship' => [['http_status' => 201, 'response' => ['ship' => 'LOCAL-3']]],
+            '201 null ship' => [['http_status' => 201, 'response' => ['ship' => null]]],
+            'validated response without status' => [['response_validated' => true, 'response' => ['ship' => ['symbol' => 'LOCAL-3']]]],
+            'legacy transaction without status' => [['response' => ['transaction' => ['waypointSymbol' => 'X1-TEST-YARDB', 'shipType' => 'SHIP_PROBE', 'agentSymbol' => 'LOCAL', 'timestamp' => '2026-11-21T12:00:00Z']]]],
+        ];
+    }
+
+    #[DataProvider('retainedPurchaseReceipts')]
+    public function test_operator_release_refuses_retained_purchase_receipts_even_without_reconciled_delivery(array $receipt): void
+    {
+        [$action, $episode] = $this->releasablePurchase();
+        $action->update(['outcome' => array_merge($action->outcome, $receipt, ['transactions' => [], 'fleet' => []])]);
+        $before = $action->fresh()->getAttributes();
+        $events = CampaignEvent::count();
+        $calls = $this->world()['calls'];
+
+        $this->assertSame(1, Artisan::call('campaign:release-probe-purchase', ['action' => $action->id, '--user' => $this->user->id]));
+        $refusal = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertFalse($refusal['released']);
+        $this->assertStringContainsString('slot stays held because stored receipt evidence shows the purchase may have happened', $refusal['reason']);
+
+        $this->assertSame($before, $action->fresh()->getAttributes());
+        $this->assertSame($events, CampaignEvent::count());
+        $this->assertSame($calls, $this->world()['calls']);
+        $this->assertSame(1, app(CampaignProbeBootstrap::class)->inFlightProbePurchases($this->agent, $episode));
+    }
+
+    public function test_operator_release_refuses_repeat_without_restamping_or_duplicate_event(): void
+    {
+        [$action, $episode] = $this->releasablePurchase();
+        $parameters = ['action' => $action->id, '--user' => $this->user->id];
+        $this->artisan('campaign:release-probe-purchase', $parameters)->assertSuccessful();
+        $before = $action->fresh()->getAttributes();
+        $events = CampaignEvent::count();
+        $calls = $this->world()['calls'];
+        $this->travel(1)->minutes();
+
+        foreach ([false, true] as $dryRun) {
+            $this->assertSame(1, Artisan::call('campaign:release-probe-purchase', $parameters + ['--dry-run' => $dryRun]));
+            $refusal = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+            $this->assertFalse($refusal['released']);
+            $this->assertStringContainsString('already released', $refusal['reason']);
+            $this->assertSame($before, $action->fresh()->getAttributes());
+            $this->assertSame($events, CampaignEvent::count());
+        }
+        $this->assertSame($calls, $this->world()['calls']);
+        $this->assertSame(0, app(CampaignProbeBootstrap::class)->inFlightProbePurchases($this->agent, $episode));
+    }
+
+    public function test_operator_release_missing_grant_returns_json_refusal_without_writes(): void
+    {
+        [$action, $episode] = $this->releasablePurchase();
+        $grantId = $episode->campaign_grant_id;
+        // Model a broken audit link while deferring its foreign-key check until the link is restored.
+        DB::statement('PRAGMA defer_foreign_keys = ON');
+        DB::table('campaign_episodes')->where('id', $episode->id)->update(['campaign_grant_id' => $grantId + 1000]);
+        $before = $action->fresh()->getAttributes();
+        $events = CampaignEvent::count();
+        $calls = $this->world()['calls'];
+
+        try {
+            $this->assertSame(1, Artisan::call('campaign:release-probe-purchase', ['action' => $action->id, '--user' => $this->user->id]));
+            $refusal = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+            $this->assertFalse($refusal['released']);
+            $this->assertSame('Campaign grant not found; the purchase cannot be released.', $refusal['reason']);
+            $this->assertSame($before, $action->fresh()->getAttributes());
+            $this->assertSame($events, CampaignEvent::count());
+            $this->assertSame($calls, $this->world()['calls']);
+            $this->assertSame(1, app(CampaignProbeBootstrap::class)->inFlightProbePurchases($this->agent, $episode));
+        } finally {
+            DB::table('campaign_episodes')->where('id', $episode->id)->update(['campaign_grant_id' => $grantId]);
+            DB::statement('PRAGMA defer_foreign_keys = OFF');
+        }
+    }
+
+    public static function unknownReleaseIds(): array
+    {
+        return ['action' => ['action'], 'operator' => ['user']];
+    }
+
+    #[DataProvider('unknownReleaseIds')]
+    public function test_operator_release_unknown_ids_return_json_refusals(string $unknown): void
+    {
+        [$action, $episode] = $this->releasablePurchase();
+        $before = $action->fresh()->getAttributes();
+        $events = CampaignEvent::count();
+        $calls = $this->world()['calls'];
+        $parameters = ['action' => $action->id, '--user' => $this->user->id];
+        $parameters[$unknown === 'action' ? 'action' : '--user'] += 1000;
+        $this->assertSame(1, Artisan::call('campaign:release-probe-purchase', $parameters));
+        $refusal = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertFalse($refusal['released']);
+        $this->assertSame($unknown === 'action' ? 'Action not found.' : 'Operator not found.', $refusal['reason']);
+        $this->assertSame($before, $action->fresh()->getAttributes());
+        $this->assertSame($events, CampaignEvent::count());
+        $this->assertSame($calls, $this->world()['calls']);
+        $this->assertSame(1, app(CampaignProbeBootstrap::class)->inFlightProbePurchases($this->agent, $episode));
+    }
+
+    public static function releaseRefusals(): array
+    {
+        return [
+            'wrong operator' => ['operator', 'does not operate'],
+            'wrong state' => ['state', 'Only an acknowledged'],
+            'wrong command' => ['command', 'Only an acknowledged'],
+            'wrong ship type' => ['type', 'Only an acknowledged'],
+            'different reset' => ['reset', 'current reset'],
+            'delivered' => ['delivered_ship', 'delivery evidence'],
+            'late delivery' => ['bootstrap_delivered_probe', 'delivery evidence'],
+            'missing fleet baseline' => ['baseline', 'baseline is incomplete; cannot rule out a delivery. Sync the agent first.'],
+            'missing sent timestamp' => ['sent', 'baseline is incomplete; cannot rule out a delivery. Sync the agent first.'],
+            'missing shipyard' => ['yard', 'baseline is incomplete; cannot rule out a delivery. Sync the agent first.'],
+            'historical observation transaction' => ['history', 'matching shipyard transaction was recorded; the slot stays held because stored evidence shows the purchase may have happened. Syncing cannot clear this evidence.'],
+            'observation transaction' => ['observation', 'matching shipyard transaction was recorded; the slot stays held because stored evidence shows the purchase may have happened. Syncing cannot clear this evidence.'],
+            'outcome transaction' => ['outcome', 'matching shipyard transaction was recorded; the slot stays held because stored evidence shows the purchase may have happened. Syncing cannot clear this evidence.'],
+            'unattributed probe away from yard' => ['probe', 'Unattributed new probe LOCAL-3 may be this delivery. Sync the agent first.'],
+        ];
+    }
+
+    #[DataProvider('releaseRefusals')]
+    public function test_operator_release_refuses_unsafe_or_unauthorized_actions(string $case, string $reason): void
+    {
+        [$action] = $this->releasablePurchase();
+        $operator = $this->user;
+        if ($case === 'operator') {
+            $operator = User::factory()->create();
+        } elseif ($case === 'state') {
+            $action->update(['state' => 'uncertain']);
+        } elseif ($case === 'command') {
+            $action->update(['command' => 'navigate']);
+        } elseif ($case === 'type') {
+            $action->update(['arguments' => array_merge($action->arguments, ['shipType' => 'SHIP_MINING_DRONE'])]);
+        } elseif ($case === 'reset') {
+            $action->update(['reset_id' => 'previous-reset']);
+        } elseif (in_array($case, ['delivered_ship', 'bootstrap_delivered_probe'], true)) {
+            $action->update(['outcome' => [$case => 'LOCAL-3']]);
+        } elseif ($case === 'baseline') {
+            $action->update(['before_state' => []]);
+        } elseif ($case === 'sent') {
+            $action->update(['sent_at' => null]);
+        } elseif ($case === 'yard') {
+            $action->update(['arguments' => ['shipType' => 'SHIP_PROBE']]);
+        } elseif (in_array($case, ['observation', 'outcome', 'history'], true)) {
+            $transaction = ['waypointSymbol' => 'X1-TEST-YARDB', 'shipType' => 'SHIP_PROBE', 'agentSymbol' => 'LOCAL', 'timestamp' => now()->subSeconds(5)->toIso8601String()];
+            if ($case === 'outcome') {
+                $action->update(['outcome' => ['transactions' => [$transaction]]]);
+            } else {
+                app(AgentSynchronizer::class)->observe($this->agent, 'shipyard', 'X1-TEST-YARDB', ['transactions' => [$transaction]]);
+                if ($case === 'history') {
+                    app(AgentSynchronizer::class)->observe($this->agent, 'shipyard', 'X1-TEST-YARDB', ['transactions' => []]);
+                }
+            }
+        } elseif ($case === 'probe') {
+            Ship::create(['agent_id' => $this->agent->id, 'symbol' => 'LOCAL-3', 'snapshot' => $this->probeShip('LOCAL-3', 'X1-TEST-PORT'), 'observed_at' => now()]);
+        }
+        $before = $action->fresh()->getAttributes();
+        $events = CampaignEvent::count();
+        $calls = $this->world()['calls'];
+
+        $this->artisan('campaign:release-probe-purchase', ['action' => $action->id, '--user' => $operator->id])
+            ->expectsOutputToContain($reason)->assertFailed();
+
+        $this->assertSame($before, $action->fresh()->getAttributes());
+        $this->assertSame($events, CampaignEvent::count());
+        $this->assertSame($calls, $this->world()['calls']);
+    }
+
+    public function test_operator_release_ignores_invalid_transactions_and_other_attributed_probes(): void
+    {
+        [$action] = $this->releasablePurchase();
+        $transaction = ['waypointSymbol' => 'X1-TEST-YARDB', 'shipType' => 'SHIP_PROBE', 'agentSymbol' => 'LOCAL', 'timestamp' => now()->toIso8601String()];
+        $invalid = [];
+        foreach ([['agentSymbol' => 'OTHER'], ['waypointSymbol' => 'X1-TEST-OTHER'], ['shipType' => 'SHIP_MINING_DRONE'],
+            ['timestamp' => now()->subSeconds(6)->toIso8601String()], ['timestamp' => 'now'], ['timestamp' => '2026-02-30T12:00:00Z'],
+            ['timestamp' => '2026-11-21T25:00:00Z'], ['timestamp' => null]] as $override) {
+            $invalid[] = array_merge($transaction, $override);
+        }
+        $action->update(['outcome' => ['transactions' => $invalid]]);
+        Ship::create(['agent_id' => $this->agent->id, 'symbol' => 'LOCAL-3', 'snapshot' => $this->probeShip('LOCAL-3', 'X1-TEST-PORT'), 'observed_at' => now()]);
+        $other = $action->replicate();
+        $other->key = 'other-attributed-probe';
+        $other->state = 'confirmed';
+        $other->outcome = ['delivered_ship' => 'LOCAL-3'];
+        $other->save();
+
+        $this->artisan('campaign:release-probe-purchase', ['action' => $action->id, '--user' => $this->user->id])->assertSuccessful();
+        $this->assertArrayHasKey('confirmed_not_sent', $action->fresh()->outcome);
+    }
+
+    public function test_unverified_loaded_delivery_fuel_refuses_probe_purchase_without_freshness_hold_and_director_continues(): void
+    {
+        [, $episode] = $this->releasablePurchase();
+        ShipAction::query()->delete();
+        $runner = app(AutomationRunner::class);
+        $buy = $runner->previewProbePurchase($this->agent->fresh(), 'LOCAL-2', 'X1-TEST-YARDB', ['reserve' => 0, 'minutes' => 15, 'cycles' => 1], $episode);
+        $runner->start($this->agent->fresh(), $buy);
+        $this->editWorld(function (array &$world) {
+            $world['ships'][0]['cargo'] = ['capacity' => 40, 'units' => 10, 'inventory' => [['symbol' => 'IRON_ORE', 'units' => 10]]];
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $delivery = AutomationRun::create([
+            'agent_id' => $this->agent->id, 'active_agent_id' => $this->agent->id, 'campaign_episode_id' => $episode->id,
+            'reset_id' => $this->agent->reset_id, 'ship_symbol' => 'LOCAL-1', 'strategy' => 'trade', 'plan_version' => 3,
+            'state' => 'running', 'started_at' => now(), 'expires_at' => now()->addMinutes(15),
+            'plan' => ['market' => 'X1-TEST-PORT', 'max_spend' => 1000], 'totals' => ['phase' => 'sell', 'spending' => 500],
+        ]);
+        $trade = \Mockery::mock(CampaignTrade::class)->makePartial();
+        $trade->shouldReceive('fuelReserve')->andThrow(new GameException('Fresh fuel route unavailable; stale quote.'));
+        $this->app->instance(CampaignTrade::class, $trade);
+        try {
+            app(CampaignProbeBootstrap::class)->compose($this->agent->fresh(), 'LOCAL-2', 'X1-TEST-YARDB', ['reserve' => 0, 'minutes' => 15, 'cycles' => 1], $episode, $buy->id);
+            $this->fail('A loaded delivery without verified fuel or approved ceilings must refuse the preview.');
+        } catch (GameException $exception) {
+            $this->assertStringContainsString('cannot be verified', $exception->getMessage());
+        }
+        $runner->advance($buy->id);
+        $this->assertSame('blocked', $buy->fresh()->state->value);
+        $this->assertStringContainsString('cannot be verified', $buy->fresh()->blocked_reason);
+        $this->assertStringContainsString('Retry once its fuel quotes are re-read.', $buy->fresh()->blocked_reason);
+        app(AgentSynchronizer::class)->observe($this->agent, 'market_listing', 'X1-TEST-PORT', [
+            'symbol' => 'X1-TEST-PORT', 'imports' => [['symbol' => 'IRON_ORE']], 'exports' => [], 'exchange' => [['symbol' => 'FUEL']],
+        ]);
+
+        $this->tickDirector();
+
+        $this->assertSame('stopped', $buy->fresh()->state->value);
+        $this->assertNull($buy->fresh()->active_agent_id);
+        $this->assertNotNull($delivery->fresh()->active_agent_id);
+        $this->assertSame(0, CampaignEvent::where('kind', 'freshness_hold')->count());
+        $this->assertSame(0, ShipAction::where('command', 'buy_ship')->count());
+        $this->assertEmpty($this->world()['writes']);
+        $this->assertNull($episode->grant()->fresh()->paused_at);
+        $this->assertSame(1, AutomationRun::where('strategy', 'scout')->where('ship_symbol', 'LOCAL-2')->whereNotNull('active_agent_id')->count());
+    }
+
+    public function test_trade_freshness_block_still_records_freshness_hold(): void
+    {
+        [$action, $episode] = $this->releasablePurchase();
+        $action->delete();
+        $run = AutomationRun::findOrFail($action->automation_run_id);
+        $run->update(['strategy' => 'trade', 'state' => 'blocked', 'active_agent_id' => $this->agent->id,
+            'blocked_reason' => 'Stale quote requires fresh market evidence.', 'started_at' => null,
+            'plan' => ['sell_only' => false], 'totals' => ['credit_delta' => 0]]);
+
+        $this->tickDirector();
+
+        $this->assertSame('stopped', $run->fresh()->state->value);
+        $this->assertSame(1, CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'freshness_hold')->count());
+        $event = CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'freshness_hold')->sole();
+        $this->assertSame($run->id, $event->data['run_id']);
+    }
+
+    private function releasablePurchase(): array
+    {
+        $this->editWorld(function (array &$world) {
+            $world['ships'][1]['nav']['waypointSymbol'] = 'X1-TEST-YARDB';
+            $world['waypoints'][] = ['symbol' => 'X1-TEST-YARDB', 'systemSymbol' => 'X1-TEST', 'type' => 'ORBITAL_STATION', 'x' => 4, 'y' => 0, 'traits' => [['symbol' => 'SHIPYARD']]];
+            $world['shipyards'] = ['X1-TEST-YARDB' => ['shipTypes' => [['type' => 'SHIP_PROBE']], 'ships' => [$this->probeOffer(24000)]]];
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $this->seedDiscoveryDone();
+        $grant = $this->approve($this->bootstrapBody(target: 2, maxPrice: 50000, minWorkingCapital: 75000));
+        $episode = CampaignEpisode::create([
+            'campaign_grant_id' => $grant->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
+            'start_credits' => 150000, 'phase' => 'discover', 'opened_at' => now(), 'next_reset_at' => now()->addDays(5),
+            'state' => ['last_discovery_at' => now()->toIso8601String(), 'role_ships' => ['command' => 'LOCAL-1', 'probe' => 'LOCAL-2']],
+        ]);
+        $run = AutomationRun::create([
+            'agent_id' => $this->agent->id, 'campaign_episode_id' => $episode->id, 'reset_id' => $this->agent->reset_id,
+            'ship_symbol' => 'LOCAL-2', 'strategy' => 'buy_probe', 'plan_version' => 6, 'state' => 'stopped',
+            'expires_at' => now()->addMinutes(15), 'plan' => [], 'totals' => [],
+        ]);
+        $action = ShipAction::create([
+            'agent_id' => $this->agent->id, 'automation_run_id' => $run->id, 'key' => 'operator-release-probe',
+            'reset_id' => $this->agent->reset_id, 'ship_symbol' => 'LOCAL-2', 'origin' => 'automation',
+            'target_type' => 'fleet', 'target_id' => 'X1-TEST-YARDB', 'command' => 'buy_ship',
+            'arguments' => ['shipType' => 'SHIP_PROBE', 'waypointSymbol' => 'X1-TEST-YARDB', 'maxTotal' => 24000, 'reserve' => 75000],
+            'state' => 'acknowledged', 'sent_at' => now(), 'settled_at' => now(), 'expires_at' => now()->addMinutes(3),
+            'before_state' => ['estimate' => ['fleet_symbols' => ['LOCAL-1', 'LOCAL-2']]], 'outcome' => ['acknowledged_at' => now()->toIso8601String()],
+        ]);
+
+        return [$action, $episode];
     }
 
     private function baseWorld(): array

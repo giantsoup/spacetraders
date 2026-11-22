@@ -69,8 +69,23 @@ scout, trade, mining, and sell_aboard, tried in file order.
 Optional `probes` policy (Tier 1A, e.g. `campaigns/weekly-probe-bootstrap.yaml`):
 - `target` (1..10): total owned probes to bootstrap up to in C0 (never active on arms or in wind-down).
 - `max_price` (1..1,000,000): maximum live-quoted price per `SHIP_PROBE` (checked at compose, arrival, and pre-send; because the SpaceTraders v2 `POST /my/ships` endpoint accepts no server-side price cap, any upstream price jump after the live read is caught post-write as a price discrepancy review hold).
-- `min_working_capital` (0..10,000,000): minimum credits that must remain after buying a probe, added on top of `limits.reserve_credits`, active trade buy-phase spending, and `ReconMission::returnExposure`.
+- `min_working_capital` (0..10,000,000): minimum credits that must remain after buying a probe, added on top of `limits.reserve_credits`, active trade buy-phase spending, loaded-delivery fuel commitments, and `ReconMission::returnExposure`. Delivery fuel uses `fuelReserve()` or the approved fuel ceilings; a purchase is refused when neither can be verified.
 - `pool` (boolean, default `true`): when enabled, all unheld same-system probes operate concurrently across distinct markets while the command ship trades or scouts, and a `ReconMission` holding one probe leaves remaining home probes active. Playbooks omitting `probes` retain the exact legacy single-probe serialized behavior and scout ordering.
+
+The arrival target check includes other in-flight probe purchases. An acknowledged purchase
+keeps its slot until a delivered probe is attributed, including late deliveries corroborated by
+shipyard transactions. The attribution persists after the probe leaves the yard.
+
+Before releasing an acknowledged purchase that you have verified never reached the server,
+sync the agent. Reconcile does not refresh an action after acknowledgement. Use
+`php artisan campaign:release-probe-purchase <action> --user=<id> --dry-run`, then repeat
+without `--dry-run` to free its slot. This command reads stored evidence only and refuses
+release if a matching transaction, a retained purchase receipt, a recorded delivery, or an
+unattributed new probe exists. Stored transaction evidence or any stored 2xx receipt, of any
+shape (including empty or agent-only data), keeps the slot held; syncing cannot clear that
+evidence. A later purchase at the same yard can also block release, keeping the slot held
+when attribution is uncertain. An already released action is refused
+without changing its release record or recording another event.
 
 Gates contain one metric, or any with a list of metric gates. Supported metrics are
 minutes_elapsed_gte, hours_to_reset_lte, credits_gte, markets_observed_gte,
