@@ -12,21 +12,28 @@ class Ship extends Model
 
     protected $casts = ['snapshot' => 'array', 'observed_at' => 'immutable_datetime'];
 
-    protected $appends = ['display_name'];
+    protected $appends = ['display_name', 'purpose'];
+
+    public ?string $runtimePurpose = null;
+
+    public function getPurposeAttribute(): ?string
+    {
+        return $this->runtimePurpose;
+    }
 
     public function getDisplayNameAttribute(): string
     {
-        return $this->displayName();
+        return $this->displayName($this->runtimePurpose);
     }
 
-    public function displayName(): string
+    public function displayName(?string $purpose = null): string
     {
         $nickname = is_string($this->nickname) ? trim($this->nickname) : '';
-        if ($nickname !== '') {
-            return $nickname;
-        }
+        $base = $nickname !== ''
+            ? $nickname
+            : self::semanticName($this->symbol, is_array($this->snapshot) ? $this->snapshot : []);
 
-        return self::semanticName($this->symbol, is_array($this->snapshot) ? $this->snapshot : []);
+        return $purpose !== null && $purpose !== '' ? $base.' · '.$purpose : $base;
     }
 
     public static function semanticName(string $symbol, array $snapshot = []): string

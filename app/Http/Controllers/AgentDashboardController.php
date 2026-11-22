@@ -13,6 +13,7 @@ use App\Gameplay\MiningPlanner;
 use App\Gameplay\OpportunityAssessor;
 use App\Gameplay\OpportunityEvaluator;
 use App\Gameplay\ShipCommandExecutor;
+use App\Gameplay\ShipPurpose;
 use App\Gameplay\SpaceTradersApi;
 use App\Http\Requests\GameplayRequest;
 use App\Maps\SystemMapKnowledge;
@@ -36,6 +37,10 @@ class AgentDashboardController extends Controller
     {
         abort_unless($agent->user_id === $request->user()->id, 404);
         $ships = Ship::where('agent_id', $agent->id)->get();
+        $purposes = app(ShipPurpose::class)->forAgent($agent, $ships);
+        foreach ($ships as $shipRow) {
+            $shipRow->runtimePurpose = $purposes[$shipRow->symbol] ?? null;
+        }
         $observations = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->get();
 
         $input = $request->validate([
@@ -101,11 +106,13 @@ class AgentDashboardController extends Controller
         $input = $request->validate(['nickname' => ['nullable', 'string', 'max:60']]);
         $clean = isset($input['nickname']) ? trim($input['nickname']) : '';
         $record->update(['nickname' => $clean === '' ? null : $clean]);
-        $display = $record->displayName();
+        $record->runtimePurpose = app(ShipPurpose::class)->forAgent($agent, collect([$record]))[$record->symbol] ?? null;
+        $display = $record->displayName($record->runtimePurpose);
 
         return response()->json([
             'symbol' => $record->symbol,
             'nickname' => $record->nickname,
+            'purpose' => $record->runtimePurpose,
             'display_name' => $display,
             'message' => $record->nickname !== null
                 ? "Renamed {$record->symbol} to {$record->nickname}."
