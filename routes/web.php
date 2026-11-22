@@ -84,6 +84,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/agents/{agent}/engine/force-stop', [LocalAutomationController::class, 'engineForceStop'])->name('game.engine.force-stop');
         Route::post('/agents/{agent}/reads', [AgentReadController::class, 'read'])->name('game.reads');
         Route::post('/agents/{agent}/sync', [AgentDashboardController::class, 'sync'])->name('game.sync');
+        Route::patch('/agents/{agent}/ships/{ship}/nickname', [AgentDashboardController::class, 'renameShip'])->name('game.ships.nickname');
         Route::post('/agents/{agent}/commands/preview', [AgentCommandController::class, 'preview'])->name('game.commands.preview');
         Route::post('/agents/{agent}/commands/{action}/approve', [AgentCommandController::class, 'approve'])->name('game.commands.approve');
         Route::post('/agents/{agent}/commands/{action}/stop', [AgentCommandController::class, 'stop'])->name('game.commands.stop');

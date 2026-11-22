@@ -6,7 +6,7 @@ import { observedNumber as number } from '@/shipPresentation.js';
 import { resourceSummary } from '@/shipFacts.js';
 import DataDetails from '@/Components/DataDetails.vue';
 import ShipDetails from '@/Components/ShipDetails.vue';
-const props = defineProps({ ship: Object, observedAt: String, section: String, readiness: String, capability: String });
+const props = defineProps({ ship: Object, displayName: String, observedAt: String, section: String, readiness: String, capability: String });
 defineEmits(['section']);
 const fuel = computed(() => resourceSummary(props.ship?.fuel?.current, props.ship?.fuel?.capacity, 'No fuel tank'));
 const cargo = computed(() => resourceSummary(props.ship?.cargo?.units, props.ship?.cargo?.capacity, 'No cargo hold'));
@@ -17,7 +17,7 @@ const miningPolicy = computed(() => !Array.isArray(props.ship?.mounts) || !Array
 </script>
 <template>
     <div class="ship-report">
-        <p>{{ ship?.symbol || 'No ship selected' }} · {{ assetName(ship?.registration?.role) }}</p>
+        <p>{{ displayName && ship?.symbol && displayName !== ship.symbol ? `${displayName} · ${ship.symbol}` : (displayName || ship?.symbol || 'No ship selected') }} · {{ assetName(ship?.registration?.role) }}</p>
         <nav aria-label="Report sections" class="sheet-tabs"><button v-for="key in ['fuel', 'cargo', 'systems']" :key="key" type="button" :aria-pressed="section === key" @click="$emit('section', key)">{{ key === 'fuel' ? 'Fuel' : key === 'cargo' ? 'Cargo' : 'Systems' }}</button></nav>
         <section v-if="section === 'fuel'" aria-labelledby="report-fuel">
             <h3 id="report-fuel">{{ ship?.fuel?.capacity === 0 ? 'Fuel' : 'Fuel tank' }}</h3>

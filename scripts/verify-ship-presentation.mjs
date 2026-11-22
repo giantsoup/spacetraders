@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { remaining, shipPresentation, flightDeckLocation, observedNumber, meterPercent } from '../resources/js/shipPresentation.js';
+import { remaining, shipPresentation, flightDeckLocation, observedNumber, meterPercent, shipDisplayName, shipOptionLabel } from '../resources/js/shipPresentation.js';
 const now = Date.parse('2026-11-01T20:00:00Z');
 assert.equal(remaining('2026-11-01T20:00:01Z', now), '0:01');
 assert.equal(remaining('2026-11-01T20:00:00Z', now), 'Checking');
@@ -23,3 +23,10 @@ assert.equal(flightDeckLocation({ nav: { ...routed.nav, status: 'DOCKED' } }, lo
 assert.deepEqual(flightDeckLocation(), { symbol: null, type: null, traits: null, description: null });
 assert.equal(flightDeckLocation({ nav: { waypointSymbol: 'X1-TEST-UNSEEN' } }, locations).type, null);
 console.log('PASS saved sprite knowledge, observed route destination, stationary location, route-only and unknown fallback');
+
+assert.equal(shipDisplayName({ symbol: 'GIANTSOUP-1', display_name: 'Command Frigate #1' }), 'Command Frigate #1');
+assert.equal(shipDisplayName({ symbol: 'GIANTSOUP-2', nickname: 'A4 Probe' }), 'A4 Probe');
+assert.equal(shipDisplayName({ symbol: 'GIANTSOUP-3' }), 'GIANTSOUP-3');
+assert.equal(shipOptionLabel({ symbol: 'GIANTSOUP-5', display_name: 'Light Hauler #5' }), 'Light Hauler #5 (GIANTSOUP-5)');
+assert.equal(shipOptionLabel({ symbol: 'LOCAL-2', display_name: 'LOCAL-2' }), 'LOCAL-2');
+console.log('PASS semantic ship display names and option labels');

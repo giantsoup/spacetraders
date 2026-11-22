@@ -8,7 +8,7 @@ import FocusSheet from '@/Components/FocusSheet.vue';
 import ShipScene from '@/Components/ShipScene.vue';
 import WaypointSprite from '@/Components/SystemMap/WaypointSprite.vue';
 import ShipReport from '@/Components/ShipReport.vue';
-import { shipPresentation, flightDeckLocation } from '@/shipPresentation.js';
+import { shipPresentation, flightDeckLocation, shipDisplayName, shipOptionLabel } from '@/shipPresentation.js';
 import { resourceSummary } from '@/shipFacts.js';
 import AutomationConsole from '@/Components/AutomationConsole.vue';
 import AppShell from '@/Layouts/AppShell.vue';
@@ -50,6 +50,33 @@ watch(selected, value => {
 });
 const ship = computed(() => props.ships.find(s => s.symbol === selected.value)?.snapshot);
 const shipRecord = computed(() => props.ships.find(s => s.symbol === selected.value));
+const selectedDisplayName = computed(() => shipDisplayName(shipRecord.value) || selected.value);
+const shipName = symbol => {
+    const entry = props.ships.find(s => s.symbol === symbol);
+    return entry ? shipOptionLabel(entry) : (symbol || '');
+};
+const nicknameDraft = ref('');
+const savingNickname = ref(false);
+watch(() => [shipRecord.value?.symbol, shipRecord.value?.nickname], () => {
+    nicknameDraft.value = shipRecord.value?.nickname || '';
+}, { immediate: true });
+async function saveNickname(value = nicknameDraft.value) {
+    if (!selected.value || savingNickname.value) return;
+    savingNickname.value = true;
+    error.value = false;
+    notice.value = '';
+    try {
+        const result = await window.axios.patch(url(`ships/${encodeURIComponent(selected.value)}/nickname`), { nickname: value }, { headers: { Accept: 'application/json' } });
+        notice.value = result.data.message || 'Ship name updated.';
+        await reload();
+    } catch (failure) {
+        error.value = true;
+        const validation = failure.response?.data?.errors;
+        notice.value = validation ? Object.values(validation).flat().join(' ') : failure.response?.data?.message || 'Could not update ship name.';
+    } finally {
+        savingNickname.value = false;
+    }
+}
 const now = ref(Date.now());
 const paused = ref(false);
 const hidden = ref(false);
@@ -334,7 +361,7 @@ function distance(point) {
         <main :aria-busy="busy">
             <section id="ship-home" class="ship-home" tabindex="-1" aria-labelledby="ship-title">
                 <header class="ship-identity">
-                    <button type="button" class="identity-button" @click="openView('fleet')"><h1 id="ship-title">{{ selected || agent.name }}</h1><span aria-hidden="true">⌄</span><span class="sr-only">Switch owned ship</span></button>
+                    <button type="button" class="identity-button" @click="openView('fleet')"><span class="identity-heading"><h1 id="ship-title">{{ selectedDisplayName || agent.name }}</h1><span v-if="selected && selectedDisplayName !== selected" class="ship-code">{{ selected }}</span></span><span aria-hidden="true">⌄</span><span class="sr-only">Switch owned ship</span></button>
                     <button type="button" class="home-link" @click="openView('report', 'systems')">Report</button>
                 </header>
                 <ShipScene :location="sceneLocation" :reset="agent.reset_id" v-if="ship" :ship-name="selected" :pose="presentation.pose" :transit="presentation.transit" :progress="presentation.progress" :paused="paused || hidden || !!view" @report="openView('report', 'systems')" />
@@ -374,15 +401,24 @@ function distance(point) {
                 </div>
                 <ManualCommandForm v-if="view === 'manualApi'" :reserve-floor="manualReserveFloor" :commands="manualCommands" :enums="foundationEnums" :selected="selected" :ships="ships" :disabled="archived || busy || !!pending || guiding" @preview="previewManual" />
                 <ManualReadBrowser v-if="view === 'library'" :agent="agent" :ships="ships" :selected="selected" :operations="manualReads" :enums="foundationEnums" :disabled="archived || guiding" />
-                <ShipReport v-if="view === 'report'" :ship="ship" :observed-at="shipRecord?.observed_at" :section="reportSection" :readiness="presentation.readiness" :capability="capabilities[selected]" @section="reportSection = $event" />
+                <ShipReport v-if="view === 'report'" :ship="ship" :display-name="selectedDisplayName" :observed-at="shipRecord?.observed_at" :section="reportSection" :readiness="presentation.readiness" :capability="capabilities[selected]" @section="reportSection = $event" />
                 <AdviserPanel v-if="view === 'adviser'" :agent="agent" :ships="ships" :selected="selected" :history="adviser" :runs="runs" :investigations="investigations" :disabled="archived || guiding" @refresh="async done => { await reload(); done(); }" />
                 <section v-if="view === 'run'"><h3>{{ activeRun ? `Run #${activeRun.id}` : 'No active run' }}</h3><template v-if="activeRun"><p>{{ readableLabel(activeRun.state) }} · {{ readableLabel(runStep) }}</p><p v-if="activeRun.stop_requested_at" role="status">Stop requested. Reserved work may settle; travel continues upstream.</p><p v-if="activeRun.blocked_reason" class="warning">{{ readableText(activeRun.blocked_reason) }}</p><p>Next step <time :datetime="activeRun.next_action_at">{{ formatLocalTime(activeRun.next_action_at) }}</time></p><DangerButton data-guide="stop" :disabled="archived || !!activeRun.stop_requested_at" @click="post(`runs/${activeRun.id}/stop`, {}, true)">{{ activeRun.stop_requested_at ? 'Stop requested' : 'Stop automation' }}</DangerButton><h3>Approved limits</h3><DataDetails :value="activeRun.plan" /><h3>Observed outcomes</h3><DataDetails :value="activeRun.totals" /></template><SecondaryButton @click="openView('automation')">Automation and engine controls</SecondaryButton></section>
                 <aside v-show="view === 'fleet'" id="fleet" data-guide="fleet" class="panel fleet" aria-labelledby="fleet-heading">
                     <h2 id="fleet-heading">Fleet</h2>
                     <p v-if="ships.length === 0">{{ archived ? 'No fleet snapshot was saved for this archived agent.' : 'No saved fleet. Synchronize to discover ships and local waypoints.' }}</p>
                     <button v-for="entry in ships" :key="entry.symbol" :data-guide="`ship:${entry.symbol}`" :disabled="guiding && entry.symbol !== guidedSession?.plan?.ship" class="ship-choice" :class="{ selected: selected === entry.symbol }" :aria-pressed="selected === entry.symbol" @click="selected = entry.symbol; destination = ''; commandPreview = null; runPreview = null; if (!guiding) openView('')">
-                        <strong>{{ entry.symbol }}</strong><span>{{ assetName(entry.snapshot.registration?.role || 'SHIP') }}</span><span>{{ entry.snapshot.nav?.waypointSymbol }}</span><span>{{ assetName(entry.snapshot.nav?.status) }} · Cargo {{ resourceSummary(entry.snapshot.cargo?.units, entry.snapshot.cargo?.capacity, 'No cargo hold').text }}</span>
+                        <strong>{{ shipDisplayName(entry) }}</strong><span v-if="shipDisplayName(entry) !== entry.symbol" class="ship-code">{{ entry.symbol }}</span><span>{{ assetName(entry.snapshot.registration?.role || 'SHIP') }} · {{ entry.snapshot.frame?.name || '' }}</span><span>{{ entry.snapshot.nav?.waypointSymbol }}</span><span>{{ assetName(entry.snapshot.nav?.status) }} · Cargo {{ resourceSummary(entry.snapshot.cargo?.units, entry.snapshot.cargo?.capacity, 'No cargo hold').text }}</span>
                     </button>
+                    <form v-if="shipRecord" class="rename-ship" @submit.prevent="saveNickname(nicknameDraft)">
+                        <h3>Rename {{ selectedDisplayName }}</h3>
+                        <p class="muted">Local label for {{ shipRecord.symbol }}. Leave blank to use the automatic semantic name. SpaceTraders keeps server symbols fixed.</p>
+                        <label>Custom ship name<input v-model="nicknameDraft" type="text" maxlength="60" :placeholder="selectedDisplayName" :disabled="savingNickname"></label>
+                        <div class="button-row">
+                            <PrimaryButton type="submit" :disabled="savingNickname">Save name</PrimaryButton>
+                            <SecondaryButton v-if="shipRecord.nickname" type="button" :disabled="savingNickname" @click="saveNickname('')">Reset to automatic name</SecondaryButton>
+                        </div>
+                    </form>
                 </aside>
 
                     <fieldset v-show="view === 'automation'" :disabled="guiding"><legend v-if="guiding">Pause guidance before using automation.</legend><AutomationConsole v-if="localAutomation && !archived" :agent="agent" :ships="ships" :selected="selected" :engine="engine" :operator="engineOperator" :investigations="investigations" :drafts="drafts" :runs="runs" :accounting="accounting" :observations="observations" :enabled="automationEnabled" @inspect-run="openView('run')" @prepare-market="prepareMarket" @refresh="async done => { await reload(); done(); }" /></fieldset>
@@ -451,7 +487,7 @@ function distance(point) {
                                 <p>Survey deposits are preserved exactly. Duplicate counts are not exact probabilities. Transfers need both ships at the same waypoint in matching states.</p>
                                 <SecondaryButton :disabled="!guideAllows('survey')" @click="preview('survey')">Preview survey creation</SecondaryButton>
                                 <div class="form-grid"><label>Usable signed survey<select v-model="surveySignature"><option value="">Select survey</option><option v-for="survey in surveys" :key="survey.id" :value="survey.symbol">{{ survey.data.signed.size }} · {{ formatLocalTime(survey.data.signed.expiration) }} · {{ survey.symbol }}</option></select></label><SecondaryButton :disabled="!surveySignature || !guideAllows('mine_survey')" @click="preview('mine_survey')">Preview surveyed extraction</SecondaryButton>
-                                <label>Receiving ship<select v-model="transferTarget"><option value="">Select receiving ship</option><option v-for="entry in ships.filter(s => s.symbol !== selected)" :key="entry.symbol" :value="entry.symbol">{{ entry.symbol }}</option></select></label><SecondaryButton :disabled="!transferTarget || !good || !guideAllows('transfer')" @click="preview('transfer')">Preview transfer of selected good and quantity</SecondaryButton></div>
+                                <label>Receiving ship<select v-model="transferTarget"><option value="">Select receiving ship</option><option v-for="entry in ships.filter(s => s.symbol !== selected)" :key="entry.symbol" :value="entry.symbol">{{ shipOptionLabel(entry) }}</option></select></label><SecondaryButton :disabled="!transferTarget || !good || !guideAllows('transfer')" @click="preview('transfer')">Preview transfer of selected good and quantity</SecondaryButton></div>
                             </details>
                         </fieldset>
                         <p class="muted">Every command is checked again by the server. Transit, cargo, cooldown, ownership and spending failures appear before send where known.</p>
@@ -492,7 +528,7 @@ function distance(point) {
                     </section>
                     <section v-if="activeRuns.length" v-show="['run', 'fleet', 'automation'].includes(view)" class="panel" aria-labelledby="active-runs-heading">
                         <h2 id="active-runs-heading">All active runs</h2>
-                        <ul class="activity"><li v-for="run in activeRuns" :key="run.id"><p>{{ run.ship_symbol }} &middot; {{ readableLabel(run.strategy) }} &middot; {{ readableLabel(run.state) }} <span v-if="run.campaign_episode_id" class="muted">Campaign</span></p><p v-if="run.campaign_episode_id" class="muted">Stopping hands the ship back to the director. The campaign will derive a fresh plan.</p><DangerButton :disabled="archived || busy || !!run.stop_requested_at" @click="post(`runs/${run.id}/stop`, {}, true)">Stop run #{{ run.id }}{{ run.campaign_episode_id ? ' and return ship to campaign director' : '' }}</DangerButton></li></ul>
+                        <ul class="activity"><li v-for="run in activeRuns" :key="run.id"><p>{{ shipName(run.ship_symbol) }} &middot; {{ readableLabel(run.strategy) }} &middot; {{ readableLabel(run.state) }} <span v-if="run.campaign_episode_id" class="muted">Campaign</span></p><p v-if="run.campaign_episode_id" class="muted">Stopping hands the ship back to the director. The campaign will derive a fresh plan.</p><DangerButton :disabled="archived || busy || !!run.stop_requested_at" @click="post(`runs/${run.id}/stop`, {}, true)">Stop run #{{ run.id }}{{ run.campaign_episode_id ? ' and return ship to campaign director' : '' }}</DangerButton></li></ul>
                     </section>
                     <section data-guide="setup" v-show="view === 'commands'" id="setup" class="panel" aria-labelledby="setup-heading">
                         <h2 id="setup-heading">One-time mining setup</h2>
@@ -514,6 +550,9 @@ function distance(point) {
 .ship-home { display: flex; flex-direction: column; min-height: calc(100svh - 56px - env(safe-area-inset-top)); }
 .ship-identity { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .identity-button { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; text-align: left; min-height: 52px; background: none; color: var(--color-ink); border: 0; }
+.identity-heading { display: grid; gap: 2px; min-width: 0; }
+.ship-code { color: var(--color-muted); font-size: 12px; font-weight: 500; letter-spacing: .02em; }
+.rename-ship { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--color-line); display: grid; gap: 10px; }
 h1 { min-width: 0; font-size: 20px; font-weight: 650; line-height: 1.25; overflow-wrap: anywhere; }
 .home-link { flex-shrink: 0; white-space: nowrap; min-height: 44px; min-width: 72px; padding: 8px; background: none; color: var(--color-accent); }
 .ship-status { padding: 8px 4px 16px; }
