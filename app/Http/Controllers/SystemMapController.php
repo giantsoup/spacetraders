@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Gameplay\ShipPurpose;
 use App\Maps\SystemMapKnowledge;
 use App\Models\Agent;
 use App\Models\Ship;
@@ -16,12 +17,13 @@ class SystemMapController extends Controller
         abort_unless($agent->user_id === $request->user()->id, 404);
         $input = $request->validate(['ship' => ['sometimes', 'nullable', 'string', 'max:80'], 'location' => ['sometimes', 'nullable', 'string', 'max:80']]);
         $ships = Ship::where('agent_id', $agent->id)->orderBy('symbol')->get();
+        $purposes = app(ShipPurpose::class)->forAgent($agent, $ships);
         $ship = empty($input['ship']) ? $ships->first() : $ships->firstWhere('symbol', $input['ship']);
         abort_if(! empty($input['ship']) && ! $ship, 404);
 
         return Inertia::render('Agent/SystemMap', [
             'agent' => $agent->only(['id', 'name', 'reset_id', 'connection_state']),
-            'ships' => $ships->map(fn ($row) => ['symbol' => $row->symbol, 'display_name' => $row->displayName()]),
+            'ships' => $ships->map(fn ($row) => ['symbol' => $row->symbol, 'display_name' => $row->displayName($purposes[$row->symbol] ?? null), 'purpose' => $purposes[$row->symbol] ?? null]),
             'map' => $knowledge->forShip($agent, $ship),
             'selectedLocation' => $input['location'] ?? null,
             'freshnessSeconds' => (int) config('gameplay.snapshot_seconds'),
