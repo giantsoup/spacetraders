@@ -4,13 +4,12 @@ namespace App\Gameplay;
 
 use App\Models\Agent;
 use App\Models\AutomationRun;
-use App\Models\CampaignEpisode;
-use App\Models\CampaignGrant;
 use App\Models\GameObservation;
 use App\Models\ObservationHistory;
 use App\Models\Ship;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class AgentSynchronizer
 {
@@ -62,21 +61,51 @@ class AgentSynchronizer
         if ($agent->reset_id === null || $agent->reset_id === $reset) {
             return false;
         }
-        DB::transaction(function () use ($agent) {
+        $key = 'archived_budget_hold:'.$agent->user_id.':'.$agent->id;
+        if ($agent->isArchived()) {
+            $value = DB::table('game_runtime')->where('key', $key)->value('value');
+            if ($value !== null) {
+                $this->reconcileArchivedDrain($key, $value);
+            }
+
+            return false;
+        }
+
+        $value = DB::transaction(function () use ($agent, $key) {
             $agent->update(['connection_state' => 'reset']);
             AutomationRun::where('agent_id', $agent->id)->whereNotNull('active_agent_id')->whereNull('stop_requested_at')->update([
                 'state' => 'blocked', 'stop_requested_at' => now(), 'blocked_reason' => 'World reset. Agent archived; old intentions cannot run.',
             ]);
-        });
+            $value = json_encode(['symbol' => $agent->name, 'reset_id' => $agent->reset_id, 'before' => microtime(true)], JSON_THROW_ON_ERROR);
+            DB::table('game_runtime')->upsert([['key' => $key, 'value' => $value]], ['key'], ['value']);
 
-        $drained = CampaignGrant::where('user_id', $agent->user_id)->where('agent_symbol', $agent->name)
-            ->whereIn('id', CampaignEpisode::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->select('campaign_grant_id'))
-            ->where(fn ($query) => $query->where('wait_reason', 'like', 'drain_pause:%')->orWhere('pause_reason', 'like', 'drain_pause:%'))->exists();
-        if ($drained) {
-            app(RequestBudget::class)->drainAgent($agent->name, false);
-        }
+            return $value;
+        });
+        $this->reconcileArchivedDrain($key, $value);
 
         return true;
+    }
+
+    public function retryArchivedDrains(int $userId): void
+    {
+        $pending = DB::table('game_runtime')->where('key', 'like', 'archived_budget_hold:'.$userId.':%')->pluck('value', 'key');
+        foreach ($pending as $key => $value) {
+            $this->reconcileArchivedDrain($key, $value);
+        }
+    }
+
+    private function reconcileArchivedDrain(string $key, string $value): void
+    {
+        $pending = json_decode($value, true, flags: JSON_THROW_ON_ERROR);
+        try {
+            app(RequestBudget::class)->clearDrainBefore($pending['symbol'], $pending['reset_id'], $pending['before']);
+        } catch (RequestDeferred $exception) {
+            Log::warning('Archived agent budget hold could not be reconciled.', ['agent' => $pending['symbol'], 'reason' => $exception->getMessage()]);
+
+            return;
+        }
+
+        DB::table('game_runtime')->where('key', $key)->where('value', $value)->delete();
     }
 
     // Caller holds the agent lock for synchronization, previews and gameplay writes.

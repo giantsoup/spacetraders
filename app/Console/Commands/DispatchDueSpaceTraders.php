@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands;
 
-use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignDirector;
 use App\Gameplay\CampaignHealth;
 use App\Gameplay\DeploymentGate;
@@ -17,7 +16,6 @@ use App\Jobs\AdvanceAutomationRun;
 use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
 use App\Models\AutomationRun;
-use App\Models\CampaignGrant;
 use App\Models\ReconMission;
 use App\Models\ShipAction;
 use Illuminate\Console\Command;
@@ -87,7 +85,7 @@ class DispatchDueSpaceTraders extends Command
         $turns = DB::table('game_runtime')->where('key', 'director_turn')->value('value') === 'arms' ? ['arms', 'director'] : ['director', 'arms'];
         foreach ($turns as $turn) {
             $started = microtime(true);
-            $attempted = $turn === 'arms' ? $this->tickArms($director) : $this->tickDirector($director);
+            $attempted = $director->dispatch($turn === 'arms');
             $timing[$turn] = microtime(true) - $started;
             if ($attempted) {
                 DB::table('game_runtime')->upsert([['key' => 'director_turn', 'value' => $turn === 'arms' ? 'director' : 'arms']], ['key'], ['value']);
@@ -171,83 +169,6 @@ class DispatchDueSpaceTraders extends Command
 
         return $query->getModel()->newQuery()->fromSub($ranked, $query->getModel()->getTable())
             ->orderBy('dispatch_round')->orderBy('id')->limit(50)->get();
-    }
-
-    private function tickDirector(CampaignDirector $director): bool
-    {
-        try {
-            $attempted = $director->tick();
-            if ($attempted) {
-                $rows = [['key' => 'campaign_director_failures', 'value' => '0']];
-                if ($director->primaryGrantId !== null) {
-                    $rows[] = ['key' => 'campaign_director_failures:'.$director->primaryGrantId, 'value' => '0'];
-                }
-                DB::table('game_runtime')->upsert($rows, ['key'], ['value']);
-            }
-
-            return $attempted;
-        } catch (\Throwable $exception) {
-            $message = 'Campaign director failed; exception details redacted.';
-            Log::error($message, ['exception_class' => get_class($exception), 'grant' => $director->primaryGrantId]);
-            try {
-                if ($director->primaryGrantId !== null) {
-                    $grant = CampaignGrant::find($director->primaryGrantId);
-                } else {
-                    // A failure before selection has no safe target when multiple primaries exist.
-                    $primaries = CampaignGrant::allPrimaries()->limit(2)->get();
-                    $grant = $primaries->count() === 1 ? $primaries->first() : null;
-                }
-                $key = $grant ? 'campaign_director_failures:'.$grant->id : 'campaign_director_failures';
-                $failures = (int) DB::table('game_runtime')->where('key', $key)->value('value') + 1;
-                DB::table('game_runtime')->upsert([['key' => $key, 'value' => (string) $failures]], ['key'], ['value']);
-                if ($grant) {
-                    $control = app(CampaignControl::class);
-                    $control->event($grant, null, 'director_error', ['exception_class' => get_class($exception), 'message' => $message, 'consecutive' => $failures, 'agent_symbol' => $grant->resolvedAgentSymbol()]);
-                    if ($failures >= 5) {
-                        $control->pause($grant, 'director_error');
-                    }
-                }
-            } catch (\Throwable) {
-            }
-
-            return true;
-        }
-    }
-
-    /**
-     * Arms get their own failure streak per grant: five consecutive failures pause that arm only,
-     * never the main campaign, and never touch the main campaign's streak.
-     */
-    private function tickArms(CampaignDirector $director): bool
-    {
-        try {
-            if ($director->tickArms()) {
-                DB::table('game_runtime')->upsert([['key' => 'arm_director_failures:'.$director->armGrantId, 'value' => '0']], ['key'], ['value']);
-
-                return true;
-            }
-
-            return false;
-        } catch (\Throwable $exception) {
-            $message = 'Arm director failed; exception details redacted.';
-            Log::error($message, ['exception_class' => get_class($exception), 'grant' => $director->armGrantId]);
-            try {
-                $grant = $director->armGrantId ? CampaignGrant::find($director->armGrantId) : null;
-                if ($grant) {
-                    $key = 'arm_director_failures:'.$grant->id;
-                    $failures = (int) DB::table('game_runtime')->where('key', $key)->value('value') + 1;
-                    DB::table('game_runtime')->upsert([['key' => $key, 'value' => (string) $failures]], ['key'], ['value']);
-                    $control = app(CampaignControl::class);
-                    $control->event($grant, null, 'director_error', ['exception_class' => get_class($exception), 'message' => $message, 'consecutive' => $failures, 'arm' => $grant->arm()['label'] ?? null]);
-                    if ($failures >= 5) {
-                        $control->pause($grant, 'director_error');
-                    }
-                }
-            } catch (\Throwable) {
-            }
-
-            return true;
-        }
     }
 
     private function metrics(array $timing): void

@@ -10,27 +10,23 @@ use App\Models\CampaignGrant;
 use App\Models\GameObservation;
 use App\Models\ReconMission;
 use App\Models\ShipAction;
+use Illuminate\Support\Facades\DB;
 
 class CampaignSafety
 {
     public function reason(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent): ?string
     {
-        // Uncertain outcomes put the shared balance in doubt; a price review holds only this campaign's own ships.
-        $fleet = app(CampaignFleet::class)->symbols($episode);
-        if (ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where(fn ($query) => $query->where('state', 'uncertain')
-            ->orWhere(fn ($query) => $query->where('review_required', true)->where(fn ($query) => $query->whereIn('ship_symbol', $fleet)->orWhereNull('ship_symbol')->orWhere('ship_symbol', '')
-                ->orWhereIn('automation_run_id', AutomationRun::where('campaign_episode_id', $episode->id)->select('id')))))->exists()) {
-            return 'uncertain_action';
+        $reason = $this->actionBlocker($grant, $episode, $agent, pinRoles: true);
+        if ($reason) {
+            return $reason;
         }
-        if (! ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereIn('state', ['pending', 'sending'])->exists()
-            && (app(CreditAccounting::class)->summary($agent)['unexplained_change'] ?? 0) !== 0) {
+        if ($this->unexplainedBalance($agent)) {
             return 'unexplained_change';
         }
         if (! empty($episode->state['pending_pause'])) {
             return $episode->state['pending_pause'];
         }
-        $arm = $grant->limits['arm'] ?? null;
-        if ($arm && isset($arm['max_net_loss']) && CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'load_result')->pluck('data')->sum(fn ($data) => $data['net'] ?? 0) < -$arm['max_net_loss']) {
+        if ($grant->arm() && self::lossStop($grant, self::recordedNet($episode))) {
             return 'arm_loss_stop';
         }
         $limit = $grant->revision()->body['trade']['losses']['pause_after_consecutive_losing_loads'];
@@ -46,6 +42,56 @@ class CampaignSafety
         }
 
         return $consecutive >= $grant->revision()->body['trade']['losses']['pause_after_consecutive_losing_loads'] ? 'consecutive_losing_loads' : null;
+    }
+
+    public function uncertain(Agent $agent): bool
+    {
+        return ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('state', 'uncertain')->exists();
+    }
+
+    public function actionBlocker(CampaignGrant $grant, ?CampaignEpisode $episode, Agent $agent, bool $pinRoles = false): ?string
+    {
+        if ($this->uncertain($agent)) {
+            return 'uncertain_action';
+        }
+
+        return $this->priceReview($grant, $episode, $agent, $pinRoles) ? 'uncertain_action' : null;
+    }
+
+    public function priceReview(CampaignGrant $grant, ?CampaignEpisode $episode, Agent $agent, bool $pinRoles = false, ?array $fleet = null): bool
+    {
+        $reviews = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('review_required', true);
+        // Most reviews have no unsettled actions. Avoid resolving campaign roles until they matter.
+        if ($fleet === null && ! $pinRoles && ! (clone $reviews)->exists()) {
+            return false;
+        }
+        $fleet ??= $episode ? app(CampaignFleet::class)->symbols($episode, $pinRoles) : array_filter([$grant->arm()['ship'] ?? null]);
+        $runs = AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->when($episode, fn ($query) => $query->where('campaign_episode_id', $episode->id),
+                fn ($query) => $query->whereIn('campaign_episode_id', CampaignEpisode::where('campaign_grant_id', $grant->id)
+                    ->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->select('id')))->select('id');
+
+        return $reviews->where(fn ($query) => $query->whereIn('ship_symbol', $fleet)->orWhereNull('ship_symbol')->orWhere('ship_symbol', '')
+            ->orWhereIn('automation_run_id', $runs))->exists();
+    }
+
+    public function unexplainedBalance(Agent $agent): bool
+    {
+        return ! ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereIn('state', ['pending', 'sending'])->exists()
+            && (app(CreditAccounting::class)->summary($agent)['unexplained_change'] ?? 0) !== 0;
+    }
+
+    public static function recordedNet(?CampaignEpisode $episode): int
+    {
+        return $episode ? (int) CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'load_result')
+            ->sum(DB::raw("coalesce(json_extract(data, '$.net'), 0)")) : 0;
+    }
+
+    public static function lossStop(CampaignGrant $grant, int $net): bool
+    {
+        $limit = $grant->arm()['max_net_loss'] ?? null;
+
+        return $grant->arm() !== null && ($grant->pause_reason === 'arm_loss_stop' || ($limit !== null && $net < -$limit));
     }
 
     public function check(AutomationRun $run, Agent $agent, ?string $command = null, array $arguments = [], bool $boundaryOnly = false): void

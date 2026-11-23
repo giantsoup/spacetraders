@@ -25,23 +25,109 @@ class RequestBudget
         }
     }
 
-    public function drainAgent(string $symbol, bool $draining): void
+    public function drainAgent(string $symbol, bool $draining, ?string $resetId = null): void
     {
-        $this->change(function (&$state) use ($symbol, $draining) {
+        $this->change(function (&$state) use ($symbol, $draining, $resetId) {
             $key = $this->drainKey($symbol);
             if ($draining) {
-                $state['draining'][$key] = true;
+                $state['draining'][$key] = ['since' => microtime(true), 'reset_id' => $resetId, 'id' => bin2hex(random_bytes(16))];
             } else {
                 unset($state['draining'][$key]);
             }
         });
     }
 
+    /** Clear only the hold that was in place when the old agent was archived. */
+    public function clearDrainBefore(string $symbol, string $resetId, float $archivedAt): void
+    {
+        if (! in_array(strtoupper($symbol), $this->drainingSymbols(requireTelemetry: config('gameplay.request_budget_enabled')), true)) {
+            return;
+        }
+
+        $this->change(function (&$state) use ($symbol, $resetId, $archivedAt) {
+            $key = $this->drainKey($symbol);
+            $hold = $state['draining'][$key] ?? false;
+            $this->assertDrainHold($hold);
+            if ($hold === true || (is_array($hold) && $hold['since'] <= $archivedAt
+                && ($hold['reset_id'] === null || $hold['reset_id'] === $resetId))) {
+                unset($state['draining'][$key]);
+            }
+        }, requireState: true);
+    }
+
     public function isDraining(string $symbol): bool
     {
-        $state = $this->readState($this->directory(false).'/budget.json');
+        return in_array(strtoupper($symbol), $this->drainingSymbols(), true);
+    }
 
-        return ! empty($state['draining'][$this->drainKey($symbol)]);
+    /** @return list<string> Symbols with a drain hold for this checkout. */
+    public function drainingSymbols(bool $requireTelemetry = false): array
+    {
+        return array_map('strval', array_keys($this->drainHoldIds($requireTelemetry)));
+    }
+
+    /** @return array<string, string> The current drain hold identity for each held agent in this checkout. */
+    public function drainHoldIds(bool $requireTelemetry = false): array
+    {
+        $file = $this->directory(false).'/budget.json';
+        if (file_exists($file) && ! is_file($file)) {
+            throw new RequestDeferred('Host request-budget drain state could not be read.', 10);
+        }
+        $state = $this->readState($file, $requireTelemetry);
+        if (array_key_exists('draining', $state) && ! is_array($state['draining'])) {
+            throw new RequestDeferred('Host request-budget drain state could not be read.', 10);
+        }
+        $prefix = hash('sha256', base_path()).':';
+        $holds = [];
+        foreach ($state['draining'] ?? [] as $key => $hold) {
+            if (! is_string($key) || ! str_starts_with($key, $prefix)) {
+                continue;
+            }
+            if (($id = $this->drainHoldId($hold)) !== null) {
+                $holds[substr($key, strlen($prefix))] = $id;
+            }
+        }
+
+        return $holds;
+    }
+
+    /** Compare and remove the reviewed hold while holding the budget file's writer lock. */
+    public function clearDrainHold(string $symbol, string $expectedId): bool
+    {
+        return $this->change(function (&$state) use ($symbol, $expectedId) {
+            if (array_key_exists('draining', $state) && ! is_array($state['draining'])) {
+                throw new RequestDeferred('Host request-budget drain state could not be read.', 10);
+            }
+            $key = $this->drainKey($symbol);
+            if ($this->drainHoldId($state['draining'][$key] ?? false) !== $expectedId) {
+                return false;
+            }
+            unset($state['draining'][$key]);
+
+            return true;
+        }, requireState: true);
+    }
+
+    private function drainHoldId(mixed $hold): ?string
+    {
+        $this->assertDrainHold($hold);
+        if (is_array($hold)) {
+            return $hold['id'] ?? hash('sha256', json_encode([$hold['since'], $hold['reset_id']], JSON_THROW_ON_ERROR));
+        }
+
+        return $hold ? 'legacy' : null;
+    }
+
+    private function assertDrainHold(mixed $hold): void
+    {
+        if (is_bool($hold)) {
+            return;
+        }
+        if (! is_array($hold) || ! is_numeric($hold['since'] ?? null) || $hold['since'] <= 0
+            || ! array_key_exists('reset_id', $hold) || ($hold['reset_id'] !== null && ! is_string($hold['reset_id']))
+            || (array_key_exists('id', $hold) && (! is_string($hold['id']) || ! preg_match('/\A[a-f0-9]{32}\z/', $hold['id'])))) {
+            throw new RequestDeferred('Host request-budget drain state could not be read.', 10);
+        }
     }
 
     private function drainKey(string $symbol): string
@@ -306,9 +392,21 @@ class RequestBudget
         });
     }
 
-    public function usage(?string $token = null, ?string $account = null, ?string $agentSymbol = null): array
+    public function usage(?string $token = null, ?string $account = null, ?string $agentSymbol = null, bool $requireTelemetry = false): array
     {
-        $state = $this->readState($this->directory(false).'/budget.json');
+        $state = $this->readState($this->directory(false).'/budget.json', $requireTelemetry);
+        try {
+            return $this->usageReport($state, $token, $account, $agentSymbol);
+        } catch (\TypeError $exception) {
+            if (! $requireTelemetry) {
+                throw $exception;
+            }
+            throw new RequestDeferred('Host request-budget telemetry could not be read.', 10);
+        }
+    }
+
+    private function usageReport(array $state, ?string $token, ?string $account, ?string $agentSymbol): array
+    {
         $now = $this->now();
         $result = [];
         foreach ($this->keys($token, $account) as $index => $key) {
@@ -566,10 +664,11 @@ POWERSHELL;
         return $cacheable ? serialize($identity) : '';
     }
 
-    private function readState(string $file): array
+    private function readState(string $file, bool $required = false): array
     {
         try {
-            $state = is_file($file) ? json_decode(file_get_contents($file), true, flags: JSON_THROW_ON_ERROR) : ['buckets' => []];
+            $state = is_file($file) || $required
+                ? json_decode(@file_get_contents($file), true, flags: JSON_THROW_ON_ERROR) : ['buckets' => []];
             if (! is_array($state) || ! isset($state['buckets']) || ! is_array($state['buckets'])) {
                 throw new \RuntimeException('Invalid request-budget state.');
             }
@@ -580,7 +679,7 @@ POWERSHELL;
         }
     }
 
-    private function change(callable $work): mixed
+    private function change(callable $work, bool $requireState = false): mixed
     {
         $directory = $this->directory(true);
         $file = $directory.'/budget.json';
@@ -599,7 +698,7 @@ POWERSHELL;
         }
         try {
             @chmod($lock, 0600);
-            $state = $this->readState($file);
+            $state = $this->readState($file, $requireState);
             $result = $work($state);
             $temporary = tempnam($directory, '.budget-');
             if (! $temporary || file_put_contents($temporary, json_encode($state, JSON_THROW_ON_ERROR)) === false || ! chmod($temporary, 0600) || ! $this->replace($temporary, $file)) {
