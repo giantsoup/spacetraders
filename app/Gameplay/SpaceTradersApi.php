@@ -180,7 +180,7 @@ class SpaceTradersApi
                 return $cached;
             }
         }
-        $body = $fresh
+        $body = $fresh && RequestBudget::agentCaps() !== []
             ? $this->client->scope(fn () => $this->call('get', '/'), priority: 'safety')
             : $this->call('get', '/');
         $this->validate($body, ['resetDate' => 'required|string|max:80', 'version' => 'required|string|max:80']);

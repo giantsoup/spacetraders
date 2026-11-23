@@ -112,6 +112,55 @@ class CampaignProbePoolTest extends TestCase
         }
     }
 
+    public function test_round_two_purchase_preview_holds_without_budget_evidence(): void
+    {
+        $episode = $this->prepareBudgetPurchase();
+        config(['gameplay.agent_request_caps' => ['LOCAL' => 500]]);
+        $this->expectExceptionMessage('insufficient_sample_window');
+        app(AutomationRunner::class)->previewProbePurchase($this->agent, 'LOCAL-2', 'X1-TEST-ROCK', ['minutes' => 10], $episode);
+    }
+
+    public function test_round_two_pending_purchase_rechecks_formula_before_transport(): void
+    {
+        $episode = $this->prepareBudgetPurchase();
+        $runner = app(AutomationRunner::class);
+        $run = $runner->previewProbePurchase($this->agent, 'LOCAL-2', 'X1-TEST-ROCK', ['minutes' => 10], $episode);
+        $runner->start($this->agent, $run);
+        app(AutomationRunner::class)->advance($run->id);
+        $action = ShipAction::where('automation_run_id', $run->id)->where('command', 'buy_ship')->sole();
+
+        $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
+        $episode->update(['opened_at' => now()->subHours(7)]);
+        AutomationRun::create(['agent_id' => $this->agent->id, 'campaign_episode_id' => $episode->id, 'reset_id' => $episode->reset_id,
+            'ship_symbol' => 'LOCAL-1', 'strategy' => 'trade', 'state' => 'stopped', 'started_at' => now()->subHours(3),
+            'updated_at' => now()->subHours(2), 'expires_at' => now()->subHours(2), 'plan' => [], 'totals' => []]);
+        DB::table('fleet_metrics')->insert(['kind' => 'requests', 'ship' => 'LOCAL-1', 'agent_symbol' => 'LOCAL', 'scope' => 'agent',
+            'value' => 1000, 'data' => '{}', 'created_at' => now()->subMinutes(150)]);
+        config(['gameplay.agent_request_caps' => ['LOCAL' => 500]]);
+        $writes = count($this->world()['writes']);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertSame('rejected', $action->fresh()->state->value);
+        $this->assertStringContainsString('trader ceiling', $action->fresh()->message);
+        $this->assertSame($writes, count($this->world()['writes']));
+    }
+
+    private function prepareBudgetPurchase(): CampaignEpisode
+    {
+        $this->setBalance(200000);
+        $this->editWorld(function (array &$world) {
+            $world['shipyards']['X1-TEST-ROCK'] = ['shipTypes' => [['type' => 'SHIP_PROBE']], 'ships' => [$this->probeOffer(24000)]];
+        });
+        $this->seedDiscoveryDone();
+        app(AgentSynchronizer::class)->observe($this->agent, 'waypoint', 'X1-TEST-ROCK', $this->world()['waypoints'][0], 'listing');
+        $grant = $this->approve($this->bootstrapBody(target: 2, maxPrice: 50000, minWorkingCapital: 75000));
+
+        return CampaignEpisode::create([
+            'campaign_grant_id' => $grant->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
+            'start_credits' => 200000, 'phase' => 'earn', 'opened_at' => now(), 'next_reset_at' => now()->addDays(5),
+            'state' => ['role_ships' => ['command' => 'LOCAL-1', 'probe' => 'LOCAL-2']],
+        ]);
+    }
+
     public function test_minute_zero_probe_bootstrap_discovers_shipyard_buys_up_to_target_and_reconciles_credits(): void
     {
         $this->editWorld(function (array &$world) {

@@ -175,9 +175,10 @@ class CampaignDirector
         }
         try {
             $deadline = $this->deadline = microtime(true) + self::DEADLINE_SECONDS;
-            $primaries = CampaignGrant::allPrimaries()->pluck('agent_symbol');
+            $primaries = CampaignGrant::allPrimaries($grant->user_id)->get()->map(fn (CampaignGrant $primary) => $primary->resolvedAgentSymbol())->unique();
+            $multiAgent = $primaries->count() > 1 && $primaries->contains(fn ($symbol) => $symbol !== $grant->resolvedAgentSymbol());
             $caps = RequestBudget::agentCaps();
-            if (! $grant->isDraining() && $primaries->count() > 1
+            if (! $grant->isDraining() && $multiAgent
                 && (! config('gameplay.request_budget_enabled') || ! isset($caps['SHARED'])
                     || $primaries->contains(fn ($symbol) => ($caps[$symbol] ?? 0) < 1))) {
                 $reason = 'multi_agent_budget_requires_stage';
@@ -189,7 +190,7 @@ class CampaignDirector
                 return;
             }
             app(SpaceTradersClient::class)->scope(fn () => $this->direct($grant, $deadline),
-                priority: $grant->isDraining() || $primaries->count() > 1 || $caps !== [] ? 'director' : 'critical', deadline: $deadline);
+                priority: $grant->isDraining() || $multiAgent || $caps !== [] ? 'director' : 'critical', deadline: $deadline);
         } catch (LocalEarnBudget) {
             $this->wait($grant, 'local_budget_deferred');
         } catch (ValidationException) {

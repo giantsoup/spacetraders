@@ -2032,6 +2032,110 @@ class CampaignAutopilotTest extends TestCase
         return $run->fresh();
     }
 
+    public function test_round_two_one_primary_per_operator_keeps_stage_off_director_work(): void
+    {
+        $local = $this->approve();
+        $other = User::factory()->create();
+        $revision = app(CampaignPlaybook::class)->import(str_replace('LOCAL', 'OTHER', $this->body()));
+        app(CampaignControl::class)->approve($revision, $other);
+
+        $this->tick();
+        $this->assertNull($local->fresh()->wait_reason);
+        $this->assertSame($local->id, CampaignEpisode::sole()->campaign_grant_id);
+        $this->assertArrayNotHasKey('director', app(RequestBudget::class)->usage()['host']['priorities']);
+    }
+
+    public function test_round_two_second_loading_lot_uses_ordinary_capacity(): void
+    {
+        $run = $this->incidentLoadedTrade();
+        $run->update(['plan' => array_replace($run->plan, ['units' => 4, 'max_inventory' => 120, 'max_spend' => 1000, 'max_credits' => 1000])]);
+        $run->update(['totals' => array_replace($run->totals, ['phase' => 'buy']), 'next_action_at' => now()]);
+        config(['gameplay.request_budget_enabled' => true, 'gameplay.agent_request_caps' => ['LOCAL' => 3400, 'SHARED' => 760]]);
+        $budget = app(RequestBudget::class);
+        $before = $budget->usage(agentSymbol: 'LOCAL')['agent'];
+        app(AutomationRunner::class)->advance($run->id);
+        $action = ShipAction::where('automation_run_id', $run->id)->where('state', 'pending')->latest('id')->first();
+        $this->assertSame('buy', $action?->command, $run->fresh()->blocked_reason ?? '');
+        $advance = $budget->usage(agentSymbol: 'LOCAL')['agent'];
+        $this->assertSame($before['tier1_last_hour'], $advance['tier1_last_hour']);
+        $this->assertGreaterThan($before['tier2_4_last_hour'], $advance['tier2_4_last_hour']);
+        app(ShipCommandExecutor::class)->execute($action->id);
+        $this->assertSame('confirmed', $action->fresh()->state->value, $action->fresh()->message ?? '');
+        $this->assertSame($before['tier1_last_hour'], $budget->usage(agentSymbol: 'LOCAL')['agent']['tier1_last_hour']);
+    }
+
+    public function test_round_two_queued_loading_intent_yields_to_delivery_at_the_cap(): void
+    {
+        $run = $this->incidentLoadedTrade();
+        $run->update([
+            'plan' => array_replace($run->plan, ['units' => 4, 'max_inventory' => 120, 'max_spend' => 1000, 'max_credits' => 1000]),
+            'totals' => array_replace($run->totals, ['phase' => 'buy']),
+        ]);
+        $buy = $this->incidentNextCommand($run);
+        $this->assertSame('buy', $buy->command);
+        config(['gameplay.request_budget_enabled' => true, 'gameplay.agent_request_caps' => ['LOCAL' => 0]]);
+
+        app(ShipCommandExecutor::class)->execute($buy->id);
+        $this->assertSame('rejected', $buy->fresh()->state->value);
+        $this->assertSame('orbit', $this->incidentNextCommand($run)->command);
+        $this->assertSame('request_budget', $run->fresh()->plan['shortened_reason']);
+    }
+
+    public function test_round_two_stage_off_recovery_uses_normal_read_and_write_priorities(): void
+    {
+        $run = $this->incidentLoadedTrade();
+        app(AutomationRunner::class)->stop($run);
+        $this->tick();
+        $recovery = AutomationRun::where('strategy', 'sell_aboard')->whereNotNull('active_agent_id')->sole();
+        $budget = app(RequestBudget::class);
+        $before = $budget->usage()['host']['priorities'];
+        for ($i = 0; $i < 10; $i++) {
+            $action = $this->incidentNextCommand($recovery);
+            app(ShipCommandExecutor::class)->execute($action->id);
+            $this->assertSame('confirmed', $action->fresh()->state->value, $action->fresh()->message ?? '');
+            if ($action->command === 'sell') {
+                break;
+            }
+        }
+
+        $this->assertSame('sell', $action->command);
+        $after = $budget->usage()['host']['priorities'];
+        $this->assertGreaterThan($before['write'] ?? 0, $after['write'] ?? 0);
+        $this->assertSame($before['settlement'] ?? 0, $after['settlement'] ?? 0);
+    }
+
+    public function test_round_two_pausing_a_draining_arm_preserves_the_primary_drain(): void
+    {
+        $primary = $this->approve();
+        $arm = CampaignGrant::create([
+            'campaign_revision_id' => $primary->campaign_revision_id, 'revision_hash' => $primary->revision_hash,
+            'user_id' => $primary->user_id, 'agent_symbol' => $primary->resolvedAgentSymbol(),
+            'limits' => ['arm' => ['label' => 'H1']], 'wait_reason' => 'drain_pause:test_pressure',
+        ]);
+        $primary->update(['wait_reason' => 'drain_pause:test_pressure']);
+        $budget = app(RequestBudget::class);
+        $budget->drainAgent('LOCAL', true);
+
+        app(CampaignControl::class)->pause($arm, 'arm_test_pause');
+
+        $this->assertTrue($primary->fresh()->isDraining());
+        $this->assertTrue($budget->isDraining('LOCAL'));
+    }
+
+    public function test_round_two_stage_off_reconciliation_uses_normal_read_priority(): void
+    {
+        $run = $this->incidentLoadedTrade();
+        $action = ShipAction::where('automation_run_id', $run->id)->where('command', 'buy')->sole();
+        $action->update(['state' => 'uncertain']);
+        $budget = app(RequestBudget::class);
+        $before = $budget->usage()['host']['priorities'];
+        app(ShipCommandExecutor::class)->reconcile($this->agent, $action);
+        $after = $budget->usage()['host']['priorities'];
+        $this->assertGreaterThan($before['critical'] ?? 0, $after['critical'] ?? 0);
+        $this->assertSame($before['settlement'] ?? 0, $after['settlement'] ?? 0);
+        $this->assertSame($before['safety'] ?? 0, $after['safety'] ?? 0);
+    }
+
     public function test_round_one_multi_agent_director_refuses_missing_stage(): void
     {
         $local = $this->approve();
@@ -2089,7 +2193,10 @@ class CampaignAutopilotTest extends TestCase
         $action = ShipAction::where('automation_run_id', $run->id)->where('command', 'buy')->sole();
         $action->update(['state' => 'uncertain']);
         app(RequestBudget::class)->drainAgent('LOCAL', true);
+        $before = count(json_decode(file_get_contents($this->file), true)['calls']);
         app(ShipCommandExecutor::class)->reconcile($this->agent, $action);
+        $paths = array_column(array_slice(json_decode(file_get_contents($this->file), true)['calls'], $before), 'path');
+        $this->assertContains('/systems/X1-TEST/waypoints/X1-TEST-ROCK/market', $paths, 'The post-sync evidence read reaches transport despite the drain.');
         $this->assertNotEmpty($action->fresh()->outcome['fleet']);
         $this->assertArrayHasKey('transactions', $action->fresh()->outcome);
     }

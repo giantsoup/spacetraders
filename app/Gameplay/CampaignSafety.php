@@ -84,7 +84,11 @@ class CampaignSafety
                 throw new GameException('Command is outside the campaign grant.');
             }
             $maxTotal = $arguments['maxTotal'] ?? PHP_INT_MAX;
-            $reserve = app(CampaignProbeBootstrap::class)->effectiveReserve($agent, $grant, $probes, $run->id);
+            $bootstrap = app(CampaignProbeBootstrap::class);
+            if ($boundaryOnly) {
+                $bootstrap->assertPurchaseBudget($agent);
+            }
+            $reserve = $bootstrap->effectiveReserve($agent, $grant, $probes, $run->id);
             if ($maxTotal > $probes['max_price'] || $agent->credits - $maxTotal < $reserve) {
                 throw new GameException('Probe purchase exceeds max_price or working-capital reserve.');
             }

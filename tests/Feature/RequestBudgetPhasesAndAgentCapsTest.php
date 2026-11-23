@@ -341,6 +341,36 @@ class RequestBudgetPhasesAndAgentCapsTest extends TestCase
         $this->assertSame(360, $budget->usage()['host']['priorities']['settlement']);
     }
 
+    public function test_round_two_settlement_borrowing_preserves_other_agents_reserves_and_ordinary_caps(): void
+    {
+        config(['gameplay.request_budget_enabled' => true, 'gameplay.request_budget_stage' => 'stage1']);
+        $budget = new class extends RequestBudget
+        {
+            public float $clock = 1700000000;
+
+            protected function now(): float
+            {
+                return $this->clock;
+            }
+        };
+        $path = config('gameplay.request_budget_path').'/budget.json';
+        foreach ([[96, 0, 'ordinary host full'], [0, 1600, 'agent ordinary cap full']] as [$host, $ordinary, $case]) {
+            file_put_contents($path, json_encode([
+                'buckets' => [],
+                'host_tiers' => ['t24' => array_fill(0, $host, $budget->clock - 5), 't1' => []],
+                'agents' => ['agent:SOUPBURN' => ['t24' => array_fill(0, $ordinary, $budget->clock - 90), 't1' => array_fill(0, 300, $budget->clock - 90)]],
+            ]));
+            try {
+                RequestBudget::forAgent('SOUPBURN', fn () => $budget->reserve(priority: 'settlement', maxWait: 0));
+                $this->fail('Exhausted agent cannot settle with '.$case);
+            } catch (RequestDeferred) {
+                $this->assertSame(300, $budget->usage(agentSymbol: 'SOUPBURN')['agent']['tier1_last_hour']);
+            }
+            RequestBudget::forAgent('GIANTSOUP', fn () => $budget->reserve(priority: 'settlement', maxWait: 0));
+            $this->assertSame(1, $budget->usage(agentSymbol: 'GIANTSOUP')['agent']['tier1_last_hour']);
+        }
+    }
+
     public function test_round_one_stage_caps_and_shared_bucket_are_selectable(): void
     {
         config(['gameplay.request_budget_stage' => 'stage1', 'gameplay.request_budget_enabled' => true]);

@@ -284,8 +284,11 @@ class AutomationRunner
             $budget = app(RequestBudget::class);
             $paced = RequestBudget::agentCaps() !== [];
             $loaded = $paced && self::hasTradeCargo($run);
-            $priority = ! empty($run->plan['sell_only']) || $loaded ? 'settlement' : ($paced ? 'run' : 'critical');
-            $work = function () use ($run, $agent, $budget, $loaded, &$outcome, &$ship) {
+            $buyPhase = ($run->totals['phase'] ?? null) === 'buy';
+            $finishLoading = $loaded && $buyPhase && $budget->ordinaryCapReached($agent->name);
+            $recovery = ! empty($run->plan['sell_only']) && ($paced || $budget->isDraining($agent->name));
+            $priority = $recovery || ($loaded && (! $buyPhase || $finishLoading)) ? 'settlement' : ($paced ? 'run' : 'critical');
+            $work = function () use ($run, $agent, $finishLoading, &$outcome, &$ship) {
                 $this->gate->check($run->engine_session_id);
                 $lastActionId = (int) (ShipAction::where('agent_id', $agent->id)->whereIn('state', ['confirmed', 'uncertain'])->max('id') ?? 0);
                 $observedAt = now();
@@ -306,7 +309,7 @@ class AutomationRunner
                 $totals['other_credit_delta'] = $otherDelta;
                 $totals['agent_balance_delta'] = $credits - $run->plan['initial_credits'];
                 $run->update(['totals' => $totals]);
-                if ($loaded && ($run->totals['phase'] ?? null) === 'buy' && $budget->ordinaryCapReached($agent->name)) {
+                if ($finishLoading) {
                     $trade = app(CampaignTrade::class);
                     $bought = $run->totals['purchased'][$run->plan['symbol']] ?? 0;
                     if ($bought > 0 && $bought < $run->plan['units']) {

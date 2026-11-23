@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Gameplay\CampaignNotifier;
+use App\Gameplay\FleetMetrics;
 use App\Gameplay\GameException;
 use App\Gameplay\GateWatch;
 use App\Gameplay\RequestBudget;
@@ -10,6 +11,7 @@ use App\Models\AutomationRun;
 use App\Models\ReconMission;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -54,8 +56,29 @@ class GateWatchTest extends TestCase
         }
         $dir = config('gameplay.request_budget_path');
         unlink($dir.'/budget.json');
+        $this->assertFalse(app(GateWatch::class)->pollGate($agent, $gate['symbol'])['polled']);
+        Http::assertSentCount(1);
+        $this->travel(5)->minutes();
         $this->assertTrue(app(GateWatch::class)->pollGate($agent, $gate['symbol'])['polled']);
         Http::assertSentCount(2);
+    }
+
+    public function test_round_two_shared_gate_poll_keeps_scorecard_attribution_complete(): void
+    {
+        $agent = User::factory()->create()->agents()->create(['name' => 'GIANTSOUP', 'token' => 'synthetic-only', 'faction' => 'VOID', 'reset_id' => 'test-reset']);
+        $gate = ['symbol' => 'X1-TEST-GATE', 'systemSymbol' => 'X1-TEST', 'type' => 'JUMP_GATE', 'x' => 0, 'y' => 0, 'traits' => [], 'isUnderConstruction' => true];
+        Http::preventStrayRequests();
+        Http::fakeSequence()->push(['data' => $gate])->push(['data' => ['symbol' => $gate['symbol'], 'materials' => [], 'isComplete' => false]]);
+        config(['gameplay.request_budget_stage' => 'stage1']);
+        FleetMetrics::forAgent('GIANTSOUP', fn () => app(GateWatch::class)->pollGate($agent, $gate['symbol'], true));
+        FleetMetrics::flush();
+        $card = app(FleetMetrics::class)->byAgent([
+            ['agent_symbol' => 'GIANTSOUP', 'qualified_label' => 'GIANTSOUP:C0', 'episodes' => []],
+        ], now()->subHours(6)->toImmutable(), now()->toImmutable())['GIANTSOUP'];
+        $this->assertTrue($card['attribution_complete']);
+        $this->assertSame(0, $card['all_in_requests']);
+        $this->assertSame(2, (int) DB::table('fleet_metrics')->where('ship', 'gate_watch')->where('scope', 'host')->sum('value'));
+        $this->assertSame(2, app(RequestBudget::class)->usage(agentSymbol: 'SHARED')['agent']['tier2_4_last_hour']);
     }
 
     public function test_progress_read_is_optional_tier_four_and_only_runs_during_construction(): void

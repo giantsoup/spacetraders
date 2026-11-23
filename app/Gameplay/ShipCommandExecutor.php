@@ -199,8 +199,17 @@ class ShipCommandExecutor
         $outbound = $recon && isset($action->arguments['recon_outbound_hash']);
         $refusedBeforeTransport = false;
         $paced = $run && RequestBudget::agentCaps() !== [];
-        $settlementScope = $run && (! empty($run->plan['sell_only']) || $action->command === 'sell'
-            || ($paced && AutomationRunner::hasTradeCargo($run) && in_array($action->command, ['orbit', 'navigate', 'dock', 'refuel'], true)));
+        $loaded = $paced && AutomationRunner::hasTradeCargo($run);
+        $buyPhase = ($run?->totals['phase'] ?? null) === 'buy';
+        $budget = app(RequestBudget::class);
+        if ($loaded && $buyPhase && in_array($action->command, ['buy', 'dock', 'refuel'], true) && $budget->ordinaryCapReached($agent->name)) {
+            $action->update(['state' => ActionState::Rejected, 'message' => 'Request budget ended loading; unsent intent released for cargo settlement.', 'settled_at' => now()]);
+
+            return;
+        }
+        $recovery = $run && (! empty($run->plan['sell_only']) || $action->command === 'sell');
+        $settlementScope = ($recovery && ($paced || $budget->isDraining($agent->name)))
+            || ($loaded && ! $buyPhase && in_array($action->command, ['orbit', 'navigate', 'dock', 'refuel'], true));
         $work = function () use ($agent, $action, $run, $prefetched, &$received, &$reserved, $recon, $outbound, &$refusedBeforeTransport) {
             try {
                 $this->gate->check($action->engine_session_id);
@@ -656,7 +665,7 @@ class ShipCommandExecutor
             if (! $knownOutcome) {
                 $action->update(['state' => ActionState::Uncertain]);
             }
-            app(SpaceTradersClient::class)->scope(fn () => $this->sync->sync($agent, false, freshReset: true), priority: 'settlement');
+            $this->sync->sync($agent, false, freshReset: true);
             $fleet = $this->api->ships($agent);
             $ship = collect($fleet)->firstWhere('symbol', $action->ship_symbol);
             if ($ship) {

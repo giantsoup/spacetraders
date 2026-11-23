@@ -21,6 +21,8 @@ class GateWatch
 {
     public const POLL_INTERVAL_MINUTES = 30;
 
+    private const RETRY_INTERVAL_MINUTES = 5;
+
     public const PROGRESS_ALERT_RATIO = 0.80;
 
     public function __construct(private SpaceTradersApi $api, private SpaceTradersClient $client) {}
@@ -33,14 +35,21 @@ class GateWatch
         $gateSymbol = strtoupper(trim($gateSymbol));
         $key = 'gate_watch:'.$agent->reset_id.':'.$gateSymbol;
 
-        return app(HostLock::class)->run($key, fn () => $this->poll($agent, $gateSymbol, $key, $readProgressWhenUnderConstruction));
+        return app(HostLock::class)->run($key, fn () => RequestBudget::forAgent('SHARED',
+            fn () => FleetMetrics::forAgent(null, fn () => FleetMetrics::as('gate_watch',
+                fn () => $this->client->scope(
+                    fn () => $this->poll($agent, $gateSymbol, $key, $readProgressWhenUnderConstruction),
+                    priority: 'discovery',
+                ))),
+        ));
     }
 
     private function poll(Agent $agent, string $gateSymbol, string $key, bool $readProgressWhenUnderConstruction): array
     {
         $raw = DB::table('game_runtime')->where('key', $key)->value('value');
         $previous = is_string($raw) ? (json_decode($raw, true) ?: []) : [];
-        if (isset($previous['polled_at']) && CarbonImmutable::parse($previous['polled_at'])->gt(now()->subMinutes(self::POLL_INTERVAL_MINUTES))) {
+        if ((isset($previous['polled_at']) && CarbonImmutable::parse($previous['polled_at'])->gt(now()->subMinutes(self::POLL_INTERVAL_MINUTES)))
+            || (isset($previous['retry_at']) && CarbonImmutable::parse($previous['retry_at'])->isFuture())) {
             return [
                 'polled' => false,
                 'gate' => $gateSymbol,
@@ -51,12 +60,16 @@ class GateWatch
             ];
         }
 
-        $waypoint = RequestBudget::forAgent('SHARED', fn () => FleetMetrics::as('gate_watch', fn () => $this->client->scope(
-            fn () => $this->api->manualRead($agent, 'get-waypoint', ['systemSymbol' => FleetClaims::systemOf($gateSymbol), 'waypointSymbol' => $gateSymbol])['data'],
-            priority: 'discovery',
-        )));
-        if (($waypoint['type'] ?? null) !== 'JUMP_GATE' || ! is_bool($waypoint['isUnderConstruction'] ?? null)) {
-            throw new GameException('Jump gate waypoint lacks construction status.');
+        try {
+            $waypoint = $this->api->manualRead($agent, 'get-waypoint', ['systemSymbol' => FleetClaims::systemOf($gateSymbol), 'waypointSymbol' => $gateSymbol])['data'];
+            if (($waypoint['type'] ?? null) !== 'JUMP_GATE' || ! is_bool($waypoint['isUnderConstruction'] ?? null)) {
+                throw new GameException('Jump gate waypoint lacks construction status.');
+            }
+        } catch (GameException $exception) {
+            $previous['retry_at'] = now()->addMinutes(self::RETRY_INTERVAL_MINUTES)->toIso8601String();
+            $this->save($key, $previous);
+
+            throw $exception;
         }
         $underConstruction = $waypoint['isUnderConstruction'];
         $wasUnderConstruction = array_key_exists('is_under_construction', $previous) ? (bool) $previous['is_under_construction'] : null;
@@ -66,10 +79,7 @@ class GateWatch
         if ($underConstruction && $readProgressWhenUnderConstruction) {
             try {
                 $system = FleetClaims::systemOf($gateSymbol);
-                $construction = RequestBudget::forAgent('SHARED', fn () => FleetMetrics::as('gate_watch', fn () => $this->client->scope(
-                    fn () => $this->api->manualRead($agent, 'get-construction', ['systemSymbol' => $system, 'waypointSymbol' => $gateSymbol]),
-                    priority: 'discovery',
-                )));
+                $construction = $this->api->manualRead($agent, 'get-construction', ['systemSymbol' => $system, 'waypointSymbol' => $gateSymbol]);
                 $materials = $construction['data']['materials'] ?? [];
                 $required = array_sum(array_map(fn ($m) => (int) ($m['required'] ?? 0), $materials));
                 $fulfilled = array_sum(array_map(fn ($m) => (int) ($m['fulfilled'] ?? 0), $materials));

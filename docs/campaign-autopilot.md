@@ -82,9 +82,10 @@ director refuses new plans and reports `multi_agent_budget_requires_stage`.
 Drain and reconciliation remain available.
 
 The settlement reserve allows 18 requests per host minute, with a target of
-300 per agent hour and 180 per shared hour. Settlement can use idle ordinary
-host capacity when its reserve is exhausted. That usage counts against the
-ordinary window, which reduces room for new work.
+300 per agent hour and 180 per shared hour. Once either settlement window is
+full, a request can use ordinary capacity only if both the host and the agent
+have room in their ordinary windows. Borrowed requests count against both
+ordinary limits.
 
 The kill switch retains the latest eligible GIANTSOUP:C0-only baseline when
 another primary joins. If no baseline exists, it uses the first eligible
@@ -93,9 +94,10 @@ resume. Host pressure and repeated 429s can trigger a drain before the
 baseline is ready. Cannibalization requires 15 consecutive minutes of
 degradation and trading overlap in the control system.
 
-The purchase scorecard uses the trailing six hours ending at the report's
-end time. A shorter sample, less than one active trading ship-hour, missing
-attribution, or a missing trader request rate holds purchases. For
+With a request budget stage enabled, the campaign checks the trailing six-hour
+scorecard at probe purchase preview and again at execution. A shorter sample,
+less than one active trading ship-hour, incomplete attribution, a missing
+trader rate, or a fleet above the trader ceiling blocks the purchase. For
 compatibility, the single-agent scorecard keeps short arm keys and supplies
 the qualified key on each row. A multi-agent scorecard uses qualified keys.
 

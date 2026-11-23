@@ -90,33 +90,28 @@ class RequestBudget
                 if (config('gameplay.request_budget_enabled') && $caps !== []) {
                     $hostTier24Limit = max(1, (int) config('gameplay.host_tier2_4_per_minute', 96));
                     $hostTier1Reserve = max(1, (int) config('gameplay.host_tier1_reserve_per_minute', 18));
-                    $tier24Count = count($state['host_tiers']['t24']);
-                    $tier1Count = count($state['host_tiers']['t1']);
+                    $ordinary = $state['host_tiers']['t24'];
+                    $protected = $state['host_tiers']['t1'];
+                    $agentOrdinary = $state['agents'][$agentKey]['t24'] ?? [];
+                    $agentProtected = $state['agents'][$agentKey]['t1'] ?? [];
+                    $cap = $caps[$agentSymbol] ?? (isset($caps['SHARED']) ? 0 : PHP_INT_MAX);
+                    // Tiers 3-4 shed at 80% of the ordinary host envelope.
+                    $hostCeiling = $tier >= 3 ? (int) floor($hostTier24Limit * 0.8) : $hostTier24Limit;
+                    $ordinaryDelay = max(
+                        count($ordinary) >= $hostCeiling ? max(1.0, ($ordinary[0] ?? $now) + 60.0 - $now) : 0.0,
+                        count($agentOrdinary) >= $cap ? max(5.0, ($agentOrdinary[0] ?? $now) + 3600.0 - $now) : 0.0,
+                    );
                     if ($tier === 1) {
-                        $reserve = $agentSymbol === 'SHARED' ? 180 : (int) config('gameplay.agent_tier1_reserve_per_hour', 300);
-                        $agentReserve = $agentKey === null || count($state['agents'][$agentKey]['t1']) < max(1, $reserve);
-                        if ($tier24Count + $tier1Count >= $hostTier24Limit + $hostTier1Reserve) {
-                            $oldest = min($state['host_tiers']['t1'][0] ?? $now, $state['host_tiers']['t24'][0] ?? $now);
-                            $delay = max($delay, $oldest + 60.0 - $now);
-                        }
-                        // Borrow unused ordinary host capacity once the settlement reserve is used.
-                        // Charge the loan to the agent's ordinary window so it displaces future exposure.
-                        $borrow = $tier24Count < $hostTier24Limit && (! $agentReserve || $tier1Count >= $hostTier1Reserve);
+                        $reserve = $agentSymbol === 'SHARED' ? 180 : max(1, (int) config('gameplay.agent_tier1_reserve_per_hour', 300));
+                        $protectedDelay = max(
+                            count($protected) >= $hostTier1Reserve ? max(1.0, $protected[0] + 60.0 - $now) : 0.0,
+                            count($agentProtected) >= $reserve ? max(1.0, $agentProtected[0] + 3600.0 - $now) : 0.0,
+                        );
+                        // Settlement can borrow only when both ordinary windows have space.
+                        $borrow = $protectedDelay > 0 && $ordinaryDelay === 0.0;
+                        $delay = max($delay, min($protectedDelay, $ordinaryDelay));
                     } else {
-                        // Tiers 3-4 shed above 80% of the Tiers 2-4 operating envelope (76.8/min); Tier 2 sheds at 100% (96/min).
-                        $hostCeiling = $tier >= 3 ? (int) floor($hostTier24Limit * 0.8) : $hostTier24Limit;
-                        if ($tier24Count >= $hostCeiling) {
-                            $oldest = $state['host_tiers']['t24'][0] ?? $now;
-                            $delay = max($delay, max(1.0, ($oldest + 60.0) - $now));
-                        }
-                        if ($agentKey !== null) {
-                            $symbol = strtoupper($agentSymbol);
-                            $cap = $caps[$symbol] ?? (isset($caps['SHARED']) ? 0 : null);
-                            if (is_int($cap) && $cap >= 0 && count($state['agents'][$agentKey]['t24']) >= $cap) {
-                                $oldest = $state['agents'][$agentKey]['t24'][0] ?? $now;
-                                $delay = max($delay, max(5.0, ($oldest + 3600.0) - $now));
-                            }
-                        }
+                        $delay = max($delay, $ordinaryDelay);
                     }
                 }
                 if ($delay > 0.001) {
