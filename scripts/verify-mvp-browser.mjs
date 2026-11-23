@@ -56,7 +56,7 @@ async function clickResponse(label, suffix) {
 }
 async function refresh() {
     await page.reload();
-    await page.getByRole('heading', { level: 1, name: 'LOCAL-1', exact: true }).waitFor();
+    await page.locator('.identity-heading').filter({ hasText: 'LOCAL-1' }).waitFor();
     await shipView(page, 'commands');
 }
 async function drain() {

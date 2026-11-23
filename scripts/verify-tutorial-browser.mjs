@@ -76,7 +76,7 @@ async function post(label, suffix) {
     await page.waitForFunction(() => document.querySelector('main[aria-busy]')?.getAttribute('aria-busy') === 'false');
     return data;
 }
-async function refreshDeck() { await page.goto(deck); await page.getByRole('heading', { name: 'LOCAL-1', exact: true }).waitFor(); await shipView(page, 'commands'); }
+async function refreshDeck() { await page.goto(deck); await page.locator('.identity-heading').filter({ hasText: 'LOCAL-1' }).waitFor(); await shipView(page, 'commands'); }
 async function sync() { await shipView(page, 'guide'); await post('Synchronize', '/sync'); await refreshDeck(); }
 async function command(label) {
     await shipView(page, 'commands');
