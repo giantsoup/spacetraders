@@ -4,6 +4,8 @@ namespace App\Gameplay;
 
 use App\Models\Agent;
 use App\Models\AutomationRun;
+use App\Models\CampaignEpisode;
+use App\Models\CampaignGrant;
 use App\Models\GameObservation;
 use App\Models\ObservationHistory;
 use App\Models\Ship;
@@ -19,12 +21,12 @@ class AgentSynchronizer
         return hash('sha256', 'https://api.spacetraders.io/v2|'.$reset.'|'.$symbol);
     }
 
-    public function guardReset(Agent $agent): void
+    public function guardReset(Agent $agent, bool $fresh = false): void
     {
         if ($agent->isArchived()) {
             throw new GameException('World reset. This agent is archived. Register or import an agent for the current world.');
         }
-        $reset = $this->api->status();
+        $reset = $this->api->status($fresh || ! $agent->reset_id);
         if ($this->archiveForReset($agent, $reset)) {
             throw new GameException('World reset detected. Import current credentials; old intentions cannot run.');
         }
@@ -67,13 +69,20 @@ class AgentSynchronizer
             ]);
         });
 
+        $drained = CampaignGrant::where('user_id', $agent->user_id)->where('agent_symbol', $agent->name)
+            ->whereIn('id', CampaignEpisode::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->select('campaign_grant_id'))
+            ->where(fn ($query) => $query->where('wait_reason', 'like', 'drain_pause:%')->orWhere('pause_reason', 'like', 'drain_pause:%'))->exists();
+        if ($drained) {
+            app(RequestBudget::class)->drainAgent($agent->name, false);
+        }
+
         return true;
     }
 
     // Caller holds the agent lock for synchronization, previews and gameplay writes.
-    public function sync(Agent $agent, bool $discover = true): void
+    public function sync(Agent $agent, bool $discover = true, bool $freshReset = false): void
     {
-        $this->guardReset($agent);
+        $this->guardReset($agent, $freshReset);
         $balance = $this->api->agent($agent);
         $fleet = $this->api->ships($agent);
         DB::transaction(function () use ($agent, $balance, $fleet) {
@@ -83,6 +92,7 @@ class AgentSynchronizer
             Ship::where('agent_id', $agent->id)->whereNotIn('symbol', array_column($fleet, 'symbol'))->delete();
             $agent->update(['credits' => $balance['credits'], 'connection_state' => 'connected', 'synced_at' => now()]);
         });
+        DB::table('game_runtime')->upsert([['key' => 'fleet_sync_at:'.$agent->id, 'value' => now()->toIso8601String()]], ['key'], ['value']);
         app(CreditAccounting::class)->baseline($agent);
         if (! $discover) {
             return;

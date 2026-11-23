@@ -28,7 +28,7 @@ Artisan::command('ship:station {ship} {waypoint?} {--clear}', function () {
     return 0;
 })->purpose('Pin a ship to a waypoint (excluding probes from campaign scouting) or release it with --clear');
 
-Artisan::command('fleet:scorecard {--since=} {--until=} {--reset=} {--json}', function (FleetMetrics $metrics) {
+Artisan::command('fleet:scorecard {--since=} {--until=} {--reset=} {--by-agent} {--json}', function (FleetMetrics $metrics) {
     $card = $metrics->scorecard($this->option('since') ? CarbonImmutable::parse($this->option('since')) : null,
         $this->option('until') ? CarbonImmutable::parse($this->option('until')) : null, $this->option('reset') ?: null);
     if ($this->option('json')) {
@@ -67,4 +67,18 @@ Artisan::command('fleet:scorecard {--since=} {--until=} {--reset=} {--json}', fu
     $s = $card['scheduler'];
     $this->line('Scheduler: '.$s['passes'].' passes, median dispatch lag '.$n($s['median_dispatch_lag'], 2).' s, median director '.$n($s['median_director'], 2)
         .' s, median arms '.$n($s['median_arms'], 2).' s, max queue depth '.($s['max_queue_depth'] ?? '-').', shared requests '.$s['shared_requests']);
+    if (($this->option('by-agent') || count($card['by_agent'] ?? []) > 1) && ! empty($card['by_agent'])) {
+        $this->table(['Agent', 'Trader h', 'All-in req', 'All-in/h', 'Trader-only/h', 'Overhead/h', 'Cap/h', 'Formula max', 'Attribution'],
+            array_map(fn ($row) => [
+                $row['agent_symbol'],
+                $n($row['active_trader_hours'], 2),
+                number_format($row['all_in_requests']),
+                $n($row['all_in_req_per_active_trader_hr']),
+                $n($row['trader_only_req_per_active_trader_hr']),
+                $n($row['agent_overhead_req_hr']),
+                $n($row['cap_req_hr']),
+                $row['formula_max_traders'] ?? ($row['purchase_hold_reason'] ?? '-'),
+                $row['attribution_complete'] ? 'complete' : 'incomplete ('.$row['unattributed_agent_requests'].')',
+            ], array_values($card['by_agent'])));
+    }
 })->purpose('Multi-ship round-one scorecard per arm (net/hour, intervals, flags)');

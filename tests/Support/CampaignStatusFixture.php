@@ -16,7 +16,7 @@ class CampaignStatusFixture
 {
     public static function seed(User $user, bool $shipMatrix = false): array
     {
-        $revision = app(CampaignPlaybook::class)->import(file_get_contents(base_path('campaigns/weekly-default.yaml')));
+        $revision = app(CampaignPlaybook::class)->import(str_replace('GIANTSOUP', 'OFFLINE', file_get_contents(base_path('campaigns/weekly-default.yaml'))));
         $grant = app(CampaignControl::class)->approve($revision, $user);
         $grant->update(['last_directed_at' => now()]);
         $agent = $user->agents()->create(['name' => 'OFFLINE', 'token' => 'synthetic-only', 'faction' => 'VOID', 'reset_id' => 'offline-demo', 'credits' => 115000]);

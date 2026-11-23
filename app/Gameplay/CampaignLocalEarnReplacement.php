@@ -30,7 +30,8 @@ class CampaignLocalEarnReplacement
                 $old->refresh();
                 $episode->refresh();
                 $agent->refresh();
-                $current = CampaignGrant::where('slot', 1)->first();
+                $symbol = strtoupper((string) $revision->body['agent']['symbol']);
+                $current = CampaignGrant::primaryFor($user->id, $symbol)->first();
                 if ($current?->id !== $expected['grant'] || $old->revision_hash !== $expected['hash'] || ! hash_equals($old->revision_hash, $old->revision()->content_hash)
                     || $episode->id !== $expected['episode'] || $episode->campaign_grant_id !== $old->id || $episode->closed_at
                     || CampaignEpisode::where('campaign_grant_id', $old->id)->whereNull('closed_at')->count() !== 1) {
@@ -41,7 +42,7 @@ class CampaignLocalEarnReplacement
                     || $agent->faction !== $revision->body['agent']['faction']) {
                     throw new GameException('Local Earn replacement must keep the exact owner, agent and reset.');
                 }
-                if ($old->arm() || CampaignGrant::where('slot', 2)->exists() || ! $old->available() || $old->paused_at || $episode->phase !== 'earn'
+                if ($old->isDraining() || $old->arm() || CampaignGrant::pendingFor($user->id, $symbol)->exists() || ! $old->available() || $old->paused_at || $episode->phase !== 'earn'
                     || app(CampaignSafety::class)->windDown($episode) || ! empty($episode->state['pending_pause'])) {
                     throw new GameException('Local Earn replacement requires unpaused Earn authority, no pending approval or pause, and time before wind-down.');
                 }
@@ -73,7 +74,7 @@ class CampaignLocalEarnReplacement
                 $episode->update(['closed_at' => now()]);
                 $control->event($old, $episode, 'superseded', ['successor_policy' => 'local_earn']);
                 $grant = CampaignGrant::create(['campaign_revision_id' => $revision->id, 'revision_hash' => $revision->content_hash,
-                    'user_id' => $user->id, 'limits' => $revision->body['limits'], 'expires_at' => $old->expires_at, 'slot' => 1]);
+                    'user_id' => $user->id, 'agent_symbol' => $symbol, 'limits' => $revision->body['limits'], 'expires_at' => $old->expires_at, 'slot' => 1]);
                 $successor = CampaignEpisode::create(['campaign_grant_id' => $grant->id, 'agent_id' => $agent->id, 'reset_id' => $episode->reset_id,
                     'phase' => 'earn', 'opened_at' => now(), 'start_credits' => $agent->credits, 'next_reset_at' => $episode->next_reset_at,
                     'state' => ['role_ships' => $episode->state['role_ships'] ?? []]]);

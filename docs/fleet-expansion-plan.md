@@ -27,7 +27,7 @@ In both 8B scenarios, nearly all the buying happens in the first 14–27 hours o
 - There is no hard credit floor. The engine may drop to very low credits when its own
   evaluation says the risk is worth it. "Risk it all" does not mean reckless play: the
   engine always picks the highest expected-value action allowed by that week's playbook.
-- Ship purchases are now in scope. Contract acceptance is still out.
+- Ship purchases are now in scope. Taylor approved an exception on 2026-11-22 for SOUPMAKER's bounded drought fallback: the existing `ContractPlanner` may accept only when `estimated_net > 0` and `estimated_cr_per_min` beats the best available trade. This fallback is opt-in and off by default; the Day 3+ module is not yet implemented.
 - The playbook still changes only through a reviewed, imported revision each week. No
   automatic tuning.
 

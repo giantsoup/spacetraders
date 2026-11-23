@@ -9,10 +9,19 @@ use Symfony\Component\Yaml\Yaml;
 /** Local, read-only explanation of C0. Keep runtime wording beside changes to the director. */
 class CampaignStrategy
 {
-    public function read(): array
+    public function read(?int $userId = null, ?string $agentSymbol = null): array
     {
-        $grant = CampaignGrant::where('slot', 1)->first();
-        $pending = CampaignGrant::where('slot', 2)->first();
+        $query = CampaignGrant::allPrimaries($userId);
+        if ($agentSymbol) {
+            $query->where('agent_symbol', strtoupper($agentSymbol));
+        } elseif ((clone $query)->count() > 1) {
+            throw new GameException('Multiple primary campaigns exist. Specify --agent=<symbol>.');
+        }
+        $grant = $query->first();
+        $pendingQuery = CampaignGrant::where('slot', 2)
+            ->when($userId !== null, fn ($q) => $q->where('user_id', $userId))
+            ->when($agentSymbol || $grant, fn ($q) => $q->where('agent_symbol', strtoupper($agentSymbol ?: $grant->resolvedAgentSymbol())));
+        $pending = $grant || $agentSymbol || (clone $pendingQuery)->count() === 1 ? $pendingQuery->first() : null;
         if ($grant) {
             $revision = $grant->revision();
             $body = $revision->body;

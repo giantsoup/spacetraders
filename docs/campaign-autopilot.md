@@ -41,6 +41,10 @@ php artisan campaign:resume
 php artisan campaign:revoke
 ~~~
 
+With more than one primary campaign, pass `--agent=<symbol>` to pause, resume,
+show status, or revoke. Paused primaries still count. Use `campaign:revoke --all`
+to revoke all of the operator’s campaign grants.
+
 Pause prevents further authority and stops pending campaign work. It cannot undo a
 request already sent. Resume requires operator review; it does not replay an old preview
 or uncertain write. Revocation or expiry requires a new approval.
@@ -59,6 +63,43 @@ A blocked or freshness-held campaign run is stopped before the active-run early 
 Pending/sending actions and transit must settle before the replacement starts. The
 replacement uses fresh state and a new preview. Deploys close old runs, but an approved,
 unpaused campaign resumes automatically once the engine is healthy again.
+
+## Configure the multi-agent request budget
+
+The default `SPACETRADERS_REQUEST_BUDGET_STAGE=off` keeps the single-agent
+request budget. Set the stage explicitly before you direct several primaries.
+Create the grants only when their rollout gates allow it.
+
+| Stage | GIANTSOUP | SOUPBURN | SOUPFLEET | Shared |
+| --- | ---: | ---: | ---: | ---: |
+| `stage1` | 3,400 | 1,600 | 0 | 760 |
+| `stage2` | 2,880 | 720 | 1,800 | 360 |
+
+The table shows ordinary requests per hour. Both stages allocate 5,760 requests
+and reserve at least half for GIANTSOUP. The shared bucket covers anonymous
+dashboard reads and GateWatch. If any primary lacks a positive allocation, the
+director refuses new plans and reports `multi_agent_budget_requires_stage`.
+Drain and reconciliation remain available.
+
+The settlement reserve allows 18 requests per host minute, with a target of
+300 per agent hour and 180 per shared hour. Once either settlement window is
+full, a request can use ordinary capacity only if both the host and the agent
+have room in their ordinary windows. Borrowed requests count against both
+ordinary limits.
+
+The kill switch retains the latest eligible GIANTSOUP:C0-only baseline when
+another primary joins. If no baseline exists, it uses the first eligible
+three-hour C0 window. The reference stays fixed for the reset, including after
+resume. Host pressure and repeated 429s can trigger a drain before the
+baseline is ready. Cannibalization requires 15 consecutive minutes of
+degradation and trading overlap in the control system.
+
+With a request budget stage enabled, the campaign checks the trailing six-hour
+scorecard at probe purchase preview and again at execution. A shorter sample,
+less than one active trading ship-hour, incomplete attribution, a missing
+trader rate, or a fleet above the trader ceiling blocks the purchase. For
+compatibility, the single-agent scorecard keeps short arm keys and supplies
+the qualified key on each row. A multi-agent scorecard uses qualified keys.
 
 ## Understand the playbook
 

@@ -276,8 +276,14 @@ class GateRecon
 
     public function episode(ReconMission $mission): ?CampaignEpisode
     {
+        $agent = Agent::find($mission->agent_id);
+        if (! $agent) {
+            return null;
+        }
+        $grants = CampaignGrant::primaryFor($agent->user_id, $agent->name)->whereNull('limits->arm')->select('id');
+
         return CampaignEpisode::where('agent_id', $mission->agent_id)->where('reset_id', $mission->reset_id)->whereNull('closed_at')
-            ->whereIn('campaign_grant_id', CampaignGrant::where('slot', 1)->whereNull('limits->arm')->select('id'))->latest('id')->first();
+            ->whereIn('campaign_grant_id', $grants)->latest('id')->first();
     }
 
     private function close(ReconMission $mission, string $outcome): void

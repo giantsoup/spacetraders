@@ -41,7 +41,7 @@ class ArmRequestBudgetTest extends TestCase
     {
         parent::setUp();
         $this->travelTo(now());
-        config(['gameplay.enabled' => true, 'gameplay.local_engine_enabled' => true]);
+        config(['gameplay.enabled' => true, 'gameplay.local_engine_enabled' => true, 'gameplay.inline_execute' => true, 'gameplay.reset_cache_seconds' => 60]);
         $this->app->instance(EngineHost::class, new FakeEngineHost);
         $this->file = tempnam(sys_get_temp_dir(), 'st-arm-');
         $world = FakeSpaceTraders::world();
@@ -138,9 +138,9 @@ class ArmRequestBudgetTest extends TestCase
         }
         ksort($byCategory);
 
-        // Ceilings: measured on 2026-11-17 against feature/request-budget-phase0.
-        $this->assertLessThanOrEqual(134, count($calls), 'total requests '.json_encode($byCategory));
-        $ceilings = ['agent' => 27, 'market' => 41, 'ship' => 26, 'ships_page' => 1, 'status' => 27, 'write:dock' => 2, 'write:navigate' => 2,
+        // Ceilings: lowered after Request Budget Phases 1-3 (inline execute, 60s reset cache, local arm director pass).
+        $this->assertLessThanOrEqual(74, count($calls), 'total requests '.json_encode($byCategory));
+        $ceilings = ['agent' => 15, 'market' => 30, 'ship' => 15, 'ships_page' => 1, 'status' => 1, 'write:dock' => 2, 'write:navigate' => 2,
             'write:orbit' => 2, 'write:purchase' => 3, 'write:refuel' => 1, 'write:sell' => 2];
         foreach ($byCategory as $category => $count) {
             $this->assertArrayHasKey($category, $ceilings, 'new request category '.$category);
@@ -172,6 +172,7 @@ class ArmRequestBudgetTest extends TestCase
     {
         $revision = app(CampaignPlaybook::class)->import($this->armBody(100000));
         app(CampaignControl::class)->approveArm($revision, $this->user, ['label' => 'T1a', 'ship' => 'LOCAL-3'], CarbonImmutable::now()->addHours(12));
+        app(\App\Gameplay\SpaceTradersApi::class)->clearResetCache();
         FleetMetrics::reset();
         app(CampaignDirector::class)->tickArms();
         FleetMetrics::flush();
@@ -188,6 +189,7 @@ class ArmRequestBudgetTest extends TestCase
 
         // C0 has no arm ship: its pass starts with the reset read, labelled director.
         DB::table('fleet_metrics')->delete();
+        app(\App\Gameplay\SpaceTradersApi::class)->clearResetCache();
         $body = str_replace(['GIANTSOUP', 'max_credits: 60000'], ['LOCAL', 'max_credits: 100'], file_get_contents(base_path('campaigns/weekly-default.yaml')));
         app(CampaignControl::class)->approve(app(CampaignPlaybook::class)->import($body), $this->user);
         FleetMetrics::reset();

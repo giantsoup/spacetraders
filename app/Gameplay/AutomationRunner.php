@@ -14,6 +14,7 @@ use App\Models\LocalEngine;
 use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
+use App\Services\SpaceTradersClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -145,7 +146,7 @@ class AutomationRunner
             });
 
             return $run;
-        });
+        }, priority: $run->strategy === 'sell_aboard' && $this->usesRecoveryReserve($run->campaign_episode_id) ? 'settlement' : 'critical');
     }
 
     public function stop(AutomationRun $run): void
@@ -158,6 +159,7 @@ class AutomationRunner
         return app(HostLock::class)->scoped('agent-'.$agent->id, function () use ($agent, $run, $episode) {
             $grant = $episode->grant();
             if (! $grant->available() || $episode->agent_id !== $agent->id || $episode->closed_at || $run->agent_id !== $agent->id
+                || ($grant->isDraining() && $run->strategy !== 'sell_aboard')
                 || ! hash_equals($grant->revision_hash, $grant->revision()->content_hash)
                 || ! in_array($run->strategy, ['scout', 'trade', 'mining', 'sell_aboard', 'buy_probe'], true)
                 || ($run->strategy === 'buy_probe' && ! CampaignProbeBootstrap::policy($grant, $episode))
@@ -206,7 +208,8 @@ class AutomationRunner
     {
         return $this->executor->locked($agent, function () use ($agent, $symbol, $buyer, $limits, $episode) {
             $this->executor->clear($agent, defer: true, ship: $symbol);
-            $fresh = app(CampaignRecovery::class)->compose($agent, $symbol, $buyer, $limits);
+            $fresh = app(CampaignRecovery::class)->compose($agent, $symbol, $buyer,
+                $limits + ['targeted_recovery' => $this->usesRecoveryReserve($episode->id)]);
 
             return AutomationRun::create(['agent_id' => $agent->id, 'campaign_episode_id' => $episode->id, 'reset_id' => $agent->reset_id,
                 'engine_session_id' => $this->gate->enabled() ? LocalEngine::find(1)?->session_id : null,
@@ -214,7 +217,17 @@ class AutomationRunner
                 'expires_at' => now()->addSeconds(config('gameplay.preview_seconds')), 'plan' => $fresh['plan'], 'fingerprint' => $fresh['fingerprint'],
                 'totals' => ['phase' => 'sell', 'cycles' => 0, 'visits' => 0, 'attempts' => 0, 'no_progress' => 0, 'extracted' => [], 'sold' => [],
                     'sale_proceeds' => 0, 'fuel_cost' => 0, 'fuel_units' => 0, 'travel_fuel' => 0, 'credit_delta' => 0]]);
-        });
+        }, priority: $this->usesRecoveryReserve($episode->id) ? 'settlement' : 'critical');
+    }
+
+    private function usesRecoveryReserve(?int $episodeId): bool
+    {
+        return RequestBudget::agentCaps() !== [] || ($episodeId && CampaignEpisode::find($episodeId)?->grant()->isDraining());
+    }
+
+    public static function hasTradeCargo(AutomationRun $run): bool
+    {
+        return $run->strategy === 'trade' && array_sum($run->totals['unsold'] ?? []) > 0;
     }
 
     public function advance(int $id): void
@@ -268,12 +281,21 @@ class AutomationRunner
             if ($run->state === RunState::Blocked || ($run->next_action_at && $run->next_action_at->isFuture())) {
                 return;
             }
-            try {
+            $budget = app(RequestBudget::class);
+            $paced = RequestBudget::agentCaps() !== [];
+            $loaded = $paced && self::hasTradeCargo($run);
+            $buyPhase = ($run->totals['phase'] ?? null) === 'buy';
+            $finishLoading = $loaded && $buyPhase && $budget->ordinaryCapReached($agent->name);
+            $recovery = ! empty($run->plan['sell_only']) && ($paced || $budget->isDraining($agent->name));
+            $priority = $recovery || ($loaded && (! $buyPhase || $finishLoading)) ? 'settlement' : ($paced ? 'run' : 'critical');
+            $work = function () use ($run, $agent, $finishLoading, &$outcome, &$ship) {
                 $this->gate->check($run->engine_session_id);
+                $lastActionId = (int) (ShipAction::where('agent_id', $agent->id)->whereIn('state', ['confirmed', 'uncertain'])->max('id') ?? 0);
+                $observedAt = now();
                 $this->sync->guardReset($agent);
                 $ship = $this->sync->refreshShip($agent, $run->ship_symbol)->snapshot;
                 $credits = $this->api->agent($agent)['credits'];
-                $agent->update(['credits' => $credits]);
+                $agent->update(['credits' => $credits, 'synced_at' => now()]);
                 app(CampaignSafety::class)->check($run, $agent);
                 $otherDelta = app(CreditAccounting::class)->outsideRunDelta($agent, $run);
                 if ($credits !== $run->plan['initial_credits'] + $run->totals['credit_delta'] + $otherDelta) {
@@ -287,6 +309,16 @@ class AutomationRunner
                 $totals['other_credit_delta'] = $otherDelta;
                 $totals['agent_balance_delta'] = $credits - $run->plan['initial_credits'];
                 $run->update(['totals' => $totals]);
+                if ($finishLoading) {
+                    $trade = app(CampaignTrade::class);
+                    $bought = $run->totals['purchased'][$run->plan['symbol']] ?? 0;
+                    if ($bought > 0 && $bought < $run->plan['units']) {
+                        $trade->shortenLoad($run, $bought, $run->totals['purchase_cost'], 'request_budget');
+                    }
+                    $run->update(['totals' => array_replace($run->totals, ['phase' => 'sell'])]);
+                }
+                $prefetchedMarket = null;
+                $prefetchedMarketSymbol = null;
                 if ($run->strategy === 'gate_recon') {
                     $step = app(GateRecon::class)->next($agent, $ship, $run);
                 } elseif ($run->strategy === 'buy_probe') {
@@ -298,6 +330,8 @@ class AutomationRunner
                 } elseif ($run->strategy === 'contracts') {
                     $this->assertContractState($agent, $run, $ship);
                     $step = $this->contracts->next($ship, $run->plan, $run->totals, now()->toImmutable());
+                } elseif (! empty($run->plan['sell_only']) && ! empty($run->plan['restore_cruise']) && $ship['nav']['flightMode'] === 'BURN') {
+                    $step = app(CampaignRecovery::class)->next($agent, $ship, $run);
                 } elseif (! empty($run->plan['sell_only'])) {
                     $this->refreshBuyer($agent, $run->plan['market'], $run->ship_symbol);
                     if (($run->plan['route']['departure_refuel_ceiling'] ?? 0) > 0 && ($run->totals['travel_fuel'] ?? 0) === 0 && $run->plan['site'] !== $run->plan['market']
@@ -308,7 +342,11 @@ class AutomationRunner
                 } else {
                     $this->refreshBuyer($agent, $run->plan['market'], $run->ship_symbol);
                     if (($run->plan['strategy'] ?? 'mining') !== 'mining') {
-                        $this->refreshBuyer($agent, $run->plan['site'], $run->ship_symbol);
+                        $siteMarket = $this->refreshBuyer($agent, $run->plan['site'], $run->ship_symbol);
+                        if ($siteMarket !== null && $ship['nav']['waypointSymbol'] === $run->plan['site']) {
+                            $prefetchedMarket = $siteMarket;
+                            $prefetchedMarketSymbol = $run->plan['site'];
+                        }
                     }
                     $market = [];
                     if (($run->plan['strategy'] ?? 'mining') === 'scout' && $run->totals['phase'] === 'observe' && ($run->totals['travel_fuel'] ?? 0) === 0 && $ship['nav']['status'] !== 'IN_TRANSIT') {
@@ -317,6 +355,8 @@ class AutomationRunner
                     if ($ship['nav']['waypointSymbol'] === $run->plan['market'] && $ship['nav']['status'] !== 'IN_TRANSIT') {
                         $market = $this->api->market($agent, $run->plan['market']);
                         $this->sync->observe($agent, 'market', $run->plan['market'], $market);
+                        $prefetchedMarket = $market;
+                        $prefetchedMarketSymbol = $run->plan['market'];
                     }
                     if ($run->strategy === 'trade') {
                         $expected = $run->totals['unsold'] ?? $run->plan['initial_inventory'];
@@ -332,6 +372,7 @@ class AutomationRunner
                         ? $this->planner->next($ship, $run->plan, $run->totals, $market, now()->toImmutable())
                         : app(OperationPlanner::class)->next($agent, $ship, $run->plan, $run->totals, now()->toImmutable());
                 }
+                $enqueuedAction = null;
                 match ($step->kind) {
                     'blocked' => $this->executor->block($run, $step->reason),
                     'wait' => $run->update(['state' => RunState::Waiting, 'next_action_at' => $step->until]),
@@ -342,16 +383,41 @@ class AutomationRunner
                         default => $this->completeTrip($run, $ship),
                     },
                     'depart' => $run->update(['totals' => array_merge($run->totals, ['phase' => 'sell']), 'next_action_at' => now(), 'state' => RunState::Running]),
-                    'act' => $this->enqueue($run, $step),
+                    'act' => $enqueuedAction = $this->enqueue($run, $step),
                 };
+                if ($enqueuedAction !== null && config('gameplay.inline_execute', true)) {
+                    // Phase 1: execute immediately after enqueue's DB transaction commits, outside any transaction,
+                    // reusing verified pre-write reads (<=10s old, zero writes since read). Exceptions stay inside executeLocked.
+                    $prefetched = [
+                        'observed_at' => $observedAt,
+                        'last_confirmed_action_id' => $lastActionId,
+                        'reset_verified' => true,
+                        'agent_credits' => $credits,
+                        'ship' => $ship,
+                        'market' => $prefetchedMarket,
+                        'market_symbol' => $prefetchedMarketSymbol,
+                    ];
+                    $this->executor->executeLocked($agent->fresh(), $enqueuedAction, $prefetched);
+                    $run->refresh();
+                    $ship = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->first()?->snapshot ?? $ship;
+                }
                 $outcome = match ($step->kind) {
                     'blocked' => self::isHold($step->reason) ? 'held' : 'blocked',
                     'act' => 'wrote',
                     default => 'waited',
                 };
+            };
+            try {
+                FleetMetrics::forAgent($agent->name, fn () => app(SpaceTradersClient::class)->scope($work, priority: $priority));
             } catch (GameException $e) {
-                FleetMetrics::as($run->ship_symbol, fn () => FleetMetrics::observe($e));
-                if ($e->retryAfter > 0 && $e->apiCode === null && $agent->connection_state === 'connected' && (! $e instanceof ReadStateUnavailable || $run->campaign_episode_id)) {
+                FleetMetrics::forAgent($agent->name, fn () => FleetMetrics::as($run->ship_symbol, fn () => FleetMetrics::observe($e)));
+                if ($e->apiCode === 4113 || ($agent->fresh()?->connection_state === 'invalid_credential')) {
+                    try {
+                        $this->sync->guardReset($agent->fresh(), fresh: true);
+                    } catch (GameException) {
+                    }
+                }
+                if ($e->retryAfter > 0 && $e->apiCode === null && $agent->fresh()?->connection_state === 'connected' && (! $e instanceof ReadStateUnavailable || $run->campaign_episode_id)) {
                     $run->update(['state' => RunState::Waiting, 'next_action_at' => now()->addSeconds(min(180, $e->retryAfter)), 'blocked_reason' => $e->getMessage()]);
                     $outcome = self::isHold($e->getMessage()) ? 'held' : 'deferred';
                 } else {
@@ -359,10 +425,10 @@ class AutomationRunner
                     $outcome = self::isHold($e->getMessage()) ? 'held' : 'blocked';
                 }
             }
-            app(CycleAccounting::class)->record($run, $ship ?? null);
+            app(CycleAccounting::class)->record($run->fresh() ?? $run, $ship ?? null);
         });
         if ($outcome !== null) {
-            FleetMetrics::advance($run->ship_symbol, $outcome, FleetMetrics::requestTotal() - $requestsBefore);
+            FleetMetrics::forAgent($agent->name, fn () => FleetMetrics::advance($run->ship_symbol, $outcome, FleetMetrics::requestTotal() - $requestsBefore));
         }
     }
 
@@ -421,17 +487,25 @@ class AutomationRunner
             ->get()->sum(fn ($action) => $action->outcome['credit_delta'] ?? 0);
     }
 
-    private function refreshBuyer(Agent $agent, string $market, ?string $ship = null): void
+    private function refreshBuyer(Agent $agent, string $market, ?string $ship = null): ?array
     {
         $observer = Ship::where('agent_id', $agent->id)->get()->contains(fn ($ship) => $ship->snapshot['nav']['waypointSymbol'] === $market && $ship->snapshot['nav']['status'] !== 'IN_TRANSIT');
         if ($observer) {
             // Attributed to the run's ship; without one (previews) the caller's current attribution applies.
-            $read = fn () => $this->sync->observe($agent, 'market', $market, $this->api->market($agent, $market));
-            $ship === null ? $read() : FleetMetrics::as($ship, $read);
+            $read = function () use ($agent, $market) {
+                $data = $this->api->market($agent, $market);
+                $this->sync->observe($agent, 'market', $market, $data);
+
+                return $data;
+            };
+
+            return $ship === null ? $read() : FleetMetrics::as($ship, $read);
         }
+
+        return null;
     }
 
-    private function enqueue(AutomationRun $run, AutomationStep $step): void
+    private function enqueue(AutomationRun $run, AutomationStep $step): ?ShipAction
     {
         $agent = Agent::findOrFail($run->agent_id);
         $shortened = null;
@@ -451,7 +525,8 @@ class AutomationRunner
             }
         }
         app(CampaignSafety::class)->check($run, $agent, $step->command, $step->arguments);
-        DB::transaction(function () use ($run, $step, $shortened) {
+        $created = null;
+        DB::transaction(function () use ($run, $step, $shortened, &$created) {
             $this->gate->check($run->engine_session_id);
             if (! AutomationRun::whereKey($run->id)->whereNull('stop_requested_at')->whereNotNull('active_agent_id')->where('expires_at', '>', now())->update(['state' => 'running', 'next_action_at' => now()->addSeconds(5)])) {
                 return;
@@ -472,7 +547,10 @@ class AutomationRunner
                 app(GateRecon::class)->bindIntent($run, $action);
             }
             ExecuteShipCommand::dispatch($action->id)->afterCommit();
+            $created = $action;
         });
+
+        return $created;
     }
 
     private function completeTrip(AutomationRun $run, array $ship): void

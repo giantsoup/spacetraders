@@ -25,7 +25,7 @@ class CampaignProbeBootstrap
 
     public static function policy(CampaignGrant $grant, CampaignEpisode $episode): ?array
     {
-        if ($grant->slot !== 1 || $grant->arm() || ! $grant->available() || $episode->closed_at
+        if ($grant->isDraining() || $grant->slot !== 1 || $grant->arm() || ! $grant->available() || $episode->closed_at
             || $episode->campaign_grant_id !== $grant->id || ! hash_equals($grant->revision_hash, $grant->revision()->content_hash)
             || app(CampaignSafety::class)->windDown($episode)) {
             return null;
@@ -352,6 +352,42 @@ class CampaignProbeBootstrap
         return null;
     }
 
+    public function assertPurchaseBudget(Agent $agent): void
+    {
+        if (RequestBudget::agentCaps() === []) {
+            return;
+        }
+
+        $symbol = strtoupper($agent->name);
+        $episodes = CampaignEpisode::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->pluck('id')->all();
+        $until = now()->toImmutable();
+        $row = app(FleetMetrics::class)->byAgent([
+            ['agent_symbol' => $symbol, 'qualified_label' => $symbol.':C0', 'episodes' => $episodes],
+        ], $until->subHours(6), $until)[$symbol] ?? [];
+        if (isset($row['purchase_hold_reason']) || ! isset($row['formula_max_traders'])) {
+            throw new GameException('Fleet purchase held for '.$symbol.': '.($row['purchase_hold_reason'] ?? 'missing_request_budget_ceiling').'.');
+        }
+
+        $ships = Ship::where('agent_id', $agent->id)->get();
+        if ($ships->isEmpty()) {
+            throw new GameException('Fleet purchase held for '.$symbol.': missing verified fleet.');
+        }
+        $traded = AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->where('strategy', 'trade')->whereNotNull('started_at')->distinct()->pluck('ship_symbol')->flip();
+        $fleet = app(CampaignFleet::class);
+        $traders = $ships->filter(function (Ship $ship) use ($fleet, $traded) {
+            $snapshot = $ship->snapshot;
+
+            return ! $fleet->isProbe($snapshot) && ($traded->has($ship->symbol)
+                || in_array($snapshot['registration']['role'] ?? null, ['COMMAND', 'HAULER', 'TRANSPORT'], true)
+                || in_array($snapshot['frame']['symbol'] ?? null, ['FRAME_SHUTTLE', 'FRAME_LIGHT_FREIGHTER', 'FRAME_HEAVY_FREIGHTER', 'FRAME_BULK_FREIGHTER'], true));
+        })->count();
+        // A probe adds no traders, but an already over-cap fleet cannot add purchase overhead.
+        if ($traders > $row['formula_max_traders']) {
+            throw new GameException('Fleet purchase held for '.$symbol.': '.$traders.' traders exceed trader ceiling '.$row['formula_max_traders'].'.');
+        }
+    }
+
     public function compose(Agent $agent, string $symbol, string $shipyard, array $limits, CampaignEpisode $episode, ?int $ignoreRunId = null): array
     {
         $grant = $episode->grant();
@@ -360,6 +396,7 @@ class CampaignProbeBootstrap
             throw new GameException('Probe bootstrap is outside current C0 campaign authority.');
         }
         app(AgentSynchronizer::class)->sync($agent, false);
+        $this->assertPurchaseBudget($agent);
         $ship = Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->firstOrFail()->snapshot;
         if ($ship['nav']['status'] === 'IN_TRANSIT' || $ship['cargo']['units'] !== 0) {
             throw new GameException('Probe purchase requires a stationary ship with empty cargo.');

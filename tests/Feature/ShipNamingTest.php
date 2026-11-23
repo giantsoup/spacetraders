@@ -245,7 +245,7 @@ class ShipNamingTest extends TestCase
 
         // Replace with a pool-enabled grant + episode so OFFLINE-2 and OFFLINE-3 are pool probes.
         $poolRevision = app(CampaignPlaybook::class)->import(
-            file_get_contents(base_path('campaigns/weekly-probe-bootstrap.yaml'))
+            str_replace('GIANTSOUP', $agent->name, file_get_contents(base_path('campaigns/weekly-probe-bootstrap.yaml')))
         );
         $episode->grant()->update(['slot' => null, 'revoked_at' => now()]);
         $episode->update(['closed_at' => now()]);

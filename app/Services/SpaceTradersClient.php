@@ -49,7 +49,7 @@ class SpaceTradersClient
         }
     }
 
-    public function request(string $method, string $path, array $data = [], ?string $token = null, ?float $deadline = null, ?string $account = null, ?callable $beforeTransport = null): Response
+    public function request(string $method, string $path, array $data = [], ?string $token = null, ?float $deadline = null, ?string $account = null, ?callable $beforeTransport = null, ?string $agentSymbol = null): Response
     {
         $deadline = $this->scopeDeadline === null ? $deadline : min($this->scopeDeadline, $deadline ?? $this->scopeDeadline);
         $read = strtolower($method) === 'get';
@@ -67,7 +67,8 @@ class SpaceTradersClient
         if ($deadline !== null) {
             $maxWait = min($maxWait, max(0, $deadline - microtime(true) - 0.1));
         }
-        app(RequestBudget::class)->reserve($token, $account, $read ? $this->priority : 'write', $maxWait);
+        $priority = $read ? $this->priority : ($this->priority === 'settlement' ? 'settlement' : 'write');
+        RequestBudget::forAgent($agentSymbol, fn () => app(RequestBudget::class)->reserve($token, $account, $priority, $maxWait));
         $timeout = $deadline === null ? 30 : min(30, $deadline - microtime(true));
         if ($timeout < 0.1) {
             throw new RequestDeferred('Investigation elapsed-time limit reached before transport.', 5);
@@ -97,7 +98,8 @@ class SpaceTradersClient
             $beforeTransport();
         }
         $category = FleetMetrics::category($method, $path);
-        FleetMetrics::count($method, $path, $category);
+        FleetMetrics::count($method, $path, $category, $agentSymbol,
+            host: $token === null && $agentSymbol === null && FleetMetrics::currentAgent() === null);
         $response = $request->send(strtoupper($method), $path, $options);
         $budget = app(RequestBudget::class);
         try {

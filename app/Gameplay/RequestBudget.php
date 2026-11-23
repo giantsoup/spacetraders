@@ -12,8 +12,47 @@ class RequestBudget
 
     private static array $windowsDirectories = [];
 
+    private static ?string $currentAgent = null;
+
+    public static function forAgent(?string $agentSymbol, callable $fn): mixed
+    {
+        $previous = self::$currentAgent;
+        self::$currentAgent = $agentSymbol !== null && $agentSymbol !== '' ? strtoupper($agentSymbol) : $previous;
+        try {
+            return $fn();
+        } finally {
+            self::$currentAgent = $previous;
+        }
+    }
+
+    public function drainAgent(string $symbol, bool $draining): void
+    {
+        $this->change(function (&$state) use ($symbol, $draining) {
+            $key = $this->drainKey($symbol);
+            if ($draining) {
+                $state['draining'][$key] = true;
+            } else {
+                unset($state['draining'][$key]);
+            }
+        });
+    }
+
+    public function isDraining(string $symbol): bool
+    {
+        $state = $this->readState($this->directory(false).'/budget.json');
+
+        return ! empty($state['draining'][$this->drainKey($symbol)]);
+    }
+
+    private function drainKey(string $symbol): string
+    {
+        return hash('sha256', base_path()).':'.strtoupper($symbol);
+    }
+
     public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75): void
     {
+        $caps = self::agentCaps();
+        $agentSymbol = self::$currentAgent ?? (isset($caps['SHARED']) ? 'SHARED' : null);
         $key = $this->storeKey();
         $localDelay = (self::$processPauses[$key] ?? 0) - $this->now();
         if ($localDelay > 0) {
@@ -22,13 +61,17 @@ class RequestBudget
         unset(self::$processPauses[$key]);
         $waited = 0.0;
         do {
-            $delay = $this->change(function (&$state) use ($token, $account, $priority, $waited, $maxWait) {
+            $delay = $this->change(function (&$state) use ($token, $account, $priority, $waited, $maxWait, $agentSymbol, $caps) {
                 $now = $this->now();
                 $keys = $this->keys($token, $account);
-                $floor = match ($priority) {
-                    'write' => 0, 'critical' => 1, default => 3
+                $tier = self::tier($priority);
+                $floor = match ($tier) {
+                    1 => 0,
+                    2 => $priority === 'write' ? 0 : 1,
+                    3 => 2,
+                    default => 3,
                 };
-                $delay = 0.0;
+                $delay = $tier > 1 && $agentSymbol && ! empty($state['draining'][$this->drainKey($agentSymbol)]) ? 60.0 : 0.0;
                 foreach ($keys as $key) {
                     $bucket = $this->refill($state['buckets'][$key] ?? [], $now);
                     $state['buckets'][$key] = $bucket;
@@ -38,12 +81,49 @@ class RequestBudget
                         $delay = max($delay, ($needed - $bucket['tokens']) / $bucket['rate']);
                     }
                 }
+                $agentKey = $agentSymbol ? 'agent:'.strtoupper($agentSymbol) : null;
+                if ($agentKey !== null) {
+                    $state['agents'][$agentKey] = $this->pruneAgentWindow($state['agents'][$agentKey] ?? [], $now);
+                }
+                $state['host_tiers'] = $this->pruneHostTiers($state['host_tiers'] ?? [], $now);
+                $borrow = false;
+                if (config('gameplay.request_budget_enabled') && $caps !== []) {
+                    $hostTier24Limit = max(1, (int) config('gameplay.host_tier2_4_per_minute', 96));
+                    $hostTier1Reserve = max(1, (int) config('gameplay.host_tier1_reserve_per_minute', 18));
+                    $ordinary = $state['host_tiers']['t24'];
+                    $protected = $state['host_tiers']['t1'];
+                    $agentOrdinary = $state['agents'][$agentKey]['t24'] ?? [];
+                    $agentProtected = $state['agents'][$agentKey]['t1'] ?? [];
+                    $cap = $caps[$agentSymbol] ?? (isset($caps['SHARED']) ? 0 : PHP_INT_MAX);
+                    // Tiers 3-4 shed at 80% of the ordinary host envelope.
+                    $hostCeiling = $tier >= 3 ? (int) floor($hostTier24Limit * 0.8) : $hostTier24Limit;
+                    $ordinaryDelay = max(
+                        count($ordinary) >= $hostCeiling ? max(1.0, ($ordinary[0] ?? $now) + 60.0 - $now) : 0.0,
+                        count($agentOrdinary) >= $cap ? max(5.0, ($agentOrdinary[0] ?? $now) + 3600.0 - $now) : 0.0,
+                    );
+                    if ($tier === 1) {
+                        $reserve = $agentSymbol === 'SHARED' ? 180 : max(1, (int) config('gameplay.agent_tier1_reserve_per_hour', 300));
+                        $protectedDelay = max(
+                            count($protected) >= $hostTier1Reserve ? max(1.0, $protected[0] + 60.0 - $now) : 0.0,
+                            count($agentProtected) >= $reserve ? max(1.0, $agentProtected[0] + 3600.0 - $now) : 0.0,
+                        );
+                        // Settlement can borrow only when both ordinary windows have space.
+                        $borrow = $protectedDelay > 0 && $ordinaryDelay === 0.0;
+                        $delay = max($delay, min($protectedDelay, $ordinaryDelay));
+                    } else {
+                        $delay = max($delay, $ordinaryDelay);
+                    }
+                }
                 if ($delay > 0.001) {
                     if ($delay + $waited > $maxWait) {
                         foreach ($keys as $key) {
                             $stats = &$state['buckets'][$key]['usage'];
                             $stats['deferrals']++;
                             $stats['deferred_seconds'] += $delay;
+                        }
+                        if ($agentKey !== null) {
+                            $state['agents'][$agentKey]['deferred_at'][] = $now;
+                            $state['agents'][$agentKey]['deferrals'] = ($state['agents'][$agentKey]['deferrals'] ?? 0) + 1;
                         }
                     }
 
@@ -56,6 +136,17 @@ class RequestBudget
                     $bucket['usage']['priorities'][$priority] = ($bucket['usage']['priorities'][$priority] ?? 0) + 1;
                     $bucket['usage']['wait_seconds'] += $waited;
                     $bucket['recent'][] = $now;
+                }
+                if ($tier === 1 && ! $borrow) {
+                    $state['host_tiers']['t1'][] = $now;
+                    if ($agentKey !== null) {
+                        $state['agents'][$agentKey]['t1'][] = $now;
+                    }
+                } else {
+                    $state['host_tiers']['t24'][] = $now;
+                    if ($agentKey !== null) {
+                        $state['agents'][$agentKey]['t24'][] = $now;
+                    }
                 }
 
                 return 0.0;
@@ -71,6 +162,88 @@ class RequestBudget
         } while (true);
     }
 
+    public static function tier(string $priority): int
+    {
+        return match ($priority) {
+            'settlement', 'safety', 'reconcile' => 1,
+            'write', 'run', 'critical' => 2,
+            'director' => 3,
+            default => 4,
+        };
+    }
+
+    /** @return array<string, int> */
+    public static function agentCaps(): array
+    {
+        $stage = config('gameplay.request_budget_stage', 'off');
+        if ($stage !== 'off') {
+            return self::stageCaps($stage);
+        }
+
+        $configured = config('gameplay.agent_request_caps', []);
+        if (! is_array($configured)) {
+            return [];
+        }
+        $caps = [];
+        foreach ($configured as $symbol => $cap) {
+            if (is_string($symbol) && $symbol !== '' && is_numeric($cap)) {
+                $caps[strtoupper($symbol)] = max(0, (int) $cap);
+            }
+        }
+
+        return $caps;
+    }
+
+    /** @return array<string, int> */
+    public static function stageCaps(string $stage): array
+    {
+        $caps = match ($stage) {
+            'stage1' => ['GIANTSOUP' => 3400, 'SOUPBURN' => 1600, 'SOUPFLEET' => 0, 'SHARED' => 760],
+            'stage2' => ['GIANTSOUP' => 2880, 'SOUPBURN' => 720, 'SOUPFLEET' => 1800, 'SHARED' => 360],
+            default => throw new GameException('Unknown SpaceTraders request budget stage. Set off, stage1, or stage2.'),
+        };
+        if (array_sum($caps) !== 5760 || $caps['GIANTSOUP'] < 2880) {
+            throw new GameException('Invalid SpaceTraders request budget stage allocation.');
+        }
+
+        return $caps;
+    }
+
+    public function ordinaryCapReached(string $symbol): bool
+    {
+        $usage = $this->usage(agentSymbol: $symbol);
+
+        return $usage['agent']['tier2_4_last_hour'] >= ($usage['agent']['cap_per_hour'] ?? PHP_INT_MAX)
+            || $usage['host']['tier2_4_last_60_seconds'] >= (int) config('gameplay.host_tier2_4_per_minute', 96);
+    }
+
+    public function countRateLimitsSince(float $since): int
+    {
+        $state = $this->readState($this->directory(false).'/budget.json');
+        $cutoff = max($since, $this->now() - 900);
+
+        return count(array_filter($state['host_rate_limits'] ?? [], fn ($at) => $at > $cutoff));
+    }
+
+    private function pruneAgentWindow(array $entry, float $now): array
+    {
+        $entry += ['t1' => [], 't24' => [], 'deferrals' => 0, 'deferred_at' => []];
+        $entry['deferred_at'] = array_values(array_filter($entry['deferred_at'], fn ($at) => $at > $now - 3600));
+        $entry['t1'] = array_values(array_filter($entry['t1'], fn ($at) => $at > $now - 3600));
+        $entry['t24'] = array_values(array_filter($entry['t24'], fn ($at) => $at > $now - 3600));
+
+        return $entry;
+    }
+
+    private function pruneHostTiers(array $tiers, float $now): array
+    {
+        $tiers += ['t1' => [], 't24' => []];
+        $tiers['t1'] = array_values(array_filter($tiers['t1'], fn ($at) => $at > $now - 60));
+        $tiers['t24'] = array_values(array_filter($tiers['t24'], fn ($at) => $at > $now - 60));
+
+        return $tiers;
+    }
+
     public function observe(Response $response, ?string $token = null, ?string $account = null, ?string $category = null): void
     {
         $this->change(function (&$state) use ($response, $token, $account, $category) {
@@ -82,6 +255,10 @@ class RequestBudget
                 $stats['responses']++;
                 $stats['rate_limits'] += (int) ($response->status() === 429);
                 $stats['server_errors'] += (int) $response->serverError();
+            }
+            $state['host_rate_limits'] = array_values(array_filter($state['host_rate_limits'] ?? [], fn ($at) => $at > $now - 900));
+            if ($response->status() === 429) {
+                $state['host_rate_limits'][] = $now;
             }
             $type = strtolower(trim($response->header('X-RateLimit-Type') ?? ''));
             $scope = $type === 'account' && count($keys) > 1 ? $keys[1] : 'host';
@@ -129,18 +306,39 @@ class RequestBudget
         });
     }
 
-    public function usage(?string $token = null, ?string $account = null): array
+    public function usage(?string $token = null, ?string $account = null, ?string $agentSymbol = null): array
     {
         $state = $this->readState($this->directory(false).'/budget.json');
+        $now = $this->now();
         $result = [];
         foreach ($this->keys($token, $account) as $index => $key) {
-            $bucket = $this->refill($state['buckets'][$key] ?? [], $this->now());
+            $bucket = $this->refill($state['buckets'][$key] ?? [], $now);
             $result[$index === 0 ? 'host' : 'account'] = $bucket['usage'] + [
                 'requests_last_60_seconds' => count($bucket['recent']), 'requests_per_second_last_60' => count($bucket['recent']) / 60,
-                'requests_per_second_last_5' => count(array_filter($bucket['recent'], fn ($at) => $at > $this->now() - 5)) / 5,
+                'requests_per_second_last_5' => count(array_filter($bucket['recent'], fn ($at) => $at > $now - 5)) / 5,
                 'sustained_per_second' => $bucket['rate'], 'burst_capacity' => $bucket['capacity'],
                 'available' => $bucket['tokens'], 'blocked_until' => $bucket['blocked_until'],
                 'last_response' => $bucket['last_response'] ?? null,
+            ];
+        }
+        $tiers = $this->pruneHostTiers($state['host_tiers'] ?? [], $now);
+        $result['host']['tier2_4_last_60_seconds'] = count($tiers['t24']);
+        $result['host']['tier1_last_60_seconds'] = count($tiers['t1']);
+        $result['host']['observed_at'] = $now;
+        $result['host']['rate_limits_last_15_minutes'] = count(array_filter($state['host_rate_limits'] ?? [], fn ($at) => $at > $now - 900));
+        if ($agentSymbol !== null && $agentSymbol !== '') {
+            $symbol = strtoupper($agentSymbol);
+            $entry = $this->pruneAgentWindow($state['agents']['agent:'.$symbol] ?? [], $now);
+            $caps = self::agentCaps();
+            $result['agent'] = [
+                'symbol' => $symbol,
+                'tier2_4_last_hour' => count($entry['t24']),
+                'tier1_last_hour' => count($entry['t1']),
+                // Must match reserve(): once a staged table exists, an unlisted agent has no ordinary allowance.
+                'cap_per_hour' => $caps[$symbol] ?? (isset($caps['SHARED']) ? 0 : null),
+                'tier1_reserve_per_hour' => $symbol === 'SHARED' ? 180 : (int) config('gameplay.agent_tier1_reserve_per_hour', 300),
+                'deferrals' => $entry['deferrals'] ?? 0,
+                'deferrals_last_hour' => count($entry['deferred_at']),
             ];
         }
 

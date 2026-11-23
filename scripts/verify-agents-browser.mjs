@@ -128,7 +128,7 @@ try {
     await page.goto(`${origin}/agents`);
     await page.getByRole('link', { name: 'Open flight deck for LOCAL', exact: true }).click();
     await page.waitForURL(`**/agents/${auth.agent_id}`);
-    await page.getByRole('heading', { name: 'LOCAL-1', exact: true }).waitFor();
+    await page.locator('.identity-heading').filter({ hasText: 'LOCAL-1' }).waitFor();
     await page.goto(`${origin}/agents`);
     await page.getByRole('link', { name: 'Import current token for TOKEN_PILOT', exact: true }).click();
     await page.getByLabel('Agent token', { exact: true }).waitFor();

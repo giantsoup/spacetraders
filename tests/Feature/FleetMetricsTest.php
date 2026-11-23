@@ -237,7 +237,7 @@ class FleetMetricsTest extends TestCase
 
     private function metricEpisode(string $label, CarbonImmutable $opened): CampaignEpisode
     {
-        $revision = CampaignRevision::firstOrCreate(['content_hash' => str_repeat('a', 64)], ['name' => 'arm', 'source' => '', 'body' => []]);
+        $revision = CampaignRevision::firstOrCreate(['content_hash' => str_repeat('a', 64)], ['name' => 'arm', 'source' => '', 'body' => ['agent' => ['symbol' => $this->agent->name]]]);
         $grant = CampaignGrant::create(['campaign_revision_id' => $revision->id, 'user_id' => $this->user->id, 'revision_hash' => $revision->content_hash,
             'limits' => $label === 'C0' ? [] : ['arm' => ['label' => $label, 'ship' => 'LOCAL-'.$label]], 'slot' => $label === 'C0' ? 1 : null]);
 
@@ -268,7 +268,7 @@ class FleetMetricsTest extends TestCase
     public function test_scorecard_reports_per_arm_rates_blocks_shared_pair_and_flags(): void
     {
         $t0 = CarbonImmutable::parse('2026-11-17 00:00:00');
-        $revision = CampaignRevision::create(['content_hash' => str_repeat('a', 64), 'name' => 'arm', 'source' => '', 'body' => []]);
+        $revision = CampaignRevision::create(['content_hash' => str_repeat('a', 64), 'name' => 'arm', 'source' => '', 'body' => ['agent' => ['symbol' => $this->agent->name]]]);
         $episodes = [];
         foreach (['C0' => 'LOCAL-1', 'T1a' => 'LOCAL-3', 'T1b' => 'LOCAL-4', 'T1c' => 'LOCAL-5', 'T3' => 'LOCAL-6', 'S1' => 'LOCAL-7'] as $label => $ship) {
             $grant = CampaignGrant::create(['campaign_revision_id' => $revision->id, 'user_id' => $this->user->id, 'revision_hash' => $revision->content_hash,
