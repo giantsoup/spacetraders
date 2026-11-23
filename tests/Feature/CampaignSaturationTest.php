@@ -446,6 +446,10 @@ class CampaignSaturationTest extends TestCase
             'engine' => $storedYard['ships'][1]['engine'] = ['speed' => 15],
             'fuel' => $storedYard['ships'][1]['frame']['fuelCapacity'] = null,
             'cargo' => $storedYard['ships'][1]['modules'] = [],
+            'second hold capacity' => $storedYard['ships'][1]['modules'] = [
+                ['symbol' => 'MODULE_CARGO_HOLD_I', 'capacity' => 40],
+                ['symbol' => 'MODULE_CARGO_HOLD_I'],
+            ],
         };
         $sync = app(AgentSynchronizer::class);
         $sync->observe($this->agent, 'waypoint', $yard, $this->point($yard, 80, ['SHIPYARD']), 'listing');
@@ -479,6 +483,7 @@ class CampaignSaturationTest extends TestCase
             'in-cap price without engine symbol' => [350000, 120, 'engine', null],
             'over-cap price without fuel capacity' => [750000, 120, 'fuel', null],
             'out-of-horizon price without cargo capacity' => [350000, 26, 'cargo', 'payback'],
+            'over-cap price without second hold capacity' => [750000, 120, 'second hold capacity', null],
         ];
     }
 

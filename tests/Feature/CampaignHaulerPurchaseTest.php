@@ -244,7 +244,7 @@ class CampaignHaulerPurchaseTest extends TestCase
     }
 
     #[DataProvider('provisionalScoutOffers')]
-    public function test_long_shipyard_scout_uses_the_reference_hauler_for_expired_or_incomplete_offers(int $age, int $price, bool $incomplete): void
+    public function test_long_shipyard_scout_uses_the_reference_hauler_for_expired_or_incomplete_offers(int $age, int $price, ?string $missingDetail = null): void
     {
         $this->setUpSaturation(hubs: 2, remoteYard: true);
         $yard = 'X1-TEST-YARD';
@@ -254,8 +254,13 @@ class CampaignHaulerPurchaseTest extends TestCase
         });
         $storedYard = $this->world()['shipyards'][$yard];
         $storedYard['ships'][1]['purchasePrice'] = $price;
-        if ($incomplete) {
+        if ($missingDetail === 'engine symbol') {
             unset($storedYard['ships'][1]['engine']['symbol']);
+        } elseif ($missingDetail === 'second hold capacity') {
+            $storedYard['ships'][1]['modules'] = [
+                ['symbol' => 'MODULE_CARGO_HOLD_I', 'capacity' => 40],
+                ['symbol' => 'MODULE_CARGO_HOLD_I'],
+            ];
         }
         $sync = app(AgentSynchronizer::class);
         $sync->observe($this->agent, 'waypoint', $yard, $this->point($yard, 393, ['SHIPYARD']), 'listing');
@@ -283,9 +288,10 @@ class CampaignHaulerPurchaseTest extends TestCase
     public static function provisionalScoutOffers(): array
     {
         return [
-            'expired over-cap offer' => [31, 750000, false],
-            'fresh incomplete in-cap offer' => [1, 350000, true],
-            'fresh incomplete over-cap offer' => [1, 750000, true],
+            'expired over-cap offer' => [31, 750000],
+            'fresh incomplete in-cap offer' => [1, 350000, 'engine symbol'],
+            'fresh incomplete over-cap offer' => [1, 750000, 'engine symbol'],
+            'fresh over-cap offer missing second hold capacity' => [1, 750000, 'second hold capacity'],
         ];
     }
 
@@ -386,7 +392,7 @@ class CampaignHaulerPurchaseTest extends TestCase
     }
 
     #[DataProvider('shortRemoteOffers')]
-    public function test_short_remote_hauler_purchase_requires_fresh_complete_offer_detail(int $observedMinutesAgo, int $arrivalPrice, ?string $arrivalRefusal = null, bool $incomplete = false): void
+    public function test_short_remote_hauler_purchase_requires_fresh_complete_offer_detail(int $observedMinutesAgo, int $arrivalPrice, ?string $arrivalRefusal = null, ?string $missingDetail = null): void
     {
         $this->setUpSaturation(hubs: 2, remoteYard: true);
         $yard = 'X1-TEST-YARD';
@@ -399,10 +405,15 @@ class CampaignHaulerPurchaseTest extends TestCase
         $sync->observe($this->agent, 'waypoint', $yard, $this->point($yard, 80, ['SHIPYARD']), 'listing');
         $liveYard = $this->world()['shipyards'][$yard];
         $storedYard = $liveYard;
-        $storedYard['ships'][1]['purchasePrice'] = $incomplete ? 350000 : 750000;
+        $storedYard['ships'][1]['purchasePrice'] = $missingDetail === null ? 750000 : 350000;
         $storedYard['ships'][1]['modules'][1]['symbol'] = 'MODULE_CARGO_HOLD_II';
-        if ($incomplete) {
+        if ($missingDetail === 'engine symbol') {
             unset($storedYard['ships'][1]['engine']['symbol']);
+        } elseif ($missingDetail === 'second hold capacity') {
+            $storedYard['ships'][1]['modules'] = [
+                ['symbol' => 'MODULE_CARGO_HOLD_I', 'capacity' => 40],
+                ['symbol' => 'MODULE_CARGO_HOLD_I'],
+            ];
         }
         $observation = $sync->observe($this->agent, 'shipyard', $yard, $storedYard);
         $observation->update(['observed_at' => now()->subMinutes($observedMinutesAgo)]);
@@ -442,6 +453,13 @@ class CampaignHaulerPurchaseTest extends TestCase
             $this->editFixture(function (&$world) use ($yard) {
                 unset($world['shipyards'][$yard]['ships'][1]['engine']['symbol']);
             });
+        } elseif ($arrivalRefusal === 'second hold capacity') {
+            $this->editFixture(function (&$world) use ($yard) {
+                $world['shipyards'][$yard]['ships'][1]['modules'] = [
+                    ['symbol' => 'MODULE_CARGO_HOLD_I', 'capacity' => 40],
+                    ['symbol' => 'MODULE_CARGO_HOLD_I'],
+                ];
+            });
         } elseif ($arrivalRefusal === 'reserve') {
             AutomationRun::create(['agent_id' => $this->agent->id, 'active_agent_id' => $this->agent->id,
                 'reset_id' => $this->agent->reset_id, 'ship_symbol' => 'LOCAL-1', 'strategy' => 'trade', 'state' => 'running',
@@ -456,13 +474,14 @@ class CampaignHaulerPurchaseTest extends TestCase
             $this->assertSame('blocked', $run->state->value);
             $message = match ($arrivalRefusal) {
                 'max_price' => '750000 CR exceeds max_price 600000 CR',
-                'configuration' => 'A complete verified hauler offer is required at arrival.',
+                'configuration', 'second hold capacity' => 'A complete verified hauler offer is required at arrival.',
                 'reserve' => 'breaches working-capital reserve',
             };
             $this->assertStringContainsString($message, $run->blocked_reason);
             $this->assertArrayNotHasKey('offer_configuration_hash', $run->totals);
             $this->assertDatabaseMissing('ship_actions', ['automation_run_id' => $run->id, 'command' => 'buy_ship']);
             $this->assertDatabaseMissing('campaign_events', ['kind' => 'hauler_purchased']);
+            $this->assertFalse(collect($this->world()['calls'])->where('method', 'POST')->contains('path', '/my/ships'));
 
             return;
         }
@@ -486,8 +505,10 @@ class CampaignHaulerPurchaseTest extends TestCase
             'expired offer with over-cap arrival price' => [31, 750000, 'max_price'],
             'expired offer with incomplete arrival configuration' => [31, 350000, 'configuration'],
             'expired offer with insufficient liquidity at arrival' => [31, 350000, 'reserve'],
-            'fresh incomplete offer with complete arrival configuration' => [1, 350000, null, true],
-            'fresh incomplete offer with incomplete arrival configuration' => [1, 350000, 'configuration', true],
+            'fresh incomplete offer with complete arrival configuration' => [1, 350000, null, 'engine symbol'],
+            'fresh incomplete offer with incomplete arrival configuration' => [1, 350000, 'configuration', 'engine symbol'],
+            'fresh offer missing second hold capacity' => [1, 350000, null, 'second hold capacity'],
+            'expired offer with missing second hold capacity at arrival' => [31, 350000, 'second hold capacity'],
         ];
     }
 
@@ -586,6 +607,14 @@ class CampaignHaulerPurchaseTest extends TestCase
     public function test_inline_purchase_rereads_the_offer_after_arrival_and_prevents_unverified_send(string $change, string $state, string $message): void
     {
         $this->setUpSaturation();
+        if ($change === 'second hold capacity') {
+            $this->editFixture(function (&$world) {
+                $world['shipyards']['X1-TEST-ROCK']['ships'][1]['modules'] = [
+                    ['symbol' => 'MODULE_CARGO_HOLD_I', 'capacity' => 40],
+                    ['symbol' => 'MODULE_CARGO_HOLD_I', 'capacity' => 40],
+                ];
+            });
+        }
         $episode = $this->primary();
         $this->schedulerPass();
         $runner = app(AutomationRunner::class);
@@ -599,6 +628,8 @@ class CampaignHaulerPurchaseTest extends TestCase
                 $changed[1]['modules'][1]['symbol'] = 'MODULE_CARGO_HOLD_II';
             } elseif ($change === 'fuel capacity') {
                 unset($changed[1]['frame']['fuelCapacity']);
+            } elseif ($change === 'second hold capacity') {
+                unset($changed[1]['modules'][1]['capacity']);
             } else {
                 unset($changed[1]['purchasePrice']);
             }
@@ -607,13 +638,15 @@ class CampaignHaulerPurchaseTest extends TestCase
         $before = $this->world();
         $runner->advance($run->id);
         $action = ShipAction::where('automation_run_id', $run->id)->sole();
+        $after = $this->world();
+        $calls = collect(array_slice($after['calls'], count($before['calls'])));
+        $yardReads = $calls->where('method', 'GET')->filter(fn (array $call) => str_ends_with($call['path'], '/shipyard'));
+        $this->assertCount(2, $yardReads);
+        $this->assertFalse($calls->where('method', 'POST')->contains('path', '/my/ships'));
+        $this->assertDatabaseMissing('campaign_events', ['kind' => 'hauler_purchased']);
         $this->assertSame($state, $action->state->value, $action->message);
         $this->assertNull($action->sent_at);
         $this->assertStringContainsString($message, $action->message);
-        $after = $this->world();
-        $yardReads = collect(array_slice($after['calls'], count($before['calls'])))->where('method', 'GET')
-            ->filter(fn (array $call) => str_ends_with($call['path'], '/shipyard'));
-        $this->assertCount(2, $yardReads);
         $this->assertSame($before['writes'], $after['writes']);
         $this->assertSame($before['credits'], $after['credits']);
     }
@@ -623,6 +656,7 @@ class CampaignHaulerPurchaseTest extends TestCase
         return [
             'different modular configuration' => ['module', 'rejected', 'Hauler offer configuration changed'],
             'same hash but missing fuel capacity' => ['fuel capacity', 'rejected', 'A complete verified hauler offer is required'],
+            'same hash but missing second hold capacity' => ['second hold capacity', 'rejected', 'A complete verified hauler offer is required'],
             'same hash but missing price' => ['price', 'pending', 'SpaceTraders returned incomplete or incompatible state'],
         ];
     }

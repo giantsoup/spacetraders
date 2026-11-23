@@ -516,11 +516,12 @@ class CommandRules
                 $this->sync->observe($agent, 'shipyard', $arguments['waypointSymbol'], $yard);
                 $offer = collect($yard['ships'] ?? [])->firstWhere('type', $arguments['shipType']);
                 if ($run?->strategy === 'buy_hauler') {
-                    $pin = CampaignHaulerPurchase::offerProfile($offer)['hash'] ?? null;
-                    if ($pin === null) {
+                    $profile = CampaignHaulerPurchase::offerProfile($offer);
+                    if ($profile === null) {
                         throw new GameException('A complete verified hauler offer is required before reservation.');
                     }
-                    if ($pin !== ($arguments['offer_configuration_hash'] ?? null)) {
+                    $expectedHash = $arguments['offer_configuration_hash'] ?? null;
+                    if (! is_string($expectedHash) || ! hash_equals($expectedHash, $profile['hash'])) {
                         throw new GameException('Hauler offer configuration changed before reservation.');
                     }
                 } elseif (! $offer || ! isset($offer['frame']['symbol'], $offer['reactor']['symbol'], $offer['engine']['symbol'], $offer['modules'], $offer['mounts'], $offer['crew']['capacity']) || ($setup && $this->planner->capability($offer, true) !== null)) {

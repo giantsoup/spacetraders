@@ -557,6 +557,7 @@ class CampaignProbeBootstrap
                         : ($hauler ? $route['outbound'] : app(FuelPlanner::class)->leg($agent, $ship, $yard, $reserve));
                     if ($leg && $leg['estimated_seconds'] + 180 > $limits['minutes'] * 60 && app(FuelPlanner::class)->fuelFree($ship)) {
                         if ($hauler) {
+                            // A complete over-cap remote quote blocks long scouts until it ages past SHIPYARD_OFFER_FRESH_MINUTES.
                             $selected = $saturation->assertPurchase($grant, $episode, $agent, $yard, $offer, fuel: $fuel, deadline: $deadline);
                         }
                         $run = app(AutomationRunner::class)->previewMeshScout($agent, $ship, $yard, $limits, $episode, 'shipyard');
@@ -774,7 +775,7 @@ class CampaignProbeBootstrap
             'participating_ships' => [$symbol],
         ]);
         if ($hauler) {
-            $plan['offer_configuration_hash'] = $offer ? ShipCommandExecutor::configurationHash($offer) : null;
+            $plan['offer_configuration_hash'] = CampaignHaulerPurchase::offerProfile($offer)['hash'] ?? null;
             $plan['grant_id'] = $grant->id;
             $plan['revision_hash'] = $grant->revision_hash;
             $plan['campaign_episode_id'] = $episode->id;

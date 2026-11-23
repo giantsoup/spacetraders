@@ -18,16 +18,39 @@ class CampaignHaulerPurchase
     public static function offerProfile(?array $offer): ?array
     {
         $price = $offer['purchasePrice'] ?? null;
-        $tank = $offer['fuel']['capacity'] ?? $offer['frame']['fuelCapacity'] ?? null;
+        $tank = $offer['frame']['fuelCapacity'] ?? null;
         $speed = $offer['engine']['speed'] ?? null;
+        $crew = $offer['crew']['capacity'] ?? null;
+        $modules = $offer['modules'] ?? null;
+        $mounts = $offer['mounts'] ?? null;
         if (! is_int($price) || $price < 1 || ! is_int($tank) || $tank < 1 || ! is_int($speed) || $speed < 1
-            || ! isset($offer['crew']['capacity'])) {
+            || ! is_int($crew) || $crew < 1 || ! is_array($modules) || ! is_array($mounts)) {
             return null;
         }
-        $hash = ShipCommandExecutor::configurationHash($offer);
-        $hold = $hash === null ? 0 : CommandRules::offeredCargoCapacity($offer);
 
-        return $hold > 0 ? ['hash' => $hash, 'tank' => $tank, 'speed' => $speed, 'hold' => $hold] : null;
+        foreach ([$offer['frame'], $offer['reactor'] ?? null, $offer['engine'], ...$mounts] as $part) {
+            if (! is_array($part) || ! is_string($part['symbol'] ?? null) || $part['symbol'] === '') {
+                return null;
+            }
+        }
+
+        $hold = 0;
+        foreach ($modules as $module) {
+            if (! is_array($module) || ! is_string($module['symbol'] ?? null) || $module['symbol'] === '') {
+                return null;
+            }
+            if (str_starts_with($module['symbol'], 'MODULE_CARGO_HOLD_')) {
+                $capacity = $module['capacity'] ?? null;
+                if (! is_int($capacity) || $capacity < 1 || $capacity > PHP_INT_MAX - $hold) {
+                    return null;
+                }
+                $hold += $capacity;
+            }
+        }
+
+        $hash = ShipCommandExecutor::configurationHash($offer);
+
+        return $hash !== null && $hold > 0 ? ['hash' => $hash, 'tank' => $tank, 'speed' => $speed, 'hold' => $hold] : null;
     }
 
     public function policy(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent): ?array
