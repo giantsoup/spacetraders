@@ -146,7 +146,7 @@ class AutomationRunner
             });
 
             return $run;
-        });
+        }, priority: $run->strategy === 'sell_aboard' && $this->usesRecoveryReserve($run->campaign_episode_id) ? 'settlement' : 'critical');
     }
 
     public function stop(AutomationRun $run): void
@@ -208,7 +208,8 @@ class AutomationRunner
     {
         return $this->executor->locked($agent, function () use ($agent, $symbol, $buyer, $limits, $episode) {
             $this->executor->clear($agent, defer: true, ship: $symbol);
-            $fresh = app(CampaignRecovery::class)->compose($agent, $symbol, $buyer, $limits);
+            $fresh = app(CampaignRecovery::class)->compose($agent, $symbol, $buyer,
+                $limits + ['targeted_recovery' => $this->usesRecoveryReserve($episode->id)]);
 
             return AutomationRun::create(['agent_id' => $agent->id, 'campaign_episode_id' => $episode->id, 'reset_id' => $agent->reset_id,
                 'engine_session_id' => $this->gate->enabled() ? LocalEngine::find(1)?->session_id : null,
@@ -216,7 +217,17 @@ class AutomationRunner
                 'expires_at' => now()->addSeconds(config('gameplay.preview_seconds')), 'plan' => $fresh['plan'], 'fingerprint' => $fresh['fingerprint'],
                 'totals' => ['phase' => 'sell', 'cycles' => 0, 'visits' => 0, 'attempts' => 0, 'no_progress' => 0, 'extracted' => [], 'sold' => [],
                     'sale_proceeds' => 0, 'fuel_cost' => 0, 'fuel_units' => 0, 'travel_fuel' => 0, 'credit_delta' => 0]]);
-        });
+        }, priority: $this->usesRecoveryReserve($episode->id) ? 'settlement' : 'critical');
+    }
+
+    private function usesRecoveryReserve(?int $episodeId): bool
+    {
+        return RequestBudget::agentCaps() !== [] || ($episodeId && CampaignEpisode::find($episodeId)?->grant()->isDraining());
+    }
+
+    public static function hasTradeCargo(AutomationRun $run): bool
+    {
+        return $run->strategy === 'trade' && array_sum($run->totals['unsold'] ?? []) > 0;
     }
 
     public function advance(int $id): void
@@ -270,8 +281,11 @@ class AutomationRunner
             if ($run->state === RunState::Blocked || ($run->next_action_at && $run->next_action_at->isFuture())) {
                 return;
             }
-            $settlementScope = ! empty($run->plan['sell_only']);
-            $work = function () use ($run, $agent, &$outcome, &$ship) {
+            $budget = app(RequestBudget::class);
+            $paced = RequestBudget::agentCaps() !== [];
+            $loaded = $paced && self::hasTradeCargo($run);
+            $priority = ! empty($run->plan['sell_only']) || $loaded ? 'settlement' : ($paced ? 'run' : 'critical');
+            $work = function () use ($run, $agent, $budget, $loaded, &$outcome, &$ship) {
                 $this->gate->check($run->engine_session_id);
                 $lastActionId = (int) (ShipAction::where('agent_id', $agent->id)->whereIn('state', ['confirmed', 'uncertain'])->max('id') ?? 0);
                 $observedAt = now();
@@ -292,6 +306,14 @@ class AutomationRunner
                 $totals['other_credit_delta'] = $otherDelta;
                 $totals['agent_balance_delta'] = $credits - $run->plan['initial_credits'];
                 $run->update(['totals' => $totals]);
+                if ($loaded && ($run->totals['phase'] ?? null) === 'buy' && $budget->ordinaryCapReached($agent->name)) {
+                    $trade = app(CampaignTrade::class);
+                    $bought = $run->totals['purchased'][$run->plan['symbol']] ?? 0;
+                    if ($bought > 0 && $bought < $run->plan['units']) {
+                        $trade->shortenLoad($run, $bought, $run->totals['purchase_cost'], 'request_budget');
+                    }
+                    $run->update(['totals' => array_replace($run->totals, ['phase' => 'sell'])]);
+                }
                 $prefetchedMarket = null;
                 $prefetchedMarketSymbol = null;
                 if ($run->strategy === 'gate_recon') {
@@ -383,13 +405,7 @@ class AutomationRunner
                 };
             };
             try {
-                FleetMetrics::forAgent($agent->name, function () use ($settlementScope, $work) {
-                    if ($settlementScope) {
-                        app(SpaceTradersClient::class)->scope($work, priority: 'settlement');
-                    } else {
-                        $work();
-                    }
-                });
+                FleetMetrics::forAgent($agent->name, fn () => app(SpaceTradersClient::class)->scope($work, priority: $priority));
             } catch (GameException $e) {
                 FleetMetrics::forAgent($agent->name, fn () => FleetMetrics::as($run->ship_symbol, fn () => FleetMetrics::observe($e)));
                 if ($e->apiCode === 4113 || ($agent->fresh()?->connection_state === 'invalid_credential')) {

@@ -2,10 +2,12 @@
 
 namespace App\Gameplay;
 
+use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
+use App\Models\Ship;
 use App\Models\ShipAction;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +23,8 @@ class FleetMetrics
     private static ?string $ship = null;
 
     private static ?string $agent = null;
+
+    private static bool $directing = false;
 
     /** @var array<string, array<string, array{reads: int, writes: int, categories?: array<string, int>, agent_symbol?: ?string}>> kind => key => counts */
     private static array $pending = [];
@@ -48,6 +52,7 @@ class FleetMetrics
     {
         self::$ship = null;
         self::$agent = null;
+        self::$directing = false;
         self::$pending = [];
         self::$events = [];
         self::$total = 0;
@@ -139,6 +144,17 @@ class FleetMetrics
         }
     }
 
+    public static function duringDirector(callable $fn): mixed
+    {
+        $previous = self::$directing;
+        self::$directing = true;
+        try {
+            return $fn();
+        } finally {
+            self::$directing = $previous;
+        }
+    }
+
     public static function current(): ?string
     {
         return self::$ship;
@@ -149,7 +165,7 @@ class FleetMetrics
         return self::$agent;
     }
 
-    public static function count(string $method, string $path = '', ?string $category = null, ?string $agentSymbol = null): void
+    public static function count(string $method, string $path = '', ?string $category = null, ?string $agentSymbol = null, bool $host = false): void
     {
         self::$total++;
         try {
@@ -157,7 +173,7 @@ class FleetMetrics
         } catch (\Throwable) {
             $category = null;
         }
-        self::tally('requests', strtolower($method) === 'get' ? 'reads' : 'writes', $category, $agentSymbol);
+        self::tally('requests', strtolower($method) === 'get' ? 'reads' : 'writes', $category, $agentSymbol, $host);
     }
 
     /** Counts a non-request occurrence (lock_collision, deferral) against the current ship. */
@@ -190,13 +206,15 @@ class FleetMetrics
         return null;
     }
 
-    private static function tally(string $kind, string $field, ?string $category = null, ?string $agentSymbol = null): void
+    private static function tally(string $kind, string $field, ?string $category = null, ?string $agentSymbol = null, bool $host = false): void
     {
         try {
             $ship = self::$ship ?? 'shared';
-            $resolvedAgent = self::resolveAgentSymbol($ship, $agentSymbol ?? self::$agent);
-            $bucketKey = $ship.'|'.($resolvedAgent ?? '');
-            self::$pending[$kind][$bucketKey] ??= ['ship' => $ship, 'agent_symbol' => $resolvedAgent, 'reads' => 0, 'writes' => 0];
+            $resolvedAgent = $host ? null : self::resolveAgentSymbol($ship, $agentSymbol ?? self::$agent);
+            $scope = $host ? 'host' : 'agent';
+            $workload = self::$directing ? 'director' : null;
+            $bucketKey = implode('|', [$ship, $resolvedAgent, $scope, $workload]);
+            self::$pending[$kind][$bucketKey] ??= ['ship' => $ship, 'agent_symbol' => $resolvedAgent, 'scope' => $scope, 'workload' => $workload, 'reads' => 0, 'writes' => 0];
             self::$pending[$kind][$bucketKey][$field]++;
             if ($category !== null) {
                 self::$pending[$kind][$bucketKey]['categories'][$category] = (self::$pending[$kind][$bucketKey]['categories'][$category] ?? 0) + 1;
@@ -239,8 +257,10 @@ class FleetMetrics
                     if (isset($counts['categories'])) {
                         $payload['categories'] = $counts['categories'];
                     }
-                    // data.categories holds per-category counts; older readers use only value, reads and writes.
-                    $rows[] = ['kind' => $kind, 'ship' => $ship, 'agent_symbol' => $agentSymbol, 'scope' => 'agent',
+                    if ($counts['workload']) {
+                        $payload['workload'] = $counts['workload'];
+                    }
+                    $rows[] = ['kind' => $kind, 'ship' => $ship, 'agent_symbol' => $agentSymbol, 'scope' => $counts['scope'],
                         'value' => $counts['reads'] + $counts['writes'],
                         'data' => $kind === 'requests' ? json_encode($payload) : null, 'created_at' => $now];
                 }
@@ -286,7 +306,7 @@ class FleetMetrics
         app(CampaignTrade::class)->harvestArms($reset);
         $episodes = CampaignEpisode::where('reset_id', $reset)->orderBy('id')->get();
         $grants = CampaignGrant::whereIn('id', $episodes->pluck('campaign_grant_id'))->get()->keyBy('id');
-        $agents = \App\Models\Agent::whereIn('id', $episodes->pluck('agent_id')->unique())->get()->keyBy('id');
+        $agents = Agent::whereIn('id', $episodes->pluck('agent_id')->unique())->get()->keyBy('id');
         $distinctAgents = $episodes->pluck('agent_id')->unique()->count();
         $arms = [];
         foreach ($episodes as $episode) {
@@ -341,13 +361,15 @@ class FleetMetrics
      */
     public function byAgent(array $rows, CarbonImmutable $t0, CarbonImmutable $until): array
     {
-        $between = [$t0->toDateTimeString(), $until->toDateTimeString()];
-        $windowHours = max(0.0, $t0->diffInSeconds($until, false) / 3600);
+        $from = max($t0, $until->subHours(6));
+        $between = [$from->toDateTimeString(), $until->toDateTimeString()];
+        $windowHours = max(0.0, $from->diffInSeconds($until, false) / 3600);
+        $caps = RequestBudget::agentCaps();
         $requestRows = DB::table('fleet_metrics')
             ->where('kind', 'requests')
             ->where('scope', '!=', 'host')
             ->whereBetween('created_at', $between)
-            ->get(['ship', 'agent_symbol', 'value']);
+            ->get(['ship', 'agent_symbol', 'value', 'data', 'created_at']);
 
         $unattributedAgentRows = (int) $requestRows->filter(fn ($row) => empty($row->agent_symbol))->sum('value');
         $byAgent = [];
@@ -356,19 +378,39 @@ class FleetMetrics
             if (! is_string($symbol) || $symbol === '') {
                 continue;
             }
-            $traderShips = $agentRows->pluck('ship')->filter()->unique()->values()->all();
-            $activeTraderHours = (float) $agentRows->sum('hours');
+            $episodes = CampaignEpisode::whereIn('id', $agentRows->pluck('episodes')->flatten()->unique())->get();
+            $sampleComplete = $windowHours >= 6.0 && $episodes->min('opened_at') <= $from && $episodes->isNotEmpty();
+            $trading = $this->tradingIntervals($episodes->pluck('agent_id')->unique()->all(), $episodes->first()?->reset_id, $from, $until);
+            $activeTraderHours = array_sum(array_map(fn ($intervals) => array_sum(array_map(fn ($span) => $span[1] - $span[0], $intervals)), $trading)) / 3600;
             $agentRequests = $requestRows->where('agent_symbol', $symbol);
             $allInRequests = (int) $agentRequests->sum('value');
-            $traderOnlyRequests = (int) $agentRequests->whereIn('ship', $traderShips)->sum('value');
+            $traderOnlyRequests = (int) $agentRequests->sum(function ($row) use ($trading) {
+                if (! isset($trading[$row->ship]) || (json_decode($row->data ?? '{}', true)['workload'] ?? null) === 'director') {
+                    return 0;
+                }
+                $at = CarbonImmutable::parse($row->created_at)->timestamp;
+                foreach ($trading[$row->ship] as [$start, $end]) {
+                    if ($at >= $start && $at <= $end) {
+                        return (int) $row->value;
+                    }
+                }
+
+                return 0;
+            });
             $overheadRequests = max(0, $allInRequests - $traderOnlyRequests);
             $allInPerTraderHr = $activeTraderHours > 0 ? $allInRequests / $activeTraderHours : null;
             $traderOnlyPerTraderHr = $activeTraderHours > 0 ? $traderOnlyRequests / $activeTraderHours : null;
             $overheadReqHr = $windowHours > 0 ? $overheadRequests / $windowHours : null;
             $attributionComplete = $unattributedAgentRows === 0;
-            $caps = config('gameplay.agent_request_caps', []);
-            $cap = is_array($caps) && isset($caps[$symbol]) ? (int) $caps[$symbol] : null;
-            $maxTraders = ($cap !== null && $attributionComplete && $activeTraderHours >= 1.0 && $traderOnlyPerTraderHr !== null && $traderOnlyPerTraderHr > 0 && $overheadReqHr !== null)
+            $cap = $caps[strtoupper($symbol)] ?? null;
+            $hold = match (true) {
+                ! $attributionComplete => 'incomplete_agent_attribution',
+                ! $sampleComplete => 'insufficient_sample_window',
+                $activeTraderHours < 1.0 => 'insufficient_trader_hours',
+                $traderOnlyPerTraderHr === null || $traderOnlyPerTraderHr <= 0 => 'missing_trader_rate',
+                default => null,
+            };
+            $maxTraders = $cap !== null && $hold === null
                 ? max(0, (int) floor(($cap - $overheadReqHr) / $traderOnlyPerTraderHr))
                 : null;
 
@@ -386,16 +428,47 @@ class FleetMetrics
                 'unattributed_agent_requests' => $unattributedAgentRows,
                 'cap_req_hr' => $cap,
                 'formula_max_traders' => $maxTraders,
-                'purchase_hold_reason' => match (true) {
-                    ! $attributionComplete => 'incomplete_agent_attribution',
-                    $activeTraderHours < 1.0 => 'insufficient_trader_hours',
-                    $traderOnlyPerTraderHr === null || $traderOnlyPerTraderHr <= 0 => 'missing_trader_rate',
-                    default => null,
-                },
+                'purchase_hold_reason' => $hold,
             ];
         }
 
         return $byAgent;
+    }
+
+    /** @return array<string, list<array{int, int}>> Union of observed trade-run lifetimes per ship. */
+    private function tradingIntervals(array $agents, ?string $reset, CarbonImmutable $from, CarbonImmutable $until): array
+    {
+        if ($agents === [] || $reset === null) {
+            return [];
+        }
+        $probes = Ship::whereIn('agent_id', $agents)->get()
+            ->filter(fn ($ship) => app(CampaignFleet::class)->isProbe($ship->snapshot))->pluck('symbol')->all();
+        $runs = AutomationRun::whereIn('agent_id', $agents)->where('reset_id', $reset)
+            ->whereIn('strategy', ['trade', 'sell_aboard'])->whereNotIn('ship_symbol', $probes)
+            ->whereNotNull('started_at')->where('started_at', '<', $until)->where('updated_at', '>', $from)
+            ->orderBy('started_at')->get();
+        $trading = [];
+        foreach ($runs as $run) {
+            $start = max($from->timestamp, $run->started_at->timestamp);
+            $observedEnd = isset($run->totals['stopped_at'])
+                ? CarbonImmutable::parse($run->totals['stopped_at'])
+                : ($run->heartbeat_at && $run->active_agent_id ? $run->heartbeat_at : $run->updated_at);
+            $end = min($until->timestamp, $observedEnd->timestamp);
+            if ($end <= $start) {
+                continue;
+            }
+            $intervals = &$trading[$run->ship_symbol];
+            $intervals ??= [];
+            $last = array_key_last($intervals);
+            if ($last !== null && $intervals[$last][1] >= $start) {
+                $intervals[$last][1] = max($intervals[$last][1], $end);
+            } else {
+                $intervals[] = [$start, $end];
+            }
+            unset($intervals);
+        }
+
+        return $trading;
     }
 
     /** SpaceTraders allows 2 requests per second per IP; the fleet may use 90% of that hour. */

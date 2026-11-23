@@ -85,21 +85,17 @@ class CampaignHealth
                 if ($grants->count() > 1) {
                     $this->hardPauseAffectedAgents($grants);
                 }
-                if (! $control) {
+                $episode = $control ? CampaignEpisode::where('campaign_grant_id', $control->id)->whereNull('closed_at')->latest('id')->first() : null;
+                if ($grants->count() === 1 && ! $episode) {
                     continue;
                 }
-                $episode = CampaignEpisode::where('campaign_grant_id', $control->id)->whereNull('closed_at')->latest('id')->first();
-                if (! $episode) {
-                    continue;
-                }
-                $key = 'kill_switch:'.$control->user_id.':'.$episode->reset_id;
+                $key = 'kill_switch:'.$grants->first()->user_id.':'.($episode?->reset_id ?? 'unconfirmed');
                 $state = json_decode(DB::table('game_runtime')->where('key', $key)->value('value') ?? '{}', true) ?: [];
-                $current = $this->controlWindow($control, $episode);
-                // Only C0 loads enter this baseline. Single-agent operation never takes action.
+                $current = $episode ? $this->controlWindow($control, $episode) : null;
                 if ($current && ($grants->count() === 1 || empty($state['baseline']))) {
                     $state['baseline'] = $current;
                 }
-                if ($grants->count() > 1 && ! empty($state['baseline']) && $current) {
+                if ($grants->count() > 1) {
                     $this->pressureChecks($grants, $control, $episode, $state, $current);
                 }
                 DB::table('game_runtime')->upsert([['key' => $key, 'value' => json_encode($state, JSON_THROW_ON_ERROR)]], ['key'], ['value']);
@@ -133,34 +129,56 @@ class CampaignHealth
         foreach ($grants as $grant) {
             $episodes = CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->get();
             foreach ($episodes as $episode) {
-                $agent = Agent::find($episode->agent_id);
-                $reason = $agent && ! $agent->isArchived() ? app(CampaignSafety::class)->reason($grant, $episode, $agent) : null;
-                if (! in_array($reason, ['uncertain_action', 'unexplained_change'], true)) {
-                    continue;
-                }
-                foreach (collect([$grant])->merge(CampaignGrant::liveArms($grant->resolvedAgentSymbol())->where('user_id', $grant->user_id)->get()) as $affected) {
-                    app(CampaignControl::class)->pause($affected, $reason);
+                try {
+                    app(HostLock::class)->run('agent-'.$episode->agent_id, function () use ($episode, $grant) {
+                        $agent = Agent::find($episode->agent_id);
+                        if (! $agent || $agent->isArchived()) {
+                            return;
+                        }
+                        $reason = app(CampaignSafety::class)->reason($grant->refresh(), $episode->refresh(), $agent);
+                        if (in_array($reason, ['uncertain_action', 'unexplained_change'], true)) {
+                            foreach (collect([$grant])->merge(CampaignGrant::liveArms($grant->agent_symbol)->where('user_id', $grant->user_id)->get()) as $affected) {
+                                app(CampaignControl::class)->pause($affected, $reason);
+                            }
+                        }
+                    });
+                } catch (GameException $e) {
+                    if ($e->retryAfter === 0) {
+                        throw $e;
+                    }
+                    // A sender owns this agent's balance and receipts. Check after it settles.
                 }
             }
         }
     }
 
-    private function pressureChecks(Collection $grants, CampaignGrant $control, CampaignEpisode $episode, array &$state, array $current): void
+    private function pressureChecks(Collection $grants, ?CampaignGrant $control, ?CampaignEpisode $episode, array &$state, ?array $current): void
     {
-        $budget = app(RequestBudget::class)->usage(agentSymbol: 'GIANTSOUP');
+        $requestBudget = app(RequestBudget::class);
+        $budget = $requestBudget->usage(agentSymbol: 'GIANTSOUP');
         $host = $budget['host'];
         $agent = $budget['agent'];
-        $base = $state['baseline'];
+        $base = $state['baseline'] ?? null;
         $requests = $agent['tier2_4_last_hour'] + $agent['tier1_last_hour'];
         $deferrals = $agent['deferrals_last_hour'];
-        $drop = ($base['loads_per_hour'] > 0 && $current['loads_per_hour'] < $base['loads_per_hour'] * .85)
-            || ($base['cr_per_hour'] > 0 && $current['cr_per_hour'] < $base['cr_per_hour'] * .85);
+        $drop = $base && $current && (($base['loads_per_hour'] > 0 && $current['loads_per_hour'] < $base['loads_per_hour'] * .85)
+            || ($base['cr_per_hour'] > 0 && $current['cr_per_hour'] < $base['cr_per_hour'] * .85));
+        $limits = isset($state['last_drain_at'])
+            ? $requestBudget->countRateLimitsSince($state['last_drain_at']) : $host['rate_limits_last_15_minutes'];
         $conditions = [
             'control_degradation' => [$drop && $deferrals / max(1, $requests + $deferrals) > .05, 900],
             'host_operating_pressure' => [$host['tier2_4_last_60_seconds'] >= 86.4, 300],
             'host_total_pressure' => [$host['tier2_4_last_60_seconds'] + $host['tier1_last_60_seconds'] >= 102, 300],
-            'host_rate_limits' => [$host['rate_limits_last_15_minutes'] >= 3, 0],
+            'host_rate_limits' => [$limits >= 3, 0],
         ];
+        $priority = ['SOUPFLEET' => 2, 'SOUPBURN' => 1];
+        $targets = $grants->filter(fn ($g) => $g->id !== $control?->id && $g->fresh()->available())
+            ->sortByDesc(fn ($g) => [$priority[$g->resolvedAgentSymbol()] ?? 0, $g->id]);
+        $marginDrop = ($base['pair_margin'] ?? 0) > 0 && ($current['pair_margin'] ?? null) !== null
+            && $current['pair_margin'] < $base['pair_margin'] * .8 && $this->noMarketDepletion($base, $current);
+        foreach ($targets as $target) {
+            $conditions['cannibalization:'.$target->id] = [$marginDrop && $episode && $this->tradesInControlSystem($target, $episode), 900];
+        }
         if (now()->timestamp - ($state['last_evaluation'] ?? 0) > 120) {
             $state['breaches'] = [];
         }
@@ -177,31 +195,34 @@ class CampaignHealth
                 $breaches[] = $reason;
             }
         }
-        $priority = ['SOUPFLEET' => 2, 'SOUPBURN' => 1];
-        $targets = $grants->filter(fn ($g) => $g->id !== $control->id && $g->fresh()->available())
-            ->sortByDesc(fn ($g) => [$priority[$g->resolvedAgentSymbol()] ?? 0, $g->id]);
-        $target = $targets->first(fn ($g) => ! $g->isDraining());
-        // One agent drains at a time; only persistent pressure after settlement escalates further.
-        if ($breaches && ! $targets->contains(fn ($g) => $g->isDraining()) && $target) {
-            $this->drainWithArms($target, $breaches[0]);
-            $state['breaches'] = [];
+        if ($targets->contains(fn ($g) => $g->isDraining())) {
+            return;
+        }
+        foreach ($breaches as $reason) {
+            $overlap = str_starts_with($reason, 'cannibalization:');
+            $target = $overlap ? $targets->firstWhere('id', (int) substr($reason, strlen('cannibalization:'))) : $targets->first();
+            if ($target) {
+                $this->drainWithArms($target, $overlap ? 'shared_system_cannibalization' : $reason);
+                $state['last_drain_at'] = $host['observed_at'];
+                $state['breaches'] = [];
 
-            return;
-        }
-        if (($base['pair_margin'] ?? 0) <= 0 || ($current['pair_margin'] ?? null) === null
-            || $current['pair_margin'] >= $base['pair_margin'] * .8 || ! $this->noMarketDepletion($base, $current)) {
-            return;
-        }
-        foreach ($targets as $other) {
-            $agents = Agent::where('user_id', $control->user_id)->where('reset_id', $episode->reset_id)->where('name', $other->resolvedAgentSymbol())->pluck('id');
-            $overlap = Ship::whereIn('agent_id', $agents)->where('snapshot->nav->systemSymbol', 'X1-SK70')->exists();
-            $trading = CampaignEvent::whereIn('campaign_episode_id', CampaignEpisode::whereIn('agent_id', $agents)->select('id'))
-                ->where('kind', 'load_result')->where('created_at', '>', now()->subHours(3))->exists();
-            if ($overlap && $trading && ! $other->isDraining()) {
-                $this->drainWithArms($other, 'shared_system_cannibalization');
-                break;
+                return;
             }
         }
+    }
+
+    private function tradesInControlSystem(CampaignGrant $grant, CampaignEpisode $control): bool
+    {
+        $agents = Agent::where('user_id', $grant->user_id)->where('reset_id', $control->reset_id)->where('name', $grant->agent_symbol)->pluck('id');
+        $ships = Ship::whereIn('agent_id', $agents)->where('snapshot->nav->systemSymbol', 'X1-SK70')->get()
+            ->reject(fn ($ship) => app(CampaignFleet::class)->isProbe($ship->snapshot))->pluck('symbol');
+        if ($ships->isEmpty()) {
+            return false;
+        }
+
+        return CampaignEvent::whereIn('campaign_episode_id', CampaignEpisode::whereIn('agent_id', $agents)->where('reset_id', $control->reset_id)->select('id'))
+            ->where('kind', 'load_result')->where('created_at', '>', now()->subHours(3))
+            ->whereIn('data->ship', $ships)->where('data->buyer', 'like', 'X1-SK70-%')->exists();
     }
 
     private function drainWithArms(CampaignGrant $grant, string $reason): void

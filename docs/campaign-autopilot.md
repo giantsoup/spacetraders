@@ -64,6 +64,41 @@ Pending/sending actions and transit must settle before the replacement starts. T
 replacement uses fresh state and a new preview. Deploys close old runs, but an approved,
 unpaused campaign resumes automatically once the engine is healthy again.
 
+## Configure the multi-agent request budget
+
+The default `SPACETRADERS_REQUEST_BUDGET_STAGE=off` keeps the single-agent
+request budget. Set the stage explicitly before you direct several primaries.
+Create the grants only when their rollout gates allow it.
+
+| Stage | GIANTSOUP | SOUPBURN | SOUPFLEET | Shared |
+| --- | ---: | ---: | ---: | ---: |
+| `stage1` | 3,400 | 1,600 | 0 | 760 |
+| `stage2` | 2,880 | 720 | 1,800 | 360 |
+
+The table shows ordinary requests per hour. Both stages allocate 5,760 requests
+and reserve at least half for GIANTSOUP. The shared bucket covers anonymous
+dashboard reads and GateWatch. If any primary lacks a positive allocation, the
+director refuses new plans and reports `multi_agent_budget_requires_stage`.
+Drain and reconciliation remain available.
+
+The settlement reserve allows 18 requests per host minute, with a target of
+300 per agent hour and 180 per shared hour. Settlement can use idle ordinary
+host capacity when its reserve is exhausted. That usage counts against the
+ordinary window, which reduces room for new work.
+
+The kill switch retains the latest eligible GIANTSOUP:C0-only baseline when
+another primary joins. If no baseline exists, it uses the first eligible
+three-hour C0 window. The reference stays fixed for the reset, including after
+resume. Host pressure and repeated 429s can trigger a drain before the
+baseline is ready. Cannibalization requires 15 consecutive minutes of
+degradation and trading overlap in the control system.
+
+The purchase scorecard uses the trailing six hours ending at the report's
+end time. A shorter sample, less than one active trading ship-hour, missing
+attribution, or a missing trader request rate holds purchases. For
+compatibility, the single-agent scorecard keeps short arm keys and supplies
+the qualified key on each row. A multi-agent scorecard uses qualified keys.
+
 ## Understand the playbook
 
 The v1 schema rejects unknown keys, including obsolete loss/exposure settings. Roles are

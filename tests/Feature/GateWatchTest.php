@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Gameplay\CampaignNotifier;
+use App\Gameplay\GameException;
 use App\Gameplay\GateWatch;
 use App\Gameplay\RequestBudget;
 use App\Models\AutomationRun;
@@ -37,6 +38,24 @@ class GateWatchTest extends TestCase
         $this->assertSame(0, AutomationRun::count());
         Http::assertSentCount(2);
         Http::assertNotSent(fn ($request) => $request->method() !== 'GET' || str_contains($request->url(), '/construction'));
+    }
+
+    public function test_round_one_transient_gate_read_does_not_consume_poll_interval(): void
+    {
+        $agent = User::factory()->create()->agents()->create(['name' => 'GIANTSOUP', 'token' => 'synthetic-only', 'faction' => 'VOID', 'reset_id' => 'test-reset']);
+        $gate = ['symbol' => 'X1-TEST-GATE', 'systemSymbol' => 'X1-TEST', 'type' => 'JUMP_GATE', 'x' => 0, 'y' => 0, 'traits' => [], 'isUnderConstruction' => true];
+        Http::preventStrayRequests();
+        Http::fakeSequence()->pushStatus(503)->push(['data' => $gate]);
+        try {
+            app(GateWatch::class)->pollGate($agent, $gate['symbol']);
+            $this->fail('The upstream failure must reach the caller.');
+        } catch (GameException $e) {
+            $this->assertStringContainsString('503', $e->getMessage());
+        }
+        $dir = config('gameplay.request_budget_path');
+        unlink($dir.'/budget.json');
+        $this->assertTrue(app(GateWatch::class)->pollGate($agent, $gate['symbol'])['polled']);
+        Http::assertSentCount(2);
     }
 
     public function test_progress_read_is_optional_tier_four_and_only_runs_during_construction(): void

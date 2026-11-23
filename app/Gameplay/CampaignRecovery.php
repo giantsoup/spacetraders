@@ -13,8 +13,15 @@ class CampaignRecovery
 {
     public function compose(Agent $agent, string $symbol, string $buyer, array $limits): array
     {
-        app(AgentSynchronizer::class)->sync($agent, false);
-        $ship = Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->firstOrFail()->snapshot;
+        $sync = app(AgentSynchronizer::class);
+        if ($limits['targeted_recovery'] ?? false) {
+            $sync->guardReset($agent);
+            $ship = $sync->refreshShip($agent, $symbol)->snapshot;
+            $agent->update(['credits' => app(SpaceTradersApi::class)->agent($agent)['credits'], 'synced_at' => now()]);
+        } else {
+            $sync->sync($agent, false);
+            $ship = Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->firstOrFail()->snapshot;
+        }
         if ($ship['nav']['status'] === 'IN_TRANSIT' || $ship['cargo']['units'] < 1) {
             throw new GameException('Recovery requires stationary owned cargo.');
         }

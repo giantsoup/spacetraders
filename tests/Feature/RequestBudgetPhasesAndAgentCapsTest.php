@@ -263,11 +263,6 @@ class RequestBudgetPhasesAndAgentCapsTest extends TestCase
         $episode = CampaignEpisode::create(['campaign_grant_id' => $grant->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
             'start_credits' => $this->agent->fresh()->credits, 'phase' => 'earn', 'opened_at' => now(), 'next_reset_at' => now()->addDay(),
             'state' => ['role_ships' => ['command' => 'LOCAL-1']]]);
-        $runner = app(AutomationRunner::class);
-        $run = $runner->previewRecovery($this->agent, 'LOCAL-1', 'X1-TEST-PORT', ['reserve' => 0, 'max_loss' => 10000, 'max_spend' => 10000,
-            'minutes' => $grant->limits['run_max_minutes'], 'recovery_started_at' => now()->toIso8601String()], $episode);
-        $beforeConfiguration = $run->plan['initial_configuration'];
-        $runner->startCampaign($this->agent, $run, $episode);
         $budget = new class extends RequestBudget
         {
             public float $clock = 1700000000;
@@ -284,7 +279,7 @@ class RequestBudgetPhasesAndAgentCapsTest extends TestCase
         };
         $this->app->instance(RequestBudget::class, $budget);
         config(['gameplay.request_budget_enabled' => true, 'gameplay.host_tier2_4_per_minute' => 6,
-            'gameplay.host_tier1_reserve_per_minute' => 18, 'gameplay.agent_tier1_reserve_per_hour' => 500,
+            'gameplay.host_tier1_reserve_per_minute' => 18, 'gameplay.agent_tier1_reserve_per_hour' => 300,
             'gameplay.agent_request_caps' => ['LOCAL' => 3, 'OTHER' => 3]]);
         @unlink(config('gameplay.request_budget_path').'/budget.json');
         foreach (['LOCAL', 'OTHER'] as $symbol) {
@@ -293,6 +288,11 @@ class RequestBudgetPhasesAndAgentCapsTest extends TestCase
             }
         }
         app(CampaignControl::class)->drainPause($grant, 'test_pressure', $episode);
+        $runner = app(AutomationRunner::class);
+        $run = $runner->previewRecovery($this->agent, 'LOCAL-1', 'X1-TEST-PORT', ['reserve' => 0, 'max_loss' => 10000, 'max_spend' => 10000,
+            'minutes' => $grant->limits['run_max_minutes'], 'recovery_started_at' => now()->toIso8601String()], $episode);
+        $beforeConfiguration = $run->plan['initial_configuration'];
+        $runner->startCampaign($this->agent, $run, $episode);
         $commands = [];
         for ($i = 0; $i < 80 && $run->fresh()->active_agent_id; $i++) {
             $budget->clock += 2;
@@ -319,12 +319,55 @@ class RequestBudgetPhasesAndAgentCapsTest extends TestCase
         $this->assertNull($run->fresh()->active_agent_id);
     }
 
+    public function test_round_one_settlement_borrows_the_idle_ordinary_envelope_after_the_reserve(): void
+    {
+        config(['gameplay.request_budget_enabled' => true, 'gameplay.agent_request_caps' => ['LOCAL' => 1000]]);
+        $budget = new class extends RequestBudget
+        {
+            public float $clock = 1700000000;
+
+            protected function now(): float
+            {
+                return $this->clock;
+            }
+        };
+        @unlink(config('gameplay.request_budget_path').'/budget.json');
+        for ($i = 0; $i < 360; $i++) {
+            $budget->clock += 10;
+            RequestBudget::forAgent('LOCAL', fn () => $budget->reserve(priority: 'settlement', maxWait: 0));
+        }
+        $this->assertSame(300, $budget->usage(agentSymbol: 'LOCAL')['agent']['tier1_last_hour']);
+        $this->assertSame(60, $budget->usage(agentSymbol: 'LOCAL')['agent']['tier2_4_last_hour']);
+        $this->assertSame(360, $budget->usage()['host']['priorities']['settlement']);
+    }
+
+    public function test_round_one_stage_caps_and_shared_bucket_are_selectable(): void
+    {
+        config(['gameplay.request_budget_stage' => 'stage1', 'gameplay.request_budget_enabled' => true]);
+        $budget = app(RequestBudget::class);
+        $this->assertSame(3400, $budget->usage(agentSymbol: 'GIANTSOUP')['agent']['cap_per_hour']);
+        $this->assertSame(1600, $budget->usage(agentSymbol: 'SOUPBURN')['agent']['cap_per_hour']);
+        $this->assertSame(0, $budget->usage(agentSymbol: 'SOUPFLEET')['agent']['cap_per_hour']);
+        $this->assertSame(760, $budget->usage(agentSymbol: 'SHARED')['agent']['cap_per_hour']);
+        $this->assertSame(2880, RequestBudget::stageCaps('stage2')['GIANTSOUP']);
+        $budget->reserve(priority: 'discovery');
+        $this->assertGreaterThan(0, $budget->usage(agentSymbol: 'SHARED')['agent']['tier2_4_last_hour']);
+    }
+
+    public function test_round_one_scorecard_never_counts_elapsed_time_without_trading_activity(): void
+    {
+        config(['gameplay.agent_request_caps' => ['local' => 1800]]);
+        $this->assertSame(0.0, app(FleetMetrics::class)->byAgent([
+            ['agent_symbol' => 'LOCAL', 'ship' => 'LOCAL-1', 'hours' => 2, 'episodes' => [], 'qualified_label' => 'LOCAL:C0'],
+        ], now()->subHours(2)->toImmutable(), now()->toImmutable())['LOCAL']['active_trader_hours']);
+    }
+
     public function test_fleet_metrics_records_host_scope_collection_time_attribution_and_split_rates(): void
     {
-        config(['gameplay.agent_request_caps' => ['LOCAL' => 1800]]);
+        config(['gameplay.agent_request_caps' => ['local' => 1800]]);
         $revision = app(CampaignPlaybook::class)->import(str_replace('GIANTSOUP', 'LOCAL', file_get_contents(base_path('campaigns/weekly-default.yaml'))));
         $grant = app(CampaignControl::class)->approve($revision, $this->user);
-        $opened = CarbonImmutable::now()->subHours(2);
+        $opened = CarbonImmutable::now()->subHours(8);
         $episode = CampaignEpisode::create([
             'campaign_grant_id' => $grant->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
             'start_credits' => 175000, 'phase' => 'earn', 'opened_at' => $opened, 'next_reset_at' => now()->addHours(15),
@@ -339,17 +382,22 @@ class RequestBudgetPhasesAndAgentCapsTest extends TestCase
             'data' => ['run_id' => 2, 'ship' => 'LOCAL-1', 'good' => 'IRON_ORE', 'buyer' => 'X1-TEST-PORT', 'net' => 12000, 'finished_at' => now()->subMinutes(10)->toIso8601String()],
         ]);
 
+        foreach ([['LOCAL-1', 120, 90], ['LOCAL-3', 120, 30], ['LOCAL-3', 85, 50], ['LOCAL-2', 120, 30]] as [$ship, $start, $end]) {
+            AutomationRun::create(['agent_id' => $this->agent->id, 'campaign_episode_id' => $episode->id, 'reset_id' => $episode->reset_id,
+                'ship_symbol' => $ship, 'strategy' => 'trade', 'state' => 'stopped', 'started_at' => now()->subMinutes($start),
+                'updated_at' => now()->subMinutes($end), 'expires_at' => now(), 'plan' => [], 'totals' => []]);
+        }
         FleetMetrics::reset();
         // Scheduler pass is explicitly host-scoped.
         app(FleetMetrics::class)->schedulerPass(['director' => 0.1, 'arms' => 0.0, 'dispatch' => 0.1, 'lags' => [1]]);
         $this->assertSame('host', DB::table('fleet_metrics')->where('kind', 'scheduler')->value('scope'));
 
-        // Record 400 trader requests + 200 probe/director overhead requests for LOCAL over 2 active trader-hours.
-        DB::table('fleet_metrics')->insert([
-            ['kind' => 'requests', 'ship' => 'LOCAL-1', 'agent_symbol' => 'LOCAL', 'scope' => 'agent', 'value' => 400, 'data' => json_encode(['reads' => 380, 'writes' => 20]), 'created_at' => now()->subMinutes(30)->toDateTimeString()],
-            ['kind' => 'requests', 'ship' => 'LOCAL-2', 'agent_symbol' => 'LOCAL', 'scope' => 'agent', 'value' => 150, 'data' => json_encode(['reads' => 150, 'writes' => 0]), 'created_at' => now()->subMinutes(30)->toDateTimeString()],
-            ['kind' => 'requests', 'ship' => 'director', 'agent_symbol' => 'LOCAL', 'scope' => 'agent', 'value' => 50, 'data' => json_encode(['reads' => 50, 'writes' => 0]), 'created_at' => now()->subMinutes(30)->toDateTimeString()],
-        ]);
+        // Two ship-hours total. The overlapping hauler run and the probe contribute no time.
+        foreach ([['LOCAL-1', 150, 100, []], ['LOCAL-3', 250, 100, []], ['LOCAL-2', 150, 100, []],
+            ['LOCAL-1', 50, 100, ['workload' => 'director']], ['LOCAL-1', 1000, 420, []]] as [$ship, $value, $age, $data]) {
+            DB::table('fleet_metrics')->insert(['kind' => 'requests', 'ship' => $ship, 'agent_symbol' => 'LOCAL',
+                'scope' => 'agent', 'value' => $value, 'data' => json_encode($data), 'created_at' => now()->subMinutes($age)->toDateTimeString()]);
+        }
 
         $card = app(FleetMetrics::class)->scorecard($opened, now()->toImmutable(), $this->agent->reset_id);
         $local = $card['by_agent']['LOCAL'];
@@ -357,10 +405,13 @@ class RequestBudgetPhasesAndAgentCapsTest extends TestCase
         $this->assertEqualsWithDelta(2.0, $local['active_trader_hours'], 0.01);
         $this->assertEqualsWithDelta(300.0, $local['all_in_req_per_active_trader_hr'], 1.0);
         $this->assertEqualsWithDelta(200.0, $local['trader_only_req_per_active_trader_hr'], 1.0);
-        $this->assertEqualsWithDelta(100.0, $local['agent_overhead_req_hr'], 1.0);
-        // Formula: floor((1800 - 100) / 200) = 8 traders (zero double counting of probe/director overhead).
+        $this->assertEqualsWithDelta(200 / 6, $local['agent_overhead_req_hr'], 1.0);
+        // Formula: floor((1800 - 200/6) / 200) = 8 traders (zero double counting of probe/director overhead).
         $this->assertSame(8, $local['formula_max_traders']);
         $this->assertNull($local['purchase_hold_reason']);
+        $partial = app(FleetMetrics::class)->scorecard(now()->subHours(2)->toImmutable(), now()->toImmutable(), $this->agent->reset_id)['by_agent']['LOCAL'];
+        $this->assertNull($partial['formula_max_traders']);
+        $this->assertSame('insufficient_sample_window', $partial['purchase_hold_reason']);
 
         // Unattributed agent-scoped request row triggers purchase hold (host rows do NOT).
         DB::table('fleet_metrics')->insert([

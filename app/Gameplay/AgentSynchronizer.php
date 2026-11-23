@@ -4,6 +4,8 @@ namespace App\Gameplay;
 
 use App\Models\Agent;
 use App\Models\AutomationRun;
+use App\Models\CampaignEpisode;
+use App\Models\CampaignGrant;
 use App\Models\GameObservation;
 use App\Models\ObservationHistory;
 use App\Models\Ship;
@@ -66,6 +68,13 @@ class AgentSynchronizer
                 'state' => 'blocked', 'stop_requested_at' => now(), 'blocked_reason' => 'World reset. Agent archived; old intentions cannot run.',
             ]);
         });
+
+        $drained = CampaignGrant::where('user_id', $agent->user_id)->where('agent_symbol', $agent->name)
+            ->whereIn('id', CampaignEpisode::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->select('campaign_grant_id'))
+            ->where(fn ($query) => $query->where('wait_reason', 'like', 'drain_pause:%')->orWhere('pause_reason', 'like', 'drain_pause:%'))->exists();
+        if ($drained) {
+            app(RequestBudget::class)->drainAgent($agent->name, false);
+        }
 
         return true;
     }

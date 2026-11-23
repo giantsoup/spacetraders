@@ -18,6 +18,7 @@ use App\Services\SpaceTradersClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class CampaignDirector
@@ -135,7 +136,7 @@ class CampaignDirector
         } catch (\Throwable) {
         }
         try {
-            FleetMetrics::forAgent($agentSymbol, fn () => RequestBudget::forAgent($agentSymbol, fn () => $this->runDirectGrant($grant)));
+            FleetMetrics::forAgent($agentSymbol, fn () => FleetMetrics::duringDirector(fn () => RequestBudget::forAgent($agentSymbol, fn () => $this->runDirectGrant($grant))));
         } finally {
             try {
                 $ship = $grant->arm()['ship'] ?? 'director';
@@ -174,9 +175,21 @@ class CampaignDirector
         }
         try {
             $deadline = $this->deadline = microtime(true) + self::DEADLINE_SECONDS;
-            $multiAgent = CampaignGrant::allPrimaries($grant->user_id)->where('agent_symbol', '!=', $grant->agent_symbol)->exists();
-            $priority = $grant->isDraining() ? 'settlement' : ($multiAgent ? 'director' : 'critical');
-            app(SpaceTradersClient::class)->scope(fn () => $this->direct($grant, $deadline), priority: $priority, deadline: $deadline);
+            $primaries = CampaignGrant::allPrimaries()->pluck('agent_symbol');
+            $caps = RequestBudget::agentCaps();
+            if (! $grant->isDraining() && $primaries->count() > 1
+                && (! config('gameplay.request_budget_enabled') || ! isset($caps['SHARED'])
+                    || $primaries->contains(fn ($symbol) => ($caps[$symbol] ?? 0) < 1))) {
+                $reason = 'multi_agent_budget_requires_stage';
+                if ($grant->wait_reason !== $reason) {
+                    Log::warning('Multi-agent campaign planning requires a request budget stage covering every primary.', ['user_id' => $grant->user_id]);
+                    $this->wait($grant, $reason);
+                }
+
+                return;
+            }
+            app(SpaceTradersClient::class)->scope(fn () => $this->direct($grant, $deadline),
+                priority: $grant->isDraining() || $primaries->count() > 1 || $caps !== [] ? 'director' : 'critical', deadline: $deadline);
         } catch (LocalEarnBudget) {
             $this->wait($grant, 'local_budget_deferred');
         } catch (ValidationException) {
@@ -201,9 +214,21 @@ class CampaignDirector
 
     private function direct(CampaignGrant $grant, float $deadline): void
     {
-        // The reset read belongs to the grant's arm ship, or to the director when the grant has no ship.
-        $schedule = FleetMetrics::as($grant->arm()['ship'] ?? 'director', fn () => app(SpaceTradersApi::class)->resetSchedule());
         $previous = CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->first();
+        if ($grant->isDraining() && $previous && $previous->next_reset_at->gt(now()->addMinutes(10))) {
+            $agent = Agent::find($previous->agent_id);
+            if ($agent && ! $agent->isArchived()) {
+                // Pending writes and advances keep these snapshots current. A new recovery validates
+                // reset, ship, balance and buyer before taking authority.
+                $this->episode($grant, $agent, ['reset_id' => $previous->reset_id], $previous->next_reset_at, $deadline);
+
+                return;
+            }
+        }
+        $readSchedule = fn () => FleetMetrics::as($grant->arm()['ship'] ?? 'director', fn () => app(SpaceTradersApi::class)->resetSchedule());
+        $schedule = $grant->isDraining()
+            ? RequestBudget::forAgent('SHARED', fn () => app(SpaceTradersClient::class)->scope($readSchedule, priority: 'safety'))
+            : $readSchedule();
         try {
             $next = is_string($schedule['next_reset']) ? CarbonImmutable::parse($schedule['next_reset']) : null;
             $resetDate = CarbonImmutable::parse($schedule['reset_id']);
@@ -300,7 +325,9 @@ class CampaignDirector
                 return;
             }
             $sync = app(AgentSynchronizer::class);
-            if ($arm) {
+            if ($episode && $grant->isDraining()) {
+                // The draining director uses stored evidence. Only cargo recovery and execution read upstream.
+            } elseif ($arm) {
                 // Phase 3: arm passes avoid full fleet pagination. When a live run exists, stay local
                 // (at most 1 fresh GET /my/agent if synced_at is >60s old). When starting a run, read
                 // only the agent and this arm's ship, reconciling the full fleet only on shipCount drift or every 5 min.
@@ -1786,6 +1813,13 @@ class CampaignDirector
 
                 continue;
             }
+            if ($grant->isDraining() && $ship['nav']['status'] === 'IN_TRANSIT'
+                && isset($ship['nav']['route']['arrival']) && CarbonImmutable::parse($ship['nav']['route']['arrival'])->lte(now())) {
+                $ship = app(SpaceTradersClient::class)->scope(
+                    fn () => app(AgentSynchronizer::class)->refreshShip($agent, $ship['symbol'])->snapshot,
+                    priority: 'settlement',
+                );
+            }
             if ($ship['nav']['status'] === 'IN_TRANSIT') {
                 $this->decision($grant, $episode, $agent, [], 'awaiting_cargo_arrival');
 
@@ -1805,11 +1839,18 @@ class CampaignDirector
 
                 return true;
             }
-            $this->refreshRecoveryEvidence($episode, $agent, $ship);
+            if (! $grant->isDraining()) {
+                $this->refreshRecoveryEvidence($episode, $agent, $ship);
+            }
             $good = array_key_first(MiningPlanner::inventory($ship));
-            $buyers = GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'market')->get()
+            $buyerQuotes = fn () => GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'market')->get()
                 ->map(fn ($row) => ['buyer' => $row->symbol, 'bid' => collect($row->data['tradeGoods'] ?? [])->firstWhere('symbol', $good)['sellPrice'] ?? 0])
                 ->filter(fn ($row) => $row['bid'] > 0)->sort(fn ($left, $right) => $right['bid'] <=> $left['bid'] ?: $left['buyer'] <=> $right['buyer']);
+            $buyers = $buyerQuotes();
+            if ($buyers->isEmpty() && $grant->isDraining()) {
+                app(SpaceTradersClient::class)->scope(fn () => $this->refreshRecoveryEvidence($episode, $agent, $ship), priority: 'settlement');
+                $buyers = $buyerQuotes();
+            }
             if ($buyers->isEmpty()) {
                 app(CampaignControl::class)->pause($grant, 'no_cargo_buyer', $episode);
 

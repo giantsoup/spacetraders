@@ -98,7 +98,8 @@ class SpaceTradersClient
             $beforeTransport();
         }
         $category = FleetMetrics::category($method, $path);
-        FleetMetrics::count($method, $path, $category, $agentSymbol);
+        FleetMetrics::count($method, $path, $category, $agentSymbol,
+            host: $token === null && $agentSymbol === null && FleetMetrics::currentAgent() === null);
         $response = $request->send(strtoupper($method), $path, $options);
         $budget = app(RequestBudget::class);
         try {

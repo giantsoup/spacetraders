@@ -2,17 +2,20 @@
 
 namespace Tests\Feature;
 
+use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignDirector;
 use App\Gameplay\CampaignHealth;
 use App\Gameplay\CampaignNotifier;
 use App\Gameplay\CampaignPlaybook;
+use App\Gameplay\CampaignSafety;
 use App\Gameplay\CampaignStatus;
 use App\Gameplay\CampaignStrategy;
 use App\Gameplay\CampaignWatchdog;
 use App\Gameplay\FleetClaims;
 use App\Gameplay\GameException;
 use App\Gameplay\GateRecon;
+use App\Gameplay\HostLock;
 use App\Gameplay\RequestBudget;
 use App\Gameplay\RequestDeferred;
 use App\Gameplay\ShipPurpose;
@@ -22,6 +25,7 @@ use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignGrant;
+use App\Models\GameObservation;
 use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
@@ -176,15 +180,93 @@ class MultiAgentCampaignTest extends TestCase
         }
     }
 
-    public function test_kill_switch_is_noop_without_baseline_and_with_only_one_primary(): void
+    public function test_round_one_host_429_drains_second_primary_before_c0_baseline(): void
     {
         [$a, $agent, $episode] = $this->campaign('GIANTSOUP');
         $this->pressure(100, 5, 3);
         app(CampaignHealth::class)->evaluateKillSwitch();
         $this->assertFalse($a->fresh()->isDraining());
+        $episode->update(['opened_at' => now()->subHour()]);
         [$b] = $this->campaign('SOUPBURN');
         app(CampaignHealth::class)->evaluateKillSwitch();
-        $this->assertFalse($b->fresh()->isDraining());
+        $this->assertSame('drain_pause:host_rate_limits', $b->fresh()->wait_reason);
+    }
+
+    public function test_round_one_safety_evaluation_skips_a_busy_agent_lock(): void
+    {
+        $this->campaign('GIANTSOUP');
+        [$grant, $agent] = $this->campaign('SOUPBURN');
+        $safety = $this->mock(CampaignSafety::class);
+        $safety->shouldReceive('reason')->zeroOrMoreTimes()->andReturnUsing(
+            fn ($grant) => $grant->agent_symbol === 'SOUPBURN' ? 'unexplained_change' : null,
+        );
+        (new HostLock)->run('agent-'.$agent->id, fn () => app(CampaignHealth::class)->evaluateKillSwitch());
+        $this->assertNull($grant->fresh()->paused_at);
+        app(CampaignHealth::class)->evaluateKillSwitch();
+        $this->assertSame('unexplained_change', $grant->fresh()->pause_reason);
+    }
+
+    public function test_round_one_cannibalization_requires_trading_in_control_system_and_sustained_margin_drop(): void
+    {
+        [$control, $agent, $episode] = $this->campaign('GIANTSOUP');
+        foreach (['X1-SK70-A', 'X1-SK70-B', 'X1-SK70-C'] as $waypoint) {
+            GameObservation::create(['agent_id' => $agent->id, 'reset_id' => $agent->reset_id, 'kind' => 'market', 'symbol' => $waypoint,
+                'observed_at' => now(), 'data' => ['tradeGoods' => [['symbol' => 'COPPER_ORE', 'sellPrice' => 100]]]]);
+        }
+        $this->load($control, $episode, 1000);
+        app(CampaignHealth::class)->evaluateKillSwitch();
+        DB::table('campaign_events')->where('kind', 'load_result')->update(['created_at' => now()->subHours(4)]);
+        [$other, $otherAgent, $otherEpisode] = $this->campaign('SOUPBURN');
+        $probe = FakeSpaceTraders::ship('SOUPBURN-2');
+        $probe['nav']['systemSymbol'] = 'X1-SK70';
+        $probe['registration']['role'] = 'SATELLITE';
+        Ship::create(['agent_id' => $otherAgent->id, 'symbol' => 'SOUPBURN-2', 'snapshot' => $probe, 'observed_at' => now()]);
+        $this->load($control, $episode, 700);
+        app(CampaignControl::class)->event($other, $otherEpisode, 'load_result', ['ship' => 'SOUPBURN-1', 'buyer' => 'X1-TEST-PORT']);
+        app(CampaignHealth::class)->evaluateKillSwitch();
+        $this->assertFalse($other->fresh()->isDraining(), 'A parked probe and a sale elsewhere are not overlap.');
+
+        $trader = Ship::where('agent_id', $otherAgent->id)->where('symbol', 'SOUPBURN-1')->sole();
+        $snapshot = $trader->snapshot;
+        $snapshot['nav']['systemSymbol'] = 'X1-SK70';
+        $trader->update(['snapshot' => $snapshot]);
+        app(CampaignControl::class)->event($other, $otherEpisode, 'load_result', ['ship' => $trader->symbol, 'buyer' => 'X1-SK70-A']);
+        app(CampaignHealth::class)->evaluateKillSwitch();
+        $this->assertFalse($other->fresh()->isDraining(), 'A single observation is not a sustained breach.');
+        for ($minute = 0; $minute < 15; $minute++) {
+            $this->travel(1)->minute();
+            app(CampaignHealth::class)->evaluateKillSwitch();
+        }
+        $this->assertSame('drain_pause:shared_system_cannibalization', $other->fresh()->wait_reason);
+    }
+
+    public function test_round_one_old_rate_limits_cannot_cascade_after_first_drain(): void
+    {
+        $this->campaign('GIANTSOUP');
+        [$burn] = $this->campaign('SOUPBURN');
+        [$fleet] = $this->campaign('SOUPFLEET');
+        $this->pressure(0, 0, 3);
+        app(CampaignHealth::class)->evaluateKillSwitch();
+        $this->assertTrue($fleet->fresh()->isDraining());
+        app(CampaignControl::class)->pause($fleet, $fleet->fresh()->wait_reason);
+        app(CampaignHealth::class)->evaluateKillSwitch();
+        $this->assertFalse($burn->fresh()->isDraining());
+    }
+
+    public function test_round_one_drain_survives_restart_but_does_not_block_the_next_reset(): void
+    {
+        $this->campaign('GIANTSOUP');
+        [$grant, $agent, $episode] = $this->campaign('SOUPBURN');
+        app(CampaignControl::class)->drainPause($grant, 'test_pressure', $episode);
+        try {
+            RequestBudget::forAgent('SOUPBURN', fn () => (new RequestBudget)->reserve(priority: 'run', maxWait: 0));
+            $this->fail('A new budget instance must still honor the active drain.');
+        } catch (RequestDeferred) {
+        }
+        (new HostLock)->run('agent-'.$agent->id, fn () => app(AgentSynchronizer::class)->archiveForReset($agent, 'next-reset'));
+        RequestBudget::forAgent('SOUPBURN', fn () => (new RequestBudget)->reserve(priority: 'run', maxWait: 0));
+        $this->assertTrue($agent->fresh()->isArchived());
+        $this->assertTrue($grant->fresh()->isDraining(), 'The budget releases the symbol, but the operator still owns grant authority.');
     }
 
     private function pressure(int $ordinary, int $settlement = 0, int $rateLimits = 0): void

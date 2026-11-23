@@ -51,19 +51,12 @@ class GateWatch
             ];
         }
 
-        try {
-            $waypoint = FleetMetrics::forAgent($agent->name, fn () => FleetMetrics::as('gate_watch', fn () => $this->client->scope(
-                fn () => $this->api->manualRead($agent, 'get-waypoint', ['systemSymbol' => FleetClaims::systemOf($gateSymbol), 'waypointSymbol' => $gateSymbol])['data'],
-                priority: 'discovery',
-            )));
-            if (($waypoint['type'] ?? null) !== 'JUMP_GATE' || ! is_bool($waypoint['isUnderConstruction'] ?? null)) {
-                throw new GameException('Jump gate waypoint lacks construction status.');
-            }
-        } catch (RequestDeferred $exception) {
-            throw $exception;
-        } catch (GameException $exception) {
-            $this->save($key, array_merge($previous, ['polled_at' => now()->toIso8601String()]));
-            throw $exception;
+        $waypoint = RequestBudget::forAgent('SHARED', fn () => FleetMetrics::as('gate_watch', fn () => $this->client->scope(
+            fn () => $this->api->manualRead($agent, 'get-waypoint', ['systemSymbol' => FleetClaims::systemOf($gateSymbol), 'waypointSymbol' => $gateSymbol])['data'],
+            priority: 'discovery',
+        )));
+        if (($waypoint['type'] ?? null) !== 'JUMP_GATE' || ! is_bool($waypoint['isUnderConstruction'] ?? null)) {
+            throw new GameException('Jump gate waypoint lacks construction status.');
         }
         $underConstruction = $waypoint['isUnderConstruction'];
         $wasUnderConstruction = array_key_exists('is_under_construction', $previous) ? (bool) $previous['is_under_construction'] : null;
@@ -73,7 +66,7 @@ class GateWatch
         if ($underConstruction && $readProgressWhenUnderConstruction) {
             try {
                 $system = FleetClaims::systemOf($gateSymbol);
-                $construction = FleetMetrics::forAgent($agent->name, fn () => FleetMetrics::as('gate_watch', fn () => $this->client->scope(
+                $construction = RequestBudget::forAgent('SHARED', fn () => FleetMetrics::as('gate_watch', fn () => $this->client->scope(
                     fn () => $this->api->manualRead($agent, 'get-construction', ['systemSymbol' => $system, 'waypointSymbol' => $gateSymbol]),
                     priority: 'discovery',
                 )));

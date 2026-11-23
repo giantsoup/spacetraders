@@ -20,9 +20,9 @@ class ShipCommandExecutor
 {
     public function __construct(private HostLock $lock, private CommandRules $rules, private SpaceTradersApi $api, private AgentSynchronizer $sync, private EngineGate $gate) {}
 
-    public function locked(Agent $agent, callable $work): mixed
+    public function locked(Agent $agent, callable $work, string $priority = 'critical'): mixed
     {
-        return $this->lock->run('agent-'.$agent->id, fn () => app(SpaceTradersClient::class)->scope($work));
+        return $this->lock->run('agent-'.$agent->id, fn () => app(SpaceTradersClient::class)->scope($work, priority: $priority));
     }
 
     public function preview(Agent $agent, string $ship, string $command, array $arguments, string $key): ShipAction
@@ -198,7 +198,9 @@ class ShipCommandExecutor
         $recon = $run?->strategy === 'gate_recon';
         $outbound = $recon && isset($action->arguments['recon_outbound_hash']);
         $refusedBeforeTransport = false;
-        $settlementScope = $run && (! empty($run->plan['sell_only']) || $action->command === 'sell');
+        $paced = $run && RequestBudget::agentCaps() !== [];
+        $settlementScope = $run && (! empty($run->plan['sell_only']) || $action->command === 'sell'
+            || ($paced && AutomationRunner::hasTradeCargo($run) && in_array($action->command, ['orbit', 'navigate', 'dock', 'refuel'], true)));
         $work = function () use ($agent, $action, $run, $prefetched, &$received, &$reserved, $recon, $outbound, &$refusedBeforeTransport) {
             try {
                 $this->gate->check($action->engine_session_id);
@@ -344,6 +346,8 @@ class ShipCommandExecutor
         };
         if ($settlementScope) {
             app(SpaceTradersClient::class)->scope($work, priority: 'settlement');
+        } elseif ($paced) {
+            app(SpaceTradersClient::class)->scope($work, priority: 'run');
         } else {
             $work();
         }
@@ -639,6 +643,9 @@ class ShipCommandExecutor
 
     public function reconcile(Agent $agent, ShipAction $action): ShipAction
     {
+        $budget = app(RequestBudget::class);
+        $priority = RequestBudget::agentCaps() !== [] || $budget->isDraining($agent->name) ? 'settlement' : 'critical';
+
         return $this->locked($agent, function () use ($agent, $action) {
             $action->refresh();
             if (! $action->review_required && ! in_array($action->state, [ActionState::Uncertain, ActionState::Sending], true)) {
@@ -649,9 +656,7 @@ class ShipCommandExecutor
             if (! $knownOutcome) {
                 $action->update(['state' => ActionState::Uncertain]);
             }
-            app(SpaceTradersClient::class)->scope(function () use ($agent) {
-                $this->sync->sync($agent, false, freshReset: true);
-            }, priority: 'settlement');
+            app(SpaceTradersClient::class)->scope(fn () => $this->sync->sync($agent, false, freshReset: true), priority: 'settlement');
             $fleet = $this->api->ships($agent);
             $ship = collect($fleet)->firstWhere('symbol', $action->ship_symbol);
             if ($ship) {
@@ -688,7 +693,7 @@ class ShipCommandExecutor
                 'outcome' => array_merge($action->outcome ?? [], $evidence), 'message' => $knownOutcome ? 'Confirmed transaction retained. Review the price discrepancy and fresh evidence before takeover.' : ($idempotentSettled ? 'Idempotent navigation state reconciled.' : 'Fresh state recorded. Outcome cannot be proven automatically; inspect evidence and acknowledge before takeover.'), 'settled_at' => now()]);
 
             return $action;
-        });
+        }, priority: $priority);
     }
 
     public function block(AutomationRun $run, string $reason): void

@@ -48,5 +48,6 @@ return [
     'host_tier2_4_per_minute' => 96,
     'host_tier1_reserve_per_minute' => 18,
     'agent_tier1_reserve_per_hour' => 300,
+    'request_budget_stage' => strtolower(trim((string) env('SPACETRADERS_REQUEST_BUDGET_STAGE', 'off'))),
     'agent_request_caps' => [],
 ];
