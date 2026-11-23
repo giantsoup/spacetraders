@@ -63,7 +63,7 @@ class AgentCommandController extends Controller
             $confirmed = $intent->state === ActionState::Confirmed;
             $intent->update(['state' => $confirmed ? ActionState::Confirmed : ActionState::Acknowledged, 'review_required' => false, 'message' => $confirmed ? 'Operator reviewed the confirmed transaction discrepancy.' : 'Operator acknowledged unresolved outcome; never replay this intent.',
                 'outcome' => array_merge($intent->outcome, ['operator_note' => $request->validated('note'), 'unresolved_adjustment' => ! $confirmed, 'reviewed_at' => now()->toIso8601String()])]);
-            AutomationRun::where('agent_id', $intent->agent_id)->whereNotNull('active_agent_id')->update(['state' => 'stopped', 'stop_requested_at' => now(), 'active_agent_id' => null, 'blocked_reason' => 'Unresolved adjustment acknowledged. New preview required.']);
+            AutomationRun::where('agent_id', $intent->agent_id)->where('reset_id', $intent->reset_id)->whereNotNull('active_agent_id')->update(['state' => 'stopped', 'stop_requested_at' => now(), 'active_agent_id' => null, 'blocked_reason' => 'Unresolved adjustment acknowledged. New preview required.']);
 
             return $intent;
         }));

@@ -113,6 +113,10 @@ class DispatchDueSpaceTraders extends Command
         $started = microtime(true);
         $timing['lags'] = [...$pre, ...$this->sweep(15)];
         $timing['handover_refresh_seconds'] = $director->handoverRefreshSeconds;
+        try {
+            $timing['engine_session_id'] = app(EngineGate::class)->session();
+        } catch (GameException) {
+        }
         $this->metrics($timing + ['dispatch' => microtime(true) - $started]);
         $this->watchGate();
 

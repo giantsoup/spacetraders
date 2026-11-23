@@ -370,7 +370,7 @@ class ArmDirectorTest extends TestCase
         $revision = app(CampaignPlaybook::class)->import($this->armBody());
         $this->artisan('campaign:arm', ['revision' => $revision->id, 'ship' => 'LOCAL-3', 'label' => 'T1b', '--hours' => 12, '--max-load' => 5000])->assertSuccessful();
         $grant = CampaignGrant::liveArms()->firstOrFail();
-        $this->assertSame(['label' => 'T1b', 'ship' => 'LOCAL-3', 'follow' => null, 'max_net_loss' => 50000, 'max_load_spend' => 5000, 'exposure_share' => 0.5], $grant->arm());
+        $this->assertSame(['label' => 'T1b', 'ship' => 'LOCAL-3', 'follow' => null, 'max_net_loss' => 50000, 'max_load_spend' => 5000, 'exposure_share' => 0.5, 'reset_id' => $this->agent->reset_id], $grant->arm());
         $this->assertNull($grant->slot);
         $this->assertTrue($grant->expires_at->between(now()->addHours(12)->subMinute(), now()->addHours(12)->addMinute()));
         $this->artisan('campaign:arms')->expectsOutputToContain('"label": "T1b"')->assertSuccessful();

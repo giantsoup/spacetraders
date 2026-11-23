@@ -687,7 +687,7 @@ class SpaceTradersApi
                 $agent->update(['connection_state' => 'invalid_credential']);
             }
             throw new GameException('SpaceTraders rejected the request, HTTP '.$response->status().'.', is_int($code) && $code > 0 ? $code : null,
-                ! $resetRejection && $method !== 'get' && ($response->serverError() || $response->status() === 429), max(5, (int) $response->header('Retry-After')));
+                ! $resetRejection && $method !== 'get' && ($response->serverError() || $response->status() === 429), max(5, (int) $response->header('Retry-After')), httpStatus: $response->status());
         }
         if (strlen($response->body()) > 2 * 1024 * 1024) {
             throw $method === 'get' ? new ReadStateUnavailable('SpaceTraders response exceeds the local state limit.') : new GameException('SpaceTraders response exceeds the local state limit.', uncertain: true);

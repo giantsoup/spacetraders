@@ -8,6 +8,11 @@ class HostLock
 
     private array $nested = [];
 
+    public function holds(string $key): bool
+    {
+        return isset($this->held[$key]);
+    }
+
     public function scoped(string $key, callable $work, float $seconds = 0): mixed
     {
         return $this->retry($key, function () use ($key, $work) {

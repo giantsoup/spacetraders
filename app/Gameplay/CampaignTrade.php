@@ -162,11 +162,11 @@ class CampaignTrade
         }
     }
 
-    public function mode(CampaignEpisode $episode, string $good, string $buyer, ?array $results = null): string
+    public function mode(CampaignEpisode $episode, string $good, string $buyer, ?array $results = null, ?float $minimum = null): string
     {
         $proof = null;
         $scaled = false;
-        $minimum = $episode->grant()->revision()->body['trade']['proof']['min_realized_ratio'];
+        $minimum ??= $episode->grant()->revision()->body['trade']['proof']['min_realized_ratio'];
         foreach ($results ?? $this->learningResults($episode) as $result) {
             // A losing load re-proves only its own good/buyer pair.
             if (! empty($result['standalone_recovery']) || $result['good'] !== $good || $result['buyer'] !== $buyer
@@ -330,7 +330,7 @@ class CampaignTrade
             'trailing_loads' => $recent->count(), 'below_floor' => $reasons !== [], 'reasons' => $reasons];
     }
 
-    public function decay(CampaignEpisode $episode, string $good, string $buyer): float
+    public function decay(CampaignEpisode $episode, string $good, string $buyer, ?float $default = null): float
     {
         $episodes = [$episode->id];
         if (FleetClaims::arm($episode->grant()) && $reference = app(FleetClaims::class)->reference($episode)) {
@@ -356,21 +356,21 @@ class CampaignTrade
             $previous = ['run' => $sale->automation_run_id, 'units' => $units, 'price' => $price];
         }
 
-        return $drops ? array_sum($drops) / count($drops) : $episode->grant()->revision()->body['trade']['lot']['default_batch_decay'];
+        return $drops ? array_sum($drops) / count($drops) : ($default ?? $episode->grant()->revision()->body['trade']['lot']['default_batch_decay']);
     }
 
-    public function rank(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array &$considered): array
+    public function rank(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array &$considered, bool $persist = true): array
     {
         $rules = $grant->revision()->body['trade'];
         $markets = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->orderBy('observed_at')->orderBy('id')->get()->keyBy('symbol');
         $pairs = app(OpportunityAssessor::class)->report($agent, 'trade', $ship['symbol'], true)['opportunities'];
         $state = $episode->state ?? [];
         $ranked = [];
-        $results = $this->learningResults($episode);
+        $results = $episode->exists ? $this->learningResults($episode) : [];
         $learning = [];
         $claims = app(FleetClaims::class);
         $arm = FleetClaims::arm($grant);
-        $taken = $arm || config('gameplay.campaign_claims', true) ? $claims->taken($episode, $ship['nav']['systemSymbol'] ?? null) : [];
+        $taken = $episode->exists && ($arm || config('gameplay.campaign_claims', true)) ? $claims->taken($episode, $ship['nav']['systemSymbol'] ?? null) : [];
         // A follower works only its leader's current pair, claims aside, and waits without one.
         if ($arm['follow'] ?? null) {
             $leader = $claims->leader($episode, $arm['follow']);
@@ -401,8 +401,8 @@ class CampaignTrade
             }
             $state['first_seen'][$key] ??= $bid['sellPrice'];
             try {
-                $learning[$key] ??= ['mode' => $this->mode($episode, $pair['good'], $pair['market'], $results),
-                    'decay' => $this->decay($episode, $pair['good'], $pair['market'])];
+                $learning[$key] ??= ['mode' => $this->mode($episode, $pair['good'], $pair['market'], $results, $rules['proof']['min_realized_ratio']),
+                    'decay' => $episode->exists ? $this->decay($episode, $pair['good'], $pair['market'], $rules['lot']['default_batch_decay']) : $rules['lot']['default_batch_decay']];
                 $projection = $this->projectPair($agent, $ship, $departure, $pair, $ask, $bid, $rules,
                     $grant->limits['run_max_minutes'] * 60, $learning[$key]['mode'], $learning[$key]['decay'], $exposure, (bool) $arm);
                 if (isset($projection['long_run'])) {
@@ -442,7 +442,9 @@ class CampaignTrade
                 array_unshift($ranked, $current);
             }
         }
-        $episode->update(['state' => $state]);
+        if ($persist) {
+            $episode->update(['state' => $state]);
+        }
         $best = ['best_margin_basis' => 'forecast', 'selection_basis' => 'conservative_score',
             'best_available_score' => $available['score'] ?? null, 'best_unclaimed_score' => $unclaimed['score'] ?? null, 'best_available' => $available['predicted_margin'] ?? null, 'best_available_key' => $available['key'] ?? null,
             'best_unclaimed' => $unclaimed['predicted_margin'] ?? null, 'best_unclaimed_key' => $unclaimed['key'] ?? null];
@@ -455,7 +457,7 @@ class CampaignTrade
     }
 
     public function projectPair(Agent $agent, array $ship, ?array $departure, array $pair, array $ask, array $bid,
-        array $rules, int $runMaxSeconds, string $mode, float $decay, float $exposure = INF, bool $arm = false, bool $localEarn = false): array
+        array $rules, int $runMaxSeconds, string $mode, float $decay, float $exposure = INF, bool $arm = false, bool $localEarn = false, ?int $cashAfterRecon = null): array
     {
         $key = $pair['good'].'@'.$pair['market'];
         $planned = $departure['ship'] ?? $ship;
@@ -479,7 +481,7 @@ class CampaignTrade
         $fuel = $costs['cycle_fuel_allowance'];
         $positionCosts = app(TradeFuelCost::class)->estimate($agent, $position['outbound_fuel'], [$ship['nav']['waypointSymbol'], $pair['source']], $position['refuel_ceiling']);
         $batches = $mode === 'first_scaled' ? $rules['lot']['first_scaled_max_buyer_batches'] : $rules['lot']['max_buyer_batches'];
-        $ceiling = max(0, $agent->credits - ReconMission::returnExposure($agent) - $refuel - max($outbound['refuel_ceiling'], $costs['fuel_safety_ceiling']));
+        $ceiling = max(0, ($cashAfterRecon ?? ($agent->credits - ReconMission::returnExposure($agent))) - $refuel - max($outbound['refuel_ceiling'], $costs['fuel_safety_ceiling']));
         $caps = ['hold' => $ship['cargo']['capacity'], 'buyer_batches' => $batches * $bid['tradeVolume']];
         $creditBound = 'credits';
         if ($mode === 'proof') {
@@ -534,7 +536,7 @@ class CampaignTrade
             $candidate['position_fuel_allowance'] = $positionCosts['cycle_fuel_allowance'];
         }
 
-        return ['candidate' => $candidate];
+        return ['candidate' => $candidate, 'position' => $position, 'at_source' => $atSource, 'outbound' => $outbound, 'return' => $return];
     }
 
     public function authorize(Agent $agent, AutomationRun $run, CampaignEpisode $episode): void

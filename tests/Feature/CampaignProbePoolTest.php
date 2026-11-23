@@ -899,7 +899,7 @@ class CampaignProbePoolTest extends TestCase
         }
     }
 
-    public function test_arrival_target_counts_other_in_flight_purchases_after_manual_probe_purchase(): void
+    public function test_purchase_slot_serializes_probe_runs_and_arrival_rechecks_the_fleet_target(): void
     {
         $this->editWorld(function (array &$world) {
             $world['ships'][1]['nav']['waypointSymbol'] = 'X1-TEST-YARDB';
@@ -913,25 +913,18 @@ class CampaignProbePoolTest extends TestCase
         $this->tickDirector();
         $this->tickDirector();
         $buys = AutomationRun::where('strategy', 'buy_probe')->whereNotNull('active_agent_id')->orderBy('id')->get();
-        $this->assertCount(2, $buys);
+        $this->assertCount(1, $buys);
 
-        // An external manual purchase fills one of the two remaining slots while both runs are active.
+        // Ships acquired outside this app still count at arrival.
         $this->editWorld(function (array &$world) {
             $world['ships'][] = $this->probeShip('LOCAL-4', 'X1-TEST-YARDB');
+            $world['ships'][] = $this->probeShip('LOCAL-5', 'X1-TEST-YARDB');
         });
         app(AgentSynchronizer::class)->sync($this->agent);
         $this->runToCompletion($buys[0]);
         $this->assertSame('blocked', $buys[0]->fresh()->state->value);
         $this->assertStringContainsString('Probe target', $buys[0]->fresh()->blocked_reason);
         $this->assertSame(0, ShipAction::where('command', 'buy_ship')->count());
-
-        // Once the first run releases its slot, the other run can buy exactly the final probe.
-        app(AutomationRunner::class)->stop($buys[0]);
-        app(AutomationRunner::class)->advance($buys[0]->id);
-        $this->runToCompletion($buys[1]);
-        $this->assertSame('completed', $buys[1]->fresh()->state->value, $buys[1]->fresh()->blocked_reason ?? '');
-        $this->assertSame(4, app(CampaignProbeBootstrap::class)->ownedProbeCount($this->agent->fresh()));
-        $this->assertSame(1, ShipAction::where('command', 'buy_ship')->count());
     }
 
     public function test_arrival_price_spike_blocks_and_backs_off_shipyard(): void

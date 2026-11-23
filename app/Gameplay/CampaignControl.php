@@ -2,15 +2,19 @@
 
 namespace App\Gameplay;
 
+use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\CampaignRevision;
+use App\Models\ReconMission;
 use App\Models\Ship;
+use App\Models\ShipAction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class CampaignControl
@@ -22,6 +26,9 @@ class CampaignControl
     {
         return app(HostLock::class)->scoped('campaign', function () use ($revision, $user, $expires, $replacement) {
             app(CampaignPlaybook::class)->validate($revision->body);
+            if (isset($revision->body['fleet']['auto_arm'])) {
+                $this->armRevision($revision);
+            }
             $symbol = strtoupper((string) $revision->body['agent']['symbol']);
             $current = CampaignGrant::primaryFor($user->id, $symbol)->first();
             if (isset($revision->body['trade']['local_earn']) && $current) {
@@ -39,7 +46,7 @@ class CampaignControl
                 throw new GameException('Local Earn approval requires an Earn-first revision and an explicit expiry.');
             }
 
-            return DB::transaction(function () use ($revision, $user, $expires, $symbol) {
+            $approve = fn () => DB::transaction(function () use ($revision, $user, $expires, $symbol) {
                 app(CampaignPlaybook::class)->validate($revision->body);
                 CampaignGrant::pendingFor($user->id, $symbol)->get()->each(fn ($grant) => $grant->update(['slot' => null, 'superseded_at' => now()]));
                 $current = CampaignGrant::primaryFor($user->id, $symbol)->first();
@@ -53,6 +60,9 @@ class CampaignControl
 
                 return $grant;
             });
+            $agent = $this->agent($user->id, $symbol);
+
+            return $agent ? app(HostLock::class)->retry('agent-'.$agent->id, $approve) : $approve();
         }, 15);
     }
 
@@ -72,48 +82,172 @@ class CampaignControl
             throw new GameException('Arm needs a short label, a nonnegative loss stop and load cap, and an exposure share in (0, 1].');
         }
 
-        return app(HostLock::class)->retry('campaign', fn () => DB::transaction(function () use ($revision, $user, $arm, $expires) {
-            app(CampaignPlaybook::class)->validate($revision->body);
-            if (isset($revision->body['trade']['local_earn'])) {
-                throw new GameException('Local Earn is C0-specific and cannot authorize an arm.');
+        return app(HostLock::class)->scoped('campaign', function () use ($revision, $user, $arm, $expires) {
+            $agent = $this->agent($user->id, $revision->body['agent']['symbol'])
+                ?? throw new GameException('Ship '.$arm['ship'].' is not in the agent\'s synced fleet.');
+
+            return app(HostLock::class)->scoped('agent-'.$agent->id, fn () => DB::transaction(
+                fn () => $this->createArm($revision, $agent->refresh(), $arm, $expires)
+            ));
+        }, 15);
+    }
+
+    public function agent(int $user, string $symbol): ?Agent
+    {
+        return Agent::where('user_id', $user)->where('name', strtoupper($symbol))->unarchived()->whereNotNull('reset_id')->latest('id')->first();
+    }
+
+    private function armRevision(CampaignRevision $revision): CampaignRevision
+    {
+        $hash = strtolower($revision->body['fleet']['auto_arm']['revision_hash']);
+        $arm = CampaignRevision::where('content_hash', $hash)->first()
+            ?? throw new GameException('Import the pinned auto-arm revision before approval.');
+        app(CampaignPlaybook::class)->validate($arm->body);
+        if (! hash_equals($hash, hash('sha256', $arm->source)) || isset($arm->body['trade']['local_earn']) || $arm->body['agent']['symbol'] !== $revision->body['agent']['symbol']) {
+            throw new GameException('Auto-arm revision must match its imported hash and authorize ordinary trade for the same agent.');
+        }
+
+        return $arm;
+    }
+
+    private function createArm(CampaignRevision $revision, Agent $agent, array $arm, CarbonImmutable $expires, ?string $prefix = null): CampaignGrant
+    {
+        app(CampaignPlaybook::class)->validate($revision->body);
+        if (isset($revision->body['trade']['local_earn'])) {
+            throw new GameException('Local Earn is C0-specific and cannot authorize an arm.');
+        }
+        $symbol = $revision->body['agent']['symbol'];
+        $schedule = CampaignDirector::cachedSchedule();
+        $lock = app(HostLock::class);
+        if (! $lock->holds('campaign') || ! $lock->holds('agent-'.$agent->id) || ! $agent->reset_id || $agent->isArchived()
+            || $agent->name !== $symbol || ($schedule && $agent->reset_id !== $schedule['reset_id']) || ! $expires->isFuture()) {
+            throw new GameException('Arm authority requires the current agent and reset under both locks.');
+        }
+        $history = CampaignGrant::where('user_id', $agent->user_id)->where('agent_symbol', $symbol)->whereNotNull('limits->arm')->get();
+        $resets = $history->mapWithKeys(fn (CampaignGrant $grant) => [$grant->id => CampaignDirector::armReset($grant, $agent->reset_id, $schedule)]);
+        $live = $history->filter(fn (CampaignGrant $grant) => ! $grant->revoked_at && ! $grant->superseded_at && (! $grant->expires_at || $grant->expires_at->isFuture()));
+        $current = $live->filter(fn (CampaignGrant $grant) => $resets[$grant->id] === $agent->reset_id);
+        $reserved = $live->filter(fn (CampaignGrant $grant) => in_array($resets[$grant->id], [$agent->reset_id, null], true));
+        if ($prefix !== null) {
+            $maxSuffix = $history->filter(fn (CampaignGrant $grant) => $resets[$grant->id] === $agent->reset_id)
+                ->map(fn (CampaignGrant $grant) => preg_match('/\A'.preg_quote($prefix, '/').'(\d+)\z/', $grant->arm()['label'], $parts) ? (int) $parts[1] : 0)->max() ?? 0;
+            $suffix = $maxSuffix + 1;
+            while ($reserved->contains(fn (CampaignGrant $grant) => $grant->arm()['label'] === $prefix.$suffix)) {
+                $suffix++;
             }
-            $symbol = strtoupper((string) $revision->body['agent']['symbol']);
-            $live = CampaignGrant::liveArms($symbol)->where('user_id', $user->id)->get();
-            if ($live->contains(fn ($grant) => $grant->arm()['label'] === $arm['label'])) {
-                throw new GameException('Arm label '.$arm['label'].' is already live.');
-            }
-            if ($live->contains(fn ($grant) => $grant->arm()['ship'] === $arm['ship'])) {
-                throw new GameException('Ship '.$arm['ship'].' already belongs to a live arm.');
-            }
-            if ($arm['follow'] !== null && ($arm['follow'] === $arm['label'] || ! $live->contains(fn ($grant) => $grant->arm()['label'] === $arm['follow']))) {
-                throw new GameException('Follow label '.$arm['follow'].' is not a live arm.');
-            }
-            $agent = $user->agents()->where('name', $symbol)->unarchived()->latest('id')->first();
-            if (! $agent || ! Ship::where('agent_id', $agent->id)->where('symbol', $arm['ship'])->exists()) {
-                throw new GameException('Ship '.$arm['ship'].' is not in the agent\'s synced fleet.');
-            }
-            $c0 = CampaignGrant::primaryFor($user->id, $symbol)->first();
-            $roles = Ship::where('agent_id', $agent->id)->get()->filter(fn ($ship) => in_array($ship->snapshot['registration']['role'] ?? null, ['COMMAND', 'SATELLITE', 'PROBE'], true)
-                || ($ship->snapshot['frame']['symbol'] ?? null) === 'FRAME_PROBE')->pluck('symbol')->all();
-            if (in_array($arm['ship'], $roles, true)) {
-                throw new GameException('Ship '.$arm['ship'].' is a role ship of the main campaign.');
-            }
-            foreach ($c0 ? CampaignEpisode::where('campaign_grant_id', $c0->id)->latest('id')->limit(1)->get() : [] as $episode) {
-                if (in_array($arm['ship'], app(CampaignFleet::class)->symbols($episode), true)) {
-                    throw new GameException('Ship '.$arm['ship'].' is a role ship of the main campaign.');
+            $arm['label'] = $prefix.$suffix;
+        }
+        if ($reserved->contains(fn (CampaignGrant $grant) => $grant->arm()['label'] === $arm['label'])) {
+            throw new GameException('Arm label '.$arm['label'].' is already live.');
+        }
+        if ($reserved->contains(fn (CampaignGrant $grant) => $grant->arm()['ship'] === $arm['ship'])) {
+            throw new GameException('Ship '.$arm['ship'].' already belongs to a live arm.');
+        }
+        if (($arm['follow'] ?? null) !== null && ($arm['follow'] === $arm['label'] || ! $current->contains(fn (CampaignGrant $grant) => $grant->arm()['label'] === $arm['follow']))) {
+            throw new GameException('Follow label '.$arm['follow'].' is not a live arm.');
+        }
+        $ship = Ship::where('agent_id', $agent->id)->where('symbol', $arm['ship'])->first();
+        if (! $ship) {
+            throw new GameException('Ship '.$arm['ship'].' is not in the agent\'s synced fleet.');
+        }
+        $fleet = app(CampaignFleet::class);
+        $primary = CampaignGrant::primaryFor($agent->user_id, $symbol)->first();
+        $episode = $primary ? $this->currentEpisode($primary, $agent) : null;
+        if ($fleet->isProbe($ship->snapshot) || ($ship->snapshot['registration']['role'] ?? null) === 'COMMAND'
+            || ($episode && in_array($ship->symbol, $fleet->symbols($episode, pin: false), true))) {
+            throw new GameException('Ship '.$arm['ship'].' is a role ship of the main campaign.');
+        }
+        $arm['reset_id'] = $agent->reset_id;
+        $grant = CampaignGrant::create(['campaign_revision_id' => $revision->id, 'revision_hash' => $revision->content_hash,
+            'user_id' => $agent->user_id, 'agent_symbol' => $symbol, 'limits' => $revision->body['limits'] + ['arm' => $arm], 'expires_at' => $expires, 'slot' => null]);
+        $this->event($grant, null, 'approval', ['revision' => $revision->id, 'agent_symbol' => $symbol, 'arm' => $arm]);
+
+        return $grant;
+    }
+
+    public function autoArmCandidates(CampaignEpisode $episode, Agent $agent, bool $includeUnresolvedConflicts = false): Collection
+    {
+        $revision = $episode->getRelationValue('policyRevision') ?? CampaignGrant::find($episode->campaign_grant_id)?->revision();
+        $policy = $revision?->body['fleet']['auto_arm'] ?? null;
+        $command = app(CampaignFleet::class)->role($episode, 'command', pin: false);
+        if (! $policy || ! $command || $episode->reset_id !== $agent->reset_id) {
+            return collect();
+        }
+        $schedule = CampaignDirector::cachedSchedule();
+        $grants = CampaignGrant::where('user_id', $agent->user_id)->where('agent_symbol', $agent->name)->whereNotNull('limits->arm')->get();
+        $assigned = $grants->filter(function (CampaignGrant $grant) use ($schedule, $agent, $includeUnresolvedConflicts) {
+            $reset = CampaignDirector::armReset($grant, $agent->reset_id, $schedule);
+            $live = ! $grant->revoked_at && ! $grant->superseded_at;
+
+            return ($reset === $agent->reset_id && ($live || ($grant->arm()['automatic'] ?? false)))
+                || ($reset === null && $live && ! $includeUnresolvedConflicts);
+        })->map(fn (CampaignGrant $grant) => $grant->arm()['ship'])->all();
+        $runs = AutomationRun::where('active_agent_id', $agent->id)->where('reset_id', $agent->reset_id)->pluck('ship_symbol')->all();
+        $actions = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereIn('state', ['pending', 'sending', 'uncertain'])->pluck('ship_symbol')->all();
+        $buy = app(CampaignProbeBootstrap::class);
+        $mismatched = $buy->actions($agent)->where(fn ($query) => $query->where('review_required', true)->orWhere('outcome->configuration_mismatch', true))
+            ->get()->map(CampaignProbeBootstrap::deliveredShip(...))->all();
+        $excluded = array_merge([$command['symbol']], $assigned, $runs, $actions, $mismatched);
+        $fleet = app(CampaignFleet::class);
+
+        return Ship::where('agent_id', $agent->id)->whereNull('stationed_waypoint')->orderBy('symbol')->get()
+            ->filter(fn (Ship $ship) => ! in_array($ship->symbol, $excluded, true)
+                && in_array($ship->snapshot['frame']['symbol'] ?? null, $policy['frames'], true) && ! $fleet->isProbe($ship->snapshot)
+                && $ship->snapshot['nav']['systemSymbol'] === $command['nav']['systemSymbol'] && $ship->snapshot['nav']['status'] !== 'IN_TRANSIT'
+                && $ship->snapshot['cargo']['units'] === 0 && ! ReconMission::holds($agent, $ship->symbol) && ! $buy->plausibleUnattributed($agent, $ship->snapshot));
+    }
+
+    public function autoArm(CampaignGrant $primary, CampaignEpisode $episode, Agent $agent): void
+    {
+        $lock = app(HostLock::class);
+        if (! $lock->holds('campaign') || ! $lock->holds('agent-'.$agent->id)) {
+            throw new GameException('Auto-arm requires the campaign and agent locks.');
+        }
+        $policy = $primary->revision()->body['fleet']['auto_arm'] ?? null;
+        if (! $policy || CampaignSaturation::authorityReason($primary->refresh(), $episode->refresh(), $agent->refresh()) !== null) {
+            return;
+        }
+        foreach ($this->autoArmCandidates($episode, $agent, includeUnresolvedConflicts: true) as $ship) {
+            try {
+                DB::transaction(function () use ($primary, $episode, $agent, $policy, $ship) {
+                    if (CampaignSaturation::authorityReason($primary->refresh(), $episode->refresh(), $agent->refresh()) !== null
+                        || ! $this->autoArmCandidates($episode, $agent, includeUnresolvedConflicts: true)->contains('id', $ship->id)) {
+                        return;
+                    }
+                    $revision = $this->armRevision($primary->revision());
+                    $purchase = app(CampaignProbeBootstrap::class)->actions($agent)->where('arguments->shipType', CampaignHaulerPurchase::TYPE)
+                        ->whereIn('state', ['confirmed', 'acknowledged'])
+                        ->whereIn('automation_run_id', AutomationRun::where('strategy', 'buy_hauler')->where('plan_version', 7)->select('id'))->get()
+                        ->first(fn (ShipAction $action) => CampaignProbeBootstrap::deliveredShip($action) === $ship->symbol);
+                    $terms = ['ship' => $ship->symbol, 'follow' => null, 'max_net_loss' => $policy['max_net_loss'], 'max_load_spend' => null,
+                        'exposure_share' => $policy['exposure_share'], 'automatic' => true, 'purchase_action_id' => $purchase?->id];
+                    $expires = ($primary->expires_at ?? $episode->next_reset_at)->min($episode->next_reset_at);
+                    $grant = $this->createArm($revision, $agent, $terms, $expires, $policy['label_prefix']);
+                    $this->event($primary, $episode, 'auto_arm', ['grant_id' => $grant->id, 'ship' => $ship->symbol, 'label' => $grant->arm()['label'],
+                        'purchase_action_id' => $purchase?->id, 'revision_hash' => $revision->content_hash]);
+                    $state = $episode->state ?? [];
+                    if (isset($state['auto_arm_failures'][$ship->symbol])) {
+                        unset($state['auto_arm_failures'][$ship->symbol]);
+                        $episode->update(['state' => $state]);
+                    }
+                });
+            } catch (\Throwable $exception) {
+                $reason = $exception instanceof GameException ? $exception->getMessage() : 'Auto-arm transaction failed.';
+                $state = $episode->refresh()->state ?? [];
+                if (($state['auto_arm_failures'][$ship->symbol] ?? null) !== $reason) {
+                    DB::transaction(function () use ($episode, $primary, $ship, $reason, $state) {
+                        $state['auto_arm_failures'][$ship->symbol] = $reason;
+                        $episode->update(['state' => $state]);
+                        $this->event($primary, $episode, 'auto_arm_conflict', ['ship' => $ship->symbol, 'reason' => $reason]);
+                    });
                 }
             }
-            $grant = CampaignGrant::create(['campaign_revision_id' => $revision->id, 'revision_hash' => $revision->content_hash,
-                'user_id' => $user->id, 'agent_symbol' => $symbol, 'limits' => $revision->body['limits'] + ['arm' => $arm], 'expires_at' => $expires, 'slot' => null]);
-            $this->event($grant, null, 'approval', ['revision' => $revision->id, 'agent_symbol' => $symbol, 'arm' => $arm]);
-
-            return $grant;
-        }));
+        }
     }
 
     public function resumeArm(CampaignGrant $grant): void
     {
-        app(HostLock::class)->retry('campaign', function () use ($grant) {
+        app(HostLock::class)->scoped('campaign', function () use ($grant) {
             $grant->refresh();
             if (! $grant->arm() || $grant->revoked_at || $grant->superseded_at) {
                 throw new GameException('Not a live arm grant.');
@@ -145,14 +279,18 @@ class CampaignControl
         });
     }
 
-    public function revokeArm(CampaignGrant $grant): void
+    public function revokeArm(CampaignGrant $grant, bool $ackPacing = false): void
     {
-        app(HostLock::class)->retry('campaign', fn () => DB::transaction(function () use ($grant) {
+        app(HostLock::class)->scoped('campaign', fn () => DB::transaction(function () use ($grant, $ackPacing) {
             $grant->refresh();
-            if (! $grant->arm() || $grant->revoked_at) {
-                return;
+            if ($ackPacing) {
+                $action = ShipAction::find($grant->arm()['purchase_action_id'] ?? null)
+                    ?? throw new GameException('The exact arm grant has no linked automatic hauler purchase.');
+                app(CampaignHaulerPurchase::class)->acknowledgePacing($action, User::findOrFail($grant->user_id), arm: $grant,
+                    revoke: fn () => $grant->revoked_at ? null : $this->close($grant));
+            } elseif ($grant->arm() && ! $grant->revoked_at) {
+                $this->close($grant);
             }
-            $this->close($grant);
         }));
     }
 
@@ -170,40 +308,87 @@ class CampaignControl
 
     public function busy(CampaignGrant $grant): bool
     {
-        $episodes = CampaignEpisode::where('campaign_grant_id', $grant->id)->get();
-        if (AutomationRun::whereIn('campaign_episode_id', $episodes->pluck('id'))->whereNotNull('active_agent_id')->exists()) {
-            return true;
-        }
-        foreach ($episodes as $episode) {
-            if (app(CampaignFleet::class)->pending($episode)->exists()) {
-                return true;
+        return $this->busyReason($grant, includePause: false) !== null;
+    }
+
+    public function currentEpisode(CampaignGrant $grant, Agent $agent): ?CampaignEpisode
+    {
+        return CampaignEpisode::where('campaign_grant_id', $grant->id)->where('agent_id', $agent->id)
+            ->where('reset_id', $agent->reset_id)->whereNull('closed_at')->latest('id')->first();
+    }
+
+    public function busyReason(CampaignGrant $grant, bool $includePause = true): ?array
+    {
+        $agent = $this->agent($grant->user_id, $grant->resolvedAgentSymbol());
+        if ($agent) {
+            $episode = $this->currentEpisode($grant, $agent) ?? new CampaignEpisode([
+                'campaign_grant_id' => $grant->id, 'agent_id' => $agent->id, 'reset_id' => $agent->reset_id,
+            ]);
+            $symbols = app(CampaignFleet::class)->symbols($episode, pin: false);
+            foreach (Ship::where('agent_id', $agent->id)->whereIn('symbol', $symbols)->orderBy('symbol')->get() as $ship) {
+                if (($ship->snapshot['cargo']['units'] ?? 0) > 0) {
+                    return ['reason' => 'cargo', 'ship' => $ship->symbol, 'operator_settlement_required' => ! $grant->available()];
+                }
+                if (($ship->snapshot['nav']['status'] ?? null) === 'IN_TRANSIT') {
+                    $arrival = $ship->snapshot['nav']['route']['arrival'] ?? null;
+
+                    return ['reason' => $arrival && CarbonImmutable::parse($arrival)->lte(now()) ? 'awaiting_arrival_evidence' : 'transit',
+                        'ship' => $ship->symbol, 'arrival' => $arrival];
+                }
+            }
+            $purchases = app(CampaignProbeBootstrap::class);
+            if ($action = $purchases->actions($agent)->whereIn('state', ['pending', 'sending', 'uncertain'])->first()) {
+                return ['reason' => 'unsettled_purchase', 'action_id' => $action->id, 'ship' => $action->ship_symbol];
+            }
+            if ($run = $purchases->activeRuns($agent)->first()) {
+                return ['reason' => 'unsettled_purchase', 'run_id' => $run->id, 'ship' => $run->ship_symbol];
+            }
+            if ($run = AutomationRun::where('active_agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+                ->where(fn ($query) => $query->whereIn('ship_symbol', $symbols)
+                    ->when($episode->exists, fn ($query) => $query->orWhere('campaign_episode_id', $episode->id)))->first()) {
+                return ['reason' => 'role_work', 'run_id' => $run->id, 'ship' => $run->ship_symbol];
+            }
+            if ($action = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereIn('state', ['pending', 'sending', 'uncertain'])
+                ->where(fn ($query) => $query->whereIn('ship_symbol', $symbols)
+                    ->when($episode->exists, fn ($query) => $query->orWhereIn('automation_run_id', AutomationRun::where('campaign_episode_id', $episode->id)->select('id'))))->first()) {
+                return ['reason' => 'role_work', 'action_id' => $action->id, 'ship' => $action->ship_symbol];
             }
         }
+        if ($includePause && ($grant->isDraining() || $grant->paused_at) && $grant->pause_reason !== 'grant_expired' && ! $grant->expires_at?->isPast()) {
+            return ['reason' => $grant->isDraining() ? 'draining' : 'paused', 'pause_reason' => $grant->pause_reason];
+        }
 
-        return false;
+        return null;
     }
 
     public function activatePending(?int $userId = null, ?string $agentSymbol = null): void
     {
-        DB::transaction(function () use ($userId, $agentSymbol) {
-            $pendings = CampaignGrant::where('slot', 2)
-                ->when($userId !== null, fn ($q) => $q->where('user_id', $userId))
-                ->when($agentSymbol !== null && $agentSymbol !== '', fn ($q) => $q->where('agent_symbol', strtoupper($agentSymbol)))
-                ->orderBy('id')
-                ->get();
-            foreach ($pendings as $pending) {
-                $symbol = $pending->resolvedAgentSymbol();
+        $pendings = CampaignGrant::where('slot', 2)
+            ->when($userId !== null, fn ($q) => $q->where('user_id', $userId))
+            ->when($agentSymbol !== null && $agentSymbol !== '', fn ($q) => $q->where('agent_symbol', strtoupper($agentSymbol)))
+            ->orderBy('id')->get();
+        foreach ($pendings as $pending) {
+            $symbol = $pending->resolvedAgentSymbol();
+            $agent = $this->agent($pending->user_id, $symbol);
+            $activate = fn () => DB::transaction(function () use ($pending, $symbol) {
                 $current = CampaignGrant::primaryFor($pending->user_id, $symbol)->first();
-                if ($current && ((($current->isDraining() || $current->paused_at) && $current->pause_reason !== 'grant_expired' && ! $current->expires_at?->isPast()) || $this->busy($current))) {
-                    continue;
+                if ($pending->refresh()->slot !== 2 || ($current && $this->busyReason($current))) {
+                    return;
                 }
                 if ($current) {
                     $this->supersede($current);
                 }
                 $pending->update(['slot' => 1]);
                 $this->event($pending, null, 'activated', ['agent_symbol' => $symbol]);
+            });
+            try {
+                $agent ? app(HostLock::class)->run('agent-'.$agent->id, $activate) : $activate();
+            } catch (GameException $exception) {
+                if ($exception->retryAfter === 0) {
+                    throw $exception;
+                }
             }
-        });
+        }
     }
 
     private function supersede(CampaignGrant $grant): void
@@ -398,7 +583,9 @@ class CampaignControl
             if ($previous && $previous->kind === $kind && $previous->campaign_episode_id === $episode?->id && ($kind === 'wait' ? ($previous->data['reason'] ?? null) === ($data['reason'] ?? null)
                 : ($previous->data['choice'] ?? null) === ($data['choice'] ?? null) && ($previous->data['rejections'] ?? []) === $data['rejections']
                     && ($previous->data['run_id'] ?? null) === ($data['run_id'] ?? null)
-                    && ($previous->data['local_earn'] ?? null) === ($data['local_earn'] ?? null))) {
+                    && ($previous->data['local_earn'] ?? null) === ($data['local_earn'] ?? null)
+                    && ($previous->data['saturation_reasons'] ?? null) === ($data['saturation_reasons'] ?? null)
+                    && ($previous->data['saturation']['hold']['reason'] ?? null) === ($data['saturation']['hold']['reason'] ?? null))) {
                 return $previous;
             }
         }

@@ -30,7 +30,7 @@ class CampaignPlaybook
 
     public function validate(array $body): void
     {
-        $this->keys($body, ['name', 'version', 'agent', 'limits', 'trade', 'probes', 'phases', 'predictions']);
+        $this->keys($body, ['name', 'version', 'agent', 'limits', 'trade', 'probes', 'fleet', 'phases', 'predictions']);
         $this->keys($body['agent'] ?? null, ['symbol', 'faction']);
         $this->keys($body['limits'] ?? null, ['reserve_credits', 'fuel_reserve', 'run_max_minutes']);
         $this->keys($body['trade'] ?? null, ['proof', 'lot', 'losses', 'switch', 'quote_max_age_seconds', 'local_earn']);
@@ -40,7 +40,7 @@ class CampaignPlaybook
         $this->keys($body['trade']['switch'] ?? null, ['bid_below_first_seen', 'better_pair_ratio']);
         if (array_key_exists('probes', $body)) {
             $probes = $body['probes'];
-            $this->keys($probes, ['target', 'max_price', 'min_working_capital', 'pool']);
+            $this->keys($probes, ['target', 'max_price', 'min_working_capital', 'pool', 'mesh']);
             foreach (['target' => [1, 10], 'max_price' => [1, 1000000], 'min_working_capital' => [0, 10000000]] as $key => [$minimum, $maximum]) {
                 if (! is_int($probes[$key] ?? null) || $probes[$key] < $minimum || $probes[$key] > $maximum) {
                     throw new GameException('Invalid probes policy: '.$key);
@@ -49,6 +49,20 @@ class CampaignPlaybook
             if (array_key_exists('pool', $probes) && ! is_bool($probes['pool'])) {
                 throw new GameException('Invalid probes policy: pool');
             }
+        }
+        if (array_key_exists('mesh', $body['probes'] ?? [])) {
+            $mesh = $body['probes']['mesh'];
+            $this->integerPolicy($mesh, [
+                'max_probes' => [1, 64], 'base' => [1, 64], 'per_trader' => [0, 64], 'read_interval_seconds' => [1, 3600],
+                'demand_read_interval_seconds' => [1, 3599], 'reads_per_pass' => [1, 4], 'dispatches_per_pass' => [1, 6],
+            ]);
+            if (($body['probes']['pool'] ?? null) !== true || $mesh['demand_read_interval_seconds'] > $mesh['read_interval_seconds']
+                || $mesh['demand_read_interval_seconds'] >= ($body['trade']['quote_max_age_seconds'] ?? 180)) {
+                throw new GameException('Mesh requires a probe pool and a demand refresh interval within quote lifetime and background cadence.');
+            }
+        }
+        if (array_key_exists('fleet', $body)) {
+            $this->validateFleet($body['fleet'], isset($body['probes']['mesh']));
         }
         if (array_key_exists('local_earn', $body['trade'])) {
             $policy = $body['trade']['local_earn'];
@@ -120,6 +134,56 @@ class CampaignPlaybook
             if (isset($prediction['gte']) === isset($prediction['lte']) || ($prediction['metric'] === 'credits' && ! isset($prediction['at_hours']))) {
                 throw new GameException('Predictions require exactly one threshold and timed credit predictions require at_hours.');
             }
+        }
+    }
+
+    private function integerPolicy(mixed $policy, array $ranges, array $other = []): void
+    {
+        $this->keys($policy, [...array_keys($ranges), ...$other]);
+        foreach ($ranges as $key => [$min, $max]) {
+            if (! is_int($policy[$key] ?? null) || $policy[$key] < $min || $policy[$key] > $max) {
+                throw new GameException('Invalid fleet policy: '.$key);
+            }
+        }
+    }
+
+    private function validateFleet(mixed $fleet, bool $mesh): void
+    {
+        $this->keys($fleet, ['haulers', 'auto_arm']);
+        if (! $mesh) {
+            throw new GameException('Fleet saturation requires a probe mesh.');
+        }
+        $haulers = $fleet['haulers'] ?? null;
+        $ratios = ['payback_fraction', 'max_idle_share', 'min_hub_coverage', 'request_headroom'];
+        $this->integerPolicy($haulers, [
+            'max_haulers' => [1, 16], 'max_price' => [1, 600000], 'max_concurrent_purchases' => [1, 1],
+            'min_working_capital' => [0, 10000000], 'working_capital_per_trader' => [0, 10000000],
+            'assumed_net_per_hour' => [1, 10000000], 'min_unclaimed_score' => [1, 10000000], 'min_marginal_net_per_hour' => [1, 10000000],
+            'stop_hours_before_reset' => [1, 168],
+        ], ['ship_type', 'scheduler', ...$ratios]);
+        if (($haulers['ship_type'] ?? null) !== 'SHIP_LIGHT_HAULER') {
+            throw new GameException('Only SHIP_LIGHT_HAULER is supported for fleet expansion.');
+        }
+        foreach ($ratios as $key) {
+            $this->ratio($haulers[$key] ?? null, $key);
+        }
+        $this->integerPolicy($haulers['scheduler'] ?? null, [
+            'max_idle_arm_wait_seconds' => [1, 3600], 'max_dispatch_lag_seconds' => [1, 1800], 'max_queue_depth' => [1, 1000],
+        ]);
+        $arm = $fleet['auto_arm'] ?? null;
+        $this->integerPolicy($arm, ['max_net_loss' => [0, 10000000]], ['revision_hash', 'label_prefix', 'frames', 'exposure_share']);
+        if (! is_string($arm['revision_hash'] ?? null) || ! preg_match('/\A[0-9a-fA-F]{64}\z/', $arm['revision_hash'])
+            || ! is_string($arm['label_prefix'] ?? null) || ! preg_match('/\A[A-Z]{1,6}\z/', $arm['label_prefix']) || $arm['label_prefix'] === 'C'
+            || ($arm['frames'] ?? null) !== ['FRAME_LIGHT_FREIGHTER']) {
+            throw new GameException('Invalid auto-arm revision hash, label prefix or frame allowlist.');
+        }
+        $this->ratio($arm['exposure_share'] ?? null, 'exposure_share');
+    }
+
+    private function ratio(mixed $value, string $key): void
+    {
+        if ((! is_int($value) && ! is_float($value)) || $value <= 0 || $value > 1) {
+            throw new GameException('Invalid fleet policy ratio: '.$key);
         }
     }
 

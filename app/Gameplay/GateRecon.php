@@ -164,6 +164,7 @@ class GateRecon
                 || OpportunityEvaluator::equipment($ship) !== $mission->terms['equipment']) {
                 throw new GameException('Balance, cargo or equipment changed. Reconcile before starting.');
             }
+            app(ShipCommandExecutor::class)->assertConfigurationReviewed($agent, $ship['symbol']);
             $this->transition($mission, ['state' => $mode, 'hold' => null]);
             $plan = ['strategy' => 'gate_recon', 'mission_id' => $mission->id, 'terms_hash' => $mission->terms_hash, 'outbound_basis' => $mission->outboundBasis(),
                 'reserve' => 0, 'max_spend' => $authority, 'max_loss' => $authority, 'minutes' => max(1, (int) now()->diffInMinutes($deadline)), 'return_deadline' => $deadline->toIso8601String(),

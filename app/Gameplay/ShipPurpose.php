@@ -31,7 +31,7 @@ class ShipPurpose
             ?? CampaignGrant::where('user_id', $agent->user_id)->where('agent_symbol', $symbol)->latest('id')->first();
         $episode = $grant
             ? CampaignEpisode::where('campaign_grant_id', $grant->id)
-                ->where('agent_id', $agent->id)
+                ->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
                 ->whereNull('closed_at')
                 ->latest('id')
                 ->first()
@@ -43,11 +43,11 @@ class ShipPurpose
             ->keyBy('ship_symbol');
 
         $arms = [];
-        foreach (CampaignGrant::liveArms($symbol)->where('user_id', $agent->user_id)->get() as $armGrant) {
+        foreach (app(CampaignFleet::class)->currentArms($agent) as $armGrant) {
             $arm = $armGrant->arm();
             if (! empty($arm['ship']) && ! empty($arm['label'])) {
                 $armEpisode = CampaignEpisode::where('campaign_grant_id', $armGrant->id)
-                    ->where('agent_id', $agent->id)
+                    ->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
                     ->whereNull('closed_at')
                     ->latest('id')
                     ->first();
@@ -84,29 +84,7 @@ class ShipPurpose
         $fleet = app(CampaignFleet::class);
         $commandSymbol = $episode?->state['role_ships']['command']
             ?? ($episode ? $ships->first(fn ($ship) => ($ship->snapshot['registration']['role'] ?? null) === 'COMMAND')?->symbol : null);
-        $probeSymbols = [];
-        if ($episode) {
-            if ($fleet->poolEnabled($episode)) {
-                $homeSystem = $ships->firstWhere('symbol', $commandSymbol)?->snapshot['nav']['systemSymbol'] ?? null;
-                foreach ($ships as $ship) {
-                    if ($fleet->isProbe($ship->snapshot)
-                        && empty($ship->stationed_waypoint)
-                        && ! isset($arms[$ship->symbol])
-                        && ! isset($reconShips[$ship->symbol])
-                        && ($homeSystem === null || ($ship->snapshot['nav']['systemSymbol'] ?? null) === $homeSystem)) {
-                        $probeSymbols[] = $ship->symbol;
-                    }
-                }
-            } elseif (isset($episode->state['role_ships']['probe'])) {
-                $probeSymbols[] = $episode->state['role_ships']['probe'];
-            } else {
-                $fallbackProbe = $ships->first(fn ($ship) => $fleet->isProbe($ship->snapshot) && empty($ship->stationed_waypoint))?->symbol;
-                if ($fallbackProbe !== null) {
-                    $probeSymbols[] = $fallbackProbe;
-                }
-            }
-        }
-        $probeSymbols = array_values(array_unique($probeSymbols));
+        $probeSymbols = $episode ? array_column($fleet->probes($episode, pin: false), 'symbol') : [];
         $activeBuyer = $this->activeBuyer($episode, $commandSymbol, $activeRuns);
 
         $purposes = [];
@@ -201,7 +179,7 @@ class ShipPurpose
             return $this->traderPurpose('Main Trader', $activeRun, $episode);
         }
         if ($episode && in_array($ship->symbol, $probeSymbols, true)) {
-            if ($activeRun?->strategy === 'buy_probe') {
+            if (in_array($activeRun?->strategy, CampaignProbeBootstrap::STRATEGIES, true)) {
                 return 'Shipyard Buyer';
             }
             $nav = $ship->snapshot['nav'] ?? [];
@@ -255,7 +233,7 @@ class ShipPurpose
 
                 return $dest !== '' ? "{$prefix}: Positioning → {$dest}" : "{$prefix}: Positioning";
             }
-            if ($activeRun->strategy === 'buy_probe') {
+            if (in_array($activeRun->strategy, CampaignProbeBootstrap::STRATEGIES, true)) {
                 return "{$prefix}: Shipyard Buyer";
             }
         }
@@ -279,7 +257,7 @@ class ShipPurpose
             'mining' => ($site = $this->shortWaypoint($run->plan['site'] ?? '')) !== '' ? "Miner ({$site})" : 'Miner',
             'scout' => ($dest = $this->shortWaypoint($run->plan['destination'] ?? '')) !== '' ? "Scout → {$dest}" : 'Scout',
             'sell_aboard' => ($market = $this->shortWaypoint($run->plan['market'] ?? '')) !== '' ? "Cargo Seller → {$market}" : 'Cargo Seller',
-            'buy_probe' => 'Shipyard Buyer',
+            'buy_probe', 'buy_hauler' => 'Shipyard Buyer',
             default => ucwords(str_replace('_', ' ', $run->strategy)),
         };
     }

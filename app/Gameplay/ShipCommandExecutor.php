@@ -41,6 +41,7 @@ class ShipCommandExecutor
                 return $existing;
             }
             $this->clear($agent);
+            $this->assertConfigurationReviewed($agent, $ship);
             $before = $this->rules->inspect($agent, $ship, $command, $arguments);
             $before['operation'] = $this->api->commandMetadata($command, $ship, $arguments);
 
@@ -59,6 +60,7 @@ class ShipCommandExecutor
     public function approve(Agent $agent, ShipAction $action): ShipAction
     {
         return $this->locked($agent, function () use ($agent, $action) {
+            $agent->refresh();
             $action->refresh();
             if ($action->state !== ActionState::Preview) {
                 return $action;
@@ -68,9 +70,12 @@ class ShipCommandExecutor
                 throw new GameException('Preview expired. Create a fresh preview.');
             }
             try {
+                $this->assertConfigurationReviewed($agent, $action->ship_symbol);
+                $this->assertManualPurchaseSlot($agent, $action);
                 $before = $this->rules->inspect($agent, $action->ship_symbol, $action->command, $action->arguments);
                 $this->unchangedApproval($action, $before);
-                DB::transaction(function () use ($action) {
+                DB::transaction(function () use ($agent, $action) {
+                    $this->assertManualPurchaseSlot($agent, $action);
                     $this->gate->check($action->engine_session_id);
                     if (! ShipAction::whereKey($action->id)->where('state', 'preview')->update(['state' => 'pending', 'last_dispatched_at' => now()])) {
                         throw new GameException('Preview was stopped or already approved.');
@@ -143,15 +148,79 @@ class ShipCommandExecutor
 
     public function clear(Agent $agent, ?int $except = null, bool $defer = false, ?string $ship = null): void
     {
-        $others = ShipAction::where('agent_id', $agent->id)->when($except, fn ($q) => $q->whereKeyNot($except));
+        $others = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->when($except, fn ($q) => $q->whereKeyNot($except));
         if ((clone $others)->where(fn ($q) => $q->where('state', 'uncertain')->orWhere(fn ($q) => self::reviewFor($q, $ship)))->exists()) {
             throw new GameException('An action is pending, uncertain or requires review. Settle it before another command.');
         }
         if ((clone $others)->whereIn('state', ['pending', 'sending'])->exists()) {
             throw new GameException($defer ? 'An action is pending or sending. Wait for it to settle before another command.' : 'An action is pending, uncertain or requires review. Settle it before another command.', retryAfter: $defer ? 5 : 0);
         }
+        if ($ship !== null) {
+            $this->assertConfigurationReviewed($agent, $ship);
+        }
         if (! $agent->canonical_identity || Agent::where('name', $agent->name)->where('reset_id', $agent->reset_id)->whereKeyNot($agent->id)->exists()) {
             throw new GameException('Agent identity is not unique. Synchronize or resolve duplicate imports first.');
+        }
+    }
+
+    public function assertConfigurationReviewed(Agent $agent, string $ship): void
+    {
+        $mismatches = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->where('command', 'buy_ship')->where('outcome->configuration_mismatch', true)->get();
+        foreach ($mismatches as $action) {
+            $delivered = CampaignProbeBootstrap::deliveredShip($action);
+            if (! self::reviewedHaulerMismatch($action) || $delivered === $ship) {
+                throw new GameException('Delivered ship configuration differs from approval. Reconcile and review the purchase before using this ship.');
+            }
+        }
+    }
+
+    public static function reviewedHaulerMismatch(ShipAction $action): bool
+    {
+        if (($action->arguments['shipType'] ?? null) !== 'SHIP_LIGHT_HAULER' || $action->review_required
+            || ! in_array($action->state, [ActionState::Confirmed, ActionState::Acknowledged], true)
+            || ! CampaignProbeBootstrap::deliveredShip($action)
+            || empty($action->outcome['operator_note']) || empty($action->outcome['reviewed_at']) || empty($action->outcome['reconciled_at'])) {
+            return false;
+        }
+        try {
+            $review = CarbonImmutable::parse($action->outcome['reviewed_at']);
+            $reconciled = CarbonImmutable::parse($action->outcome['reconciled_at']);
+            $linkage = app(CampaignProbeBootstrap::class)->linkage($action);
+
+            return $linkage && $linkage[0]->plan_version === 7 && $review->gte($reconciled) && $review->lte($reconciled->addMinutes(3))
+                && ($action->state === ActionState::Confirmed || isset($action->outcome['delivery_transaction']));
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    private function assertManualPurchaseSlot(Agent $agent, ShipAction $action): void
+    {
+        if (! $action->automation_run_id && $action->command === 'buy_ship'
+            && in_array($action->arguments['shipType'] ?? null, CampaignProbeBootstrap::PURCHASE_TYPES, true)) {
+            app(CampaignProbeBootstrap::class)->assertSlot($agent, ignoreActionId: $action->id);
+        }
+    }
+
+    private function checkPurchaseTransport(Agent $agent, ShipAction $action, ?AutomationRun $run): void
+    {
+        $agent->refresh();
+        $action->refresh();
+        if ($action->state !== ActionState::Sending || ! $action->expires_at->isFuture() || $action->reset_id !== $agent->reset_id
+            || ! empty($action->outcome['stop_requested_at'])) {
+            throw new GameException('Purchase intent expired, reset or stopped before transport.');
+        }
+        $this->gate->check($action->engine_session_id);
+        $this->assertManualPurchaseSlot($agent, $action);
+        if ($action->automation_run_id) {
+            $run = $run?->fresh();
+            if (! $run || $run->active_agent_id !== $agent->id || $run->stop_requested_at || ! $run->expires_at->isFuture()
+                || ! in_array($run->state, [RunState::Running, RunState::Waiting], true)) {
+                throw new GameException('Purchase run stopped or expired before transport.');
+            }
+            $this->gate->check($run->engine_session_id);
+            app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments, boundaryOnly: true);
         }
     }
 
@@ -214,6 +283,7 @@ class ShipCommandExecutor
             try {
                 $this->gate->check($action->engine_session_id);
                 $this->clear($agent, $action->id, defer: $run !== null, ship: $run ? $action->ship_symbol : null);
+                $this->assertManualPurchaseSlot($agent, $action);
                 if ($action->reset_id !== $agent->reset_id || $action->expires_at->isPast() || ($run && ($run->stop_requested_at || $run->expires_at->isPast() || ! $run->active_agent_id))) {
                     throw new GameException('Intent expired, reset or stopped before execution.');
                 }
@@ -240,9 +310,14 @@ class ShipCommandExecutor
                     app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments);
                 }
                 $this->unchangedApproval($action, $before);
+                if ($run?->strategy === 'buy_hauler' && $action->command === 'buy_ship'
+                    && ($action->arguments['offer_configuration_hash'] ?? null) !== self::configurationHash($before['estimate']['configuration'] ?? [])) {
+                    throw new GameException('Hauler offer configuration changed before reservation.');
+                }
                 // Stop and reservation contend on a database transaction, independently of the host lock.
                 DB::transaction(function () use ($action, $run, $before, $agent, $outbound) {
                     $this->gate->check($action->engine_session_id);
+                    $this->assertManualPurchaseSlot($agent->fresh(), $action);
                     if ($outbound) {
                         app(GateRecon::class)->validateOutboundIntent($run, $action);
                     }
@@ -268,9 +343,9 @@ class ShipCommandExecutor
                         app(GateRecon::class)->validateOutboundIntent($run, $action);
                         $refusedBeforeTransport = false;
                     },
-                    $run && $run->campaign_episode_id && $action->command === 'buy_ship' => function () use ($run, $agent, $action, &$refusedBeforeTransport) {
+                    $action->command === 'buy_ship' && ($run || in_array($action->arguments['shipType'] ?? null, CampaignProbeBootstrap::PURCHASE_TYPES, true)) => function () use ($run, $agent, $action, &$refusedBeforeTransport) {
                         $refusedBeforeTransport = true;
-                        app(CampaignSafety::class)->check($run->fresh(), $agent->fresh(), $action->command, $action->arguments, boundaryOnly: true);
+                        $this->checkPurchaseTransport($agent, $action, $run);
                         $refusedBeforeTransport = false;
                     },
                     default => null,
@@ -283,6 +358,11 @@ class ShipCommandExecutor
                 $action->update(['outcome' => array_merge($action->fresh()->outcome ?? [], ['response' => $data, 'response_validated' => true, 'response_received_at' => now()->utc()->toIso8601String()])]);
                 $this->confirm($agent, $action, $data, $before, $run);
             } catch (RequestDeferred $e) {
+                if ($refusedBeforeTransport && $action->command === 'buy_ship') {
+                    $this->rejectUnsentPurchase($action, $run, $e->getMessage());
+
+                    return;
+                }
                 FleetMetrics::as($action->ship_symbol ?: null, fn () => FleetMetrics::observe($e));
                 $action->refresh();
                 if ($received) {
@@ -304,6 +384,11 @@ class ShipCommandExecutor
                     }
                 }
             } catch (GameException $e) {
+                if ($refusedBeforeTransport && $action->command === 'buy_ship') {
+                    $this->rejectUnsentPurchase($action, $run, $e->getMessage());
+
+                    return;
+                }
                 FleetMetrics::as($action->ship_symbol ?: null, fn () => FleetMetrics::observe($e));
                 if ($e->apiCode === 4113 || ($agent->fresh()?->connection_state === 'invalid_credential')) {
                     try {
@@ -337,6 +422,11 @@ class ShipCommandExecutor
                     $this->block($run, $e->getMessage());
                 }
             } catch (\Throwable $e) {
+                if ($refusedBeforeTransport && $action->command === 'buy_ship') {
+                    $this->rejectUnsentPurchase($action, $run, 'Purchase authority could not be verified before transport.');
+
+                    return;
+                }
                 Log::build(['driver' => 'single', 'path' => storage_path('logs/gameplay.log'), 'permission' => 0600])->error('Ship command local execution failed.', [
                     'action_id' => $action->id, 'exception_class' => get_class($e),
                     'source' => str_replace(base_path().'/', '', $e->getFile()), 'line' => $e->getLine(),
@@ -359,6 +449,21 @@ class ShipCommandExecutor
             app(SpaceTradersClient::class)->scope($work, priority: 'run');
         } else {
             $work();
+        }
+    }
+
+    private function rejectUnsentPurchase(ShipAction $action, ?AutomationRun $run, string $reason): void
+    {
+        $action->refresh();
+        if ((isset($action->outcome['response_received_at']) || isset($action->outcome['body_sha256']))
+            || in_array($action->state, [ActionState::Confirmed, ActionState::Uncertain, ActionState::Acknowledged], true)) {
+            return;
+        }
+        $action->update(['state' => ActionState::Rejected, 'sent_at' => null, 'settled_at' => $action->settled_at ?? now(),
+            'message' => $action->state === ActionState::Rejected && $action->message ? $action->message : $reason] + $this->localRefusal('pretransport', $reason));
+        $run = $run?->fresh();
+        if ($run && ! $run->stop_requested_at && in_array($run->state, [RunState::Running, RunState::Waiting], true)) {
+            $this->block($run, $reason);
         }
     }
 
@@ -494,7 +599,7 @@ class ShipCommandExecutor
                 $actualShip[$component] = $fresh[$component];
             }
         }
-        $configurationMismatch = $action->command === 'buy_ship' && $this->configuration($actualShip) !== $this->configuration($before['estimate']['configuration']);
+        $configurationMismatch = $action->command === 'buy_ship' && self::configurationHash($actualShip) !== self::configurationHash($before['estimate']['configuration']);
         $credits = $data['agent']['credits'] ?? $before['credits'];
         $price = $data['transaction']['totalPrice'] ?? $data['transaction']['price'] ?? 0;
         $delta = $credits - $before['credits'];
@@ -602,7 +707,7 @@ class ShipCommandExecutor
                     'reported_consumed' => $data['fuel']['consumed'] ?? null, 'server_route' => $actualShip['nav']['route'], 'events' => $data['events'] ?? []];
                 $this->sync->observe($agent, 'travel', $actualShip['symbol'], $outcome['travel'], 'navigation', $actualShip['symbol']);
             }
-            $reviewRequired = $discrepancy || ($configurationMismatch && $run?->strategy === 'buy_probe');
+            $reviewRequired = $discrepancy || ($configurationMismatch && in_array($run?->strategy, CampaignProbeBootstrap::STRATEGIES, true));
             $action->update(['state' => ActionState::Confirmed, 'review_required' => $reviewRequired, 'outcome' => array_merge($action->fresh()->outcome ?? [], $outcome), 'settled_at' => now(), 'message' => $fuelDiscrepancy ? 'Actual fuel differed from the approved prediction. Reconcile and replan before further commands.' : ($discrepancy ? (ExplorationPolicy::command($action->command) ? 'Exploration exceeded the cooldown review threshold or changed credits unexpectedly. Review before further work.' : 'Execution differed from approved quote or reserve. Further work is paused.') : 'Confirmed by SpaceTraders.')]);
             app(CreditAccounting::class)->record($agent, $action, $delta);
             if (isset($data['contract'])) {
@@ -610,6 +715,9 @@ class ShipCommandExecutor
             }
             if ($run) {
                 app(CreditAccounting::class)->apply($run, $action, $action->command === 'buy_ship' ? $before['ship'] : $actualShip, $outcome, $delta, $price);
+                if ($action->command === 'buy_ship') {
+                    app(CampaignProbeBootstrap::class)->recordDelivery($action);
+                }
             }
         });
         if ($action->command === 'buy_ship' && ($configurationMismatch || (isset($action->arguments['site']) && app(MiningPlanner::class)->capability($actualShip) !== null))) {
@@ -640,14 +748,20 @@ class ShipCommandExecutor
         });
     }
 
-    private function configuration(array $ship): array
+    public static function configurationHash(array $ship): ?string
     {
+        if (! isset($ship['frame']['symbol'], $ship['reactor']['symbol'], $ship['engine']['symbol']) || ! is_array($ship['modules'] ?? null) || ! is_array($ship['mounts'] ?? null)) {
+            return null;
+        }
         $modules = array_column($ship['modules'], 'symbol');
         $mounts = array_column($ship['mounts'], 'symbol');
-        sort($modules);
-        sort($mounts);
+        if (count($modules) !== count($ship['modules']) || count($mounts) !== count($ship['mounts'])) {
+            return null;
+        }
+        sort($modules, SORT_STRING);
+        sort($mounts, SORT_STRING);
 
-        return [$ship['frame']['symbol'], $ship['reactor']['symbol'], $ship['engine']['symbol'], $modules, $mounts];
+        return hash('sha256', json_encode([$ship['frame']['symbol'], $ship['reactor']['symbol'], $ship['engine']['symbol'], $modules, $mounts], JSON_THROW_ON_ERROR));
     }
 
     public function reconcile(Agent $agent, ShipAction $action): ShipAction
@@ -661,7 +775,7 @@ class ShipCommandExecutor
                 return $action;
             }
             // Holding the process lock proves no local sender remains in flight.
-            $knownOutcome = $action->state === ActionState::Confirmed && $action->review_required;
+            $knownOutcome = in_array($action->state, [ActionState::Confirmed, ActionState::Acknowledged], true) && $action->review_required;
             if (! $knownOutcome) {
                 $action->update(['state' => ActionState::Uncertain]);
             }
@@ -698,7 +812,7 @@ class ShipCommandExecutor
                 $evidence['installed'] = $this->api->manualRead($agent, str_ends_with($action->command, 'mount') ? 'get-mounts' : 'get-ship-modules', ['shipSymbol' => $action->ship_symbol]);
             }
             $idempotentSettled = ($ship && $action->command === 'dock' && $ship['nav']['status'] === 'DOCKED') || ($ship && $action->command === 'orbit' && $ship['nav']['status'] === 'IN_ORBIT');
-            $action->update(['state' => $knownOutcome || $idempotentSettled ? ActionState::Confirmed : ActionState::Uncertain,
+            $action->update(['state' => $knownOutcome ? $action->state : ($idempotentSettled ? ActionState::Confirmed : ActionState::Uncertain),
                 'outcome' => array_merge($action->outcome ?? [], $evidence), 'message' => $knownOutcome ? 'Confirmed transaction retained. Review the price discrepancy and fresh evidence before takeover.' : ($idempotentSettled ? 'Idempotent navigation state reconciled.' : 'Fresh state recorded. Outcome cannot be proven automatically; inspect evidence and acknowledge before takeover.'), 'settled_at' => now()]);
 
             return $action;

@@ -157,6 +157,9 @@ class SchedulerThroughputTest extends TestCase
     public function test_both_arm_turns_skip_a_prior_reset_without_stamp_or_new_episode(): void
     {
         $grant = $this->arm('H1', 'LOCAL-2');
+        $limits = $grant->limits;
+        unset($limits['arm']['reset_id']);
+        DB::table('campaign_grants')->where('id', $grant->id)->update(['limits' => json_encode($limits, JSON_THROW_ON_ERROR)]);
         $this->episode($grant);
         CampaignEpisode::where('campaign_grant_id', $grant->id)->update([
             'reset_id' => '2026-10-18', 'closed_at' => now()->subDay(),

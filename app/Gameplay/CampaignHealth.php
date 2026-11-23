@@ -137,7 +137,7 @@ class CampaignHealth
                         }
                         $reason = app(CampaignSafety::class)->reason($grant->refresh(), $episode->refresh(), $agent);
                         if (in_array($reason, ['uncertain_action', 'unexplained_change'], true)) {
-                            foreach (collect([$grant])->merge(CampaignGrant::liveArms($grant->agent_symbol)->where('user_id', $grant->user_id)->get()) as $affected) {
+                            foreach (collect([$grant])->merge($agent->reset_id === $episode->reset_id ? app(CampaignFleet::class)->currentArms($agent) : collect()) as $affected) {
                                 app(CampaignControl::class)->pause($affected, $reason);
                             }
                         }
@@ -227,7 +227,12 @@ class CampaignHealth
 
     private function drainWithArms(CampaignGrant $grant, string $reason): void
     {
-        foreach (collect([$grant])->merge(CampaignGrant::liveArms($grant->resolvedAgentSymbol())->where('user_id', $grant->user_id)->whereNull('paused_at')->get()) as $affected) {
+        $control = app(CampaignControl::class);
+        $agent = $control->agent($grant->user_id, $grant->resolvedAgentSymbol());
+        $arms = $agent && $control->currentEpisode($grant, $agent)
+            ? app(CampaignFleet::class)->currentArms($agent)->filter(fn (CampaignGrant $arm) => ! $arm->paused_at)
+            : collect();
+        foreach (collect([$grant])->merge($arms) as $affected) {
             app(CampaignControl::class)->drainPause($affected, $reason);
         }
     }

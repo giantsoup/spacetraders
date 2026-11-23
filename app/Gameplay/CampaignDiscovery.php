@@ -6,13 +6,20 @@ use App\Models\Agent;
 use App\Models\CampaignEpisode;
 use App\Models\GameObservation;
 use App\Models\Ship;
+use Carbon\CarbonImmutable;
 
 class CampaignDiscovery
 {
-    public function advance(CampaignEpisode $episode, Agent $agent): void
+    public function advance(CampaignEpisode $episode, Agent $agent, array &$reads = [], float $deadline = INF): void
     {
         $state = $episode->state ?? [];
         $cursor = $state['discovery'] ?? ['systems' => Ship::where('agent_id', $agent->id)->get()->map(fn ($ship) => $ship->snapshot['nav']['systemSymbol'])->unique()->take(3)->values()->all(), 'system' => 0, 'page' => 1];
+        if (CampaignMesh::policy($episode) && ! isset($state['discovery'])) {
+            $system = app(CampaignFleet::class)->role($episode, 'command', pin: false)['nav']['systemSymbol'] ?? null;
+            $catalogue = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'catalogue')
+                ->where('symbol', $system)->exists();
+            $cursor['systems'] = $system !== null && ! $catalogue ? [$system] : [];
+        }
         $api = app(SpaceTradersApi::class);
         $sync = app(AgentSynchronizer::class);
         if (isset($cursor['systems'][$cursor['system']])) {
@@ -28,6 +35,10 @@ class CampaignDiscovery
             } else {
                 $cursor['page']++;
             }
+        } elseif ($mesh = CampaignMesh::policy($episode)) {
+            $this->readDirectories($episode, $agent, $reads, $mesh['reads_per_pass'], $deadline);
+
+            return;
         } else {
             if ($episode->phase === 'earn' && ($cursor['market_scope'] ?? null) !== 'occupied') {
                 $occupied = Ship::where('agent_id', $agent->id)->get()->filter(fn ($ship) => $ship->snapshot['nav']['status'] !== 'IN_TRANSIT')->map(fn ($ship) => $ship->snapshot['nav']['waypointSymbol'])->all();
@@ -58,6 +69,70 @@ class CampaignDiscovery
             }
         }
         $state['discovery'] = $cursor;
+        $episode->update(['state' => $state]);
+    }
+
+    public function directoryGaps(CampaignEpisode $episode, Agent $agent, bool $includeBackoff = false): array
+    {
+        $system = app(CampaignFleet::class)->role($episode, 'command', pin: false)['nav']['systemSymbol'] ?? null;
+        if ($system === null) {
+            return [];
+        }
+        $query = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id);
+        $listed = (clone $query)->where('kind', 'market_listing')->pluck('symbol')->flip();
+        $failures = $episode->state['directory_failures'] ?? [];
+        $gaps = [];
+        foreach ((clone $query)->where('kind', 'waypoint')->where('data->systemSymbol', $system)->orderBy('symbol')->get() as $waypoint) {
+            $symbol = $waypoint->symbol;
+            if ($listed->has($symbol) || ! in_array('MARKETPLACE', array_column($waypoint->data['traits'] ?? [], 'symbol'), true)) {
+                continue;
+            }
+            $failure = $failures[$symbol] ?? [];
+            if ($includeBackoff || ! isset($failure['retry_at']) || CarbonImmutable::parse($failure['retry_at'])->lte(now())) {
+                $gaps[] = ['waypoint' => $symbol, 'reason' => $failure['reason'] ?? 'missing_market_listing',
+                    'retry_at' => $failure['retry_at'] ?? null, 'failures' => $failure['count'] ?? 0];
+            }
+        }
+
+        return $gaps;
+    }
+
+    private function readDirectories(CampaignEpisode $episode, Agent $agent, array &$reads, int $budget, float $deadline): void
+    {
+        $state = $episode->state ?? [];
+        $failures = $state['directory_failures'] ?? [];
+        $directories = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market_listing')->pluck('symbol');
+        foreach ($directories as $symbol) {
+            unset($failures[$symbol]);
+        }
+        $gaps = $this->directoryGaps($episode, $agent);
+        foreach (array_slice($gaps, 0, 2) as $gap) {
+            if (count($reads) >= $budget || microtime(true) >= $deadline) {
+                break;
+            }
+            $symbol = $gap['waypoint'];
+            if (isset($reads[$symbol])) {
+                continue;
+            }
+            $reads[$symbol] = true;
+            try {
+                $market = app(SpaceTradersApi::class)->market($agent, $symbol);
+                app(AgentSynchronizer::class)->observe($agent, 'market', $symbol, $market);
+                unset($failures[$symbol]);
+            } catch (RequestDeferred) {
+                break;
+            } catch (GameException $exception) {
+                if ($exception->retryAfter > 0 && ! in_array($exception->httpStatus, [400, 403, 404, 422], true)) {
+                    break;
+                }
+                $count = ($failures[$symbol]['count'] ?? 0) + 1;
+                $failures[$symbol] = ['count' => $count, 'reason' => $exception->getMessage()]
+                    + ($count >= 2 ? ['retry_at' => now()->addMinutes(30)->toIso8601String()] : []);
+            }
+        }
+        unset($state['discovery']);
+        $state['directory_failures'] = $failures;
+        $state['last_discovery_at'] = now()->toIso8601String();
         $episode->update(['state' => $state]);
     }
 }

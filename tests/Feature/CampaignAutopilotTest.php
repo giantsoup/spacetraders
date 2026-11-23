@@ -528,6 +528,51 @@ class CampaignAutopilotTest extends TestCase
         $this->assertNull($grant->fresh()->slot);
     }
 
+    public function test_expired_handover_rotates_two_overdue_arrival_reads_and_preserves_other_blockers(): void
+    {
+        $this->editWorld(function (&$world) {
+            foreach (['LOCAL-2', 'LOCAL-3', 'LOCAL-4'] as $symbol) {
+                $probe = FakeSpaceTraders::probe($symbol, 'X1-TEST-PORT');
+                $probe['nav']['status'] = 'IN_TRANSIT';
+                $probe['nav']['route']['arrival'] = now()->addMinutes(5)->toIso8601String();
+                $probe['nav']['route']['destination'] = ['symbol' => 'X1-TEST-PORT'];
+                $world['ships'][] = $probe;
+            }
+        });
+        app(AgentSynchronizer::class)->sync($this->agent, false);
+        $source = str_replace('GIANTSOUP', 'LOCAL', file_get_contents(base_path('campaigns/weekly-probe-bootstrap.yaml')));
+        $control = app(CampaignControl::class);
+        $outgoing = $control->approve(app(CampaignPlaybook::class)->import($source), $this->user, now()->toImmutable()->addMinutes(2));
+        $episode = CampaignEpisode::create(['campaign_grant_id' => $outgoing->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
+            'phase' => 'earn', 'opened_at' => now(), 'start_credits' => $this->agent->credits, 'next_reset_at' => now()->addDays(4), 'state' => []]);
+        $pending = $control->approve(app(CampaignPlaybook::class)->import($source."\n# handover fixture\n"), $this->user);
+        $this->assertSame(2, $pending->slot);
+        $retained = AutomationRun::create(['agent_id' => $this->agent->id, 'campaign_episode_id' => $episode->id, 'reset_id' => $episode->reset_id,
+            'ship_symbol' => 'LOCAL-4', 'strategy' => 'buy_probe', 'state' => 'preview', 'expires_at' => now()->addMinutes(2), 'plan' => [], 'totals' => []]);
+        $this->tick();
+        $this->assertSame('stopped', $retained->fresh()->state->value);
+        $this->travel(6)->minutes();
+        LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+        $this->editWorld(fn (&$world) => $world['defer_read_path'] = '/my/ships/LOCAL-2');
+        $this->artisan('spacetraders:dispatch-due')->assertSuccessful();
+        $this->assertSame('IN_TRANSIT', Ship::where('symbol', 'LOCAL-2')->value('snapshot')['nav']['status']);
+        $this->assertSame('IN_ORBIT', Ship::where('symbol', 'LOCAL-3')->value('snapshot')['nav']['status']);
+        $this->assertSame('IN_TRANSIT', Ship::where('symbol', 'LOCAL-4')->value('snapshot')['nav']['status']);
+        $metric = json_decode(DB::table('fleet_metrics')->where('kind', 'scheduler')->latest('id')->value('data'), true);
+        $this->assertGreaterThan(0, $metric['handover_refresh_seconds']);
+        $this->assertSame('awaiting_arrival_evidence', $control->busyReason($outgoing->refresh())['reason']);
+        $this->tick();
+        $this->assertSame('IN_ORBIT', Ship::where('symbol', 'LOCAL-4')->value('snapshot')['nav']['status']);
+        $this->assertSame(2, $pending->fresh()->slot);
+        $this->editWorld(function (&$world) {
+            unset($world['defer_read_path']);
+        });
+        $this->tick();
+        $this->assertSame(1, $pending->fresh()->slot);
+        $this->assertSame(1, AutomationRun::count());
+        $this->assertSame([], json_decode(file_get_contents($this->file), true)['writes']);
+    }
+
     public function test_resume_resets_the_director_failure_streak(): void
     {
         $grant = $this->approve();

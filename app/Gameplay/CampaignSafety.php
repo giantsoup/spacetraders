@@ -9,17 +9,22 @@ use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\GameObservation;
 use App\Models\ReconMission;
+use App\Models\Ship;
 use App\Models\ShipAction;
 
 class CampaignSafety
 {
-    public function reason(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent): ?string
+    public function reason(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, ?array $roleShips = null): ?string
     {
         // Uncertain outcomes put the shared balance in doubt; a price review holds only this campaign's own ships.
-        $fleet = app(CampaignFleet::class)->symbols($episode);
+        $fleet = $roleShips ?? app(CampaignFleet::class)->symbols($episode);
         if (ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where(fn ($query) => $query->where('state', 'uncertain')
             ->orWhere(fn ($query) => $query->where('review_required', true)->where(fn ($query) => $query->whereIn('ship_symbol', $fleet)->orWhereNull('ship_symbol')->orWhere('ship_symbol', '')
                 ->orWhereIn('automation_run_id', AutomationRun::where('campaign_episode_id', $episode->id)->select('id')))))->exists()) {
+            return 'uncertain_action';
+        }
+        if (ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('command', 'buy_ship')
+            ->where('outcome->configuration_mismatch', true)->get()->contains(fn (ShipAction $action) => ! ShipCommandExecutor::reviewedHaulerMismatch($action))) {
             return 'uncertain_action';
         }
         if (! ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereIn('state', ['pending', 'sending'])->exists()
@@ -60,7 +65,8 @@ class CampaignSafety
             app(CampaignControl::class)->pause($grant, $reason, $episode);
         }
         if (($reason && ($reason !== 'consecutive_losing_loads' || empty($run->plan['sell_only'])))
-            || ! $grant->fresh()->available() || $episode->closed_at || $agent->reset_id !== $episode->reset_id) {
+            || ! $grant->fresh()->available() || $episode->closed_at || $run->reset_id !== $episode->reset_id || $agent->id !== $episode->agent_id || $agent->reset_id !== $episode->reset_id
+            || ($grant->arm() && CampaignDirector::armReset($grant, $agent->reset_id, CampaignDirector::cachedSchedule()) !== $agent->reset_id)) {
             throw new GameException('Campaign authority is paused, closed or awaiting liquidation.');
         }
         if (! in_array($command, [null, 'flight_mode', 'orbit', 'dock', 'navigate', 'mine', 'mine_survey', 'sell', 'buy', 'refuel', 'buy_ship'], true)) {
@@ -78,31 +84,8 @@ class CampaignSafety
         if ($this->windDown($episode) && in_array($command, ['buy', 'buy_ship', 'mine', 'mine_survey'], true)) {
             throw new GameException('Wind-down only permits selling aboard.');
         }
-        if ($command === 'buy_ship') {
-            $probes = CampaignProbeBootstrap::policy($grant, $episode);
-            if (! $probes || $run->strategy !== 'buy_probe' || ($arguments['shipType'] ?? null) !== 'SHIP_PROBE') {
-                throw new GameException('Command is outside the campaign grant.');
-            }
-            $maxTotal = $arguments['maxTotal'] ?? PHP_INT_MAX;
-            $bootstrap = app(CampaignProbeBootstrap::class);
-            if ($boundaryOnly) {
-                $bootstrap->assertPurchaseBudget($agent);
-            }
-            $reserve = $bootstrap->effectiveReserve($agent, $grant, $probes, $run->id);
-            if ($maxTotal > $probes['max_price'] || $agent->credits - $maxTotal < $reserve) {
-                throw new GameException('Probe purchase exceeds max_price or working-capital reserve.');
-            }
-        }
-        if ($command === 'refuel' && $run->strategy === 'buy_probe' && ! $boundaryOnly) {
-            $probes = CampaignProbeBootstrap::policy($grant, $episode);
-            if (! $probes) {
-                throw new GameException('Command is outside the campaign grant.');
-            }
-            $maxTotal = $arguments['maxTotal'] ?? PHP_INT_MAX;
-            $reserve = app(CampaignProbeBootstrap::class)->effectiveReserve($agent, $grant, $probes, $run->id);
-            if ($agent->credits - $maxTotal < $reserve) {
-                throw new GameException('Probe bootstrap refuel exceeds current working-capital reserve.');
-            }
+        if ($command === 'buy_ship' || ($command === 'refuel' && in_array($run->strategy, CampaignProbeBootstrap::STRATEGIES, true))) {
+            $this->purchaseBoundary($run, $agent, $grant, $episode, $command, $arguments, $boundaryOnly);
         }
         if (in_array($command, ['buy', 'sell'], true)) {
             app(FleetClaims::class)->follow($run, $episode, $command, $arguments);
@@ -118,6 +101,62 @@ class CampaignSafety
             $reserve = app(CampaignTrade::class)->fuelReserve($agent, $run->ship_symbol, $run->plan['market']);
             if ($agent->credits - ($arguments['maxTotal'] ?? PHP_INT_MAX) < $reserve + ReconMission::returnExposure($agent)) {
                 throw new GameException('Buy skipped: delivery fuel reserve requires a smaller batch.');
+            }
+        }
+    }
+
+    private function purchaseBoundary(AutomationRun $run, Agent $agent, CampaignGrant $grant, CampaignEpisode $episode, string $command, array $arguments, bool $boundaryOnly): void
+    {
+        $hauler = $run->strategy === 'buy_hauler';
+        $type = $hauler ? 'SHIP_LIGHT_HAULER' : 'SHIP_PROBE';
+        $buyer = app(CampaignHaulerPurchase::class);
+        $policy = $hauler ? $buyer->policy($grant, $episode, $agent) : CampaignProbeBootstrap::policy($grant, $episode);
+        if (! $policy || ! in_array($run->strategy, CampaignProbeBootstrap::STRATEGIES, true)
+            || $agent->name !== $grant->resolvedAgentSymbol() || $run->plan['ship_type'] !== $type
+            || ($hauler && ($run->plan_version !== 7 || $run->plan['grant_id'] !== $grant->id || $run->plan['revision_hash'] !== $grant->revision_hash
+                || $run->plan['campaign_episode_id'] !== $episode->id || $run->plan['purchaser'] !== $run->ship_symbol))) {
+            throw new GameException('Purchase command is outside the current campaign grant.');
+        }
+        $bootstrap = app(CampaignProbeBootstrap::class);
+        $maxTotal = $arguments['maxTotal'] ?? PHP_INT_MAX;
+        $reserve = max($run->plan['reserve'], $arguments['reserve'] ?? 0, $bootstrap->effectiveReserve($agent, $grant, $policy, $run->id));
+        $spent = max($run->totals['spending'] ?? 0, $run->totals['fuel_cost'] ?? 0);
+        if ($maxTotal > $run->plan['max_spend'] - $spent || $maxTotal > $run->plan['max_loss'] + $run->totals['credit_delta'] || $agent->credits - $maxTotal < $reserve) {
+            throw new GameException('Purchase exceeds remaining run caps or working-capital reserve.');
+        }
+        if ($command === 'refuel') {
+            if ($maxTotal > ($run->plan['route']['departure_refuel_ceiling'] ?? 0) - ($run->totals['fuel_cost'] ?? 0)
+                || ($run->totals['fuel_units'] ?? 0) + ($arguments['units'] ?? PHP_INT_MAX) > $run->plan['max_fuel']) {
+                throw new GameException('Purchase refuel exceeds the authorized route fuel limits.');
+            }
+
+            return;
+        }
+
+        $ship = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->first()?->snapshot;
+        $yard = $run->plan['shipyard'];
+        if (($arguments['shipType'] ?? null) !== $type || ($arguments['waypointSymbol'] ?? null) !== $yard
+            || ($ship['nav']['waypointSymbol'] ?? null) !== $yard || ($ship['nav']['status'] ?? null) === 'IN_TRANSIT'
+            || ($ship['cargo']['units'] ?? null) !== 0 || ReconMission::holds($agent, $run->ship_symbol)
+            || ($hauler && ShipCommandExecutor::configurationHash($ship) !== $run->plan['purchaser_configuration_hash'])
+            || $maxTotal > min($policy['max_price'], $run->plan['max_price'])
+            || ($hauler && (empty($arguments['offer_configuration_hash']) || ($run->plan['offer_configuration_hash'] ?? $arguments['offer_configuration_hash']) !== $arguments['offer_configuration_hash']
+                || ($run->totals['offer_configuration_hash'] ?? $arguments['offer_configuration_hash']) !== $arguments['offer_configuration_hash']))) {
+            throw new GameException('Purchase exceeds the authorized purchaser, yard, type, price or configuration.');
+        }
+        $bootstrap->assertSlot($agent, $run->id);
+        [$owned, $target] = $hauler ? [$buyer->ownedHaulers($episode, $agent), $policy['max_haulers']] : $bootstrap->probeTarget($episode, $agent, $policy);
+        if ($owned + $bootstrap->reservations($agent, $run->id, undeliveredType: $type)->count() >= $target) {
+            throw new GameException('Purchase target already reached.');
+        }
+        if ($boundaryOnly) {
+            if ($hauler) {
+                $requests = app(CampaignSaturation::class)->requests($agent, $policy, $run->id);
+                if (! $requests['pass']) {
+                    throw new GameException($requests['reason']);
+                }
+            } else {
+                $bootstrap->assertPurchaseBudget($agent);
             }
         }
     }

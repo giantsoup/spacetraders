@@ -33,6 +33,42 @@ final class FakeSpaceTraders
         ];
     }
 
+    public static function lightHauler(string $symbol, string $waypoint): array
+    {
+        $ship = self::ship($symbol, $waypoint);
+        $ship['registration']['role'] = 'HAULER';
+        $ship['frame']['symbol'] = 'FRAME_LIGHT_FREIGHTER';
+        $ship['frame']['fuelCapacity'] = 600;
+        $ship['engine']['speed'] = 15;
+        $ship['fuel'] = ['current' => 600, 'capacity' => 600];
+        $ship['cargo']['capacity'] = 80;
+        $ship['modules'][1]['capacity'] = 80;
+        $ship['mounts'] = [];
+
+        return $ship;
+    }
+
+    public static function probe(string $symbol, string $waypoint, int $speed = 30): array
+    {
+        $ship = self::ship($symbol, $waypoint);
+        $ship['registration']['role'] = 'SATELLITE';
+        $ship['frame']['symbol'] = 'FRAME_PROBE';
+        $ship['frame']['fuelCapacity'] = 0;
+        $ship['engine']['speed'] = $speed;
+        $ship['fuel'] = ['current' => 0, 'capacity' => 0];
+        $ship['cargo']['capacity'] = 0;
+        $ship['mounts'] = [];
+        $ship['modules'] = [];
+
+        return $ship;
+    }
+
+    public static function shipyardOffer(string $type, array $ship, int $price): array
+    {
+        return array_intersect_key($ship, array_flip(['frame', 'reactor', 'engine', 'crew', 'mounts', 'modules']))
+            + ['type' => $type, 'name' => $type, 'purchasePrice' => $price];
+    }
+
     public static function contract(string $id = 'contract-1'): array
     {
         return ['id' => $id, 'factionSymbol' => 'COSMIC', 'type' => 'PROCUREMENT', 'accepted' => false, 'fulfilled' => false,
@@ -232,7 +268,15 @@ final class FakeSpaceTraders
             }
             if (str_ends_with($path, '/market')) {
                 $symbol = explode('/', $path)[4];
-                $visible = collect($world['ships'])->contains(fn ($s) => $s['nav']['waypointSymbol'] === $symbol);
+                if (in_array($symbol, $world['missing_markets'] ?? [], true)) {
+                    return [['error' => ['code' => 404]], 404];
+                }
+                if (isset($world['market_errors'][$symbol])) {
+                    $code = $world['market_errors'][$symbol];
+
+                    return [['error' => ['code' => $code]], $code];
+                }
+                $visible = collect($world['ships'])->contains(fn ($s) => $s['nav']['waypointSymbol'] === $symbol && $s['nav']['status'] !== 'IN_TRANSIT');
                 $goods = $world['market_goods'][$symbol] ?? $world['goods'];
 
                 return [['data' => ['symbol' => $symbol, 'imports' => [], 'exports' => [], 'exchange' => array_map(fn ($g) => ['symbol' => $g['symbol']], $goods), 'transactions' => $world['transactions']] + ($visible ? ['tradeGoods' => $goods] : [])], 200];
@@ -336,6 +380,11 @@ final class FakeSpaceTraders
                 $ship['registration']['role'] = 'SATELLITE';
                 $ship['fuel'] = ['current' => 0, 'capacity' => 0];
                 $ship['cargo'] = ['capacity' => 0, 'units' => 0, 'inventory' => []];
+            } elseif (($args['shipType'] ?? null) === 'SHIP_LIGHT_HAULER') {
+                $ship['registration']['role'] = 'HAULER';
+                $tank = $offer['frame']['fuelCapacity'];
+                $ship['fuel'] = ['current' => $tank, 'capacity' => $tank];
+                $ship['cargo']['capacity'] = array_sum(array_column($offer['modules'], 'capacity'));
             }
             if (isset($world['deliver_mismatched_frame'])) {
                 $ship['frame']['symbol'] = $world['deliver_mismatched_frame'];
@@ -412,6 +461,7 @@ final class FakeSpaceTraders
                 $ship['nav']['status'] = 'IN_TRANSIT';
                 $ship['nav']['route']['departureTime'] = now()->toIso8601String();
                 $ship['nav']['route']['arrival'] = now()->addSeconds($world['travel_seconds'])->toIso8601String();
+                $ship['nav']['route']['destination'] = ['symbol' => $args['waypointSymbol']];
                 $ship['fuel']['current'] -= $ship['fuel']['capacity'] === 0 ? 0 : ($world['fuel_consumption'] ?? 5);
 
                 return [['data' => ['nav' => $ship['nav'], 'fuel' => $ship['fuel'], 'events' => []]], 200];
