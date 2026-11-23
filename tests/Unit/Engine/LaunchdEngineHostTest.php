@@ -7,7 +7,9 @@ use App\Gameplay\Engine\HostCommands;
 use App\Gameplay\Engine\HostResult;
 use App\Gameplay\Engine\LaunchdEngineHost;
 use App\Gameplay\Engine\PosixChild;
+use App\Gameplay\EngineGate;
 use App\Gameplay\GameException;
+use App\Gameplay\HostLock;
 use App\Gameplay\LocalEngineManager;
 use App\Models\LocalEngine;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -52,7 +54,7 @@ class LaunchdEngineHostTest extends TestCase
         $expected = 'io.spacetraders.engine.'.substr(hash('sha256', realpath(base_path()).'|'.config('database.connections.sqlite.database')), 0, 24);
         $this->assertSame($expected, $this->host->serviceName());
         $this->assertSame($expected, EngineIdentity::label());
-        $this->assertSame($expected, (new LocalEngineManager(new \App\Gameplay\HostLock, new \App\Gameplay\EngineGate, $this->host))->label());
+        $this->assertSame($expected, (new LocalEngineManager(new HostLock, new EngineGate, $this->host))->label());
         $this->assertSame('macOS', $this->host->platform());
         $this->assertSame(PHP_OS_FAMILY === 'Darwin', $this->host->supported());
         $this->assertFalse($this->host->hasServiceMarker());

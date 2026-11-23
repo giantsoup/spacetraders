@@ -37,6 +37,10 @@ class CampaignDirector
     /** The arm grant tickArms() picked this pass, for the scheduler's per-arm failure counter. */
     public ?int $armGrantId = null;
 
+    public float $handoverRefreshSeconds = 0;
+
+    private array $sectionSeconds = [];
+
     /** Outcome of the pass in progress; see directGrant(). */
     private string $passOutcome = 'waiting';
 
@@ -62,6 +66,7 @@ class CampaignDirector
     public function tick(): bool
     {
         $this->primaryGrantId = null;
+        $this->handoverRefreshSeconds = 0;
         $attempted = false;
         try {
             app(HostLock::class)->run('campaign', function () use (&$attempted) {
@@ -91,41 +96,197 @@ class CampaignDirector
         return $attempted;
     }
 
-    /**
-     * Directs one live, unpaused arm grant per pass, least recently directed first. That rotation is
-     * also the claim priority rotation between arms.
-     */
     public function tickArms(): bool
     {
+        return $this->directArms(1, null, fn (CampaignGrant $grant, callable $direct) => $direct()) > 0;
+    }
+
+    public function tickArmsBatch(callable $runner): int
+    {
+        return $this->directArms(
+            max(0, (int) config('gameplay.arm_pass_max_arms')),
+            microtime(true) + max(0, (int) config('gameplay.arm_pass_seconds')),
+            $runner,
+        );
+    }
+
+    private function directArms(int $limit, ?float $batchDeadline, callable $runner): int
+    {
         $this->armGrantId = null;
+        $directed = 0;
         try {
-            app(HostLock::class)->run('campaign', function () {
-                app(CampaignTrade::class)->harvestArms();
-                $grant = CampaignGrant::liveArms()->whereNull('paused_at')
-                    ->where(fn ($query) => $query->whereNull('last_directed_at')->orWhere('last_directed_at', '<=', now()->subSeconds(30)))
-                    ->orderByRaw('last_directed_at is not null')->orderBy('last_directed_at')->orderBy('id')->first();
-                if (! $grant) {
+            app(HostLock::class)->run('campaign', function () use ($limit, $batchDeadline, $runner, &$directed) {
+                $grants = CampaignGrant::liveArms()->orderByRaw('last_directed_at is not null')
+                    ->orderBy('last_directed_at')->orderBy('id')->get();
+                if ($limit === 0 || $grants->isEmpty() || microtime(true) >= ($batchDeadline ?? INF)) {
                     return;
                 }
-                $this->armGrantId = $grant->id;
+                $schedule = null;
                 try {
-                    $this->directGrant($grant);
-                } finally {
-                    $grant->update(['last_directed_at' => now()]);
+                    $single = $grants->count() === 1 ? $grants->first() : null;
+                    $schedule = FleetMetrics::forAgent($single?->resolvedAgentSymbol(), fn () => FleetMetrics::as($single?->arm()['ship'] ?? 'director',
+                        fn () => FleetMetrics::duringDirector(fn () => app(SpaceTradersClient::class)->scope(
+                            fn () => app(SpaceTradersApi::class)->resetSchedule(),
+                            deadline: min(microtime(true) + 3.0, $batchDeadline ?? INF),
+                        ))));
+                } catch (\Throwable) {
+                    // A shared schedule failure has no individual arm to charge.
+                }
+                $schedule = self::verifiedSchedule($schedule);
+                $eligible = collect();
+                $expired = false;
+                foreach ($grants as $grant) {
+                    $matches = $schedule && $this->checkArmReset($grant, $schedule);
+                    if ($grant->paused_at) {
+                        continue;
+                    }
+                    if ($grant->expires_at?->isPast()) {
+                        app(CampaignControl::class)->pause($grant, 'grant_expired');
+                        $expired = true;
+
+                        continue;
+                    }
+                    if (! $matches || $grant->last_directed_at?->gt(now()->subSeconds(30))) {
+                        continue;
+                    }
+                    $busy = $batchDeadline !== null && $this->healthyBusyArm($grant, $schedule['reset_id']);
+                    $revisit = max(30, (int) config('gameplay.arm_busy_revisit_seconds'));
+                    if (! $busy || ! $grant->last_directed_at?->gt(now()->subSeconds($revisit))) {
+                        $eligible->push([$grant, $busy]);
+                    }
+                }
+                if ($schedule) {
+                    app(CampaignTrade::class)->harvestArms($schedule['reset_id']);
+                }
+                if ($expired && $batchDeadline === null) {
+                    $directed = 1;
+
+                    return;
+                }
+                foreach ($eligible->sortBy(fn (array $entry) => $entry[1]) as [$grant]) {
+                    $remaining = ($batchDeadline ?? INF) - microtime(true);
+                    if ($directed >= $limit || $remaining <= 0) {
+                        break;
+                    }
+                    $this->armGrantId = $grant->id;
+                    $seconds = min(self::DEADLINE_SECONDS, max(5, $remaining));
+                    $directed++;
+                    $runner($grant, function () use ($grant, $schedule, $seconds): bool {
+                        try {
+                            $this->directGrant($grant, $seconds, $schedule);
+                        } finally {
+                            $grant->update(['last_directed_at' => now()]);
+                        }
+
+                        return true;
+                    }, $seconds);
                 }
             });
         } catch (GameException) {
         }
 
-        return $this->armGrantId !== null;
+        return $directed;
+    }
+
+    private function healthyBusyArm(CampaignGrant $grant, string $reset): bool
+    {
+        if ($grant->isDraining()) {
+            return false;
+        }
+        $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->where('reset_id', $reset)->whereNull('closed_at')->first();
+        if (! $episode || ! empty($episode->state['pending_pause'])) {
+            return false;
+        }
+
+        return AutomationRun::where('campaign_episode_id', $episode->id)->where('active_agent_id', $episode->agent_id)
+            ->whereIn('state', ['running', 'waiting'])->whereNull('stop_requested_at')->where('expires_at', '>', now())->exists()
+            && ! ShipAction::where('agent_id', $episode->agent_id)->where('reset_id', $reset)
+                ->where('ship_symbol', $grant->arm()['ship'])->whereIn('state', ['pending', 'sending'])->exists();
+    }
+
+    public static function cachedSchedule(): ?array
+    {
+        $data = DB::table('game_runtime')->where('key', 'reset_schedule:'.hash('sha256', SpaceTradersClient::BASE_URL))->value('value');
+
+        return self::verifiedSchedule(is_string($data) ? json_decode($data, true) : null);
+    }
+
+    private static function verifiedSchedule(?array $schedule): ?array
+    {
+        if (! is_string($schedule['reset_id'] ?? null) || ! is_string($schedule['next_reset'] ?? null)
+            || ! preg_match('/^\d{4}-\d{2}-\d{2}(?:T.+)?$/D', $schedule['reset_id'])) {
+            return null;
+        }
+        try {
+            $reset = CarbonImmutable::parse($schedule['reset_id'], 'UTC');
+            $next = CarbonImmutable::parse($schedule['next_reset'], 'UTC');
+
+            return $reset->isFuture() || ! $next->isFuture() ? null : $schedule;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /** Null indicates unresolved ownership. An empty string proves prior ownership, with an unknown reset ID. */
+    public static function armReset(CampaignGrant $grant, string $activeReset, ?array $schedule = null): ?string
+    {
+        $stamp = $grant->arm()['reset_id'] ?? CampaignEpisode::where('campaign_grant_id', $grant->id)->oldest('id')->value('reset_id');
+        if (is_string($stamp) && $stamp !== '') {
+            return $stamp;
+        }
+        if (! $grant->created_at || ! preg_match('/^\d{4}-\d{2}-\d{2}(?:T.+)?$/D', $activeReset)) {
+            return null;
+        }
+        try {
+            $date = CarbonImmutable::parse($activeReset, 'UTC');
+            if (strlen($activeReset) > 10) {
+                return $grant->created_at->lt($date) ? '' : $activeReset;
+            }
+            if (($schedule['reset_id'] ?? null) === $activeReset) {
+                $start = CarbonImmutable::parse($schedule['next_reset'], 'UTC')->utc()->subWeek();
+                if ($start->toDateString() === $activeReset) {
+                    return $grant->created_at->lt($start) ? '' : $activeReset;
+                }
+            }
+            // A date-only ID cannot settle ownership within that day.
+            if ($grant->created_at->gte($date->addDay())) {
+                return $activeReset;
+            }
+
+            return $schedule && $grant->created_at->lt($date) ? '' : null;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function checkArmReset(CampaignGrant $grant, array $schedule): bool
+    {
+        $reset = self::armReset($grant, $schedule['reset_id'], $schedule);
+        if ($reset === $schedule['reset_id']) {
+            return $grant->pause_reason !== 'reset_mismatch';
+        }
+        if ($reset !== null && $grant->pause_reason !== 'reset_mismatch') {
+            DB::transaction(function () use ($grant, $reset, $schedule) {
+                $prior = $grant->pause_reason;
+                $grant->update(['paused_at' => $grant->paused_at ?? now(), 'pause_reason' => 'reset_mismatch', 'wait_reason' => null]);
+                $control = app(CampaignControl::class);
+                $control->pause($grant, 'reset_mismatch');
+                $control->event($grant, null, 'pause', ['reason' => 'reset_mismatch', 'owning_reset_id' => $reset ?: null,
+                    'active_reset_id' => $schedule['reset_id'], 'prior_pause_reason' => $prior]);
+            });
+        }
+
+        return false;
     }
 
     /**
      * One director pass. Outcome mapping: started = a run was started (decision with a run); awaiting_run = an active run
      * exists (decision awaiting_run); waiting = everything else (wait reasons, pauses, busy or idle decisions).
      */
-    private function directGrant(CampaignGrant $grant): void
+    private function directGrant(CampaignGrant $grant, float $seconds = self::DEADLINE_SECONDS, ?array $schedule = null): void
     {
+        $started = microtime(true);
+        $this->sectionSeconds = array_fill_keys(['sync', 'mesh_refresh', 'mesh_dispatch', 'purchases', 'trade'], 0.0);
         $this->passOutcome = 'waiting';
         $this->localSummary = [];
         $this->marketReads = [];
@@ -136,19 +297,36 @@ class CampaignDirector
         } catch (\Throwable) {
         }
         try {
-            FleetMetrics::forAgent($agentSymbol, fn () => FleetMetrics::duringDirector(fn () => RequestBudget::forAgent($agentSymbol, fn () => $this->runDirectGrant($grant))));
+            FleetMetrics::forAgent($agentSymbol, fn () => FleetMetrics::duringDirector(fn () => RequestBudget::forAgent($agentSymbol, fn () => $this->runDirectGrant($grant, $seconds, $schedule))));
         } finally {
             try {
                 $ship = $grant->arm()['ship'] ?? 'director';
             } catch (\Throwable) {
                 $ship = 'director';
             }
-            FleetMetrics::forAgent($agentSymbol, fn () => FleetMetrics::directorPass($ship, $this->passOutcome, FleetMetrics::requestTotal() - $before));
+            $timings = $this->sectionSeconds + ['total' => microtime(true) - $started];
+            FleetMetrics::forAgent($agentSymbol, fn () => FleetMetrics::directorPass($ship, $this->passOutcome, FleetMetrics::requestTotal() - $before, ['timings' => $timings]));
         }
     }
 
-    private function runDirectGrant(CampaignGrant $grant): void
+    private function measure(string $section, callable $work): mixed
     {
+        $started = microtime(true);
+        try {
+            return $work();
+        } finally {
+            $this->sectionSeconds[$section] = ($this->sectionSeconds[$section] ?? 0.0) + microtime(true) - $started;
+        }
+    }
+
+    private function runDirectGrant(CampaignGrant $grant, float $seconds, ?array $schedule): void
+    {
+        if ($grant->arm()) {
+            $schedule ??= self::cachedSchedule();
+            if (! $schedule || ! $this->checkArmReset($grant, $schedule)) {
+                return;
+            }
+        }
         $control = app(CampaignControl::class);
         $grant->update(['last_directed_at' => now()]);
         if ($grant->expires_at?->isPast()) {
@@ -174,7 +352,7 @@ class CampaignDirector
             return;
         }
         try {
-            $deadline = $this->deadline = microtime(true) + self::DEADLINE_SECONDS;
+            $deadline = $this->deadline = microtime(true) + $seconds;
             $primaries = CampaignGrant::allPrimaries($grant->user_id)->get()->map(fn (CampaignGrant $primary) => $primary->resolvedAgentSymbol())->unique();
             $multiAgent = $primaries->count() > 1 && $primaries->contains(fn ($symbol) => $symbol !== $grant->resolvedAgentSymbol());
             $caps = RequestBudget::agentCaps();
@@ -189,7 +367,7 @@ class CampaignDirector
 
                 return;
             }
-            app(SpaceTradersClient::class)->scope(fn () => $this->direct($grant, $deadline),
+            app(SpaceTradersClient::class)->scope(fn () => $this->direct($grant, $deadline, $schedule),
                 priority: $grant->isDraining() || $multiAgent || $caps !== [] ? 'director' : 'critical', deadline: $deadline);
         } catch (LocalEarnBudget) {
             $this->wait($grant, 'local_budget_deferred');
@@ -213,21 +391,28 @@ class CampaignDirector
         app(CampaignControl::class)->event($grant, null, 'wait', ['reason' => $reason]);
     }
 
-    private function direct(CampaignGrant $grant, float $deadline): void
+    private function direct(CampaignGrant $grant, float $deadline, ?array $schedule = null): void
     {
+        $arm = $grant->arm();
+        if ($arm) {
+            $schedule ??= self::cachedSchedule();
+            if (! $schedule || ! $this->checkArmReset($grant, $schedule)) {
+                return;
+            }
+        }
         $previous = CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->first();
         if ($grant->isDraining() && $previous && $previous->next_reset_at->gt(now()->addMinutes(10))) {
             $agent = Agent::find($previous->agent_id);
-            if ($agent && ! $agent->isArchived()) {
+            if ($agent && ! $agent->isArchived() && (! $arm || $schedule['reset_id'] === $previous->reset_id)) {
                 // Pending writes and advances keep these snapshots current. A new recovery validates
                 // reset, ship, balance and buyer before taking authority.
-                $this->episode($grant, $agent, ['reset_id' => $previous->reset_id], $previous->next_reset_at, $deadline);
+                $this->episode($grant, $agent, $schedule ?? ['reset_id' => $previous->reset_id], $previous->next_reset_at, $deadline);
 
                 return;
             }
         }
         $readSchedule = fn () => FleetMetrics::as($grant->arm()['ship'] ?? 'director', fn () => app(SpaceTradersApi::class)->resetSchedule());
-        $schedule = $grant->isDraining()
+        $schedule ??= $grant->isDraining()
             ? RequestBudget::forAgent('SHARED', fn () => app(SpaceTradersClient::class)->scope($readSchedule, priority: 'safety'))
             : $readSchedule();
         try {
@@ -244,7 +429,6 @@ class CampaignDirector
         }
         $user = User::findOrFail($grant->user_id);
         $spec = $grant->revision()->body['agent'];
-        $arm = $grant->arm();
         $agent = $user->agents()->where('name', $spec['symbol'])->where('reset_id', $schedule['reset_id'])->unarchived()->first();
         if (! $arm) {
             app(AgentSynchronizer::class)->archivePreviousWorlds($user->agents()->unarchived()->whereNotNull('reset_id')->get(), $schedule['reset_id']);
@@ -323,49 +507,54 @@ class CampaignDirector
             $entered = true;
             // Another worker may have confirmed a trade between loading the agent and acquiring this lock.
             $agent->refresh();
+            if ($arm && (! $this->checkArmReset($grant, $schedule) || $agent->reset_id !== $schedule['reset_id'] || $agent->isArchived())) {
+                return;
+            }
             $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->where('reset_id', $schedule['reset_id'])->whereNull('closed_at')->first();
             if ($episode && $this->startRetainedPreview($grant, $episode, $agent)) {
                 return;
             }
             $sync = app(AgentSynchronizer::class);
-            if ($episode && $grant->isDraining()) {
-                // The draining director uses stored evidence. Only cargo recovery and execution read upstream.
-            } elseif ($arm) {
-                // Phase 3: arm passes avoid full fleet pagination. When a live run exists, stay local
-                // (at most 1 fresh GET /my/agent if synced_at is >60s old). When starting a run, read
-                // only the agent and this arm's ship, reconciling the full fleet only on shipCount drift or every 5 min.
-                $hasLiveRun = $episode !== null && (
-                    AutomationRun::where('active_agent_id', $agent->id)->where('campaign_episode_id', $episode->id)
-                        ->where(fn ($q) => $q->whereIn('state', ['running', 'waiting', 'stopping'])->orWhereNotNull('stop_requested_at'))
-                        ->exists()
-                    || ShipAction::where('agent_id', $agent->id)->where('ship_symbol', $arm['ship'])->whereIn('state', ['pending', 'sending'])->exists()
-                );
-                $freshSeconds = max(1, (int) config('gameplay.agent_balance_fresh_seconds', 60));
-                $balanceStale = ! $agent->synced_at || $agent->synced_at->lt(now()->subSeconds($freshSeconds));
-                if ($hasLiveRun) {
-                    if ($balanceStale) {
+            $this->measure('sync', function () use ($episode, $grant, $arm, $agent, $sync) {
+                if ($episode && $grant->isDraining()) {
+                    // The draining director uses stored evidence. Only cargo recovery and execution read upstream.
+                } elseif ($arm) {
+                    // Phase 3: arm passes avoid full fleet pagination. When a live run exists, stay local
+                    // (at most 1 fresh GET /my/agent if synced_at is >60s old). When starting a run, read
+                    // only the agent and this arm's ship, reconciling the full fleet only on shipCount drift or every 5 min.
+                    $hasLiveRun = $episode !== null && (
+                        AutomationRun::where('active_agent_id', $agent->id)->where('campaign_episode_id', $episode->id)
+                            ->where(fn ($q) => $q->whereIn('state', ['running', 'waiting', 'stopping'])->orWhereNotNull('stop_requested_at'))
+                            ->exists()
+                        || ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('ship_symbol', $arm['ship'])->whereIn('state', ['pending', 'sending'])->exists()
+                    );
+                    $freshSeconds = max(1, (int) config('gameplay.agent_balance_fresh_seconds', 60));
+                    $balanceStale = ! $agent->synced_at || $agent->synced_at->lt(now()->subSeconds($freshSeconds));
+                    if ($hasLiveRun) {
+                        if ($balanceStale) {
+                            $balance = app(SpaceTradersApi::class)->agent($agent);
+                            $agent->update(['credits' => $balance['credits'], 'connection_state' => 'connected', 'synced_at' => now()]);
+                            if (isset($balance['shipCount']) && (int) $balance['shipCount'] !== Ship::where('agent_id', $agent->id)->count()) {
+                                $sync->sync($agent, false);
+                            }
+                        }
+                    } else {
                         $balance = app(SpaceTradersApi::class)->agent($agent);
                         $agent->update(['credits' => $balance['credits'], 'connection_state' => 'connected', 'synced_at' => now()]);
-                        if (isset($balance['shipCount']) && (int) $balance['shipCount'] !== Ship::where('agent_id', $agent->id)->count()) {
+                        $lastFleetSync = DB::table('game_runtime')->where('key', 'fleet_sync_at:'.$agent->id)->value('value');
+                        $fleetSyncDue = ! is_string($lastFleetSync) || CarbonImmutable::parse($lastFleetSync)->lt(now()->subSeconds((int) config('gameplay.fleet_sync_interval_seconds', 300)));
+                        $countDrift = isset($balance['shipCount']) && (int) $balance['shipCount'] !== Ship::where('agent_id', $agent->id)->count();
+                        $shipKnown = Ship::where('agent_id', $agent->id)->where('symbol', $arm['ship'])->exists();
+                        if ($countDrift || ! $shipKnown || $fleetSyncDue) {
                             $sync->sync($agent, false);
+                        } else {
+                            $sync->refreshShip($agent, $arm['ship']);
                         }
                     }
                 } else {
-                    $balance = app(SpaceTradersApi::class)->agent($agent);
-                    $agent->update(['credits' => $balance['credits'], 'connection_state' => 'connected', 'synced_at' => now()]);
-                    $lastFleetSync = DB::table('game_runtime')->where('key', 'fleet_sync_at:'.$agent->id)->value('value');
-                    $fleetSyncDue = ! is_string($lastFleetSync) || CarbonImmutable::parse($lastFleetSync)->lt(now()->subSeconds((int) config('gameplay.fleet_sync_interval_seconds', 300)));
-                    $countDrift = isset($balance['shipCount']) && (int) $balance['shipCount'] !== Ship::where('agent_id', $agent->id)->count();
-                    $shipKnown = Ship::where('agent_id', $agent->id)->where('symbol', $arm['ship'])->exists();
-                    if ($countDrift || ! $shipKnown || $fleetSyncDue) {
-                        $sync->sync($agent, false);
-                    } else {
-                        $sync->refreshShip($agent, $arm['ship']);
-                    }
+                    $sync->sync($agent, false);
                 }
-            } else {
-                $sync->sync($agent, false);
-            }
+            });
             $episode = CampaignEpisode::firstOrCreate(['campaign_grant_id' => $grant->id, 'reset_id' => $schedule['reset_id']],
                 ['agent_id' => $agent->id, 'start_credits' => $agent->credits, 'phase' => $arm ? 'earn' : $grant->revision()->body['phases'][0]['id'], 'opened_at' => now(), 'next_reset_at' => $next]
                     + ($arm ? ['state' => ['arm' => $arm['label'], 'role_ships' => ['command' => $arm['ship']]]] : []));
@@ -621,7 +810,9 @@ class CampaignDirector
                     }
                     $this->candidate = null;
                     $run = match ($activity['strategy']) {
-                        'trade' => $this->trade($grant, $episode, $agent, $ship, $activity, $considered, $busyShips),
+                        'trade' => $this->measure('trade', function () use ($grant, $episode, $agent, $ship, $activity, &$considered, $busyShips) {
+                            return $this->trade($grant, $episode, $agent, $ship, $activity, $considered, $busyShips);
+                        }),
                         'mining' => $this->mining($grant, $episode, $agent, $ship, $considered),
                         'scout' => $this->scout($grant, $episode, $agent, $ship, $considered, $activity['role'] === 'command', $assignedTargets),
                         'sell_aboard' => null,
@@ -1430,7 +1621,7 @@ class CampaignDirector
                     'strategy' => 'scout', 'destination' => $task['destination'], 'max_fuel' => $ship['fuel']['capacity'], 'one_way' => true]
                     + ($local ? ['departure_refuel' => true] : []));
             } catch (GameException $exception) {
-                if ($exception instanceof LocalEarnBudget) {
+                if ($exception instanceof LocalEarnBudget || $exception->retryAfter > 0) {
                     throw $exception;
                 }
                 $considered[] = ['strategy' => 'scout', 'destination' => $task['destination'], 'rejected' => $exception->getMessage()];
@@ -1457,67 +1648,71 @@ class CampaignDirector
     /** @param list<string> $busyShips */
     private function refreshRoleMarkets(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, AgentSynchronizer $sync, array $busyShips, bool $includeCommand): void
     {
-        $fleet = app(CampaignFleet::class);
-        $observers = $fleet->probes($episode);
-        if ($includeCommand) {
-            $command = $fleet->role($episode, 'command');
-            if ($command) {
-                array_unshift($observers, $command);
-            }
-        }
-        $seenMarkets = [];
-        foreach ($observers as $observer) {
-            if (($observer['nav']['status'] ?? null) === 'IN_TRANSIT' || in_array($observer['symbol'], $busyShips, true)) {
-                continue;
-            }
-            $market = $observer['nav']['waypointSymbol'];
-            if (isset($seenMarkets[$market])) {
-                continue;
-            }
-            $seenMarkets[$market] = true;
-            $point = GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'waypoint')->where('symbol', $market)->first();
-            if (! in_array('MARKETPLACE', array_column($point?->data['traits'] ?? [], 'symbol'), true)) {
-                continue;
-            }
-            if (CampaignLocalEarn::policy($grant, $episode)) {
-                app(CampaignLocalEarn::class)->reserve($this->deadline);
-                $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'market')->where('symbol', $market)->first();
-                if ($quote && empty($quote->data['invalidated_by_action']) && ! empty($quote->data['tradeGoods']) && $quote->observed_at->gt(now()->subSeconds(20))) {
-                    continue;
+        $this->measure('mesh_refresh', function () use ($grant, $episode, $agent, $sync, $busyShips, $includeCommand) {
+            $fleet = app(CampaignFleet::class);
+            $observers = $fleet->probes($episode);
+            if ($includeCommand) {
+                $command = $fleet->role($episode, 'command');
+                if ($command) {
+                    array_unshift($observers, $command);
                 }
             }
-            $this->marketReads[$market] = true;
-            $sync->observe($agent, 'market', $market, app(SpaceTradersApi::class)->market($agent, $market));
-        }
+            $seenMarkets = [];
+            foreach ($observers as $observer) {
+                if (($observer['nav']['status'] ?? null) === 'IN_TRANSIT' || in_array($observer['symbol'], $busyShips, true)) {
+                    continue;
+                }
+                $market = $observer['nav']['waypointSymbol'];
+                if (isset($seenMarkets[$market])) {
+                    continue;
+                }
+                $seenMarkets[$market] = true;
+                $point = GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'waypoint')->where('symbol', $market)->first();
+                if (! in_array('MARKETPLACE', array_column($point?->data['traits'] ?? [], 'symbol'), true)) {
+                    continue;
+                }
+                if (CampaignLocalEarn::policy($grant, $episode)) {
+                    app(CampaignLocalEarn::class)->reserve($this->deadline);
+                    $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'market')->where('symbol', $market)->first();
+                    if ($quote && empty($quote->data['invalidated_by_action']) && ! empty($quote->data['tradeGoods']) && $quote->observed_at->gt(now()->subSeconds(20))) {
+                        continue;
+                    }
+                }
+                $this->marketReads[$market] = true;
+                $sync->observe($agent, 'market', $market, app(SpaceTradersApi::class)->market($agent, $market));
+            }
+        });
     }
 
     /** @param list<string> $busyShips */
     private function dispatchProbeBootstrap(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array &$busyShips, array &$considered): bool
     {
-        try {
-            $run = app(CampaignProbeBootstrap::class)->plan($grant, $episode, $agent, $busyShips, $considered, $this->deadline);
-            if (! $run) {
+        return $this->measure('purchases', function () use ($grant, $episode, $agent, &$busyShips, &$considered) {
+            try {
+                $run = app(CampaignProbeBootstrap::class)->plan($grant, $episode, $agent, $busyShips, $considered, $this->deadline);
+                if (! $run) {
+                    return false;
+                }
+                if (! $run->active_agent_id) {
+                    app(AutomationRunner::class)->startCampaign($agent, $run, $episode);
+                }
+                $busyShips[] = $run->ship_symbol;
+                $this->decision($grant, $episode, $agent, $considered, 'buy_probe', $run->id, ['shipyard' => $run->plan['shipyard'] ?? null]);
+
+                return true;
+            } catch (LocalEarnBudget) {
+                throw new LocalEarnBudget;
+            } catch (GameException $exception) {
+                if ($exception->retryAfter > 0) {
+                    $this->wait($grant, 'awaiting_run_start');
+
+                    return false;
+                }
+                $considered[] = ['strategy' => 'buy_probe', 'rejected' => $exception->getMessage()];
+
                 return false;
             }
-            if (! $run->active_agent_id) {
-                app(AutomationRunner::class)->startCampaign($agent, $run, $episode);
-            }
-            $busyShips[] = $run->ship_symbol;
-            $this->decision($grant, $episode, $agent, $considered, 'buy_probe', $run->id, ['shipyard' => $run->plan['shipyard'] ?? null]);
-
-            return true;
-        } catch (LocalEarnBudget) {
-            throw new LocalEarnBudget;
-        } catch (GameException $exception) {
-            if ($exception->retryAfter > 0) {
-                $this->wait($grant, 'awaiting_run_start');
-
-                return false;
-            }
-            $considered[] = ['strategy' => 'buy_probe', 'rejected' => $exception->getMessage()];
-
-            return false;
-        }
+        });
     }
 
     /**
@@ -1557,100 +1752,102 @@ class CampaignDirector
      */
     private function dispatchPoolProbes(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array &$busyShips, array &$assignedTargets, array &$considered): bool
     {
-        $started = false;
-        $localEarn = CampaignLocalEarn::policy($grant, $episode);
-        $probes = app(CampaignFleet::class)->probes($episode);
-        $activeBuyer = $this->activeBuyer($episode);
-        $heldProbe = null;
-        $buyerCovered = $activeBuyer === null;
-        $buyerTargeted = $activeBuyer !== null && in_array($activeBuyer, $assignedTargets, true);
-        if ($activeBuyer !== null) {
+        return $this->measure('mesh_dispatch', function () use ($grant, $episode, $agent, &$busyShips, &$assignedTargets, &$considered) {
+            $started = false;
+            $localEarn = CampaignLocalEarn::policy($grant, $episode);
+            $probes = app(CampaignFleet::class)->probes($episode);
+            $activeBuyer = $this->activeBuyer($episode);
+            $heldProbe = null;
+            $buyerCovered = $activeBuyer === null;
+            $buyerTargeted = $activeBuyer !== null && in_array($activeBuyer, $assignedTargets, true);
+            if ($activeBuyer !== null) {
+                foreach ($probes as $probe) {
+                    if (($probe['nav']['status'] ?? null) !== 'IN_TRANSIT'
+                        && ($probe['nav']['waypointSymbol'] ?? null) === $activeBuyer
+                        && ($probe['cargo']['units'] ?? 0) === 0
+                        && ! in_array($probe['symbol'], $busyShips, true)) {
+                        $heldProbe = $probe['symbol'];
+                        $buyerCovered = true;
+                        if (! in_array($activeBuyer, $assignedTargets, true)) {
+                            $assignedTargets[] = $activeBuyer;
+                        }
+                        break;
+                    }
+                }
+            }
+            $probeBackoff = $episode->state['probe_position_failed'] ?? null;
+            $buyerQuote = $activeBuyer !== null
+                ? GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'market')->where('symbol', $activeBuyer)->first()
+                : null;
+            $buyerNeedsRefresh = $activeBuyer !== null
+                && (! $buyerQuote || ! empty($buyerQuote->data['invalidated_by_action']) || empty($buyerQuote->data['tradeGoods'])
+                    || $buyerQuote->observed_at->lte(now()->subSeconds(min(60, (int) config('gameplay.snapshot_seconds')))));
+            $canPositionBuyer = ! $buyerCovered && ! $buyerTargeted && $buyerNeedsRefresh
+                && ! $this->parked($agent, $activeBuyer)
+                && (! is_string($probeBackoff) || CarbonImmutable::parse($probeBackoff)->lt(now()->subMinutes(30)));
             foreach ($probes as $probe) {
-                if (($probe['nav']['status'] ?? null) !== 'IN_TRANSIT'
-                    && ($probe['nav']['waypointSymbol'] ?? null) === $activeBuyer
-                    && ($probe['cargo']['units'] ?? 0) === 0
-                    && ! in_array($probe['symbol'], $busyShips, true)) {
-                    $heldProbe = $probe['symbol'];
-                    $buyerCovered = true;
-                    if (! in_array($activeBuyer, $assignedTargets, true)) {
-                        $assignedTargets[] = $activeBuyer;
-                    }
-                    break;
-                }
-            }
-        }
-        $probeBackoff = $episode->state['probe_position_failed'] ?? null;
-        $buyerQuote = $activeBuyer !== null
-            ? GameObservation::where('agent_id', $agent->id)->where('reset_id', $episode->reset_id)->where('kind', 'market')->where('symbol', $activeBuyer)->first()
-            : null;
-        $buyerNeedsRefresh = $activeBuyer !== null
-            && (! $buyerQuote || ! empty($buyerQuote->data['invalidated_by_action']) || empty($buyerQuote->data['tradeGoods'])
-                || $buyerQuote->observed_at->lte(now()->subSeconds(min(60, (int) config('gameplay.snapshot_seconds')))));
-        $canPositionBuyer = ! $buyerCovered && ! $buyerTargeted && $buyerNeedsRefresh
-            && ! $this->parked($agent, $activeBuyer)
-            && (! is_string($probeBackoff) || CarbonImmutable::parse($probeBackoff)->lt(now()->subMinutes(30)));
-        foreach ($probes as $probe) {
-            if (($probe['nav']['status'] ?? null) === 'IN_TRANSIT'
-                || ($probe['cargo']['units'] ?? 0) !== 0
-                || in_array($probe['symbol'], $busyShips, true)
-                || $probe['symbol'] === $heldProbe) {
-                continue;
-            }
-            try {
-                if ($localEarn) {
-                    app(CampaignLocalEarn::class)->reserve($this->deadline);
-                }
-                $run = null;
-                if ($canPositionBuyer && app(FuelPlanner::class)->fuelFree($probe) && ($probe['nav']['waypointSymbol'] ?? null) !== $activeBuyer) {
-                    try {
-                        $run = $this->position($grant, $episode, $agent, $probe, $activeBuyer);
-                        $canPositionBuyer = false;
-                        $buyerTargeted = true;
-                    } catch (GameException $exception) {
-                        if ($exception instanceof LocalEarnBudget || $exception->retryAfter > 0) {
-                            throw $exception;
-                        }
-                        if (! $exception->uncertain && $exception->apiCode === null) {
-                            $episode->update(['state' => array_merge($episode->refresh()->state ?? [], ['probe_position_failed' => now()->toIso8601String()])]);
-                            $canPositionBuyer = false;
-                        }
-                        $considered[] = ['role' => 'probe', 'strategy' => 'scout', 'ship' => $probe['symbol'], 'destination' => $activeBuyer, 'rejected' => $exception->getMessage()];
-                    }
-                }
-                $run ??= $this->scout($grant, $episode, $agent, $probe, $considered, false, $assignedTargets);
-                if (! $run) {
+                if (($probe['nav']['status'] ?? null) === 'IN_TRANSIT'
+                    || ($probe['cargo']['units'] ?? 0) !== 0
+                    || in_array($probe['symbol'], $busyShips, true)
+                    || $probe['symbol'] === $heldProbe) {
                     continue;
                 }
-                if (! $run->active_agent_id) {
-                    app(AutomationRunner::class)->startCampaign($agent, $run, $episode);
-                }
-                $busyShips[] = $run->ship_symbol;
-                if (isset($run->plan['destination'])) {
-                    $assignedTargets[] = $run->plan['destination'];
-                }
-                $this->decision($grant, $episode, $agent, $considered, 'scout', $run->id);
-                $started = true;
-            } catch (LocalEarnBudget) {
-                if (! $started) {
-                    $this->localSummary['end'] = 'local_budget_deferred';
-                    $this->decision($grant, $episode, $agent, $considered, 'local_budget_deferred');
-                    $this->wait($grant, 'local_budget_deferred');
-                }
-
-                break;
-            } catch (GameException $exception) {
-                if ($exception->retryAfter > 0) {
+                try {
+                    if ($localEarn) {
+                        app(CampaignLocalEarn::class)->reserve($this->deadline);
+                    }
+                    $run = null;
+                    if ($canPositionBuyer && app(FuelPlanner::class)->fuelFree($probe) && ($probe['nav']['waypointSymbol'] ?? null) !== $activeBuyer) {
+                        try {
+                            $run = $this->position($grant, $episode, $agent, $probe, $activeBuyer);
+                            $canPositionBuyer = false;
+                            $buyerTargeted = true;
+                        } catch (GameException $exception) {
+                            if ($exception instanceof LocalEarnBudget || $exception->retryAfter > 0) {
+                                throw $exception;
+                            }
+                            if (! $exception->uncertain && $exception->apiCode === null) {
+                                $episode->update(['state' => array_merge($episode->refresh()->state ?? [], ['probe_position_failed' => now()->toIso8601String()])]);
+                                $canPositionBuyer = false;
+                            }
+                            $considered[] = ['role' => 'probe', 'strategy' => 'scout', 'ship' => $probe['symbol'], 'destination' => $activeBuyer, 'rejected' => $exception->getMessage()];
+                        }
+                    }
+                    $run ??= $this->scout($grant, $episode, $agent, $probe, $considered, false, $assignedTargets);
+                    if (! $run) {
+                        continue;
+                    }
+                    if (! $run->active_agent_id) {
+                        app(AutomationRunner::class)->startCampaign($agent, $run, $episode);
+                    }
+                    $busyShips[] = $run->ship_symbol;
+                    if (isset($run->plan['destination'])) {
+                        $assignedTargets[] = $run->plan['destination'];
+                    }
+                    $this->decision($grant, $episode, $agent, $considered, 'scout', $run->id);
+                    $started = true;
+                } catch (LocalEarnBudget) {
                     if (! $started) {
-                        $this->wait($grant, 'awaiting_run_start');
+                        $this->localSummary['end'] = 'local_budget_deferred';
+                        $this->decision($grant, $episode, $agent, $considered, 'local_budget_deferred');
+                        $this->wait($grant, 'local_budget_deferred');
                     }
 
                     break;
-                }
-                $considered[] = ['role' => 'probe', 'strategy' => 'scout', 'ship' => $probe['symbol'], 'rejected' => $exception->getMessage()];
-            }
-        }
+                } catch (GameException $exception) {
+                    if ($exception->retryAfter > 0) {
+                        if (! $started) {
+                            $this->wait($grant, 'awaiting_run_start');
+                        }
 
-        return $started;
+                        break;
+                    }
+                    $considered[] = ['role' => 'probe', 'strategy' => 'scout', 'ship' => $probe['symbol'], 'rejected' => $exception->getMessage()];
+                }
+            }
+
+            return $started;
+        });
     }
 
     /** @return list<string> Other waypoints in the ship's system at exactly its coordinates. */

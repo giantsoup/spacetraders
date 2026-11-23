@@ -30,6 +30,7 @@ use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
+use App\Services\SpaceTradersClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -136,7 +137,7 @@ class MultiAgentCampaignTest extends TestCase
         $this->artisan('spacetraders:dispatch-due')->assertSuccessful();
         Queue::assertPushed(ExecuteShipCommand::class, fn ($job) => $job->actionId === $lean->id);
         Queue::assertPushed(AdvanceAutomationRun::class, fn ($job) => $job->runId === $leanRun->id);
-        Queue::assertPushed(ExecuteShipCommand::class, 50);
+        Queue::assertPushed(ExecuteShipCommand::class, 100);
         Queue::assertPushed(AdvanceAutomationRun::class, 7);
     }
 
@@ -368,6 +369,10 @@ class MultiAgentCampaignTest extends TestCase
             $arms[] = CampaignGrant::create(['campaign_revision_id' => $grant->campaign_revision_id, 'revision_hash' => $grant->revision_hash,
                 'user_id' => $this->user->id, 'limits' => $grant->limits + ['arm' => ['label' => 'H1', 'ship' => $symbol.'-5']], 'slot' => null]);
         }
+        config(['gameplay.reset_cache_seconds' => 60]);
+        DB::table('game_runtime')->insert(['key' => 'reset_schedule:'.hash('sha256', SpaceTradersClient::BASE_URL),
+            'value' => json_encode(['reset_id' => '2026-10-25', 'next_reset' => now()->addDays(5)->toIso8601String(),
+                'observed_at' => now()->toIso8601String()], JSON_THROW_ON_ERROR)]);
         // Disabled engine proves local cadence without upstream calls.
         foreach ($primaries as $expected) {
             $director = new CampaignDirector;

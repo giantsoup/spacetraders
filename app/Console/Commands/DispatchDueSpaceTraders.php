@@ -51,8 +51,11 @@ class DispatchDueSpaceTraders extends Command
 
     private function dispatchDue(ShipCommandExecutor $executor): int
     {
-        $deadline = hrtime(true) + 15_000_000_000;
         DB::table('game_runtime')->upsert([['key' => 'scheduler', 'value' => json_encode(now()->toIso8601String())]], ['key'], ['value']);
+        $started = microtime(true);
+        $pre = $this->sweep((int) config('gameplay.pre_dispatch_seconds'));
+        $preSeconds = microtime(true) - $started;
+        $deadline = hrtime(true) + 15_000_000_000;
         foreach (ShipAction::where('state', 'sending')->where('sent_at', '<', now()->subSeconds(180))->limit(50)->get() as $action) {
             if (hrtime(true) >= $deadline) {
                 break;
@@ -82,30 +85,59 @@ class DispatchDueSpaceTraders extends Command
         } catch (\Throwable $exception) {
             Log::error('Campaign kill switch evaluation failed.', ['exception_class' => get_class($exception)]);
         }
-        $timing = ['lags' => [], 'director' => 0, 'arms' => 0];
+        $timing = ['director' => 0, 'arms' => 0, 'arms_directed' => 0, 'pre_dispatched' => count($pre),
+            'pre_dispatch' => $preSeconds];
         $director = app(CampaignDirector::class);
         $turns = DB::table('game_runtime')->where('key', 'director_turn')->value('value') === 'arms' ? ['arms', 'director'] : ['director', 'arms'];
+        $both = config('gameplay.arms_every_pass');
+        if ($both) {
+            $this->nextTurn($turns[0]);
+        }
         foreach ($turns as $turn) {
             $started = microtime(true);
-            $attempted = $turn === 'arms' ? $this->tickArms($director) : $this->tickDirector($director);
+            if ($turn === 'arms') {
+                $timing['arms_directed'] = $both
+                    ? $director->tickArmsBatch(fn (CampaignGrant $grant, callable $direct) => $this->runArm($director, $direct, $grant->id))
+                    : (int) $this->runArm($director, $director->tickArms(...));
+                $attempted = $timing['arms_directed'] > 0;
+            } else {
+                $attempted = $this->tickDirector($director);
+            }
             $timing[$turn] = microtime(true) - $started;
-            if ($attempted) {
-                DB::table('game_runtime')->upsert([['key' => 'director_turn', 'value' => $turn === 'arms' ? 'director' : 'arms']], ['key'], ['value']);
+            if (! $both && $attempted) {
+                $this->nextTurn($turn);
+
                 break;
             }
         }
         $started = microtime(true);
-        // A campaign decision can take most of a minute. Give dispatch its own budget after it.
-        $deadline = hrtime(true) + 15_000_000_000;
+        $timing['lags'] = [...$pre, ...$this->sweep(15)];
+        $timing['handover_refresh_seconds'] = $director->handoverRefreshSeconds;
+        $this->metrics($timing + ['dispatch' => microtime(true) - $started]);
+        $this->watchGate();
+
+        return self::SUCCESS;
+    }
+
+    private function nextTurn(string $first): void
+    {
+        DB::table('game_runtime')->upsert([['key' => 'director_turn', 'value' => $first === 'arms' ? 'director' : 'arms']], ['key'], ['value']);
+    }
+
+    private function sweep(int $seconds): array
+    {
+        if ($seconds <= 0) {
+            return [];
+        }
+        $deadline = hrtime(true) + $seconds * 1_000_000_000;
         if (app(EngineGate::class)->enabled()) {
             try {
                 app(EngineGate::class)->session();
             } catch (GameException) {
-                $this->metrics($timing + ['dispatch' => microtime(true) - $started]);
-
-                return self::SUCCESS;
+                return [];
             }
         }
+        $lags = [];
         $pendingActions = $this->fairSlice(
             ShipAction::where('state', 'pending')->where(function ($q) {
                 $q->whereNull('last_dispatched_at')->orWhere('last_dispatched_at', '<=', now()->subSeconds(30));
@@ -116,7 +148,7 @@ class DispatchDueSpaceTraders extends Command
             if (hrtime(true) >= $deadline) {
                 break;
             }
-            if (ShipAction::whereKey($action->id)->where(function ($q) {
+            if (ShipAction::whereKey($action->id)->where('state', 'pending')->where(function ($q) {
                 $q->whereNull('last_dispatched_at')->orWhere('last_dispatched_at', '<=', now()->subSeconds(30));
             })->update(['last_dispatched_at' => now()])) {
                 ExecuteShipCommand::dispatch($action->id);
@@ -134,17 +166,15 @@ class DispatchDueSpaceTraders extends Command
             if (hrtime(true) >= $deadline) {
                 break;
             }
-            if (AutomationRun::whereKey($run->id)->where(function ($q) {
+            if (AutomationRun::whereKey($run->id)->whereNotNull('active_agent_id')->where(function ($q) {
                 $q->whereNull('last_dispatched_at')->orWhere('last_dispatched_at', '<=', now()->subSeconds(30));
             })->update(['last_dispatched_at' => now()])) {
-                $timing['lags'][] = max(0, $run->next_action_at->diffInSeconds(now(), false));
+                $lags[] = max(0, $run->next_action_at->diffInSeconds(now(), false));
                 AdvanceAutomationRun::dispatch($run->id);
             }
         }
-        $this->metrics($timing + ['dispatch' => microtime(true) - $started]);
-        $this->watchGate();
 
-        return self::SUCCESS;
+        return $lags;
     }
 
     private function watchGate(): void
@@ -218,21 +248,25 @@ class DispatchDueSpaceTraders extends Command
      * Arms get their own failure streak per grant: five consecutive failures pause that arm only,
      * never the main campaign, and never touch the main campaign's streak.
      */
-    private function tickArms(CampaignDirector $director): bool
+    private function runArm(CampaignDirector $director, callable $direct, ?int $selected = null): bool
     {
         try {
-            if ($director->tickArms()) {
-                DB::table('game_runtime')->upsert([['key' => 'arm_director_failures:'.$director->armGrantId, 'value' => '0']], ['key'], ['value']);
+            if ($direct()) {
+                $selected ??= $director->armGrantId;
+                if ($selected !== null) {
+                    DB::table('game_runtime')->upsert([['key' => 'arm_director_failures:'.$selected, 'value' => '0']], ['key'], ['value']);
+                }
 
                 return true;
             }
 
             return false;
         } catch (\Throwable $exception) {
+            $selected ??= $director->armGrantId;
             $message = 'Arm director failed; exception details redacted.';
-            Log::error($message, ['exception_class' => get_class($exception), 'grant' => $director->armGrantId]);
+            Log::error($message, ['exception_class' => get_class($exception), 'grant' => $selected]);
             try {
-                $grant = $director->armGrantId ? CampaignGrant::find($director->armGrantId) : null;
+                $grant = $selected ? CampaignGrant::find($selected) : null;
                 if ($grant) {
                     $key = 'arm_director_failures:'.$grant->id;
                     $failures = (int) DB::table('game_runtime')->where('key', $key)->value('value') + 1;

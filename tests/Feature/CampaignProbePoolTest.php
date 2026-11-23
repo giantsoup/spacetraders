@@ -16,6 +16,7 @@ use App\Gameplay\CreditAccounting;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\FuelPlanner;
 use App\Gameplay\GameException;
+use App\Gameplay\RequestDeferred;
 use App\Gameplay\ShipCommandExecutor;
 use App\Models\Agent;
 use App\Models\AutomationRun;
@@ -336,6 +337,40 @@ class CampaignProbePoolTest extends TestCase
         $this->assertNull(CampaignProbeBootstrap::policy($armGrant, $armEpisode));
         $this->assertFalse(app(CampaignFleet::class)->poolEnabled($armEpisode));
         $this->assertNotNull($grant);
+    }
+
+    public function test_retryable_scout_deferral_stops_pool_selection_for_the_pass(): void
+    {
+        $this->editWorld(function (array &$world) {
+            $world['ships'][] = $this->probeShip('LOCAL-3', 'X1-TEST-ROCK');
+            $world['ships'][] = $this->probeShip('LOCAL-4', 'X1-TEST-ROCK');
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $sync = app(AgentSynchronizer::class);
+        foreach (['X1-TEST-A0FUEL', 'X1-TEST-M1', 'X1-TEST-M2'] as $market) {
+            $sync->observe($this->agent, 'market_listing', $market, [
+                'symbol' => $market, 'imports' => [['symbol' => 'IRON_ORE']], 'exports' => [], 'exchange' => [['symbol' => 'FUEL']],
+            ]);
+        }
+        $grant = $this->approve($this->bootstrapBody(target: 3, maxPrice: 50000, minWorkingCapital: 75000));
+        $episode = CampaignEpisode::create([
+            'campaign_grant_id' => $grant->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
+            'start_credits' => $this->agent->credits, 'phase' => 'earn', 'opened_at' => now(), 'next_reset_at' => now()->addDays(5),
+            'state' => ['last_discovery_at' => now()->toIso8601String(), 'role_ships' => ['command' => 'LOCAL-1', 'probe' => 'LOCAL-2']],
+        ]);
+        AutomationRun::create([
+            'agent_id' => $this->agent->id, 'active_agent_id' => $this->agent->id, 'campaign_episode_id' => $episode->id,
+            'reset_id' => $this->agent->reset_id, 'ship_symbol' => 'LOCAL-1', 'strategy' => 'trade', 'state' => 'running',
+            'started_at' => now(), 'expires_at' => now()->addMinutes(15), 'plan' => [], 'totals' => [],
+        ]);
+        $this->partialMock(AutomationRunner::class)->shouldReceive('preview')->once()
+            ->andThrow(new RequestDeferred('Synthetic market budget deferral.', 10));
+
+        $this->tickDirector();
+
+        $this->assertSame('awaiting_run_start', $grant->fresh()->wait_reason);
+        $this->assertNull($grant->fresh()->paused_at);
+        $this->assertFalse(AutomationRun::where('strategy', 'scout')->exists());
     }
 
     public function test_multi_probe_pool_scouts_distinct_markets_concurrently_while_command_ship_trades(): void

@@ -15,6 +15,11 @@ return [
     // finishes within the allowance. Invalid or non-positive values use 180; the floor is 30.
     'engine_shutdown_seconds' => (int) env('SPACETRADERS_ENGINE_SHUTDOWN_SECONDS', 180),
     'fixture_path' => env('SPACETRADERS_FIXTURE_PATH'),
+    'arms_every_pass' => (bool) env('SPACETRADERS_ARMS_EVERY_PASS', true),
+    'arm_pass_seconds' => (int) env('SPACETRADERS_ARM_PASS_SECONDS', 20),
+    'arm_pass_max_arms' => (int) env('SPACETRADERS_ARM_PASS_MAX_ARMS', 6),
+    'arm_busy_revisit_seconds' => (int) env('SPACETRADERS_ARM_BUSY_REVISIT_SECONDS', 300),
+    'pre_dispatch_seconds' => (int) env('SPACETRADERS_PRE_DISPATCH_SECONDS', 3),
     'enabled' => env('SPACETRADERS_AUTOMATION_ENABLED', false),
     'lock_path' => env('SPACETRADERS_LOCK_PATH', storage_path('framework/game-locks')),
     'request_budget_enabled' => ! env('SPACETRADERS_FIXTURE_PATH'),

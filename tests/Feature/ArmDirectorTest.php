@@ -160,7 +160,9 @@ class ArmDirectorTest extends TestCase
     {
         $c0 = app(CampaignControl::class)->approve(app(CampaignPlaybook::class)->import($this->body()), $this->user);
         $arm = $this->arm('T1b', 'LOCAL-3');
-        $this->partialMock(SpaceTradersApi::class)->shouldReceive('resetSchedule')->times(5)->andThrow(new \TypeError('synthetic-secret-must-not-be-logged'));
+        $api = \Mockery::mock(SpaceTradersApi::class, [app(SpaceTradersClient::class)])->makePartial();
+        $this->app->instance(SpaceTradersApi::class, $api);
+        $api->shouldReceive('agent')->times(5)->andThrow(new \TypeError('synthetic-secret-must-not-be-logged'));
         for ($attempt = 1; $attempt <= 5; $attempt++) {
             // C0 was directed this pass window, so the scheduler gives the pass to the arm.
             $c0->update(['last_directed_at' => now()]);
@@ -185,6 +187,7 @@ class ArmDirectorTest extends TestCase
 
     public function test_arms_tick_only_on_passes_where_c0_did_not_attempt(): void
     {
+        config(['gameplay.arms_every_pass' => false]);
         $this->arm('T1b', 'LOCAL-3');
         $mock = $this->partialMock(CampaignDirector::class);
         $mock->shouldReceive('tick')->once()->andReturn(true);
@@ -194,6 +197,7 @@ class ArmDirectorTest extends TestCase
 
     public function test_arms_tick_when_c0_is_throttled(): void
     {
+        config(['gameplay.arms_every_pass' => false]);
         $this->arm('T1b', 'LOCAL-3');
         $mock = $this->partialMock(CampaignDirector::class);
         $mock->shouldReceive('tick')->once()->andReturn(false);
@@ -204,6 +208,7 @@ class ArmDirectorTest extends TestCase
     #[DataProvider('dispatcherIntervals')]
     public function test_slow_c0_and_arms_alternate_when_both_are_due(int $interval): void
     {
+        config(['gameplay.arms_every_pass' => false]);
         $grant = $this->c0();
         $arm = $this->arm('T1b', 'LOCAL-3');
         $schedule = app(SpaceTradersApi::class)->resetSchedule();
