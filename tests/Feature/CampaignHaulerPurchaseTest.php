@@ -243,6 +243,37 @@ class CampaignHaulerPurchaseTest extends TestCase
         $this->assertSame('running', $run->fresh()->state->value);
     }
 
+    public function test_long_shipyard_scout_treats_an_expired_over_cap_offer_as_unknown_so_it_can_refresh(): void
+    {
+        $this->setUpSaturation(hubs: 2, remoteYard: true);
+        $yard = 'X1-TEST-YARD';
+        $this->editFixture(function (&$world) use ($yard) {
+            $world['waypoints'][2]['x'] = 393;
+            $world['shipyards'][$yard]['ships'][1]['purchasePrice'] = 750000;
+            $world['ships'][] = FakeSpaceTraders::probe('LOCAL-6', 'X1-TEST-ROCK', 5);
+        });
+        $sync = app(AgentSynchronizer::class);
+        $sync->observe($this->agent, 'waypoint', $yard, $this->point($yard, 393, ['SHIPYARD']), 'listing');
+        $obs = $sync->observe($this->agent, 'shipyard', $yard, $this->world()['shipyards'][$yard]);
+        $obs->update(['observed_at' => now()->subMinutes(31)]);
+        $sync->sync($this->agent, false);
+        $episode = $this->primary();
+        $this->schedulerPass();
+        $grant = $episode->grant();
+        $considered = [];
+
+        $run = app(CampaignHaulerPurchase::class)->plan($grant, $episode, $this->agent, ['LOCAL-1'], $considered, microtime(true) + 10);
+
+        $this->assertNotNull($run);
+        $this->assertSame(['scout', $yard, 'shipyard'], [$run->strategy, $run->plan['destination'], $run->plan['observe_kind']]);
+        $gates = collect($considered)->whereNotNull('gates')->sole()['gates'];
+        $this->assertSame(600000, $gates['G5']['price']);
+        $this->assertTrue($gates['G5']['pass']);
+        $this->assertTrue($gates['G8']['pass']);
+        app(AutomationRunner::class)->startCampaign($this->agent, $run, $episode);
+        $this->assertSame('running', $run->fresh()->state->value);
+    }
+
     public function test_reviewed_mismatch_clears_agent_hold_and_keeps_the_delivered_ship_excluded(): void
     {
         [$run, $action] = $this->purchaseIntent();
@@ -528,6 +559,32 @@ class CampaignHaulerPurchaseTest extends TestCase
         $this->assertNull($bootstrap::deliveredShip($earlier));
         $this->assertFalse(app(CampaignControl::class)->autoArmCandidates($episode, $this->agent)->contains('symbol', 'LOCAL-9'));
         $this->assertSame([$earlier->id, $later->id], $bootstrap->reservations($this->agent)->pluck('action_id')->all());
+        $this->assertFalse(CampaignEvent::where('kind', 'hauler_purchased')->exists());
+    }
+
+    public function test_cross_yard_outstanding_purchase_keeps_ship_ambiguous_after_movement(): void
+    {
+        $this->setUpSaturation(hubs: 2, remoteYard: true);
+        $episode = $this->primary();
+        $bootstrap = app(CampaignProbeBootstrap::class);
+        $transaction = ['agentSymbol' => 'LOCAL', 'waypointSymbol' => 'X1-TEST-ROCK', 'shipType' => 'SHIP_LIGHT_HAULER',
+            'timestamp' => now()->toIso8601String(), 'price' => 350000];
+        $yardA = $this->haulerPurchase($episode, 'yard-a-ack', outcome: ['transactions' => [$transaction]]);
+        $this->editFixture(fn (&$world) => $world['ships'][] = FakeSpaceTraders::lightHauler('LOCAL-8', 'X1-TEST-PORT'));
+        $sync = app(AgentSynchronizer::class);
+        $sync->sync($this->agent, false);
+        $this->travel(10)->seconds();
+        $yardB = $this->haulerPurchase($episode, 'yard-b-uncertain', 'uncertain');
+        $yardB->update(['arguments' => array_replace($yardB->arguments, ['waypointSymbol' => 'X1-TEST-YARD'])]);
+        $this->editFixture(fn (&$world) => $world['ships'][] = FakeSpaceTraders::lightHauler('LOCAL-9', 'X1-TEST-ROCK'));
+        $sync->sync($this->agent, false);
+
+        $bootstrap->reconcileDeliveries($episode->grant(), $episode, $this->agent);
+
+        $this->assertSame(['LOCAL-9'], $yardA->fresh()->outcome['hauler_delivery_candidates']);
+        $this->assertNull($bootstrap::deliveredShip($yardA));
+        $this->assertFalse(app(CampaignControl::class)->autoArmCandidates($episode, $this->agent)->contains('symbol', 'LOCAL-9'));
+        $this->assertSame([$yardA->id, $yardB->id], $bootstrap->reservations($this->agent)->pluck('action_id')->all());
         $this->assertFalse(CampaignEvent::where('kind', 'hauler_purchased')->exists());
     }
 

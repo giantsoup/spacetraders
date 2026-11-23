@@ -213,11 +213,12 @@ class CampaignProbeBootstrap
                         continue 2;
                     }
                 }
-                $competitors = $outstanding->filter(fn (ShipAction $other) => $other->id !== $action->id
-                    && $other->arguments['shipType'] === $action->arguments['shipType']
-                    && ($other->arguments['waypointSymbol'] ?? null) === $action->arguments['waypointSymbol']);
-                $ambiguousTransaction = $competitors->contains(fn (ShipAction $other) => $this->matchingTransaction($agent, $other, [$transaction], includeUnsent: true) !== null);
-                $ambiguousShip = $competitors->contains(function (ShipAction $other) use ($symbol) {
+                $sameType = $outstanding->filter(fn (ShipAction $other) => $other->id !== $action->id
+                    && $other->arguments['shipType'] === $action->arguments['shipType']);
+                $ambiguousTransaction = $sameType
+                    ->filter(fn (ShipAction $other) => ($other->arguments['waypointSymbol'] ?? null) === $action->arguments['waypointSymbol'])
+                    ->contains(fn (ShipAction $other) => $this->matchingTransaction($agent, $other, [$transaction], includeUnsent: true) !== null);
+                $ambiguousShip = $sameType->contains(function (ShipAction $other) use ($symbol) {
                     $baseline = $other->before_state['estimate']['fleet_symbols'] ?? null;
 
                     return ! is_array($baseline) || ! in_array($symbol, $baseline, true);
@@ -526,12 +527,13 @@ class CampaignProbeBootstrap
                 $selected = null;
                 if ($hauler) {
                     $yardObservation = $shipyards[$yard];
-                    $offer = $this->offer($yardObservation->data, $type);
+                    $offer = $yardObservation->observed_at->gte(now()->subMinutes(self::SHIPYARD_BACKOFF_MINUTES))
+                        ? $this->offer($yardObservation->data, $type)
+                        : null;
                     $route = $this->purchaseRoute($agent, $ship, $yard, $reserve);
                     $fuel = $route['fuel_ceiling'];
                     $fuelByYard[$yard] = min($fuelByYard[$yard] ?? $fuel, $fuel);
-                    if ($offer && $yardObservation->observed_at->gte(now()->subMinutes(self::SHIPYARD_BACKOFF_MINUTES))
-                        && $agent->credits - $reserve < $offer['purchasePrice'] + $fuel) {
+                    if ($offer && $agent->credits - $reserve < $offer['purchasePrice'] + $fuel) {
                         $considered[] = ['strategy' => $strategy, 'ship' => $ship['symbol'], 'shipyard' => $yard,
                             'rejected' => 'Observed '.$type.' price and fuel breach the working-capital reserve.'];
 
@@ -553,7 +555,7 @@ class CampaignProbeBootstrap
                         : ($hauler ? $route['outbound'] : app(FuelPlanner::class)->leg($agent, $ship, $yard, $reserve));
                     if ($leg && $leg['estimated_seconds'] + 180 > $limits['minutes'] * 60 && app(FuelPlanner::class)->fuelFree($ship)) {
                         if ($hauler) {
-                            $selected = $saturation->assertPurchase($grant, $episode, $agent, $yard, $offer, deadline: $deadline);
+                            $selected = $saturation->assertPurchase($grant, $episode, $agent, $yard, $offer, fuel: $fuel, deadline: $deadline);
                         }
                         $run = app(AutomationRunner::class)->previewMeshScout($agent, $ship, $yard, $limits, $episode, 'shipyard');
                     }
