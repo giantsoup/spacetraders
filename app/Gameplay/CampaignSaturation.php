@@ -50,7 +50,7 @@ class CampaignSaturation
         return collect([$command['symbol'] ?? null])->merge($arms)->merge($delivered)->filter()->unique()->values()->all();
     }
 
-    public function evaluate(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, ?string $yard = null, ?array $offer = null, ?int $ignoreRun = null, int $fuel = 0, ?CampaignRevision $revision = null, bool $offerIndependentOnly = false, ?array $candidateYards = null, ?float $deadline = null): array
+    public function evaluate(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, ?string $yard = null, ?array $offer = null, ?int $ignoreRun = null, int $fuel = 0, ?CampaignRevision $revision = null, bool $offerIndependentOnly = false, ?array $candidateYards = null, ?float $deadline = null, array $fuelByYard = []): array
     {
         $simulate = $revision !== null;
         $revision ??= $grant->revision();
@@ -113,13 +113,15 @@ class CampaignSaturation
                     break;
                 }
                 $candidatePrice = $candidateOffer['purchasePrice'] ?? $policy['max_price'];
+                $candidateFuel = $fuelByYard[$candidateYard] ?? $fuel;
                 $opportunity = $reserveReason ? ['score' => 0, 'limiting_factor' => 'unknown_commitments', 'excluded_claims' => []]
-                    : $this->opportunity($grant, $episode, $agent, $revision, $candidateYard ?: null, $candidateOffer, $candidatePrice, $fuel, $reserve, $deadline);
+                    : $this->opportunity($grant, $episode, $agent, $revision, $candidateYard ?: null, $candidateOffer, $candidatePrice, $candidateFuel, $reserve, $deadline);
                 $searchComplete = $searchComplete && ! ($opportunity['search_incomplete'] ?? false);
-                $g4 = ['pass' => $opportunity['score'] >= $policy['min_unclaimed_score'] && $idle['maximum'] < $policy['max_idle_share'],
-                    'reason' => $opportunity['score'] < $policy['min_unclaimed_score'] ? 'spare_corridor' : ($idle['maximum'] >= $policy['max_idle_share'] ? 'idle_share' : null),
+                $g4 = ['pass' => $candidateYard !== '' && $opportunity['score'] >= $policy['min_unclaimed_score'] && $idle['maximum'] < $policy['max_idle_share'],
+                    'reason' => $candidateYard === '' ? 'no_eligible_yard'
+                        : ($opportunity['score'] < $policy['min_unclaimed_score'] ? 'spare_corridor' : ($idle['maximum'] >= $policy['max_idle_share'] ? 'idle_share' : null)),
                     'idle' => $idle] + $opportunity;
-                $g5 = $this->liquidity($agent, $reserve, $reserveReason, $candidatePrice, $fuel);
+                $g5 = $this->liquidity($agent, $reserve, $reserveReason, $candidateYard === '' ? null : $candidatePrice, $candidateFuel);
                 $payback = $reference['net_per_hour'] > 0 ? $candidatePrice / $reference['net_per_hour'] : null;
                 $g8 = ['pass' => $hours >= $policy['stop_hours_before_reset'] && $payback !== null && $payback <= $paybackLimit,
                     'reason' => $hours < $policy['stop_hours_before_reset'] ? 'time_to_reset' : ($payback === null ? 'nonpositive_reference_yield' : ($payback > $paybackLimit ? 'payback' : null)),
@@ -133,17 +135,24 @@ class CampaignSaturation
                 }
             }
             $known = $yardOffers->isNotEmpty() && $yardOffers->every(fn (?array $value) => $value !== null);
-            if ($searchComplete && $known) {
+            if ($searchComplete && $known && $mesh['system'] !== null) {
+                $catalogue = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+                    ->where('kind', 'catalogue')->where('symbol', $mesh['system'])->first();
                 $cheapest = $yardOffers->min('purchasePrice');
-                if ($cheapest > $policy['max_price']) {
-                    $permanent ??= ['reason' => 'all_shipyards_over_price_cap'];
-                } elseif ($reference['net_per_hour'] > 0 && $cheapest / $reference['net_per_hour'] > $paybackLimit) {
-                    $permanent ??= ['reason' => 'payback'];
+                if (($catalogue?->data['complete'] ?? null) === true) {
+                    if ($cheapest > $policy['max_price']) {
+                        $permanent ??= ['reason' => 'all_shipyards_over_price_cap'];
+                    } elseif ($reference['net_per_hour'] > 0 && $cheapest / $reference['net_per_hour'] > $paybackLimit) {
+                        $permanent ??= ['reason' => 'payback'];
+                    }
                 }
             }
         }
         ksort($gates);
         $hold = $this->hold($episode, $gates, $permanent, $halt['cannibalization'], $activePolicy, $aggregate && $yard !== null && $searchComplete);
+        if ($hold === null && ! $offerIndependentOnly && $price > $policy['max_price']) {
+            $hold = ['permanent' => false, 'reason' => 'max_price', 'minutes' => null];
+        }
         $pass = $searchComplete && collect($gates)->every(fn ($gate) => $gate['pass']) && ! $hold && ($offerIndependentOnly || ($yard !== null && $price <= $policy['max_price']));
         $gaps = $offerIndependentOnly ? [] : app(CampaignDiscovery::class)->directoryGaps($episode, $agent, includeBackoff: true);
 
@@ -158,10 +167,12 @@ class CampaignSaturation
         ];
     }
 
-    public function assertPurchase(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, string $yard, ?array $offer = null, ?int $ignoreRun = null, int $fuel = 0, bool $persist = false, ?float $deadline = null): void
+    public function assertPurchase(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, string $yard, ?array $offer = null, ?int $ignoreRun = null, int $fuel = 0, bool $persist = false, ?float $deadline = null): array
     {
         $evaluation = $this->evaluate($grant, $episode, $agent, $yard, $offer, $ignoreRun, $fuel, deadline: $deadline);
         $this->assertGates($grant, $episode, $evaluation, $persist);
+
+        return $evaluation;
     }
 
     public function assertGates(CampaignGrant $grant, CampaignEpisode $episode, array $evaluation, bool $persist = false): void
@@ -184,6 +195,10 @@ class CampaignSaturation
         $state = $episode->refresh()->state ?? [];
         $prior = $state['saturation_hold'] ?? null;
         $hold = $evaluation['hold'];
+        if ($hold === null && ! isset($evaluation['gates']['G4'])
+            && (in_array($prior['gate'] ?? null, ['G4', 'G5', 'G8'], true) || ($prior['reason'] ?? null) === 'max_price')) {
+            return;
+        }
         if ($hold && ! $hold['permanent'] && ! empty($hold['minutes']) && ! isset($hold['held_until'])) {
             $hold['held_until'] = now()->addMinutes($hold['minutes'])->toIso8601String();
         }
@@ -200,7 +215,7 @@ class CampaignSaturation
         }
         $episode->update(['state' => $state]);
         app(CampaignControl::class)->event($grant, $episode, 'saturation', ['hold' => $hold, 'previous_reason' => $prior['reason'] ?? null,
-            'gate' => collect($evaluation['gates'])->search(fn ($gate) => ! $gate['pass']) ?: null]);
+            'gate' => $hold['gate'] ?? (collect($evaluation['gates'])->search(fn ($gate) => ! $gate['pass']) ?: null)]);
     }
 
     private function hold(CampaignEpisode $episode, array $gates, ?array $permanent, ?array $cannibalization, bool $activePolicy, bool $hasYard): ?array
@@ -218,7 +233,7 @@ class CampaignSaturation
         if ($cannibalization) {
             return ['permanent' => false, 'reason' => 'incumbent_yield', 'minutes' => 180, 'evidence' => $cannibalization];
         }
-        foreach (['G1', 'G2', 'G3', 'G6', 'G7', 'G9', 'G4', 'G5', 'G8'] as $gate) {
+        foreach (['G1', 'G2', 'G3', 'G6', 'G7', 'G9', 'G5', 'G4', 'G8'] as $gate) {
             if (isset($gates[$gate]) && ! $gates[$gate]['pass']) {
                 $minutes = match ($gate) {
                     'G6', 'G7' => 30,

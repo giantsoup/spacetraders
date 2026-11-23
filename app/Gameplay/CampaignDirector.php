@@ -1223,7 +1223,7 @@ class CampaignDirector
     private function decision(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $considered, string $choice, ?int $run = null, array $extra = []): void
     {
         $this->passOutcome = $run !== null ? 'started' : ($choice === 'awaiting_run' ? 'awaiting_run' : 'waiting');
-        $gates = collect($considered)->first(fn ($candidate) => isset($candidate['gates']));
+        $gates = collect($considered)->last(fn ($candidate) => isset($candidate['gates']));
         if ($gates) {
             $failures = array_filter(array_map(fn ($gate) => $gate['pass'] ? null : $gate['reason'], $gates['gates']));
             $extra += ['saturation' => ['gates' => $gates['gates'], 'hold' => $gates['hold']], 'saturation_reasons' => $failures];

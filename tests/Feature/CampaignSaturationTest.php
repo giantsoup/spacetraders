@@ -355,6 +355,138 @@ class CampaignSaturationTest extends TestCase
         return [['awaiting_first_load'], ['time_to_reset'], ['liquidity']];
     }
 
+    public function test_offer_liquidity_holds_once_and_c0_records_the_driving_gates(): void
+    {
+        $this->setUpSaturation(credits: 450000);
+        $episode = $this->primary();
+        $grant = $episode->grant();
+        $this->schedulerPass();
+        $yard = 'X1-TEST-ROCK';
+        app(AgentSynchronizer::class)->observe($this->agent, 'shipyard', $yard, $this->world()['shipyards'][$yard]);
+        $before = $this->world()['calls'];
+        $buyer = app(CampaignHaulerPurchase::class);
+
+        for ($pass = 0; $pass < 2; $pass++) {
+            $considered = [];
+            $this->assertNull($buyer->plan($grant, $episode, $this->agent, [], $considered, microtime(true) + 10));
+            $snapshot = collect($considered)->whereNotNull('gates')->sole();
+            $this->assertSame('liquidity', $snapshot['hold']['reason']);
+            $this->assertSame([350000, 300000], [$snapshot['gates']['G5']['price'], $snapshot['gates']['G5']['reserve']]);
+            $this->assertSame(1, CampaignEvent::where('kind', 'saturation')->count());
+        }
+        $this->assertSame($before, $this->world()['calls']);
+        $saturation = app(CampaignSaturation::class);
+        $saturation->record($grant, $episode, $saturation->evaluate($grant, $episode, $this->agent, offerIndependentOnly: true));
+        $this->assertSame('liquidity', $episode->fresh()->state['saturation_hold']['reason']);
+        $this->assertSame(1, CampaignEvent::where('kind', 'saturation')->count());
+
+        $this->tickC0();
+        $this->assertSame(1, CampaignEvent::where('kind', 'saturation')->count());
+        $decision = CampaignEvent::where('kind', 'decision')->latest('id')->firstOrFail();
+        $this->assertSame('liquidity', $decision->data['saturation']['hold']['reason']);
+        $this->assertSame('liquidity', $decision->data['saturation_reasons']['G5']);
+        $this->assertSame(350000, $decision->data['saturation']['gates']['G5']['price']);
+    }
+
+    public function test_estimated_purchase_fuel_counts_toward_liquidity_before_preview(): void
+    {
+        $this->setUpSaturation(hubs: 2, remoteYard: true, credits: 650000);
+        $yard = 'X1-TEST-YARD';
+        $sync = app(AgentSynchronizer::class);
+        $sync->observe($this->agent, 'waypoint', $yard, $this->point($yard, 8, ['SHIPYARD']), 'listing');
+        $sync->observe($this->agent, 'shipyard', $yard, $this->world()['shipyards'][$yard]);
+        $episode = $this->primary();
+        $this->schedulerPass();
+        $before = $this->world()['calls'];
+        $considered = [];
+
+        $this->assertNull(app(CampaignHaulerPurchase::class)->plan($episode->grant(), $episode, $this->agent,
+            ['LOCAL-2', 'LOCAL-4'], $considered, microtime(true) + 10));
+        $snapshot = collect($considered)->whereNotNull('gates')->sole();
+        $gate = $snapshot['gates']['G5'];
+        $this->assertSame('liquidity', $snapshot['hold']['reason']);
+        $this->assertSame($gate['available_credits'] - $gate['reserve'], $gate['price']);
+        $this->assertGreaterThan(0, $gate['purchase_fuel_ceiling']);
+        $this->assertSame($before, $this->world()['calls']);
+    }
+
+    public function test_c0_purchase_decision_records_the_selected_offers_corridor_and_payback(): void
+    {
+        $this->setUpSaturation(hubs: 2);
+        $this->editFixture(fn (&$world) => $world['shipyards']['X1-TEST-ROCK']['ships'][1]['purchasePrice'] = 380000);
+        $body = $this->revision->body;
+        $body['phases'][1]['activities'][0]['when'] = ['credits_gte' => 2300000];
+        $this->primary(revision: app(CampaignPlaybook::class)->import(Yaml::dump($body, 12)));
+        $this->schedulerPass();
+
+        $this->tickC0();
+
+        $decision = CampaignEvent::where('kind', 'decision')->where('data->choice', 'buy_hauler')->sole();
+        $gates = $decision->data['saturation']['gates'];
+        $this->assertTrue($gates['G4']['pass']);
+        $this->assertGreaterThan(0, $gates['G4']['units']);
+        $this->assertSame(380000, $gates['G5']['price']);
+        $this->assertTrue($gates['G8']['pass']);
+        $this->assertSame(9.5, $gates['G8']['payback_hours']);
+        $this->assertNull($decision->data['saturation']['hold']);
+        $run = AutomationRun::findOrFail($decision->data['run_id']);
+        $this->workRun($run);
+        $this->assertSame('completed', $run->fresh()->state->value, $run->fresh()->blocked_reason ?? '');
+        $this->assertSame(380000, CampaignEvent::where('kind', 'hauler_purchased')->sole()->data['price']);
+    }
+
+    #[DataProvider('permanentYardStops')]
+    public function test_permanent_yard_stops_require_a_complete_home_catalogue(int $price, int $hours, string $reason): void
+    {
+        $this->setUpSaturation(hubs: 2);
+        $yard = 'X1-TEST-ROCK';
+        $this->editFixture(fn (&$world) => $world['shipyards'][$yard]['ships'][1]['purchasePrice'] = $price);
+        $sync = app(AgentSynchronizer::class);
+        $sync->observe($this->agent, 'shipyard', $yard, $this->world()['shipyards'][$yard]);
+        $sync->observe($this->agent, 'catalogue', 'X1-TEST', ['complete' => false, 'total' => 22], 'listing');
+        $episode = $this->primary();
+        $episode->update(['next_reset_at' => now()->addHours($hours)]);
+        $this->schedulerPass();
+        $buyer = app(CampaignHaulerPurchase::class);
+        $considered = [];
+
+        $this->assertNull($buyer->plan($episode->grant(), $episode, $this->agent, [], $considered, microtime(true) + 10));
+        $this->assertFalse($episode->fresh()->state['saturation_hold']['permanent']);
+
+        $sync->observe($this->agent, 'catalogue', 'X1-TEST', ['complete' => true, 'total' => 22], 'listing');
+        $considered = [];
+        $this->assertNull($buyer->plan($episode->grant(), $episode, $this->agent, [], $considered, microtime(true) + 10));
+        $hold = $episode->fresh()->state['saturation_hold'];
+        $this->assertTrue($hold['permanent']);
+        $this->assertSame($reason, $hold['reason']);
+    }
+
+    public static function permanentYardStops(): array
+    {
+        return [
+            'max_price' => [650000, 120, 'all_shipyards_over_price_cap'],
+            'payback' => [400000, 30, 'payback'],
+        ];
+    }
+
+    public function test_an_empty_hauler_candidate_search_reports_no_eligible_yard(): void
+    {
+        $this->setUpSaturation(hubs: 2);
+        $yard = 'X1-TEST-ROCK';
+        $this->editFixture(function (&$world) use ($yard) {
+            array_pop($world['shipyards'][$yard]['shipTypes']);
+            array_pop($world['shipyards'][$yard]['ships']);
+        });
+        $episode = $this->primary();
+        $this->schedulerPass();
+        $considered = [];
+
+        $this->assertNull(app(CampaignHaulerPurchase::class)->plan($episode->grant(), $episode, $this->agent, [], $considered, microtime(true) + 10));
+        $snapshot = collect($considered)->whereNotNull('gates')->sole();
+        $this->assertSame('no_eligible_yard', $snapshot['gates']['G4']['reason']);
+        $this->assertSame('no_eligible_yard', $episode->fresh()->state['saturation_hold']['reason']);
+    }
+
     public function test_g4_uses_cargo_modules_and_rejects_the_unprofitable_forty_unit_offer(): void
     {
         $this->setUpSaturation(hubs: 2);

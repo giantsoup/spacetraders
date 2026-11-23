@@ -210,6 +210,39 @@ class CampaignHaulerPurchaseTest extends TestCase
         $this->assertTrue($markets->contains('/systems/X1-TEST/waypoints/X1-TEST-PORT/market'));
     }
 
+    public function test_long_shipyard_scout_uses_the_stored_offers_price_and_configuration(): void
+    {
+        $this->setUpSaturation(hubs: 2, remoteYard: true);
+        $yard = 'X1-TEST-YARD';
+        $this->editFixture(function (&$world) use ($yard) {
+            $world['waypoints'][2]['x'] = 393;
+            $world['shipyards'][$yard]['ships'][1]['purchasePrice'] = 380000;
+            $world['ships'][] = FakeSpaceTraders::probe('LOCAL-6', 'X1-TEST-ROCK', 5);
+        });
+        $sync = app(AgentSynchronizer::class);
+        $sync->observe($this->agent, 'waypoint', $yard, $this->point($yard, 393, ['SHIPYARD']), 'listing');
+        $sync->observe($this->agent, 'shipyard', $yard, $this->world()['shipyards'][$yard]);
+        $sync->sync($this->agent, false);
+        $episode = $this->primary();
+        $episode->update(['next_reset_at' => now()->addHours(36)]);
+        $this->schedulerPass();
+        $grant = $episode->grant();
+        $saturation = app(CampaignSaturation::class);
+        $this->assertSame('payback', $saturation->evaluate($grant, $episode, $this->agent, $yard)['gates']['G8']['reason']);
+        $considered = [];
+
+        $run = app(CampaignHaulerPurchase::class)->plan($grant, $episode, $this->agent, ['LOCAL-1'], $considered, microtime(true) + 10);
+
+        $this->assertNotNull($run);
+        $this->assertSame(['scout', $yard, 'shipyard'], [$run->strategy, $run->plan['destination'], $run->plan['observe_kind']]);
+        $gates = collect($considered)->whereNotNull('gates')->sole()['gates'];
+        $this->assertTrue($gates['G4']['pass']);
+        $this->assertSame(380000, $gates['G5']['price']);
+        $this->assertSame(9.5, $gates['G8']['payback_hours']);
+        app(AutomationRunner::class)->startCampaign($this->agent, $run, $episode);
+        $this->assertSame('running', $run->fresh()->state->value);
+    }
+
     public function test_reviewed_mismatch_clears_agent_hold_and_keeps_the_delivered_ship_excluded(): void
     {
         [$run, $action] = $this->purchaseIntent();
@@ -471,6 +504,31 @@ class CampaignHaulerPurchaseTest extends TestCase
             'pending overlap' => ['pending', true],
             'later uncertain send' => ['uncertain', false],
         ];
+    }
+
+    public function test_later_purchase_can_explain_the_ship_without_explaining_the_earlier_transaction(): void
+    {
+        $this->setUpSaturation();
+        $episode = $this->primary();
+        $bootstrap = app(CampaignProbeBootstrap::class);
+        $transaction = ['agentSymbol' => 'LOCAL', 'waypointSymbol' => 'X1-TEST-ROCK', 'shipType' => 'SHIP_LIGHT_HAULER',
+            'timestamp' => now()->toIso8601String(), 'price' => 350000];
+        $earlier = $this->haulerPurchase($episode, 'earlier-purchase', outcome: ['transactions' => [$transaction]]);
+        $this->editFixture(fn (&$world) => $world['ships'][] = FakeSpaceTraders::lightHauler('LOCAL-8', 'X1-TEST-PORT'));
+        $sync = app(AgentSynchronizer::class);
+        $sync->sync($this->agent, false);
+        $this->travel(10)->seconds();
+        $later = $this->haulerPurchase($episode, 'later-purchase', 'uncertain');
+        $this->editFixture(fn (&$world) => $world['ships'][] = FakeSpaceTraders::lightHauler('LOCAL-9', 'X1-TEST-ROCK'));
+        $sync->sync($this->agent, false);
+
+        $bootstrap->reconcileDeliveries($episode->grant(), $episode, $this->agent);
+
+        $this->assertSame(['LOCAL-9'], $earlier->fresh()->outcome['hauler_delivery_candidates']);
+        $this->assertNull($bootstrap::deliveredShip($earlier));
+        $this->assertFalse(app(CampaignControl::class)->autoArmCandidates($episode, $this->agent)->contains('symbol', 'LOCAL-9'));
+        $this->assertSame([$earlier->id, $later->id], $bootstrap->reservations($this->agent)->pluck('action_id')->all());
+        $this->assertFalse(CampaignEvent::where('kind', 'hauler_purchased')->exists());
     }
 
     public function test_release_hauler_purchase_cli_keeps_receipt_evidence_and_the_slot(): void

@@ -213,10 +213,16 @@ class CampaignProbeBootstrap
                         continue 2;
                     }
                 }
-                if ($outstanding->contains(fn (ShipAction $other) => $other->id !== $action->id
+                $competitors = $outstanding->filter(fn (ShipAction $other) => $other->id !== $action->id
                     && $other->arguments['shipType'] === $action->arguments['shipType']
-                    && ($other->arguments['waypointSymbol'] ?? null) === $action->arguments['waypointSymbol']
-                    && $this->matchingTransaction($agent, $other, [$transaction], includeUnsent: true) !== null)) {
+                    && ($other->arguments['waypointSymbol'] ?? null) === $action->arguments['waypointSymbol']);
+                $ambiguousTransaction = $competitors->contains(fn (ShipAction $other) => $this->matchingTransaction($agent, $other, [$transaction], includeUnsent: true) !== null);
+                $ambiguousShip = $competitors->contains(function (ShipAction $other) use ($symbol) {
+                    $baseline = $other->before_state['estimate']['fleet_symbols'] ?? null;
+
+                    return ! is_array($baseline) || ! in_array($symbol, $baseline, true);
+                });
+                if ($ambiguousTransaction || $ambiguousShip) {
                     continue;
                 }
                 $pin = $action->arguments['offer_configuration_hash'] ?? null;
@@ -461,9 +467,10 @@ class CampaignProbeBootstrap
             if (! $evaluation['enabled']) {
                 return null;
             }
-            $saturation->record($grant, $episode, $evaluation);
-            $considered[] = ['strategy' => $strategy, 'gates' => $evaluation['gates'], 'hold' => $evaluation['hold']];
             if (! $policy || ! $evaluation['can_purchase']) {
+                $saturation->record($grant, $episode, $evaluation);
+                $considered[] = ['strategy' => $strategy, 'gates' => $evaluation['gates'], 'hold' => $evaluation['hold']];
+
                 return null;
             }
         } elseif ($policy) {
@@ -498,7 +505,7 @@ class CampaignProbeBootstrap
         }
 
         $shipyards = $this->discoverShipyards($grant, $episode, $agent, $system, $eligibleShips, $deadline, $type);
-        if ($shipyards === []) {
+        if (! $hauler && $shipyards === []) {
             $considered[] = ['strategy' => $strategy, 'rejected' => 'No '.$type.' shipyard observed yet in '.$system.'.'];
 
             return null;
@@ -507,11 +514,30 @@ class CampaignProbeBootstrap
         $points = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
             ->where('kind', 'waypoint')->get()->keyBy('symbol');
         $candidates = $this->rankCandidates($episode, $agent, $policy, $reserve, $shipyards, $eligibleShips, $points, $considered, $type, $deadline);
+        $fuelByYard = [];
         foreach ($candidates as $candidate) {
             if (microtime(true) >= ($deadline ?? INF)) {
                 return null;
             }
             try {
+                $ship = $candidate['ship'];
+                $yard = $candidate['shipyard'];
+                $run = null;
+                $selected = null;
+                if ($hauler) {
+                    $yardObservation = $shipyards[$yard];
+                    $offer = $this->offer($yardObservation->data, $type);
+                    $route = $this->purchaseRoute($agent, $ship, $yard, $reserve);
+                    $fuel = $route['fuel_ceiling'];
+                    $fuelByYard[$yard] = min($fuelByYard[$yard] ?? $fuel, $fuel);
+                    if ($offer && $yardObservation->observed_at->gte(now()->subMinutes(self::SHIPYARD_BACKOFF_MINUTES))
+                        && $agent->credits - $reserve < $offer['purchasePrice'] + $fuel) {
+                        $considered[] = ['strategy' => $strategy, 'ship' => $ship['symbol'], 'shipyard' => $yard,
+                            'rejected' => 'Observed '.$type.' price and fuel breach the working-capital reserve.'];
+
+                        continue;
+                    }
+                }
                 if (CampaignLocalEarn::policy($grant, $episode) && $deadline !== null) {
                     app(CampaignLocalEarn::class)->reserve($deadline);
                 }
@@ -522,23 +548,26 @@ class CampaignProbeBootstrap
                     'minutes' => min($grant->limits['run_max_minutes'], max(1, (int) now()->diffInMinutes($episode->next_reset_at, false))),
                     'cycles' => 1,
                 ];
-
-                $ship = $candidate['ship'];
-                $yard = $candidate['shipyard'];
                 if ($policy['mesh'] ?? $hauler) {
-                    $leg = $ship['nav']['waypointSymbol'] === $yard ? null : app(FuelPlanner::class)->leg($agent, $ship, $yard, $reserve);
+                    $leg = $ship['nav']['waypointSymbol'] === $yard ? null
+                        : ($hauler ? $route['outbound'] : app(FuelPlanner::class)->leg($agent, $ship, $yard, $reserve));
                     if ($leg && $leg['estimated_seconds'] + 180 > $limits['minutes'] * 60 && app(FuelPlanner::class)->fuelFree($ship)) {
                         if ($hauler) {
-                            $saturation->assertPurchase($grant, $episode, $agent, $yard, deadline: $deadline);
+                            $selected = $saturation->assertPurchase($grant, $episode, $agent, $yard, $offer, deadline: $deadline);
                         }
-
-                        return app(AutomationRunner::class)->previewMeshScout($agent, $ship, $yard, $limits, $episode, 'shipyard');
+                        $run = app(AutomationRunner::class)->previewMeshScout($agent, $ship, $yard, $limits, $episode, 'shipyard');
                     }
                 }
 
-                return $hauler
-                    ? app(AutomationRunner::class)->previewHaulerPurchase($agent, $ship['symbol'], $yard, $limits, $episode, $deadline)
+                $run ??= $hauler
+                    ? app(AutomationRunner::class)->previewHaulerPurchase($agent, $ship['symbol'], $yard, $limits, $episode, $deadline, $selected)
                     : app(AutomationRunner::class)->previewProbePurchase($agent, $ship['symbol'], $yard, $limits, $episode);
+                if ($selected !== null) {
+                    $saturation->record($grant, $episode, $selected);
+                    $considered[] = ['strategy' => $strategy, 'gates' => $selected['gates'], 'hold' => $selected['hold']];
+                }
+
+                return $run;
             } catch (GameException $exception) {
                 if ($exception instanceof LocalEarnBudget || $exception->retryAfter > 0) {
                     throw $exception;
@@ -552,13 +581,13 @@ class CampaignProbeBootstrap
                 && in_array('SHIPYARD', array_column($point->data['traits'] ?? [], 'symbol'), true))->keys();
             $observed = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
                 ->where('kind', 'shipyard')->whereIn('symbol', $directory)->pluck('symbol');
-            if ($directory->diff($observed)->isEmpty()) {
-                $evaluation = $saturation->evaluate($grant, $episode, $agent,
-                    candidateYards: array_unique(array_column($candidates, 'shipyard')), deadline: $deadline);
-                if ($evaluation['search_complete']) {
+            $evaluation = $saturation->evaluate($grant, $episode, $agent,
+                candidateYards: array_unique(array_column($candidates, 'shipyard')), deadline: $deadline, fuelByYard: $fuelByYard);
+            if ($evaluation['search_complete']) {
+                if ($directory->diff($observed)->isEmpty()) {
                     $saturation->record($grant, $episode, $evaluation);
-                    $considered[] = ['strategy' => $strategy, 'gates' => $evaluation['gates'], 'hold' => $evaluation['hold']];
                 }
+                $considered[] = ['strategy' => $strategy, 'gates' => $evaluation['gates'], 'hold' => $evaluation['hold']];
             }
         }
 
@@ -679,30 +708,9 @@ class CampaignProbeBootstrap
             throw new GameException('Shipyard '.$shipyard.' does not list '.$type.'.');
         }
 
-        $fuel = app(FuelPlanner::class);
-        $departureCeiling = 0;
-        $outboundFuel = 0;
-        $fuelCeiling = 0;
-        if ($atYard) {
-            $leg = ['destination' => $shipyard, 'continuation' => $shipyard, 'outbound_fuel' => 0, 'required_fuel' => 0, 'refuel_ceiling' => 0];
-        } else {
-            $listings = $fuel->listings($agent);
-            $departure = $fuel->departureRefuel($agent, $ship, $listings);
-            if ($departure) {
-                $ceiling = min($departure['ceiling'], max(0, $agent->credits - $reserve));
-                $fill = (int) ceil(($ship['fuel']['capacity'] - $ship['fuel']['current']) / 100) * $departure['quote']['purchasePrice'];
-                if ($ceiling < $fill) {
-                    $departure = null;
-                } else {
-                    $departure['ceiling'] = $ceiling;
-                    $departure['agent']->credits = $agent->credits - $ceiling;
-                    $departureCeiling = $ceiling;
-                }
-            }
-            $leg = $fuel->leg($departure['agent'] ?? $agent, $departure['ship'] ?? $ship, $shipyard, $reserve, listings: $listings);
-            $outboundFuel = $leg['outbound_fuel'];
-            $fuelCeiling = $departureCeiling + $leg['refuel_ceiling'];
-        }
+        $route = $this->purchaseRoute($agent, $ship, $shipyard, $reserve);
+        $leg = $route['outbound'];
+        $fuelCeiling = $route['fuel_ceiling'];
 
         $offer = $this->offer($yardData, $type);
         $minutes = $limits['minutes'];
@@ -718,7 +726,7 @@ class CampaignProbeBootstrap
             if ($atYard && ! $offer) {
                 throw new GameException('A complete verified hauler offer is required at the yard.');
             }
-            $saturation->assertPurchase($grant, $episode, $agent, $shipyard, $offer, $ignoreRunId, $fuelCeiling, deadline: $deadline);
+            $evaluation = $saturation->assertPurchase($grant, $episode, $agent, $shipyard, $offer, $ignoreRunId, $fuelCeiling, deadline: $deadline);
         }
         if ($offer !== null) {
             $price = $offer['purchasePrice'];
@@ -739,14 +747,6 @@ class CampaignProbeBootstrap
             throw new GameException('Approved spending bound cannot cover '.$type.' purchase and fuel.');
         }
 
-        $route = [
-            'site' => $ship['nav']['waypointSymbol'],
-            'market' => $shipyard,
-            'outbound' => $leg,
-            'departure_refuel_ceiling' => $departureCeiling,
-            'fuel_estimate' => $outboundFuel,
-            'fuel_ceiling' => $fuelCeiling,
-        ];
         $plan = array_merge($limits, [
             'strategy' => $hauler ? 'buy_hauler' : 'buy_probe',
             'minutes' => $minutes,
@@ -788,7 +788,7 @@ class CampaignProbeBootstrap
             unset($approved['route']['outbound']['fuel_price_at']);
             ksort($approved);
 
-            return ['plan' => $plan, 'fingerprint' => hash('sha256', json_encode([$agent->reset_id, $approved], JSON_THROW_ON_ERROR))];
+            return ['plan' => $plan, 'fingerprint' => hash('sha256', json_encode([$agent->reset_id, $approved], JSON_THROW_ON_ERROR)), 'saturation' => $evaluation];
         }
         $fingerprint = hash('sha256', json_encode([
             $agent->reset_id,
@@ -806,6 +806,33 @@ class CampaignProbeBootstrap
         ]));
 
         return ['plan' => $plan, 'fingerprint' => $fingerprint];
+    }
+
+    private function purchaseRoute(Agent $agent, array $ship, string $shipyard, int $reserve): array
+    {
+        $site = $ship['nav']['waypointSymbol'];
+        $departureCeiling = 0;
+        if ($site === $shipyard) {
+            $leg = ['destination' => $shipyard, 'continuation' => $shipyard, 'outbound_fuel' => 0, 'required_fuel' => 0, 'refuel_ceiling' => 0];
+        } else {
+            $fuel = app(FuelPlanner::class);
+            $listings = $fuel->listings($agent);
+            $departure = $fuel->departureRefuel($agent, $ship, $listings);
+            if ($departure) {
+                $ceiling = min($departure['ceiling'], max(0, $agent->credits - $reserve));
+                $fill = (int) ceil(($ship['fuel']['capacity'] - $ship['fuel']['current']) / 100) * $departure['quote']['purchasePrice'];
+                if ($ceiling < $fill) {
+                    $departure = null;
+                } else {
+                    $departure['agent']->credits = $agent->credits - $ceiling;
+                    $departureCeiling = $ceiling;
+                }
+            }
+            $leg = $fuel->leg($departure['agent'] ?? $agent, $departure['ship'] ?? $ship, $shipyard, $reserve, listings: $listings);
+        }
+
+        return ['site' => $site, 'market' => $shipyard, 'outbound' => $leg, 'departure_refuel_ceiling' => $departureCeiling,
+            'fuel_estimate' => $leg['outbound_fuel'], 'fuel_ceiling' => $departureCeiling + $leg['refuel_ceiling']];
     }
 
     public function next(Agent $agent, array $ship, AutomationRun $run): AutomationStep

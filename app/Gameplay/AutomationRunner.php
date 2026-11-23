@@ -216,18 +216,19 @@ class AutomationRunner
         return $this->previewPurchase($agent, $symbol, $shipyard, $limits, $episode, 'buy_probe');
     }
 
-    public function previewHaulerPurchase(Agent $agent, string $symbol, string $shipyard, array $limits, CampaignEpisode $episode, ?float $deadline = null): AutomationRun
+    public function previewHaulerPurchase(Agent $agent, string $symbol, string $shipyard, array $limits, CampaignEpisode $episode, ?float $deadline = null, ?array &$saturation = null): AutomationRun
     {
-        return $this->previewPurchase($agent, $symbol, $shipyard, $limits, $episode, 'buy_hauler', $deadline);
+        return $this->previewPurchase($agent, $symbol, $shipyard, $limits, $episode, 'buy_hauler', $deadline, $saturation);
     }
 
-    private function previewPurchase(Agent $agent, string $symbol, string $shipyard, array $limits, CampaignEpisode $episode, string $strategy, ?float $deadline = null): AutomationRun
+    private function previewPurchase(Agent $agent, string $symbol, string $shipyard, array $limits, CampaignEpisode $episode, string $strategy, ?float $deadline = null, ?array &$saturation = null): AutomationRun
     {
-        return $this->executor->locked($agent, function () use ($agent, $symbol, $shipyard, $limits, $episode, $strategy, $deadline) {
+        return $this->executor->locked($agent, function () use ($agent, $symbol, $shipyard, $limits, $episode, $strategy, $deadline, &$saturation) {
             $this->executor->clear($agent, defer: true, ship: $symbol);
             $this->executor->assertConfigurationReviewed($agent, $symbol);
             $purchase = $strategy === 'buy_hauler' ? app(CampaignHaulerPurchase::class) : app(CampaignProbeBootstrap::class);
             $fresh = $purchase->compose($agent, $symbol, $shipyard, $limits, $episode, deadline: $deadline);
+            $saturation = $fresh['saturation'] ?? null;
 
             return AutomationRun::create([
                 'agent_id' => $agent->id, 'campaign_episode_id' => $episode->id, 'reset_id' => $agent->reset_id,
