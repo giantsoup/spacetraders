@@ -370,6 +370,107 @@ class CampaignHaulerPurchaseTest extends TestCase
         $this->assertSame(350000, $action->arguments['maxTotal']);
     }
 
+    #[DataProvider('shortRemoteOffers')]
+    public function test_short_remote_hauler_purchase_respects_offer_freshness(int $observedMinutesAgo, int $arrivalPrice, ?string $arrivalRefusal = null): void
+    {
+        $this->setUpSaturation(hubs: 2, remoteYard: true);
+        $yard = 'X1-TEST-YARD';
+        $this->editFixture(function (&$world) use ($yard, $arrivalPrice) {
+            $world['waypoints'][2]['x'] = 80;
+            $world['shipyards'][$yard]['ships'][1]['purchasePrice'] = $arrivalPrice;
+            $world['ships'][] = FakeSpaceTraders::probe('LOCAL-6', 'X1-TEST-ROCK');
+        });
+        $sync = app(AgentSynchronizer::class);
+        $sync->observe($this->agent, 'waypoint', $yard, $this->point($yard, 80, ['SHIPYARD']), 'listing');
+        $liveYard = $this->world()['shipyards'][$yard];
+        $storedYard = $liveYard;
+        $storedYard['ships'][1]['purchasePrice'] = 750000;
+        $storedYard['ships'][1]['modules'][1]['symbol'] = 'MODULE_CARGO_HOLD_II';
+        $observation = $sync->observe($this->agent, 'shipyard', $yard, $storedYard);
+        $observation->update(['observed_at' => now()->subMinutes($observedMinutesAgo)]);
+        $sync->sync($this->agent, false);
+        $episode = $this->primary();
+        $this->schedulerPass();
+        $grant = $episode->grant();
+        $considered = [];
+
+        $preview = app(CampaignHaulerPurchase::class)->plan($grant, $episode, $this->agent, ['LOCAL-1'], $considered, microtime(true) + 10);
+        $gates = collect($considered)->whereNotNull('gates')->sole()['gates'];
+
+        if ($observedMinutesAgo === 30) {
+            $this->assertNull($preview);
+            $this->assertSame(750000, $gates['G5']['price']);
+            $this->assertSame('all_shipyards_over_price_cap', $episode->fresh()->state['saturation_hold']['reason']);
+            $this->assertSame([], $this->world()['writes']);
+            $this->assertTrue($observation->observed_at->equalTo($observation->fresh()->observed_at));
+
+            return;
+        }
+
+        $this->assertNotNull($preview, json_encode($considered));
+        $this->assertSame(['buy_hauler', 7, 'LOCAL-6', $yard], [$preview->strategy, $preview->plan_version, $preview->ship_symbol, $preview->plan['shipyard']]);
+        $this->assertLessThanOrEqual($preview->plan['minutes'] * 60, $preview->plan['route']['outbound']['estimated_seconds'] + 180);
+        $this->assertSame(600000, $gates['G5']['price']);
+        $this->assertNull($preview->plan['observed_price']);
+        $this->assertNull($preview->plan['offer_configuration_hash']);
+        $runner = app(AutomationRunner::class);
+        $runner->startCampaign($this->agent, $preview, $episode);
+        $run = $preview->fresh();
+        $this->assertSame('running', $run->state->value);
+        $this->assertSame($preview->fingerprint, $run->fingerprint);
+        $this->assertTrue($observation->observed_at->equalTo($observation->fresh()->observed_at));
+
+        if ($arrivalRefusal === 'configuration') {
+            $this->editFixture(function (&$world) use ($yard) {
+                unset($world['shipyards'][$yard]['ships'][1]['engine']['symbol']);
+            });
+        } elseif ($arrivalRefusal === 'reserve') {
+            AutomationRun::create(['agent_id' => $this->agent->id, 'active_agent_id' => $this->agent->id,
+                'reset_id' => $this->agent->reset_id, 'ship_symbol' => 'LOCAL-1', 'strategy' => 'trade', 'state' => 'running',
+                'expires_at' => now()->addMinutes(15), 'plan' => ['max_spend' => 1600000], 'totals' => ['phase' => 'buy', 'spending' => 0]]);
+        }
+        $this->workRun($run);
+        $ship = Ship::where('agent_id', $this->agent->id)->where('symbol', $run->ship_symbol)->sole();
+        $this->assertSame($yard, $ship->snapshot['nav']['waypointSymbol'], $run->blocked_reason ?? '');
+        $this->assertSame($arrivalPrice, $observation->fresh()->data['ships'][1]['purchasePrice']);
+
+        if ($arrivalRefusal !== null) {
+            $this->assertSame('blocked', $run->state->value);
+            $message = match ($arrivalRefusal) {
+                'max_price' => '750000 CR exceeds max_price 600000 CR',
+                'configuration' => 'Arrival offer configuration differs from approved hauler configuration.',
+                'reserve' => 'breaches working-capital reserve',
+            };
+            $this->assertStringContainsString($message, $run->blocked_reason);
+            $this->assertArrayNotHasKey('offer_configuration_hash', $run->totals);
+            $this->assertDatabaseMissing('ship_actions', ['automation_run_id' => $run->id, 'command' => 'buy_ship']);
+            $this->assertDatabaseMissing('campaign_events', ['kind' => 'hauler_purchased']);
+
+            return;
+        }
+
+        $this->assertSame('completed', $run->state->value, $run->blocked_reason ?? '');
+        $action = ShipAction::where('automation_run_id', $run->id)->where('command', 'buy_ship')->sole();
+        $this->assertSame('confirmed', $action->state->value, $action->message ?? '');
+        $pin = ShipCommandExecutor::configurationHash($liveYard['ships'][1]);
+        $this->assertNotNull($pin);
+        $this->assertSame($pin, $run->totals['offer_configuration_hash']);
+        $this->assertSame($pin, $action->arguments['offer_configuration_hash']);
+        $this->assertSame($arrivalPrice, $action->arguments['maxTotal']);
+        $this->assertSame($arrivalPrice, CampaignEvent::where('kind', 'hauler_purchased')->sole()->data['price']);
+    }
+
+    public static function shortRemoteOffers(): array
+    {
+        return [
+            'expired offer with lower arrival price' => [31, 350000],
+            'fresh over-cap offer at the cutoff' => [30, 350000],
+            'expired offer with over-cap arrival price' => [31, 750000, 'max_price'],
+            'expired offer with incomplete arrival configuration' => [31, 350000, 'configuration'],
+            'expired offer with insufficient liquidity at arrival' => [31, 350000, 'reserve'],
+        ];
+    }
+
     #[DataProvider('releaseTypes')]
     public function test_manual_release_audit_has_no_campaign_event_and_broken_links_refuse(string $kind, string $type): void
     {

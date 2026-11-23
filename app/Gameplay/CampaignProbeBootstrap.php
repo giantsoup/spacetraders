@@ -218,6 +218,7 @@ class CampaignProbeBootstrap
                 $ambiguousTransaction = $sameType
                     ->filter(fn (ShipAction $other) => ($other->arguments['waypointSymbol'] ?? null) === $action->arguments['waypointSymbol'])
                     ->contains(fn (ShipAction $other) => $this->matchingTransaction($agent, $other, [$transaction], includeUnsent: true) !== null);
+                // If two uncertain purchases coexist across yards, resolve them with campaign:release-hauler-purchase.
                 $ambiguousShip = $sameType->contains(function (ShipAction $other) use ($symbol) {
                     $baseline = $other->before_state['estimate']['fleet_symbols'] ?? null;
 
@@ -526,10 +527,7 @@ class CampaignProbeBootstrap
                 $run = null;
                 $selected = null;
                 if ($hauler) {
-                    $yardObservation = $shipyards[$yard];
-                    $offer = $yardObservation->observed_at->gte(now()->subMinutes(self::SHIPYARD_BACKOFF_MINUTES))
-                        ? $this->offer($yardObservation->data, $type)
-                        : null;
+                    $offer = $this->freshOffer($shipyards[$yard], $type);
                     $route = $this->purchaseRoute($agent, $ship, $yard, $reserve);
                     $fuel = $route['fuel_ceiling'];
                     $fuelByYard[$yard] = min($fuelByYard[$yard] ?? $fuel, $fuel);
@@ -700,13 +698,10 @@ class CampaignProbeBootstrap
         $yardObs = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
             ->where('kind', 'shipyard')->where('symbol', $shipyard)->first();
         if ($atYard || ! $yardObs) {
-            $yardData = app(SpaceTradersApi::class)->shipyard($agent, $shipyard);
-            app(AgentSynchronizer::class)->observe($agent, 'shipyard', $shipyard, $yardData);
-            $yardObs = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
-                ->where('kind', 'shipyard')->where('symbol', $shipyard)->first();
+            $yardData = app(SpaceTradersApi::class)->shipyard($agent, $shipyard, fresh: $hauler && $atYard);
+            $yardObs = app(AgentSynchronizer::class)->observe($agent, 'shipyard', $shipyard, $yardData);
         }
-        $yardData = $yardObs?->data ?? [];
-        if (! $this->offers($yardData, $type)) {
+        if (! $this->offers($yardObs->data, $type)) {
             throw new GameException('Shipyard '.$shipyard.' does not list '.$type.'.');
         }
 
@@ -714,7 +709,7 @@ class CampaignProbeBootstrap
         $leg = $route['outbound'];
         $fuelCeiling = $route['fuel_ceiling'];
 
-        $offer = $this->offer($yardData, $type);
+        $offer = $this->freshOffer($yardObs, $type);
         $minutes = $limits['minutes'];
         if ($hauler || ($policy['mesh'] ?? null)) {
             $cutoff = $episode->next_reset_at->subHour();
@@ -1093,8 +1088,8 @@ class CampaignProbeBootstrap
                 }
             }
 
-            $offer = $this->offer($obs->data ?? [], $type);
-            if ($offer !== null && $obs->observed_at->gte(now()->subMinutes(self::SHIPYARD_BACKOFF_MINUTES))) {
+            $offer = $this->freshOffer($obs, $type);
+            if ($offer !== null) {
                 if (! $hauler && $offer['purchasePrice'] > $policy['max_price']) {
                     $considered[] = ['strategy' => $strategy, 'shipyard' => $symbol, 'rejected' => 'Observed '.$type.' price '.$offer['purchasePrice'].' CR exceeds max_price.'];
 
@@ -1146,6 +1141,12 @@ class CampaignProbeBootstrap
         $offer = collect($yard['ships'] ?? [])->firstWhere('type', $type);
 
         return is_array($offer) && isset($offer['purchasePrice']) ? $offer : null;
+    }
+
+    public function freshOffer(?GameObservation $observation, string $type): ?array
+    {
+        return $observation && $observation->observed_at->gte(now()->subMinutes(self::SHIPYARD_BACKOFF_MINUTES))
+            ? $this->offer($observation->data, $type) : null;
     }
 
     private function refreshAcknowledgedShipyards(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, ?float $deadline): void

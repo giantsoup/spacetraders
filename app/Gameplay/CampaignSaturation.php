@@ -269,12 +269,7 @@ class CampaignSaturation
 
         return $yards->reject(fn ($point) => $observations->has($point->symbol)
             && ! $purchase->offers($observations->get($point->symbol)->data, CampaignHaulerPurchase::TYPE))
-            ->map(function ($point) use ($observations, $purchase) {
-                $observation = $observations->get($point->symbol);
-
-                return $observation && $observation->observed_at->gte(now()->subMinutes(30))
-                    ? $purchase->offer($observation->data, CampaignHaulerPurchase::TYPE) : null;
-            });
+            ->map(fn ($point) => $purchase->freshOffer($observations->get($point->symbol), CampaignHaulerPurchase::TYPE));
     }
 
     private function opportunity(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, CampaignRevision $revision, ?string $yard, ?array $offer, int $price, int $fuel, array $reserve, ?float $deadline): array
