@@ -2,8 +2,9 @@
 import AppShell from '@/Layouts/AppShell.vue';
 import CampaignNavigation from '@/Components/CampaignNavigation.vue';
 import StrategyWalkthrough from '@/Components/StrategyWalkthrough.vue';
-import { Head } from '@inertiajs/vue3';
-defineProps({ selectedAgent: String, campaignAgents: Array, source: { type: Object, required: true }, graph: { type: Object, required: true } });
+import { bridgeHref } from '@/bridgeFormat.js';
+import { Head, Link } from '@inertiajs/vue3';
+defineProps({ fromBridge: Boolean, selectedAgent: String, campaignAgents: Array, source: { type: Object, required: true }, graph: { type: Object, required: true } });
 </script>
 
 <template>
@@ -11,6 +12,7 @@ defineProps({ selectedAgent: String, campaignAgents: Array, source: { type: Obje
     <AppShell compact class="campaign-strategy-shell">
         <main id="main-content" tabindex="-1" class="strategy-page">
             <CampaignNavigation :campaign-agents="campaignAgents" :selected-agent="selectedAgent" />
+            <Link v-if="fromBridge" class="app-link" :href="bridgeHref('brief', selectedAgent)">‹ Bridge</Link>
             <header class="strategy-heading">
                 <h1>How C0 decides</h1>
                 <p>Explore what the campaign checks and what it does next.</p>

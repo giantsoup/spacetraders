@@ -201,15 +201,28 @@ class ReconMission extends Model
 
     public static function holds(Agent $agent, string $symbol): bool
     {
-        $mission = static::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('ship_symbol', $symbol)->whereNull('closed_at')->first();
-        if (! $mission) {
-            return false;
-        }
-        $ship = Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->first();
+        return static::heldShips($agent, [$symbol]) !== [];
+    }
 
-        return ! $ship || $ship->snapshot['nav']['systemSymbol'] !== $mission->origin_system || $mission->state === 'review'
-            || $mission->start_window_until->isFuture() || $mission->exposure() > 0
-            || $mission->runs()->whereNotNull('active_agent_id')->exists()
-            || $mission->actions()->where(fn ($q) => $q->whereIn('state', ['pending', 'sending', 'uncertain'])->orWhere('review_required', true))->exists();
+    /** @param list<string> $symbols @return list<string> */
+    public static function heldShips(Agent $agent, array $symbols): array
+    {
+        if ($symbols === []) {
+            return [];
+        }
+        $missions = static::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->whereIn('ship_symbol', $symbols)->whereNull('closed_at')->orderBy('id')->get()->unique('ship_symbol');
+
+        return $missions->filter(fn (self $mission) => $mission->holdsShip())->pluck('ship_symbol')->all();
+    }
+
+    private function holdsShip(): bool
+    {
+        $ship = Ship::where('agent_id', $this->agent_id)->where('symbol', $this->ship_symbol)->first();
+
+        return ! $ship || $ship->snapshot['nav']['systemSymbol'] !== $this->origin_system || $this->state === 'review'
+            || $this->start_window_until->isFuture() || $this->exposure() > 0
+            || $this->runs()->whereNotNull('active_agent_id')->exists()
+            || $this->actions()->where(fn ($q) => $q->whereIn('state', ['pending', 'sending', 'uncertain'])->orWhere('review_required', true))->exists();
     }
 }

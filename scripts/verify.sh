@@ -33,6 +33,7 @@ node --check scripts/verify-tutorial-browser.mjs
 node --check scripts/verify-guided-browser.mjs
 node --check scripts/verify-mvp-browser.mjs
 node --check scripts/verify-pages-browser.mjs
+node --check tests/Browser/campaign-bridge.mjs
 node --check scripts/verify-presentation-browser.mjs
 node --check scripts/verify-agents-browser.mjs
 node --check scripts/verify-private-account-browser.mjs
@@ -50,6 +51,9 @@ node --check scripts/verify-batch2-browser.mjs
     app/Services/SpaceTradersClient.php \
     app/Http/Controllers/AgentController.php \
     app/Http/Controllers/ForwarderController.php \
+    app/Http/Controllers/CampaignBridgeController.php app/Http/Controllers/CampaignStatusController.php app/Http/Controllers/Concerns/SelectsCampaignAgent.php \
+    database/migrations/2026_11_24_000001_add_bridge_indexes.php tests/Browser/campaign-bridge.php \
+    tests/Feature/CampaignBridgeTest.php tests/Feature/CampaignBridgeActionsTest.php tests/Feature/BridgeReadModelsTest.php tests/Unit/Bridge*Test.php \
     app/Models/Agent.php app/Exceptions/Handler.php routes/web.php \
     app/Http/Kernel.php app/Http/Middleware/HandleInertiaRequests.php \
     app/Http/Middleware/PreventRequestForgery.php \

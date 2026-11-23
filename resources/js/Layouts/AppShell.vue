@@ -6,6 +6,7 @@ import { Link, usePage } from '@inertiajs/vue3';
 
 defineProps({
     compact: Boolean,
+    bridge: Boolean,
     brand: { type: String, default: 'ST // AGENT COMMAND' },
     skipTo: { type: String, default: 'main-content' },
     skipLabel: { type: String, default: 'Skip to content' },
@@ -23,12 +24,16 @@ const signedIn = computed(() => Boolean(page.props.auth?.user));
     <div class="app-shell" :class="{ 'compact-shell': compact }">
         <a :href="`#${skipTo}`" class="skip">{{ skipLabel }}</a>
         <header class="app-topbar">
-            <Link :href="signedIn ? route('agents.index') : '/'" class="app-brand">{{ brand }}</Link>
-            <RateLimitStatus v-if="signedIn" :agent-id="agentId" />
-            <button v-if="compact" class="shell-menu app-button app-button-secondary" type="button" @click="menuOpen = true">Menu</button>
+            <slot name="topbar-leading">
+                <Link :href="signedIn ? route('agents.index') : '/'" class="app-brand">{{ brand }}</Link>
+            </slot>
+            <slot name="topbar-center" />
+            <RateLimitStatus v-if="signedIn && !bridge" :agent-id="agentId" />
+            <slot name="topbar-agent" />
+            <button v-if="compact" class="shell-menu app-button app-button-secondary" type="button" aria-haspopup="dialog" @click="menuOpen = true">Menu</button>
             <component :is="compact ? FocusSheet : 'div'" :open="menuOpen" title="Navigation" @close="menuOpen = false">
             <nav aria-label="Main navigation">
-                <slot name="navigation">
+                <slot name="navigation" :close="() => menuOpen = false">
                     <template v-if="signedIn">
                         <Link :href="route('agents.index')" :aria-current="route().current('agents.index') ? 'page' : undefined">Agents</Link>
                         <Link v-if="agentId" :href="route('agents.show', { agent: agentId, ship: shipSymbol || undefined })" :aria-current="route().current('agents.show') ? 'page' : undefined">Flight deck</Link>

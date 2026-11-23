@@ -9,7 +9,7 @@ import { formatLocalClock, formatLocalTime } from '@/dateTime.js';
 import { readableLabel, readableText } from '@/dataPresentation.js';
 import { flightDeckLocation, shipPresentation } from '@/shipPresentation.js';
 import { resourceSummary, equipmentSummary } from '@/shipFacts.js';
-import { Head, useForm, usePoll } from '@inertiajs/vue3';
+import { Head, Link, useForm, usePoll } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 const props = defineProps({
@@ -64,7 +64,10 @@ const post = action => form.post(route(`campaign.${action}`, props.selectedAgent
 <template>
     <Head title="Campaign status" />
     <AuthenticatedLayout>
-        <CampaignNavigation :campaign-agents="campaignAgents" :selected-agent="selectedAgent" />
+        <div class="campaign-status-navigation">
+            <CampaignNavigation :campaign-agents="campaignAgents" :selected-agent="selectedAgent" />
+            <Link class="app-link" :href="route('campaign.bridge.brief', selectedAgent ? { agent: selectedAgent } : {})">Try Bridge ›</Link>
+        </div>
         <template #header>
             <p class="app-eyebrow">CAMPAIGN AUTOPILOT</p>
             <h1>Campaign status</h1>
@@ -223,6 +226,8 @@ const post = action => form.post(route(`campaign.${action}`, props.selectedAgent
 </template>
 
 <style scoped>
+.campaign-status-navigation { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 24px; }
+.campaign-status-navigation :deep(.campaign-navigation) { flex: 1 1 auto; }
 .status-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .status { padding: 4px 8px; border: 1px solid #58708b; font-size: 12px; }
 .status.good { background: #123029; color: var(--color-accent); border-color: #78c6a4; }

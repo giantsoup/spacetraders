@@ -6,6 +6,7 @@ use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AgentDashboardController;
 use App\Http\Controllers\AgentReadController;
 use App\Http\Controllers\AutomationRunController;
+use App\Http\Controllers\CampaignBridgeController;
 use App\Http\Controllers\CampaignStatusController;
 use App\Http\Controllers\ForwarderController;
 use App\Http\Controllers\LocalAutomationController;
@@ -43,6 +44,25 @@ Route::middleware('auth')->group(function () {
     Route::get('/campaign/strategy', [CampaignStatusController::class, 'strategy'])->name('campaign.strategy');
     Route::post('/campaign/pause', [CampaignStatusController::class, 'pause'])->name('campaign.pause');
     Route::post('/campaign/resume', [CampaignStatusController::class, 'resume'])->name('campaign.resume');
+    Route::prefix('campaign/bridge')->name('campaign.bridge.')->controller(CampaignBridgeController::class)->group(function () {
+        Route::get('/', 'brief')->name('brief');
+        Route::get('/routes', 'routes')->name('routes');
+        Route::get('/routes/ended', 'ended')->name('routes.ended');
+        Route::get('/routes/{good}/{source}/{buyer}', 'routes')->where([
+            'good' => '[A-Z0-9_]+', 'source' => '[A-Z0-9-]+', 'buyer' => '[A-Z0-9-]+',
+        ])->name('route');
+        Route::get('/fleet', 'fleet')->name('fleet');
+        Route::get('/fleet/probes', 'probes')->name('probes');
+        Route::get('/fleet/{ship}', 'fleet')->where('ship', '[A-Z0-9_]+(?:-[A-Z0-9_]+)*-[A-Z0-9]+')->name('ship');
+        Route::get('/log', 'log')->name('log');
+
+        Route::middleware('throttle:20,1')->group(function () {
+            Route::post('/arms/{grant}/resume', 'resumeArm')->whereNumber('grant')->name('arm.resume');
+            Route::post('/arms/{grant}/retire', 'retireArm')->whereNumber('grant')->name('arm.retire');
+            Route::post('/fleet/pause', 'pauseFleet')->name('fleet.pause');
+            Route::post('/fleet/resume', 'resumeFleet')->name('fleet.resume');
+        });
+    });
     Route::delete('/agents/account-token', [AgentController::class, 'forgetAccountToken'])->name('agents.accountToken.forget');
     Route::get('/rate-limit', RateLimitController::class)->name('game.rate-limit');
     Route::get('/guide', [PlayerGuideController::class, 'show'])->name('guide');
