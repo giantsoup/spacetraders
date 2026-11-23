@@ -321,6 +321,8 @@ class CampaignDirector
         $entered = false;
         $work = function () use ($grant, $agent, $schedule, $next, $arm, &$entered) {
             $entered = true;
+            // Another worker may have confirmed a trade between loading the agent and acquiring this lock.
+            $agent->refresh();
             $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->where('reset_id', $schedule['reset_id'])->whereNull('closed_at')->first();
             if ($episode && $this->startRetainedPreview($grant, $episode, $agent)) {
                 return;
