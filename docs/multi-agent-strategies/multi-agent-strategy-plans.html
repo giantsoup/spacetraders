@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SpaceTraders Multi-Agent Strategy Portfolio</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+    color: var(--foreground);
+    line-height: 1.48;
+    font-size: 13.5px;
+  }
+  .wrap {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .kicker {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted-foreground);
+    margin-bottom: 4px;
+  }
+  h1 {
+    margin: 0 0 6px;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--foreground);
+  }
+  h2 {
+    margin: 0 0 10px;
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    color: var(--foreground);
+  }
+  h3 {
+    margin: 0 0 6px;
+    font-size: 13.5px;
+    font-weight: 650;
+    color: var(--foreground);
+  }
+  p { margin: 0 0 8px; color: var(--muted-foreground); }
+  p:last-child { margin-bottom: 0; }
+  code {
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 11.5px;
+    background: var(--code-background, var(--secondary));
+    color: var(--foreground);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  /* Header strip */
+  .hero {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--foreground);
+  }
+  .badge.ok {
+    border-color: var(--success);
+    color: var(--success);
+  }
+  .badge.warn {
+    border-color: var(--warning);
+    color: var(--warning);
+  }
+  .badge.accent {
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  /* Cards */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 10px);
+    padding: 16px;
+  }
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+  @media (max-width: 600px) {
+    .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .kpi {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 10px);
+    padding: 12px 14px;
+  }
+  .kpi-label {
+    font-size: 11px;
+    color: var(--muted-foreground);
+    margin-bottom: 4px;
+  }
+  .kpi-val {
+    font-size: 18px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--foreground);
+  }
+  .kpi-sub {
+    font-size: 11px;
+    color: var(--muted-foreground);
+    margin-top: 2px;
+  }
+  .kpi-val.danger { color: var(--destructive); }
+  .kpi-val.good { color: var(--success); }
+  .kpi-val.info { color: var(--info); }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .tab-btn {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--secondary);
+    color: var(--secondary-foreground, var(--foreground));
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 7px 11px;
+    border-radius: var(--radius, 8px);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+  }
+  .tab-btn:hover { border-color: var(--ring, var(--primary)); }
+  .tab-btn.active {
+    background: var(--primary);
+    color: var(--primary-foreground, var(--background));
+    border-color: var(--primary);
+  }
+  .tab-tag {
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--card);
+    color: var(--foreground);
+    opacity: 0.9;
+  }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* Strategy Detail Layout */
+  .strat-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+  }
+  .strat-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--foreground);
+  }
+  .strat-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .cols-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  @media (max-width: 600px) {
+    .cols-2 { grid-template-columns: 1fr; }
+  }
+  .box {
+    background: var(--secondary);
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius, 10px) - 2px);
+    padding: 12px;
+  }
+  .box ul {
+    margin: 6px 0 0;
+    padding-left: 16px;
+    color: var(--foreground);
+  }
+  .box li {
+    margin-bottom: 5px;
+    font-size: 12.5px;
+  }
+  .box li:last-child { margin-bottom: 0; }
+
+  /* Flow diagrams */
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .step {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 6px 9px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--foreground);
+  }
+  .step.hl { border-color: var(--primary); color: var(--primary); }
+  .step.ok { border-color: var(--success); color: var(--success); }
+  .step.warn { border-color: var(--warning); color: var(--warning); }
+  .arrow {
+    color: var(--muted-foreground);
+    font-weight: 700;
+    font-size: 12px;
+  }
+
+  /* Budget Stacked Bars */
+  .bar-group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .bar-row-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    font-size: 12px;
+    margin-bottom: 5px;
+  }
+  .bar-row-head strong { color: var(--foreground); }
+  .bar-row-head span { color: var(--muted-foreground); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+  .stacked-bar {
+    width: 100%;
+    height: 26px;
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+    border: 1px solid var(--border);
+    background: var(--secondary);
+  }
+  .seg {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--background);
+    white-space: nowrap;
+    overflow: hidden;
+    padding: 0 3px;
+  }
+  .seg-short { display: none; }
+  @media (max-width: 560px) {
+    .seg-full { display: none; }
+    .seg-short { display: inline; font-size: 10px; }
+  }
+  .c1 { background: var(--chart-1); }
+  .c2 { background: var(--chart-2); }
+  .c3 { background: var(--chart-3); }
+  .c4 { background: var(--chart-4); }
+  .c5 { background: var(--chart-5); }
+  .c6 { background: var(--muted); color: var(--muted-foreground); border-left: 1px solid var(--border); }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+    font-size: 11.5px;
+    color: var(--muted-foreground);
+  }
+  .leg-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    display: inline-block;
+    border: 1px solid var(--border);
+  }
+
+  /* Comparison Table */
+  .tbl-wrap { overflow-x: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 9px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted-foreground);
+    font-weight: 650;
+  }
+  td strong { color: var(--foreground); }
+
+  /* Timeline */
+  .timeline {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+  @media (max-width: 640px) {
+    .timeline { grid-template-columns: 1fr; }
+  }
+  .ms {
+    background: var(--secondary);
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius, 10px) - 2px);
+    padding: 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .ms-tag {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--primary);
+  }
+  .ms-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--foreground);
+  }
+  .ms-desc {
+    font-size: 11.5px;
+    color: var(--muted-foreground);
+  }
+
+  /* Kill switch banner */
+  .alert-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  @media (max-width: 600px) {
+    .alert-grid { grid-template-columns: 1fr; }
+  }
+  .alert-box {
+    border-radius: calc(var(--radius, 10px) - 2px);
+    padding: 12px;
+    border: 1px solid var(--border);
+    background: var(--secondary);
+  }
+  .alert-box.warn {
+    border-color: var(--warning);
+    background: var(--warning-surface, var(--secondary));
+  }
+  .alert-box.danger {
+    border-color: var(--destructive);
+    background: var(--destructive-surface, var(--secondary));
+  }
+
+  /* Approval checklist */
+  .decisions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .dec-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: calc(var(--radius, 10px) - 2px);
+    border: 1px solid var(--border);
+    background: var(--secondary);
+    cursor: pointer;
+    user-select: none;
+  }
+  .dec-row input {
+    margin-top: 3px;
+    accent-color: var(--primary);
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+  }
+  .dec-text {
+    font-size: 12.5px;
+    color: var(--foreground);
+  }
+  .dec-sub {
+    display: block;
+    font-size: 11.5px;
+    color: var(--muted-foreground);
+    margin-top: 2px;
+  }
+  .approval-status {
+    margin-top: 10px;
+    padding: 9px 12px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted-foreground);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .approval-status.ready {
+    border-color: var(--success);
+    color: var(--success);
+  }
+  .chart-svg-wrap {
+    width: 100%;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <!-- Header -->
+  <div class="hero">
+    <div class="kicker">SpaceTraders Multi-Agent Strategy Portfolio · Wipe 2026-11-22 → 2026-11-29</div>
+    <h1>Council-Approved Multi-Agent Strategy Plans</h1>
+    <div class="badges">
+      <span class="badge ok"><span class="dot"></span>Claude Opus 5.5 · Approved</span>
+      <span class="badge ok"><span class="dot"></span>GPT-6.2 Sol · Approved</span>
+      <span class="badge ok"><span class="dot"></span>Muse Wonder 1.0 · Approved</span>
+      <span class="badge accent"><span class="dot"></span>Revision 6 · 3 Core Agents + 1 Module + GateWatch</span>
+      <span class="badge warn"><span class="dot"></span>Launch Cutoff: Nov 27 13:00Z</span>
+    </div>
+  </div>
+
+  <!-- Top Telemetry KPIs -->
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="kpi-label">Live Host Rate (Today)</div>
+      <div class="kpi-val danger">1,549 /hr</div>
+      <div class="kpi-sub">94.9% non-write reads · 4.2-ship cap</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Post-RB Target Rate</div>
+      <div class="kpi-val good">≤300 /hr</div>
+      <div class="kpi-sub">All-in per active trader-hr</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">IP Operating Envelope</div>
+      <div class="kpi-val info">5,760 /hr</div>
+      <div class="kpi-sub">+1,080 Tier-1 reserve · 360 cushion</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Control Protection</div>
+      <div class="kpi-val good">≥50%</div>
+      <div class="kpi-sub">GIANTSOUP:C0 hard floor</div>
+    </div>
+  </div>
+
+  <!-- Interactive Strategy Explorer -->
+  <div class="card">
+    <div class="kicker">Interactive Strategy Breakdown — Select a Plan to Inspect</div>
+    <div class="tabs" role="tablist">
+      <button class="tab-btn active" data-tab="s1" role="tab" aria-selected="true">
+        1. GIANTSOUP <span class="tab-tag">Live Control</span>
+      </button>
+      <button class="tab-btn" data-tab="s2" role="tab" aria-selected="false">
+        2. SOUPBURN <span class="tab-tag">Stage 1</span>
+      </button>
+      <button class="tab-btn" data-tab="s3" role="tab" aria-selected="false">
+        3. SOUPFLEET <span class="tab-tag">Stage 2</span>
+      </button>
+      <button class="tab-btn" data-tab="s4" role="tab" aria-selected="false">
+        4. SOUPMAKER <span class="tab-tag">Module</span>
+      </button>
+      <button class="tab-btn" data-tab="s5" role="tab" aria-selected="false">
+        GateWatch <span class="tab-tag">Read-Only</span>
+      </button>
+    </div>
+
+    <!-- Strategy 1 -->
+    <div class="tab-panel active" id="s1">
+      <div class="strat-head">
+        <div>
+          <div class="strat-title">Strategy 1: GIANTSOUP — Probe-Pool Steady Compounder</div>
+          <p>Untouched operational baseline in <code>X1-SK70</code> (<code>VOID</code>), earning <strong>215,350 CR/hr</strong> on C0 Frigate + <code>H1</code> Light Hauler.</p>
+        </div>
+        <div class="strat-meta">
+          <span class="badge ok">Live Now</span>
+          <span class="badge">Cap: 3,400 → 2,880 req/hr</span>
+          <span class="badge">≥50% Protected</span>
+        </div>
+      </div>
+      <div class="cols-2">
+        <div class="box">
+          <h3>How C0 Operates (Untouched Control)</h3>
+          <ul>
+            <li><strong>Zero drift:</strong> All new features (<code>BURN</code>, chaining, auto-hauler) sit behind default-OFF playbook flags.</li>
+            <li><strong>Proven loop:</strong> Tier 1A probe pool (1 shadowing buyer, others rotating hubs), <code>CRUISE</code> flight mode, round-trip routes, proof <code>1 → 3 → 5</code> batches.</li>
+            <li><strong>Kill-switch anchor:</strong> <code>GIANTSOUP:C0</code> (excluding <code>H1</code>) is the sole health reference that protects control revenue.</li>
+          </ul>
+        </div>
+        <div class="box">
+          <h3>Optional Causal BURN A/B (Arm H1 Only)</h3>
+          <ul>
+            <li><strong>Calibration first:</strong> 3 short inner-ring <code>BURN</code> legs (<code>d ≤ 60</code>) on <code>GIANTSOUP-5</code> to record real fuel/time evidence.</li>
+            <li><strong>Randomized paired blocks:</strong> Alternating <code>[CRUISE, BURN]</code> / <code>[BURN, CRUISE]</code> 2-load blocks from a full tank at source (<code>≥6 blocks = 12 loads</code>).</li>
+            <li><strong>True causal proof:</strong> Same system, same ship; includes <code>PATCH /nav</code> latency &amp; requests in <code>BURN</code> cost.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="flow">
+        <span class="step ok">Probe Pool Fresh Quotes</span><span class="arrow">→</span>
+        <span class="step">CRUISE Proof 1→3→5</span><span class="arrow">→</span>
+        <span class="step">Round-Trip Refuel</span><span class="arrow">→</span>
+        <span class="step hl">C0 Control Baseline (Protected ≥50%)</span>
+      </div>
+    </div>
+
+    <!-- Strategy 2 -->
+    <div class="tab-panel" id="s2">
+      <div class="strat-head">
+        <div>
+          <div class="strat-title">Strategy 2: SOUPBURN — Lean Velocity / Zero-Deadhead Specialist</div>
+          <p>Ultra-lean <strong>1 Command Frigate + 1–3 probes</strong>. Eliminates hull capex drag, empty return legs, and slow CRUISE legs in a clean 3-step ladder.</p>
+        </div>
+        <div class="strat-meta">
+          <span class="badge accent">Launches at Stage 1 Gate</span>
+          <span class="badge">Cap: 1,600 → 720 req/hr</span>
+          <span class="badge">Faction: VOID</span>
+        </div>
+      </div>
+      <div class="cols-2">
+        <div class="box">
+          <h3>3-Step Sequential Isolation Ladder</h3>
+          <ul>
+            <li><strong>Step 2a (CRUISE Canary):</strong> Launch on existing round-trip routing. Pass gate: <code>≥6h</code> &amp; <code>≥10 loads</code>, 0 pauses, <code>C0</code> stable within 15%.</li>
+            <li><strong>Step 2b (Chained CRUISE):</strong> End trade at buyer <code>B</code> and pick best outbound trade from <code>B</code> (or orbital neighbor), allowing empty move only when it beats backhaul. Pass: <code>≥6h</code>, <code>≥10 loads</code>, 0 stalls, C0-adjusted net/hr ≥ Step 2a.</li>
+            <li><strong>Step 2c (Calibrated Chained BURN):</strong> Unlocks only after 3-leg calibration + positive <code>H1</code> paired A/B. Pass: <code>≥+5%</code> C0-adjusted net/hr &amp; <code>≥95%</code> net/req vs Step 2b.</li>
+          </ul>
+        </div>
+        <div class="box">
+          <h3>Safety &amp; Engineering Guarantees</h3>
+          <ul>
+            <li><strong>Buyer fuel continuation:</strong> Every chained one-way leg verifies a fuel seller reachable from <code>B</code> + mid-chain <code>sell_aboard</code> recovery.</li>
+            <li><strong>Scoped <code>flight_mode</code>:</strong> <code>CampaignSafety:66</code> &amp; <code>CommandRules:50</code> keep crew, ownership, and fuel checks intact; probes stay CRUISE fuel-free.</li>
+            <li><strong>Same-system guard:</strong> If HQ lands in <code>X1-SK70</code>, cross-agent <code>FleetClaims</code> activates automatically.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="flow">
+        <span class="step">2a: CRUISE Canary (6h / 10 loads)</span><span class="arrow">→</span>
+        <span class="step hl">2b: Chained CRUISE (No Empty Return)</span><span class="arrow">→</span>
+        <span class="step ok">2c: Calibrated Chained BURN (+5% Net/hr)</span>
+      </div>
+    </div>
+
+    <!-- Strategy 3 -->
+    <div class="tab-panel" id="s3">
+      <div class="strat-head">
+        <div>
+          <div class="strat-title">Strategy 3: SOUPFLEET — Payback-Gated Hauler Snowball (Fleet v2)</div>
+          <p>Freezes <code>SOUPBURN</code>'s validated routing &amp; flight policy and adds <strong>automated 80u Light Hauler compounding</strong> bounded strictly by live request telemetry.</p>
+        </div>
+        <div class="strat-meta">
+          <span class="badge accent">Launches at Stage 2 Gate</span>
+          <span class="badge">Cap: 1,800 req/hr (31.25%)</span>
+          <span class="badge">Formula Fleet Cap</span>
+        </div>
+      </div>
+      <div class="cols-2">
+        <div class="box">
+          <h3>5-Guard Automated Hauler Purchase Rule</h3>
+          <ul>
+            <li><strong>Formula cap (sole limit):</strong> <code>floor((1,800 − overhead_req/hr) / trader_only_req/hr)</code> from trailing 6h telemetry (holds buys if sample &lt;1.0 trader-hr or attribution incomplete).</li>
+            <li><strong>Incremental payback:</strong> <code>price / incremental_net_hr ≤ min(12h, 0.35 × hrs_left)</code> after bid decay, fuel &amp; probe overhead.</li>
+            <li><strong>Working-capital floor:</strong> Keeps <code>120k–150k CR</code> cash per active trader so haulers never fly half-empty.</li>
+            <li><strong>Paced ramp:</strong> Max +1 hauler per 6h during first 12h; buys <code>SHIP_LIGHT_HAULER</code> (80u) or Shuttle only on distance-0 loops.</li>
+          </ul>
+        </div>
+        <div class="box">
+          <h3>Launch Gate &amp; Coordination</h3>
+          <ul>
+            <li><strong>4-part Stage 2 gate:</strong> RB Phases 4–5 live, all-in rate <code>≤300 req/trader-hr</code>, <code>GIANTSOUP:C0</code> stable ≥6h, AND <code>SOUPBURN</code> Step 2b (or 2c) validated.</li>
+            <li><strong>Policy freeze:</strong> Freezes Step 2c if passed, otherwise Step 2b (Chained <code>CRUISE</code>).</li>
+            <li><strong><code>FleetClaims</code> v2:</strong> Tracks system-wide in-flight cargo units + arrival ETAs so haulers price in teammate bid decay.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="flow">
+        <span class="step">Frozen SOUPBURN Policy</span><span class="arrow">→</span>
+        <span class="step">Earn Hauler + Cash Floor</span><span class="arrow">→</span>
+        <span class="step hl">Check Formula Cap + Payback</span><span class="arrow">→</span>
+        <span class="step ok">Auto-Buy 80u Hauler (+1 / 6h)</span>
+      </div>
+    </div>
+
+    <!-- Strategy 4 -->
+    <div class="tab-panel" id="s4">
+      <div class="strat-head">
+        <div>
+          <div class="strat-title">Strategy 4: SOUPMAKER — Bounded Supply-Chain Priming + Drought Fallback</div>
+          <p><strong>Conditional opt-in module (no 4th agent this wipe).</strong> Tests whether feeding upstream inputs to stalled factories expands downstream spreads &amp; <code>tradeVolume</code>.</p>
+        </div>
+        <div class="strat-meta">
+          <span class="badge warn">In-Agent Module Only</span>
+          <span class="badge">Day 3+ / Next Wipe</span>
+          <span class="badge warn">Contracts Need Policy Flip</span>
+        </div>
+      </div>
+      <div class="cols-2">
+        <div class="box">
+          <h3>Scoped V1 Single-Exporter Priming Test</h3>
+          <ul>
+            <li><strong>Narrow focus:</strong> Pick ONE stalled exporter (<code>SCARCE/LIMITED</code> + <code>RESTRICTED/WEAK</code>) and ONE required upstream input.</li>
+            <li><strong>Hard caps:</strong> Fixed per-hour spend cap (<code>≤25k CR/hr</code>) and 6-hour duration window on 1 non-control ship.</li>
+            <li><strong>Auto-stop rule:</strong> Measure incremental realized downstream margin vs an unprimed route; auto-disable if net incremental margin is negative.</li>
+          </ul>
+        </div>
+        <div class="box">
+          <h3>Separate Drought Fallback</h3>
+          <ul>
+            <li><strong>Zero-capital Gas Siphoning:</strong> Uses frigate's free <code>MOUNT_GAS_SIPHON_II</code> during spread droughts—no working capital required.</li>
+            <li><strong>Procurement Contracts (<code>ContractPlanner</code>):</strong> Guaranteed upfront + fulfillment seed cash—<strong>locked OFF</strong> unless you explicitly reverse <code>fleet-expansion-plan.md:30</code> ("Contract acceptance is still out").</li>
+          </ul>
+        </div>
+      </div>
+      <div class="flow">
+        <span class="step">Detect SCARCE Exporter</span><span class="arrow">→</span>
+        <span class="step warn">Capped Input Delivery (6h)</span><span class="arrow">→</span>
+        <span class="step">Measure Downstream Volume &amp; Spread</span><span class="arrow">→</span>
+        <span class="step ok">Keep or Auto-Stop</span>
+      </div>
+    </div>
+
+    <!-- GateWatch -->
+    <div class="tab-panel" id="s5">
+      <div class="strat-head">
+        <div>
+          <div class="strat-title">Shared Trigger: GateWatch (Replaces Retired SOUPGATE Agent)</div>
+          <p>Solo Jump Gate construction (<code>1,600 FAB_MATS</code> + <code>400 ADVANCED_CIRCUITRY</code> = ≥25 hauler loads, ~3.2M–10M+ CR, zero direct payout, public access) is negative-EV over 6.5 days.</p>
+        </div>
+        <div class="strat-meta">
+          <span class="badge ok">Read-Only Trigger</span>
+          <span class="badge">1 read / 30 min (Tier 4)</span>
+          <span class="badge">Zero Writes</span>
+        </div>
+      </div>
+      <div class="cols-2">
+        <div class="box">
+          <h3>How <code>GateWatch::pollGate()</code> Works</h3>
+          <ul>
+            <li><strong>Polls <code>get-waypoint</code> first:</strong> Checks <code>isUnderConstruction</code> so gate completion between polls is never missed (<code>get-construction</code> fails once finished).</li>
+            <li><strong>Conditional progress read:</strong> Only reads <code>get-construction</code> while <code>isUnderConstruction === true</code> within Tier 4 budget.</li>
+            <li><strong>Alerts only:</strong> Notifies you at <code>≥80%</code> community progress or <code>isUnderConstruction: true → false</code> (gate open!).</li>
+          </ul>
+        </div>
+        <div class="box">
+          <h3>Strict Safety Boundary</h3>
+          <ul>
+            <li><strong>Zero missions / zero writes:</strong> Never calls <code>GateRecon::start()</code> or scheduled <code>GateRecon::approve(dryRun)</code>; unit-tested for zero mutations and zero upstream writes.</li>
+            <li><strong>Operator escalation:</strong> Live recon jumps, co-building, or remote shipyard buys (requiring an owned ship at that yard) remain explicit manual decisions.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="flow">
+        <span class="step">Poll get-waypoint (30m, Tier 4)</span><span class="arrow">→</span>
+        <span class="step warn">Progress ≥80% or Open?</span><span class="arrow">→</span>
+        <span class="step hl">Alert Operator</span><span class="arrow">→</span>
+        <span class="step ok">Manual Recon / Remote Decision</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shared IP Request Budget Chart -->
+  <div class="card">
+    <div class="kicker">Hard Engineering Constraint · Shared 7,200 req/hr (120 req/min) IP Ceiling</div>
+    <h2>Per-Agent Request Budget Allocation &amp; Dedicated Tier-1 Settlement Reserve</h2>
+    <p>Every agent gets an independent <code>agent:&lt;symbol&gt;</code> bucket in <code>RequestBudget</code>. Routine traffic (Tiers 2–4) fits inside <strong>5,760 req/hr (80%)</strong> while a dedicated <strong>1,080 req/hr (15%) Tier-1 Settlement Reserve</strong> guarantees cargo aboard (including <code>BURN → CRUISE</code> + <code>sell_aboard</code>) and reconciliation always finish under cap saturation.</p>
+
+    <div class="bar-group" style="margin-top: 12px;">
+      <div>
+        <div class="bar-row-head">
+          <strong>Stage 1 — After RB Phases 1–3 (Gate: ≤600 all-in req/trader-hr)</strong>
+          <span>5,760 Tiers 2–4 + 1,080 Tier-1 + 360 Cushion = 7,200 req/hr</span>
+        </div>
+        <div class="stacked-bar">
+          <div class="seg c1" style="width: 47.22%;"><span class="seg-full">GIANTSOUP 3,400</span><span class="seg-short">3.4k</span></div>
+          <div class="seg c2" style="width: 22.22%;"><span class="seg-full">SOUPBURN 1,600</span><span class="seg-short">1.6k</span></div>
+          <div class="seg c4" style="width: 10.56%;"><span class="seg-full">Shared 760</span><span class="seg-short">760</span></div>
+          <div class="seg c5" style="width: 15.00%;"><span class="seg-full">Tier-1 Res 1,080</span><span class="seg-short">T1</span></div>
+          <div class="seg c6" style="width: 5.00%;"><span class="seg-full">5%</span><span class="seg-short"></span></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="bar-row-head">
+          <strong>Stage 2 — After RB Phases 4–5 (Gate: ≤300 all-in + SOUPBURN Validated)</strong>
+          <span>5,760 Tiers 2–4 + 1,080 Tier-1 + 360 Cushion = 7,200 req/hr</span>
+        </div>
+        <div class="stacked-bar">
+          <div class="seg c1" style="width: 40.00%;"><span class="seg-full">GIANTSOUP 2,880 (50%)</span><span class="seg-short">2.88k</span></div>
+          <div class="seg c3" style="width: 25.00%;"><span class="seg-full">SOUPFLEET 1,800</span><span class="seg-short">1.8k</span></div>
+          <div class="seg c2" style="width: 10.00%;"><span class="seg-full">BURN 720</span><span class="seg-short">720</span></div>
+          <div class="seg c4" style="width: 5.00%;"><span class="seg-full">360</span><span class="seg-short"></span></div>
+          <div class="seg c5" style="width: 15.00%;"><span class="seg-full">Tier-1 Res 1,080</span><span class="seg-short">T1</span></div>
+          <div class="seg c6" style="width: 5.00%;"><span class="seg-full">5%</span><span class="seg-short"></span></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="bar-row-head">
+          <strong>Next-Wipe Minute 0 (2026-11-29 13:00Z, Case 1 Full Stage 2 Ready)</strong>
+          <span>SOUPFLEET releases at Hour +6 after live scorecard ≤300</span>
+        </div>
+        <div class="stacked-bar">
+          <div class="seg c1" style="width: 40.00%;"><span class="seg-full">GIANTSOUP 2,880</span><span class="seg-short">2.88k</span></div>
+          <div class="seg c2" style="width: 20.00%;"><span class="seg-full">SOUPBURN 1,440</span><span class="seg-short">1.44k</span></div>
+          <div class="seg c4" style="width: 20.00%;"><span class="seg-full">Bootstrap / Shared 1,440</span><span class="seg-short">1.44k</span></div>
+          <div class="seg c5" style="width: 15.00%;"><span class="seg-full">Tier-1 Res 1,080</span><span class="seg-short">T1</span></div>
+          <div class="seg c6" style="width: 5.00%;"><span class="seg-full">5%</span><span class="seg-short"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span class="leg-item"><span class="swatch c1"></span>GIANTSOUP (≥50% of 5,760)</span>
+      <span class="leg-item"><span class="swatch c2"></span>SOUPBURN</span>
+      <span class="leg-item"><span class="swatch c3"></span>SOUPFLEET</span>
+      <span class="leg-item"><span class="swatch c4"></span>Shared / Dashboard / GateWatch</span>
+      <span class="leg-item"><span class="swatch c5"></span>Tier-1 Settlement Reserve (300/agent + 180 shared)</span>
+      <span class="leg-item"><span class="swatch c6"></span>5% IP Safety Margin (360/hr)</span>
+    </div>
+  </div>
+
+  <!-- Side-by-Side Comparison Matrix -->
+  <div class="card">
+    <div class="kicker">Portfolio Comparison Matrix</div>
+    <h2>How the Strategies Compare</h2>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Strategy</th>
+            <th>Fleet Profile</th>
+            <th>Flight / Routing</th>
+            <th>Evidence Type</th>
+            <th>Launch Trigger</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>1. GIANTSOUP</strong><br><span style="color:var(--muted-foreground)">Control (+ H1 A/B)</span></td>
+            <td>1 Frigate + 6 Probes + H1 Hauler</td>
+            <td>C0: CRUISE Round-Trip<br>H1: Optional Paired BURN A/B</td>
+            <td><strong>Control Baseline</strong><br>(H1 A/B = <strong>Causal</strong>)</td>
+            <td>Live now in <code>X1-SK70</code></td>
+          </tr>
+          <tr>
+            <td><strong>2. SOUPBURN</strong><br><span style="color:var(--muted-foreground)">Lean Velocity</span></td>
+            <td>1 Frigate + 1–3 Probes (no cargo hull capex)</td>
+            <td>2a CRUISE → 2b Chained CRUISE → 2c Chained BURN</td>
+            <td>Observational vs C0 (concurrent ratio + covariates)</td>
+            <td>Stage 1 Gate (RB 1–3, ≤600/hr)</td>
+          </tr>
+          <tr>
+            <td><strong>3. SOUPFLEET</strong><br><span style="color:var(--muted-foreground)">Hauler Snowball</span></td>
+            <td>1 Frigate + Auto 80u Haulers + 1 Probe / 3–4 Haulers</td>
+            <td>Freezes SOUPBURN's validated policy + <code>FleetClaims</code> v2</td>
+            <td>Observational within-agent pre/post time series</td>
+            <td>Stage 2 Gate (RB 4–5, ≤300/hr, 2b pass)</td>
+          </tr>
+          <tr>
+            <td><strong>4. SOUPMAKER</strong><br><span style="color:var(--muted-foreground)">Conditional Module</span></td>
+            <td>1 non-control ship (no 4th agent this wipe)</td>
+            <td>Single-exporter priming (6h cap) + Siphon / Contract fallback</td>
+            <td>Bounded 6h route delta w/ auto-stop rule</td>
+            <td>Day 3+ opt-in; contracts need policy flip</td>
+          </tr>
+          <tr>
+            <td><strong>GateWatch</strong><br><span style="color:var(--muted-foreground)">Shared Trigger</span></td>
+            <td>Zero dedicated ships</td>
+            <td>Read-only <code>get-waypoint</code> poll (1 / 30 min, Tier 4)</td>
+            <td>Threshold alerts (≥80% or open)</td>
+            <td>Ships with Milestone 0 infra</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Event-Driven Rollout Timeline -->
+  <div class="card">
+    <div class="kicker">Event-Driven Sequencing · Go/No-Go Cutoff: 2026-11-27 13:00Z</div>
+    <h2>From Approval to Live Multi-Agent Execution</h2>
+    <div class="timeline">
+      <div class="ms">
+        <div class="ms-tag">Milestone 0 · Now</div>
+        <div class="ms-title">Infra &amp; Isolation</div>
+        <div class="ms-desc">Ship RB Phases 1–3, 4-tier priorities, <code>agent:&lt;symbol&gt;</code> buckets, 15-file multi-agent scaffolding, cross-agent <code>FleetClaims</code>, Kill Switch &amp; <code>GateWatch</code> in <code>spacetraders-dev</code>; deploy in 1 restart.</div>
+      </div>
+      <div class="ms">
+        <div class="ms-tag">Milestone 1 · ≤600/hr</div>
+        <div class="ms-title">Launch SOUPBURN</div>
+        <div class="ms-desc">Register <code>SOUPBURN</code>, run Step 2a CRUISE canary (6h / 10 loads). In parallel, calibrate <code>BURN</code> (3 legs) &amp; run randomized paired <code>BURN</code> A/B on <code>H1</code>.</div>
+      </div>
+      <div class="ms">
+        <div class="ms-tag">Milestone 2 · ≤300/hr</div>
+        <div class="ms-title">Chain, BURN &amp; FLEET</div>
+        <div class="ms-desc">Ship RB Phases 4–5. Validate Step 2b (Chained CRUISE) &amp; Step 2c (Chained BURN). Once <code>C0</code> holds 6h + ≤300/hr, launch <code>SOUPFLEET</code> under formula cap.</div>
+      </div>
+      <div class="ms">
+        <div class="ms-tag">Milestone 3 · Nov 27 / 29</div>
+        <div class="ms-title">Cutoff &amp; Next Wipe</div>
+        <div class="ms-desc">No new agent after Nov 27 13:00Z. At Nov 29 13:00Z reset: M0 launches <code>GIANTSOUP</code> + <code>SOUPBURN</code> (or C0-only fallback), releasing <code>SOUPFLEET</code> at Hour +6.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Safety & Kill Switch -->
+  <div class="card">
+    <div class="kicker">Automated Risk Controls · CampaignHealth::evaluateKillSwitch()</div>
+    <h2>Two-Tier Kill Switch (Protecting GIANTSOUP:C0 &amp; Cargo Aboard)</h2>
+    <div class="alert-grid">
+      <div class="alert-box warn">
+        <h3>Cargo-Safe Drain Pause (Tiers 2–4 Only)</h3>
+        <p style="color:var(--foreground); font-size:12px;">Triggers on: <code>C0</code> 3h CR/hr or loads/hr drop <strong>&gt;15%</strong> + deferrals <strong>&gt;5%</strong> (15m); host Tiers 2–4 <strong>≥86.4/min</strong> or total <strong>≥102/min</strong> (5m); <strong>≥3×429</strong> (15m); or <code>X1-SK70</code> cannibalization <strong>&gt;20%</strong>.</p>
+        <p style="font-size:12px;">Drains newest agent first (<code>SOUPFLEET → SOUPBURN</code>): halts new buys/scouts while Tier-1 reserve finishes <code>BURN → CRUISE</code> + <code>sell_aboard</code>, then pauses.</p>
+      </div>
+      <div class="alert-box danger">
+        <h3>Immediate Hard Pause (Affected Agent Only)</h3>
+        <p style="color:var(--foreground); font-size:12px;">Triggers on: unexplained credit delta, price-review hold, or uncertain write on a specific agent.</p>
+        <p style="font-size:12px;">Immediately pauses <strong>only that agent</strong> (isolated failure streaks &amp; per-agent watchdog alerts), leaving all healthy agents running uninterrupted.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Interactive Approval Checklist -->
+  <div class="card">
+    <div class="kicker">Operator Sign-Off — Review Before We Build &amp; Launch</div>
+    <h2>Decisions Needed to Start Immediately</h2>
+    <div class="decisions" id="decisions">
+      <label class="dec-row">
+        <input type="checkbox" class="dec-cb" checked />
+        <div class="dec-text">
+          <strong>1. Approve Milestone 0 Infra + 3 Core Agents (<code>GIANTSOUP</code>, <code>SOUPBURN</code>, <code>SOUPFLEET</code>)</strong>
+          <span class="dec-sub">Starts development immediately in <code>spacetraders-dev</code>: RB Phases 1–3, per-agent buckets, 15-file multi-agent scaffolding, Kill Switch, and <code>GateWatch::pollGate()</code>.</span>
+        </div>
+      </label>
+      <label class="dec-row">
+        <input type="checkbox" class="dec-cb" checked />
+        <div class="dec-text">
+          <strong>2. Authorize 3-Leg <code>BURN</code> Calibration + Paired Randomized A/B on <code>GIANTSOUP:H1</code></strong>
+          <span class="dec-sub">Keeps <code>GIANTSOUP:C0</code> 100% untouched while generating causal <code>BURN</code> evidence on arm <code>H1</code> (<code>GIANTSOUP-5</code>).</span>
+        </div>
+      </label>
+      <label class="dec-row">
+        <input type="checkbox" class="dec-cb" />
+        <div class="dec-text">
+          <strong>3. Optional Policy Flip: Reverse "Contract acceptance is still out" for <code>SOUPMAKER</code> Drought Fallback?</strong>
+          <span class="dec-sub">Unchecked = keep contracts disabled per <code>docs/fleet-expansion-plan.md:30</code> (gas siphoning &amp; single-exporter priming remain available). Checked = allow bounded <code>ContractPlanner</code> fallback.</span>
+        </div>
+      </label>
+    </div>
+    <div class="approval-status ready" id="approval-status">
+      <span>Core portfolio + H1 BURN A/B selected · Contracts kept OFF (default)</span>
+      <span>Reply in chat to confirm &amp; begin Milestone 0</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Tab switching
+  const btns = document.querySelectorAll('.tab-btn');
+  const panels = document.querySelectorAll('.tab-panel');
+  btns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      btns.forEach((b) => { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); });
+      panels.forEach((p) => p.classList.remove('active'));
+      btn.classList.add('active');
+      btn.setAttribute('aria-selected', 'true');
+      const target = document.getElementById(btn.dataset.tab);
+      if (target) target.classList.add('active');
+    });
+  });
+
+  // Live approval summary
+  const cbs = document.querySelectorAll('.dec-cb');
+  const statusEl = document.getElementById('approval-status');
+  function updateApproval() {
+    const [core, burn, contracts] = Array.from(cbs).map((c) => c.checked);
+    const parts = [];
+    if (core) parts.push('Core 3-agent portfolio + Milestone 0');
+    if (burn) parts.push('H1 BURN calibration & A/B');
+    parts.push(contracts ? 'Contracts ENABLED for drought fallback' : 'Contracts kept OFF');
+    statusEl.classList.toggle('ready', core);
+    statusEl.children[0].textContent = core
+      ? parts.join(' · ')
+      : 'Select item 1 to start Milestone 0 multi-agent build';
+  }
+  cbs.forEach((cb) => cb.addEventListener('change', updateApproval));
+</script>
+</body>
+</html>

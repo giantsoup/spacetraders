@@ -334,7 +334,8 @@ class RequestBudget
                 'symbol' => $symbol,
                 'tier2_4_last_hour' => count($entry['t24']),
                 'tier1_last_hour' => count($entry['t1']),
-                'cap_per_hour' => $caps[$symbol] ?? null,
+                // Must match reserve(): once a staged table exists, an unlisted agent has no ordinary allowance.
+                'cap_per_hour' => $caps[$symbol] ?? (isset($caps['SHARED']) ? 0 : null),
                 'tier1_reserve_per_hour' => $symbol === 'SHARED' ? 180 : (int) config('gameplay.agent_tier1_reserve_per_hour', 300),
                 'deferrals' => $entry['deferrals'] ?? 0,
                 'deferrals_last_hour' => count($entry['deferred_at']),

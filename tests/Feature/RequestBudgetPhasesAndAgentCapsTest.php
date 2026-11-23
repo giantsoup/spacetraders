@@ -384,6 +384,24 @@ class RequestBudgetPhasesAndAgentCapsTest extends TestCase
         $this->assertGreaterThan(0, $budget->usage(agentSymbol: 'SHARED')['agent']['tier2_4_last_hour']);
     }
 
+    public function test_unlisted_agent_cap_matches_admission_so_loading_finishes_at_stage1(): void
+    {
+        config(['gameplay.request_budget_stage' => 'stage1', 'gameplay.request_budget_enabled' => true]);
+        $budget = app(RequestBudget::class);
+        $this->assertSame(0, $budget->usage(agentSymbol: 'MACSOUP')['agent']['cap_per_hour']);
+        $this->assertTrue($budget->ordinaryCapReached('MACSOUP'));
+        $this->expectException(RequestDeferred::class);
+        RequestBudget::forAgent('MACSOUP', fn () => $budget->reserve(priority: 'run', maxWait: 0));
+    }
+
+    public function test_stage_off_leaves_agents_uncapped(): void
+    {
+        config(['gameplay.request_budget_stage' => 'off', 'gameplay.agent_request_caps' => []]);
+        $budget = app(RequestBudget::class);
+        $this->assertNull($budget->usage(agentSymbol: 'GIANTSOUP')['agent']['cap_per_hour']);
+        $this->assertFalse($budget->ordinaryCapReached('GIANTSOUP'));
+    }
+
     public function test_round_one_scorecard_never_counts_elapsed_time_without_trading_activity(): void
     {
         config(['gameplay.agent_request_caps' => ['local' => 1800]]);
