@@ -113,6 +113,32 @@ class CampaignProbePoolTest extends TestCase
         }
     }
 
+    public function test_v6_remote_probe_preview_and_ranking_reject_a_stale_over_cap_price(): void
+    {
+        $yard = 'X1-TEST-YARDB';
+        $sync = app(AgentSynchronizer::class);
+        $sync->observe($this->agent, 'waypoint', $yard, ['symbol' => $yard, 'systemSymbol' => 'X1-TEST', 'type' => 'ORBITAL_STATION',
+            'x' => 4, 'y' => 0, 'traits' => [['symbol' => 'SHIPYARD']]], 'listing');
+        $observation = $sync->observe($this->agent, 'shipyard', $yard, ['shipTypes' => [['type' => 'SHIP_PROBE']], 'ships' => [$this->probeOffer(100000)]]);
+        $observation->update(['observed_at' => now()->subMinutes(31)]);
+        $grant = $this->approve($this->bootstrapBody(target: 2, maxPrice: 50000, minWorkingCapital: 0));
+        $episode = CampaignEpisode::create(['campaign_grant_id' => $grant->id, 'agent_id' => $this->agent->id,
+            'reset_id' => $this->agent->reset_id, 'start_credits' => 150000, 'phase' => 'earn',
+            'opened_at' => now(), 'next_reset_at' => now()->addDays(5)]);
+        $considered = [];
+
+        $this->assertNull(app(CampaignProbeBootstrap::class)->plan($grant, $episode, $this->agent, [], $considered));
+        $this->assertContains('Observed SHIP_PROBE price 100000 CR exceeds max_price.', array_column($considered, 'rejected'));
+        try {
+            app(AutomationRunner::class)->previewProbePurchase($this->agent, 'LOCAL-2', $yard, ['minutes' => 15], $episode);
+            $this->fail('Expected the stored probe price to block preview before departure.');
+        } catch (GameException $exception) {
+            $this->assertStringContainsString('SHIP_PROBE price 100000 CR exceeds max_price 50000 CR', $exception->getMessage());
+        }
+        $this->assertDatabaseMissing('automation_runs', ['strategy' => 'buy_probe']);
+        $this->assertSame([], $this->world()['writes']);
+    }
+
     public function test_round_two_purchase_preview_holds_without_budget_evidence(): void
     {
         $episode = $this->prepareBudgetPurchase();

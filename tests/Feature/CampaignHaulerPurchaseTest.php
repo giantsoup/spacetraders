@@ -243,19 +243,24 @@ class CampaignHaulerPurchaseTest extends TestCase
         $this->assertSame('running', $run->fresh()->state->value);
     }
 
-    public function test_long_shipyard_scout_treats_an_expired_over_cap_offer_as_unknown_so_it_can_refresh(): void
+    #[DataProvider('provisionalScoutOffers')]
+    public function test_long_shipyard_scout_uses_the_reference_hauler_for_expired_or_incomplete_offers(int $age, int $price, bool $incomplete): void
     {
         $this->setUpSaturation(hubs: 2, remoteYard: true);
         $yard = 'X1-TEST-YARD';
-        $this->editFixture(function (&$world) use ($yard) {
+        $this->editFixture(function (&$world) {
             $world['waypoints'][2]['x'] = 393;
-            $world['shipyards'][$yard]['ships'][1]['purchasePrice'] = 750000;
             $world['ships'][] = FakeSpaceTraders::probe('LOCAL-6', 'X1-TEST-ROCK', 5);
         });
+        $storedYard = $this->world()['shipyards'][$yard];
+        $storedYard['ships'][1]['purchasePrice'] = $price;
+        if ($incomplete) {
+            unset($storedYard['ships'][1]['engine']['symbol']);
+        }
         $sync = app(AgentSynchronizer::class);
         $sync->observe($this->agent, 'waypoint', $yard, $this->point($yard, 393, ['SHIPYARD']), 'listing');
-        $obs = $sync->observe($this->agent, 'shipyard', $yard, $this->world()['shipyards'][$yard]);
-        $obs->update(['observed_at' => now()->subMinutes(31)]);
+        $obs = $sync->observe($this->agent, 'shipyard', $yard, $storedYard);
+        $obs->update(['observed_at' => now()->subMinutes($age)]);
         $sync->sync($this->agent, false);
         $episode = $this->primary();
         $this->schedulerPass();
@@ -267,11 +272,21 @@ class CampaignHaulerPurchaseTest extends TestCase
         $this->assertNotNull($run);
         $this->assertSame(['scout', $yard, 'shipyard'], [$run->strategy, $run->plan['destination'], $run->plan['observe_kind']]);
         $gates = collect($considered)->whereNotNull('gates')->sole()['gates'];
+        $this->assertTrue($gates['G4']['pass']);
         $this->assertSame(600000, $gates['G5']['price']);
         $this->assertTrue($gates['G5']['pass']);
         $this->assertTrue($gates['G8']['pass']);
         app(AutomationRunner::class)->startCampaign($this->agent, $run, $episode);
         $this->assertSame('running', $run->fresh()->state->value);
+    }
+
+    public static function provisionalScoutOffers(): array
+    {
+        return [
+            'expired over-cap offer' => [31, 750000, false],
+            'fresh incomplete in-cap offer' => [1, 350000, true],
+            'fresh incomplete over-cap offer' => [1, 750000, true],
+        ];
     }
 
     public function test_reviewed_mismatch_clears_agent_hold_and_keeps_the_delivered_ship_excluded(): void
@@ -371,7 +386,7 @@ class CampaignHaulerPurchaseTest extends TestCase
     }
 
     #[DataProvider('shortRemoteOffers')]
-    public function test_short_remote_hauler_purchase_respects_offer_freshness(int $observedMinutesAgo, int $arrivalPrice, ?string $arrivalRefusal = null): void
+    public function test_short_remote_hauler_purchase_requires_fresh_complete_offer_detail(int $observedMinutesAgo, int $arrivalPrice, ?string $arrivalRefusal = null, bool $incomplete = false): void
     {
         $this->setUpSaturation(hubs: 2, remoteYard: true);
         $yard = 'X1-TEST-YARD';
@@ -384,8 +399,11 @@ class CampaignHaulerPurchaseTest extends TestCase
         $sync->observe($this->agent, 'waypoint', $yard, $this->point($yard, 80, ['SHIPYARD']), 'listing');
         $liveYard = $this->world()['shipyards'][$yard];
         $storedYard = $liveYard;
-        $storedYard['ships'][1]['purchasePrice'] = 750000;
+        $storedYard['ships'][1]['purchasePrice'] = $incomplete ? 350000 : 750000;
         $storedYard['ships'][1]['modules'][1]['symbol'] = 'MODULE_CARGO_HOLD_II';
+        if ($incomplete) {
+            unset($storedYard['ships'][1]['engine']['symbol']);
+        }
         $observation = $sync->observe($this->agent, 'shipyard', $yard, $storedYard);
         $observation->update(['observed_at' => now()->subMinutes($observedMinutesAgo)]);
         $sync->sync($this->agent, false);
@@ -438,7 +456,7 @@ class CampaignHaulerPurchaseTest extends TestCase
             $this->assertSame('blocked', $run->state->value);
             $message = match ($arrivalRefusal) {
                 'max_price' => '750000 CR exceeds max_price 600000 CR',
-                'configuration' => 'Arrival offer configuration differs from approved hauler configuration.',
+                'configuration' => 'A complete verified hauler offer is required at arrival.',
                 'reserve' => 'breaches working-capital reserve',
             };
             $this->assertStringContainsString($message, $run->blocked_reason);
@@ -468,6 +486,8 @@ class CampaignHaulerPurchaseTest extends TestCase
             'expired offer with over-cap arrival price' => [31, 750000, 'max_price'],
             'expired offer with incomplete arrival configuration' => [31, 350000, 'configuration'],
             'expired offer with insufficient liquidity at arrival' => [31, 350000, 'reserve'],
+            'fresh incomplete offer with complete arrival configuration' => [1, 350000, null, true],
+            'fresh incomplete offer with incomplete arrival configuration' => [1, 350000, 'configuration', true],
         ];
     }
 
@@ -542,7 +562,28 @@ class CampaignHaulerPurchaseTest extends TestCase
         $this->assertSame('running', $runner->startCampaign($this->agent, $scout(), $primary)->state->value);
     }
 
-    public function test_inline_purchase_rereads_the_offer_after_arrival_and_rejects_drift(): void
+    public function test_at_yard_preview_refuses_a_live_offer_without_a_fuel_profile(): void
+    {
+        $this->setUpSaturation();
+        $episode = $this->primary();
+        $this->schedulerPass();
+        $this->editFixture(function (&$world) {
+            unset($world['shipyards']['X1-TEST-ROCK']['ships'][1]['frame']['fuelCapacity']);
+        });
+
+        try {
+            app(AutomationRunner::class)->previewHaulerPurchase($this->agent, 'LOCAL-2', 'X1-TEST-ROCK', ['minutes' => 15], $episode);
+            $this->fail('Expected the incomplete live offer to block preview.');
+        } catch (GameException $exception) {
+            $this->assertStringContainsString('A complete verified hauler offer is required at the yard.', $exception->getMessage());
+        }
+        $this->assertDatabaseMissing('automation_runs', ['strategy' => 'buy_hauler']);
+        $this->assertDatabaseMissing('ship_actions', ['command' => 'buy_ship']);
+        $this->assertSame([], $this->world()['writes']);
+    }
+
+    #[DataProvider('inlineOfferChanges')]
+    public function test_inline_purchase_rereads_the_offer_after_arrival_and_prevents_unverified_send(string $change, string $state, string $message): void
     {
         $this->setUpSaturation();
         $episode = $this->primary();
@@ -552,23 +593,38 @@ class CampaignHaulerPurchaseTest extends TestCase
         $runner->startCampaign($this->agent, $run, $episode);
         config(['gameplay.inline_execute' => true]);
 
-        $this->editFixture(function (&$world) {
+        $this->editFixture(function (&$world) use ($change) {
             $changed = $world['shipyards']['X1-TEST-ROCK']['ships'];
-            $changed[1]['modules'][1]['symbol'] = 'MODULE_CARGO_HOLD_II';
+            if ($change === 'module') {
+                $changed[1]['modules'][1]['symbol'] = 'MODULE_CARGO_HOLD_II';
+            } elseif ($change === 'fuel capacity') {
+                unset($changed[1]['frame']['fuelCapacity']);
+            } else {
+                unset($changed[1]['purchasePrice']);
+            }
             $world['shipyards']['X1-TEST-ROCK']['offers_after_read'] = $changed;
         });
         $before = $this->world();
         $runner->advance($run->id);
         $action = ShipAction::where('automation_run_id', $run->id)->sole();
-        $this->assertSame('rejected', $action->state->value, $action->message);
+        $this->assertSame($state, $action->state->value, $action->message);
         $this->assertNull($action->sent_at);
-        $this->assertStringContainsString('configuration changed', $action->message);
+        $this->assertStringContainsString($message, $action->message);
         $after = $this->world();
         $yardReads = collect(array_slice($after['calls'], count($before['calls'])))->where('method', 'GET')
             ->filter(fn (array $call) => str_ends_with($call['path'], '/shipyard'));
         $this->assertCount(2, $yardReads);
         $this->assertSame($before['writes'], $after['writes']);
         $this->assertSame($before['credits'], $after['credits']);
+    }
+
+    public static function inlineOfferChanges(): array
+    {
+        return [
+            'different modular configuration' => ['module', 'rejected', 'Hauler offer configuration changed'],
+            'same hash but missing fuel capacity' => ['fuel capacity', 'rejected', 'A complete verified hauler offer is required'],
+            'same hash but missing price' => ['price', 'pending', 'SpaceTraders returned incomplete or incompatible state'],
+        ];
     }
 
     #[DataProvider('releaseTypes')]

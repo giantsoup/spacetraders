@@ -307,10 +307,6 @@ class ShipCommandExecutor
                     app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments);
                 }
                 $this->unchangedApproval($action, $before);
-                if ($run?->strategy === 'buy_hauler' && $action->command === 'buy_ship'
-                    && ($action->arguments['offer_configuration_hash'] ?? null) !== self::configurationHash($before['estimate']['configuration'] ?? [])) {
-                    throw new GameException('Hauler offer configuration changed before reservation.');
-                }
                 // Stop and reservation contend on a database transaction, independently of the host lock.
                 DB::transaction(function () use ($action, $run, $before, $agent, $outbound) {
                     $this->gate->check($action->engine_session_id);

@@ -515,7 +515,15 @@ class CommandRules
                 $yard = $this->api->shipyard($agent, $arguments['waypointSymbol'], fresh: true);
                 $this->sync->observe($agent, 'shipyard', $arguments['waypointSymbol'], $yard);
                 $offer = collect($yard['ships'] ?? [])->firstWhere('type', $arguments['shipType']);
-                if (! $offer || ! isset($offer['frame']['symbol'], $offer['reactor']['symbol'], $offer['engine']['symbol'], $offer['modules'], $offer['mounts'], $offer['crew']['capacity']) || ($setup && $this->planner->capability($offer, true) !== null)) {
+                if ($run?->strategy === 'buy_hauler') {
+                    $pin = CampaignHaulerPurchase::offerProfile($offer)['hash'] ?? null;
+                    if ($pin === null) {
+                        throw new GameException('A complete verified hauler offer is required before reservation.');
+                    }
+                    if ($pin !== ($arguments['offer_configuration_hash'] ?? null)) {
+                        throw new GameException('Hauler offer configuration changed before reservation.');
+                    }
+                } elseif (! $offer || ! isset($offer['frame']['symbol'], $offer['reactor']['symbol'], $offer['engine']['symbol'], $offer['modules'], $offer['mounts'], $offer['crew']['capacity']) || ($setup && $this->planner->capability($offer, true) !== null)) {
                     throw new GameException('The complete ship configuration is not verified as mining capable.');
                 }
                 $cost = $offer['purchasePrice'];

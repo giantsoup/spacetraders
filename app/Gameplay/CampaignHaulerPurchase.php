@@ -15,6 +15,21 @@ class CampaignHaulerPurchase
 {
     public const TYPE = 'SHIP_LIGHT_HAULER';
 
+    public static function offerProfile(?array $offer): ?array
+    {
+        $price = $offer['purchasePrice'] ?? null;
+        $tank = $offer['fuel']['capacity'] ?? $offer['frame']['fuelCapacity'] ?? null;
+        $speed = $offer['engine']['speed'] ?? null;
+        if (! is_int($price) || $price < 1 || ! is_int($tank) || $tank < 1 || ! is_int($speed) || $speed < 1
+            || ! isset($offer['crew']['capacity'])) {
+            return null;
+        }
+        $hash = ShipCommandExecutor::configurationHash($offer);
+        $hold = $hash === null ? 0 : CommandRules::offeredCargoCapacity($offer);
+
+        return $hold > 0 ? ['hash' => $hash, 'tank' => $tank, 'speed' => $speed, 'hold' => $hold] : null;
+    }
+
     public function policy(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent): ?array
     {
         $policy = $grant->revision()->body['fleet']['haulers'] ?? null;

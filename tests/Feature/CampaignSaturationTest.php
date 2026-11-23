@@ -435,6 +435,53 @@ class CampaignSaturationTest extends TestCase
         $this->assertSame(380000, CampaignEvent::where('kind', 'hauler_purchased')->sole()->data['price']);
     }
 
+    #[DataProvider('incompleteRemoteOffers')]
+    public function test_status_projects_incomplete_remote_offers_provisionally_without_permanent_stops(int $price, int $hours, string $detail, ?string $hold): void
+    {
+        $this->setUpSaturation(hubs: 2, remoteYard: true);
+        $yard = 'X1-TEST-YARD';
+        $storedYard = $this->world()['shipyards'][$yard];
+        $storedYard['ships'][1]['purchasePrice'] = $price;
+        match ($detail) {
+            'engine' => $storedYard['ships'][1]['engine'] = ['speed' => 15],
+            'fuel' => $storedYard['ships'][1]['frame']['fuelCapacity'] = null,
+            'cargo' => $storedYard['ships'][1]['modules'] = [],
+        };
+        $sync = app(AgentSynchronizer::class);
+        $sync->observe($this->agent, 'waypoint', $yard, $this->point($yard, 80, ['SHIPYARD']), 'listing');
+        $sync->observe($this->agent, 'shipyard', $yard, $storedYard);
+        $episode = $this->primary();
+        $episode->update(['next_reset_at' => now()->addHours($hours)]);
+        $this->schedulerPass();
+        $before = $this->world()['calls'];
+
+        $saturation = app(CampaignSaturation::class);
+        $reference = $saturation->evaluate($episode->grant(), $episode, $this->agent, $yard);
+        $direct = $saturation->evaluate($episode->grant(), $episode, $this->agent, $yard, $storedYard['ships'][1]);
+        $status = app(CampaignStatus::class)->saturation($this->operator->id, 'LOCAL');
+
+        $this->assertTrue($reference['gates']['G4']['pass']);
+        foreach ([$direct, $status] as $result) {
+            $this->assertTrue($result['provisional']);
+            $this->assertSame($yard, $result['yard']);
+            $this->assertSame($reference['gates']['G4'], $result['gates']['G4']);
+            $this->assertSame(600000, $result['gates']['G5']['price']);
+            $this->assertSame(15, $result['gates']['G8']['payback_hours']);
+            $this->assertSame($hold, $result['hold']['reason'] ?? null);
+            $this->assertFalse($result['hold']['permanent'] ?? false);
+        }
+        $this->assertSame($before, $this->world()['calls']);
+    }
+
+    public static function incompleteRemoteOffers(): array
+    {
+        return [
+            'in-cap price without engine symbol' => [350000, 120, 'engine', null],
+            'over-cap price without fuel capacity' => [750000, 120, 'fuel', null],
+            'out-of-horizon price without cargo capacity' => [350000, 26, 'cargo', 'payback'],
+        ];
+    }
+
     #[DataProvider('permanentYardStops')]
     public function test_permanent_yard_stops_require_a_complete_home_catalogue(int $price, int $hours, string $reason): void
     {

@@ -99,6 +99,7 @@ class CampaignSaturation
 
         $searchComplete = true;
         $aggregate = $yard === null;
+        $offer = CampaignHaulerPurchase::offerProfile($offer) === null ? null : $offer;
         $price = $offer['purchasePrice'] ?? $policy['max_price'];
         if (! $offerIndependentOnly) {
             $yardOffers = $aggregate ? $this->yardOffers($agent, $mesh['yards']) : collect();
@@ -269,7 +270,7 @@ class CampaignSaturation
 
         return $yards->reject(fn ($point) => $observations->has($point->symbol)
             && ! $purchase->offers($observations->get($point->symbol)->data, CampaignHaulerPurchase::TYPE))
-            ->map(fn ($point) => $purchase->freshOffer($observations->get($point->symbol), CampaignHaulerPurchase::TYPE));
+            ->map(fn ($point) => $purchase->freshHaulerOffer($observations->get($point->symbol)));
     }
 
     private function opportunity(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, CampaignRevision $revision, ?string $yard, ?array $offer, int $price, int $fuel, array $reserve, ?float $deadline): array
@@ -367,14 +368,12 @@ class CampaignSaturation
         return $best + ['excluded_claims' => $excluded, 'last_refusal' => $lastFailure, 'projected_exposure' => $exposure, 'cash_after_commitments' => $cash];
     }
 
-    private function projectedHauler(string $yard, ?array $offer): ?array
+    private function projectedHauler(string $yard, ?array $offer): array
     {
-        $tank = $offer ? ($offer['fuel']['capacity'] ?? $offer['frame']['fuelCapacity'] ?? 0) : 600;
-        $speed = $offer ? ($offer['engine']['speed'] ?? 0) : 15;
-        $hold = $offer ? (CommandRules::offeredCargoCapacity($offer)) : 80;
-        if ($tank < 1 || $speed < 1 || $hold < 1 || ($offer && ! ShipCommandExecutor::configurationHash($offer))) {
-            return null;
-        }
+        $profile = CampaignHaulerPurchase::offerProfile($offer);
+        $tank = $profile['tank'] ?? 600;
+        $speed = $profile['speed'] ?? 15;
+        $hold = $profile['hold'] ?? 80;
 
         return ['symbol' => 'PROJECTED-HAULER', 'nav' => ['systemSymbol' => FleetClaims::systemOf($yard), 'waypointSymbol' => $yard,
             'status' => 'DOCKED', 'flightMode' => 'CRUISE'], 'fuel' => ['capacity' => $tank, 'current' => $tank],

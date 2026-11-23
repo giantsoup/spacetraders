@@ -28,6 +28,8 @@ class CampaignProbeBootstrap
 
     public const SHIPYARD_BACKOFF_MINUTES = 30;
 
+    public const SHIPYARD_OFFER_FRESH_MINUTES = 30;
+
     public const MAX_SHIPYARD_READS_PER_PASS = 2;
 
     public static function policy(CampaignGrant $grant, CampaignEpisode $episode): ?array
@@ -218,7 +220,9 @@ class CampaignProbeBootstrap
                 $ambiguousTransaction = $sameType
                     ->filter(fn (ShipAction $other) => ($other->arguments['waypointSymbol'] ?? null) === $action->arguments['waypointSymbol'])
                     ->contains(fn (ShipAction $other) => $this->matchingTransaction($agent, $other, [$transaction], includeUnsent: true) !== null);
-                // If two uncertain purchases coexist across yards, resolve them with campaign:release-hauler-purchase.
+                // Cross-yard ambiguity holds the slot for probes and haulers until the ship is resolved.
+                // campaign:release-probe-purchase and campaign:release-hauler-purchase require an acknowledged
+                // action with no remaining plausible unattributed ship of the same type.
                 $ambiguousShip = $sameType->contains(function (ShipAction $other) use ($symbol) {
                     $baseline = $other->before_state['estimate']['fleet_symbols'] ?? null;
 
@@ -527,7 +531,7 @@ class CampaignProbeBootstrap
                 $run = null;
                 $selected = null;
                 if ($hauler) {
-                    $offer = $this->freshOffer($shipyards[$yard], $type);
+                    $offer = $this->freshHaulerOffer($shipyards[$yard]);
                     $route = $this->purchaseRoute($agent, $ship, $yard, $reserve);
                     $fuel = $route['fuel_ceiling'];
                     $fuelByYard[$yard] = min($fuelByYard[$yard] ?? $fuel, $fuel);
@@ -709,7 +713,7 @@ class CampaignProbeBootstrap
         $leg = $route['outbound'];
         $fuelCeiling = $route['fuel_ceiling'];
 
-        $offer = $this->freshOffer($yardObs, $type);
+        $offer = $hauler ? $this->freshHaulerOffer($yardObs) : $this->offer($yardObs->data, $type);
         $minutes = $limits['minutes'];
         if ($hauler || ($policy['mesh'] ?? null)) {
             $cutoff = $episode->next_reset_at->subHour();
@@ -719,7 +723,6 @@ class CampaignProbeBootstrap
             }
         }
         if ($hauler) {
-            $offer = $offer && ShipCommandExecutor::configurationHash($offer) ? $offer : null;
             if ($atYard && ! $offer) {
                 throw new GameException('A complete verified hauler offer is required at the yard.');
             }
@@ -905,6 +908,18 @@ class CampaignProbeBootstrap
             return AutomationStep::blocked('Shipyard '.$shipyard.' does not currently offer '.$type.'.');
         }
 
+        $pin = null;
+        if ($hauler) {
+            $pin = CampaignHaulerPurchase::offerProfile($offer)['hash'] ?? null;
+            $known = $run->plan['offer_configuration_hash'] ?? $run->totals['offer_configuration_hash'] ?? null;
+            if ($pin === null) {
+                return AutomationStep::blocked('A complete verified hauler offer is required at arrival.');
+            }
+            if ($known !== null && ! hash_equals($known, $pin)) {
+                return AutomationStep::blocked('Arrival offer configuration differs from approved hauler configuration.');
+            }
+        }
+
         $price = $offer['purchasePrice'];
         $reserve = max($run->plan['reserve'], $this->effectiveReserve($agent, $grant, $policy, $run->id));
         $remainingSpend = $run->plan['max_spend'] - ($run->totals['fuel_cost'] ?? 0);
@@ -922,13 +937,7 @@ class CampaignProbeBootstrap
             return AutomationStep::blocked($type.' price '.$price.' CR exceeds remaining run spending cap '.$remainingSpend.' CR.');
         }
 
-        $pin = null;
         if ($hauler) {
-            $pin = ShipCommandExecutor::configurationHash($offer);
-            $known = $run->plan['offer_configuration_hash'] ?? $run->totals['offer_configuration_hash'] ?? null;
-            if (! $pin || ($known !== null && ! hash_equals($known, $pin))) {
-                return AutomationStep::blocked('Arrival offer configuration differs from approved hauler configuration.');
-            }
             app(CampaignSaturation::class)->assertPurchase($grant, $episode, $agent, $shipyard, $offer, $run->id,
                 max(0, $run->plan['route']['fuel_ceiling'] - ($run->totals['fuel_cost'] ?? 0)), persist: true);
         }
@@ -1088,14 +1097,13 @@ class CampaignProbeBootstrap
                 }
             }
 
-            $offer = $this->freshOffer($obs, $type);
-            if ($offer !== null) {
-                if (! $hauler && $offer['purchasePrice'] > $policy['max_price']) {
+            if (! $hauler && ($offer = $this->offer($obs->data, $type)) !== null) {
+                if ($offer['purchasePrice'] > $policy['max_price']) {
                     $considered[] = ['strategy' => $strategy, 'shipyard' => $symbol, 'rejected' => 'Observed '.$type.' price '.$offer['purchasePrice'].' CR exceeds max_price.'];
 
                     continue;
                 }
-                if (! $hauler && $agent->credits - $offer['purchasePrice'] < $reserve) {
+                if ($agent->credits - $offer['purchasePrice'] < $reserve) {
                     $considered[] = ['strategy' => $strategy, 'shipyard' => $symbol, 'rejected' => 'Observed '.$type.' price '.$offer['purchasePrice'].' CR breaches reserve.'];
 
                     continue;
@@ -1143,10 +1151,14 @@ class CampaignProbeBootstrap
         return is_array($offer) && isset($offer['purchasePrice']) ? $offer : null;
     }
 
-    public function freshOffer(?GameObservation $observation, string $type): ?array
+    public function freshHaulerOffer(?GameObservation $observation): ?array
     {
-        return $observation && $observation->observed_at->gte(now()->subMinutes(self::SHIPYARD_BACKOFF_MINUTES))
-            ? $this->offer($observation->data, $type) : null;
+        if (! $observation || $observation->observed_at->lt(now()->subMinutes(self::SHIPYARD_OFFER_FRESH_MINUTES))) {
+            return null;
+        }
+        $offer = $this->offer($observation->data, CampaignHaulerPurchase::TYPE);
+
+        return CampaignHaulerPurchase::offerProfile($offer) === null ? null : $offer;
     }
 
     private function refreshAcknowledgedShipyards(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, ?float $deadline): void
