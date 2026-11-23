@@ -104,18 +104,52 @@ class CreditAccounting
         return (int) $delta - ($modern ? $run->plan['initial_external_credit_delta'] : ($run->plan['initial_manual_credit_delta'] ?? 0));
     }
 
+    /** Read persisted agent and ledger state in one read-only SELECT snapshot, ignoring unsaved model changes. */
     public function summary(Agent $agent): array
     {
-        $baseline = DB::table('agent_credit_baselines')->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->first();
-        $entries = DB::table('confirmed_credit_entries')->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id);
-        $confirmed = (int) (clone $entries)->when($baseline, fn ($q) => $q->where('confirmed_at', '>=', $baseline->observed_at))->sum('credits');
-        $change = $baseline && $agent->credits !== null ? $agent->credits - ($baseline->user_starting_credits ?? $baseline->credits) : null;
+        // Read the balance and its ledger from one SQLite snapshot without an IMMEDIATE transaction.
+        $snapshot = DB::selectOne(<<<'SQL'
+            SELECT agents.credits, agents.reset_id, baseline.id AS baseline_id, baseline.credits AS baseline_credits,
+                   baseline.source, baseline.user_starting_credits, baseline.user_starting_at, baseline.observed_at,
+                   (SELECT COALESCE(SUM(entries.credits), 0)
+                    FROM confirmed_credit_entries AS entries
+                    WHERE entries.agent_id = agents.id AND entries.reset_id = agents.reset_id
+                      AND (baseline.id IS NULL OR entries.confirmed_at >= baseline.observed_at)) AS confirmed_change,
+                   (SELECT COALESCE(SUM(entries.credits), 0)
+                    FROM confirmed_credit_entries AS entries
+                    WHERE entries.agent_id = agents.id AND entries.reset_id = agents.reset_id
+                      AND entries.automation_run_id IS NULL) AS manual_change,
+                   (SELECT COALESCE(SUM(reviews.adjustment), 0)
+                    FROM agent_balance_reviews AS reviews
+                    WHERE reviews.agent_id = agents.id AND reviews.reset_id = agents.reset_id) AS reviewed_adjustments
+            FROM agents
+            LEFT JOIN agent_credit_baselines AS baseline
+                ON baseline.agent_id = agents.id AND baseline.reset_id = agents.reset_id
+            WHERE agents.id = ?
+            SQL, [$agent->id]);
 
-        $reviewed = (int) DB::table('agent_balance_reviews')->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->sum('adjustment');
+        $hasBaseline = isset($snapshot->baseline_id);
+        $credits = isset($snapshot->credits) ? (int) $snapshot->credits : null;
+        $baselineCredits = $hasBaseline ? (int) $snapshot->baseline_credits : null;
+        $userStartingCredits = isset($snapshot->user_starting_credits) ? (int) $snapshot->user_starting_credits : null;
+        $confirmed = (int) ($snapshot->confirmed_change ?? 0);
+        $reviewed = (int) ($snapshot->reviewed_adjustments ?? 0);
+        $change = $hasBaseline && $credits !== null ? $credits - ($userStartingCredits ?? $baselineCredits) : null;
 
-        return ['reviewed_adjustments' => $reviewed, 'baseline' => $baseline ? ['credits' => $baseline->credits, 'source' => $baseline->source, 'user_starting_credits' => $baseline->user_starting_credits, 'user_starting_at' => $baseline->user_starting_at, 'observed_at' => $baseline->observed_at] : null,
-            'total_balance_change' => $change, 'confirmed_change' => $confirmed, 'manual_change' => (int) (clone $entries)->whereNull('automation_run_id')->sum('credits'),
-            'unexplained_change' => $change === null ? null : $agent->credits - $baseline->credits - $confirmed - $reviewed];
+        return [
+            'reviewed_adjustments' => $reviewed,
+            'baseline' => $hasBaseline ? [
+                'credits' => $baselineCredits,
+                'source' => $snapshot->source,
+                'user_starting_credits' => $userStartingCredits,
+                'user_starting_at' => $snapshot->user_starting_at,
+                'observed_at' => $snapshot->observed_at,
+            ] : null,
+            'total_balance_change' => $change,
+            'confirmed_change' => $confirmed,
+            'manual_change' => (int) ($snapshot->manual_change ?? 0),
+            'unexplained_change' => $change === null ? null : $credits - $baselineCredits - $confirmed - $reviewed,
+        ];
     }
 
     public function review(Agent $agent, int $observedBalance, string $note, ?int $startingBalance): array

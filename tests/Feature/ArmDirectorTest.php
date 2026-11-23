@@ -11,6 +11,7 @@ use App\Gameplay\CampaignPlaybook;
 use App\Gameplay\CampaignReport;
 use App\Gameplay\CampaignSafety;
 use App\Gameplay\CampaignTrade;
+use App\Gameplay\CreditAccounting;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\FleetMetrics;
 use App\Gameplay\GameException;
@@ -26,6 +27,7 @@ use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
+use App\Models\CampaignSample;
 use App\Models\LocalEngine;
 use App\Models\Ship;
 use App\Models\ShipAction;
@@ -34,6 +36,7 @@ use App\Services\SpaceTradersClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\EngineFixture;
@@ -799,6 +802,131 @@ class ArmDirectorTest extends TestCase
         $this->artisan('spacetraders:dispatch-due')->assertSuccessful();
         Queue::assertPushed(AdvanceAutomationRun::class, 2);
         Queue::assertPushed(ExecuteShipCommand::class, 1);
+    }
+
+    public function test_arm_pass_ignores_another_ships_sale_confirmed_while_waiting_for_agent_lock(): void
+    {
+        $arm = $this->armWithRunningTradeDuringBalanceChange(recordSale: true);
+
+        $this->assertNull($arm->paused_at);
+        $this->assertNull($arm->pause_reason);
+        $decision = CampaignEvent::where('campaign_grant_id', $arm->id)->where('kind', 'decision')->latest('id')->firstOrFail();
+        $this->assertSame('awaiting_run', $decision->data['choice']);
+        $this->assertSame(100200, $decision->data['credits']);
+    }
+
+    public function test_arm_pass_still_pauses_on_unrecorded_balance_change_while_waiting_for_agent_lock(): void
+    {
+        $arm = $this->armWithRunningTradeDuringBalanceChange(recordSale: false);
+
+        $this->assertNotNull($arm->paused_at);
+        $this->assertSame('unexplained_change', $arm->pause_reason);
+    }
+
+    public function test_arm_playbook_bounds_runs_at_thirty_minutes(): void
+    {
+        $this->editWorld(function (&$world) {
+            $world['waypoints'][1]['x'] = 300;
+            $world['waypoints'][1]['y'] = 0;
+            $world['ships'][2]['engine']['speed'] = 15;
+            $world['ships'][2]['fuel'] = ['current' => 1000, 'capacity' => 1000];
+            $world['ships'][2]['frame']['fuelCapacity'] = 1000;
+            $world['market_goods']['X1-TEST-PORT'][0]['sellPrice'] = 2000;
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $playbook = app(CampaignPlaybook::class);
+        $control = app(CampaignControl::class);
+        $director = app(CampaignDirector::class);
+        $source = str_replace('GIANTSOUP', 'LOCAL', file_get_contents(base_path('campaigns/arm-trade.yaml')));
+        $short = $playbook->import(preg_replace('/run_max_minutes: \d+/', 'run_max_minutes: 15', $source));
+        $armSpec = ['label' => 'H1', 'ship' => 'LOCAL-3'];
+        $expires = CarbonImmutable::now()->addHours(12);
+        $shortArm = $control->approveArm($short, $this->user, $armSpec, $expires);
+
+        $this->assertTrue($director->tickArms());
+        $decision = CampaignEvent::where('campaign_grant_id', $shortArm->id)->where('kind', 'decision')->latest('id')->firstOrFail();
+        $this->assertNull($decision->data['run_id']);
+        $this->assertArrayHasKey('Planned run exceeds run_max_minutes.', $decision->data['rejections']);
+        $longPair = collect($decision->data['long_run_rejections'])->firstWhere('good', 'IRON_ORE');
+        $this->assertNotNull($longPair);
+        $this->assertGreaterThan(15, $longPair['planned_minutes']);
+        $this->assertLessThan(30, $longPair['planned_minutes']);
+
+        $control->revokeArm($shortArm);
+        $revision = $playbook->import($source);
+        $this->assertSame(30, $revision->body['limits']['run_max_minutes']);
+        $arm = $control->approveArm($revision, $this->user, $armSpec, $expires);
+
+        $this->assertTrue($director->tickArms());
+        $episode = CampaignEpisode::where('campaign_grant_id', $arm->id)->firstOrFail();
+        $run = AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertSame('trade', $run->strategy);
+        $this->assertSame([$longPair['good'], $longPair['source'], $longPair['buyer']], [$run->plan['symbol'], $run->plan['site'], $run->plan['market']]);
+        $this->assertSame(30, $run->plan['minutes']);
+        $this->assertTrue($run->expires_at->equalTo($run->started_at->addMinutes(30)));
+    }
+
+    private function armWithRunningTradeDuringBalanceChange(bool $recordSale): CampaignGrant
+    {
+        config(['gameplay.campaign_claims' => false]);
+        $arm = $this->arm('H1', 'LOCAL-3');
+        $director = app(CampaignDirector::class);
+        $this->assertTrue($director->tickArms());
+        $episode = CampaignEpisode::where('campaign_grant_id', $arm->id)->firstOrFail();
+        $run = AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('active_agent_id')->firstOrFail();
+        $this->assertSame('trade', $run->strategy);
+        $this->assertSame('running', $run->state->value);
+
+        $c0 = $this->c0();
+        $c0Episode = CampaignEpisode::where('campaign_grant_id', $c0->id)->firstOrFail();
+        $c0Run = AutomationRun::where('campaign_episode_id', $c0Episode->id)->whereNotNull('active_agent_id')->firstOrFail();
+        $agent = $this->agent;
+        Agent::whereKey($agent->id)->update(['synced_at' => now()->subSeconds(61)]);
+        CampaignSample::where('campaign_episode_id', $episode->id)->update(['observed_at' => now()->subMinutes(16)]);
+        $this->app->instance(HostLock::class, new class(function () use ($agent, $c0Run, $recordSale) {
+            $this->editWorld(fn (&$world) => $world['credits'] += 200);
+            DB::transaction(function () use ($agent, $c0Run, $recordSale) {
+                Agent::whereKey($agent->id)->update(['credits' => 100200, 'synced_at' => now()]);
+                if ($recordSale) {
+                    $action = ShipAction::create([
+                        'agent_id' => $agent->id, 'automation_run_id' => $c0Run->id, 'ship_symbol' => $c0Run->ship_symbol,
+                        'key' => 'race-sale', 'reset_id' => $agent->reset_id, 'command' => 'sell', 'state' => 'confirmed',
+                        'origin' => 'automation', 'arguments' => ['symbol' => 'IRON_ORE', 'units' => 1],
+                        'outcome' => ['credit_delta' => 200], 'expires_at' => now(), 'settled_at' => now(),
+                    ]);
+                    app(CreditAccounting::class)->record($agent, $action, 200);
+                }
+            });
+        }) extends HostLock
+        {
+
+            public function __construct(private ?\Closure $afterAcquisition) {}
+
+            public function run(string $key, callable $work): mixed
+            {
+                if (! str_starts_with($key, 'agent-') || $this->afterAcquisition === null) {
+                    return parent::run($key, $work);
+                }
+
+                return parent::run($key, function () use ($work) {
+                    $hook = $this->afterAcquisition;
+                    $this->afterAcquisition = null;
+                    $hook();
+
+                    return $work();
+                });
+            }
+        });
+
+        $requestCount = Http::recorded()->count();
+        $this->assertTrue($director->tickArms());
+        $this->assertFalse(Http::recorded()->slice($requestCount)->contains(
+            fn (array $exchange) => $exchange[0]->method() === 'GET' && str_ends_with($exchange[0]->url(), '/my/agent'),
+        ), 'A live arm with a fresh balance should skip GET /my/agent.');
+        $sample = CampaignSample::where('campaign_episode_id', $episode->id)->where('observed_at', now())->sole();
+        $this->assertSame(100200, $sample->credits);
+
+        return $arm->refresh();
     }
 
     private function body(int $exposure = 100): string

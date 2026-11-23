@@ -7,7 +7,8 @@ agent: { symbol: GIANTSOUP, faction: VOID }
 limits:
   reserve_credits: 0
   fuel_reserve: next_leg
-  run_max_minutes: 15
+  # Speed-15 Light Freighters need longer run bounds than the speed-36 frigate.
+  run_max_minutes: 30
 trade:
   proof: { max_units_batches: 1, max_credits: 60000, min_realized_ratio: 0.8 }
   lot: { max_buyer_batches: 5, first_scaled_max_buyer_batches: 3, default_batch_decay: 0.04 }
