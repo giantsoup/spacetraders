@@ -724,7 +724,7 @@ class CampaignDirector
                     return;
                 }
                 if ($pendingHandover) {
-                    if (! $this->recover($grant, $episode, $agent, $busyShips)) {
+                    if (! $this->recover($grant, $episode, $agent, $busyShips, $pendingHandover)) {
                         $this->decision($grant, $episode, $agent, [], 'awaiting_pending_activation');
                     }
 
@@ -1878,7 +1878,7 @@ class CampaignDirector
     private function recordSaturation(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent): void
     {
         $saturation = app(CampaignSaturation::class);
-        $saturation->record($grant, $episode, $saturation->evaluate($grant, $episode, $agent));
+        $saturation->record($grant, $episode, $saturation->evaluate($grant, $episode, $agent, offerIndependentOnly: true));
     }
 
     private function markArmRecovery(CampaignGrant $grant, CampaignEpisode $episode, bool $recovering): void

@@ -11,18 +11,22 @@ use App\Gameplay\CampaignProbeBootstrap;
 use App\Gameplay\CampaignSaturation;
 use App\Gameplay\CampaignTrade;
 use App\Gameplay\EngineGate;
+use App\Gameplay\FleetClaims;
 use App\Gameplay\GameException;
 use App\Gameplay\HostLock;
 use App\Gameplay\RequestBudget;
 use App\Gameplay\ShipCommandExecutor;
+use App\Gameplay\SpaceTradersApi;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
+use App\Models\GameObservation;
 use App\Models\LocalEngine;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\FakeSpaceTraders;
 use Tests\Support\SaturationFixture;
@@ -124,6 +128,11 @@ class CampaignHaulerPurchaseTest extends TestCase
     {
         [$run, $action] = $this->purchaseIntent();
         app(ShipCommandExecutor::class)->execute($action->id);
+        $this->artisan('campaign:ack-hauler-pacing', ['action' => $action->id])
+            ->expectsOutput('The delivery must have stalled before confirming its first load.')->assertFailed();
+        $this->assertArrayNotHasKey('pacing_acknowledged', $action->fresh()->outcome);
+        $this->assertDatabaseMissing('campaign_events', ['kind' => 'hauler_pacing_acknowledged']);
+        $this->travel(91)->minutes();
         $this->artisan('campaign:ack-hauler-pacing', ['action' => $action->id, '--dry-run' => true])->assertSuccessful();
         $this->assertArrayNotHasKey('pacing_acknowledged', $action->fresh()->outcome);
         $this->artisan('campaign:ack-hauler-pacing', ['action' => $action->id])->assertSuccessful();
@@ -229,6 +238,10 @@ class CampaignHaulerPurchaseTest extends TestCase
         app(ShipCommandExecutor::class)->reconcile($this->agent, $action);
         $this->actingAs($this->operator)->postJson(route('game.commands.acknowledge', [$this->agent, $action]), ['note' => 'Reviewed the delivered frame.', 'acknowledge' => true])->assertSuccessful();
         $this->assertTrue(ShipCommandExecutor::reviewedHaulerMismatch($action->refresh()));
+        $reviewedEvidence = $action->outcome['reconciled_at'];
+        $this->assertSame($reviewedEvidence, $action->outcome['reviewed_reconciled_at']);
+        $action->update(['outcome' => array_replace($action->outcome, ['reconciled_at' => now()->addMinute()->toIso8601String()])]);
+        $this->assertTrue(ShipCommandExecutor::reviewedHaulerMismatch($action->refresh()));
         $this->assertTrue($check()['gates']['G9']['pass']);
         $healthy = $runner->preview($this->agent, 'LOCAL-1', $limits);
         $runner->startCampaign($this->agent, $healthy, $episode);
@@ -319,6 +332,235 @@ class CampaignHaulerPurchaseTest extends TestCase
     public static function releaseTypes(): array
     {
         return [['probe', 'SHIP_PROBE'], ['hauler', 'SHIP_LIGHT_HAULER']];
+    }
+
+    public function test_unreviewed_c0_mismatch_holds_new_approvals_and_allows_an_arm_to_deliver_its_load(): void
+    {
+        $this->setUpSaturation(hubs: 2);
+        $this->editFixture(fn (&$world) => $world['ships'][] = FakeSpaceTraders::lightHauler('LOCAL-9', 'X1-TEST-ROCK'));
+        app(AgentSynchronizer::class)->sync($this->agent, false);
+        $primary = $this->primary();
+        $arm = $this->arm('LOCAL-9', 'H1');
+        $runner = app(AutomationRunner::class);
+        $probe = Ship::where('symbol', 'LOCAL-3')->sole()->snapshot;
+        $scout = fn () => $runner->previewMeshScout($this->agent, $probe, 'X1-TEST-ROCK', ['minutes' => 15, 'reserve' => 0], $primary);
+        $unstarted = $scout();
+        $this->assertTrue(app(CampaignDirector::class)->tickArms());
+        $trade = AutomationRun::whereNotNull('active_agent_id')->where('strategy', 'trade')->sole();
+        $runner->advance($trade->id);
+        $buy = ShipAction::where('automation_run_id', $trade->id)->where('command', 'buy')->sole();
+        app(ShipCommandExecutor::class)->execute($buy->id);
+        $this->assertSame('confirmed', $buy->fresh()->state->value);
+        $this->assertGreaterThan(0, $trade->fresh()->totals['unsold']['IRON_ORE']);
+
+        $mismatch = $this->haulerPurchase($primary, 'c0-hauler-mismatch', 'confirmed',
+            ['configuration_mismatch' => true, 'delivered_ship' => 'LOCAL-A'], requiresReview: true);
+        foreach ([$scout, fn () => $runner->start($this->agent, $unstarted)] as $approval) {
+            try {
+                $approval();
+                $this->fail('New approval ignored the configuration mismatch.');
+            } catch (GameException $exception) {
+                $this->assertStringContainsString('configuration differs', $exception->getMessage());
+            }
+        }
+        $this->assertSame('preview', $unstarted->fresh()->state->value);
+        $this->workRun($trade);
+        $this->assertSame('completed', $trade->fresh()->state->value, $trade->fresh()->blocked_reason ?? '');
+        $this->assertNull($arm->fresh()->paused_at);
+        $this->assertTrue($mismatch->fresh()->review_required);
+        $this->assertSame(['navigate', 'sell'], ShipAction::where('automation_run_id', $trade->id)->where('state', 'confirmed')
+            ->whereIn('command', ['navigate', 'sell'])->orderBy('id')->limit(2)->pluck('command')->all());
+
+        app(ShipCommandExecutor::class)->reconcile($this->agent, $mismatch);
+        $this->actingAs($this->operator)->postJson(route('game.commands.acknowledge', [$this->agent, $mismatch]),
+            ['note' => 'Reviewed the replacement frame.', 'acknowledge' => true])->assertSuccessful();
+        $this->assertSame('running', $runner->startCampaign($this->agent, $scout(), $primary)->state->value);
+    }
+
+    public function test_inline_purchase_rereads_the_offer_after_arrival_and_rejects_drift(): void
+    {
+        $this->setUpSaturation();
+        $episode = $this->primary();
+        $this->schedulerPass();
+        $runner = app(AutomationRunner::class);
+        $run = $runner->previewHaulerPurchase($this->agent, 'LOCAL-2', 'X1-TEST-ROCK', ['minutes' => 15], $episode);
+        $runner->startCampaign($this->agent, $run, $episode);
+        config(['gameplay.inline_execute' => true]);
+
+        $this->editFixture(function (&$world) {
+            $changed = $world['shipyards']['X1-TEST-ROCK']['ships'];
+            $changed[1]['modules'][1]['symbol'] = 'MODULE_CARGO_HOLD_II';
+            $world['shipyards']['X1-TEST-ROCK']['offers_after_read'] = $changed;
+        });
+        $before = $this->world();
+        $runner->advance($run->id);
+        $action = ShipAction::where('automation_run_id', $run->id)->sole();
+        $this->assertSame('rejected', $action->state->value, $action->message);
+        $this->assertNull($action->sent_at);
+        $this->assertStringContainsString('configuration changed', $action->message);
+        $after = $this->world();
+        $yardReads = collect(array_slice($after['calls'], count($before['calls'])))->where('method', 'GET')
+            ->filter(fn (array $call) => str_ends_with($call['path'], '/shipyard'));
+        $this->assertCount(2, $yardReads);
+        $this->assertSame($before['writes'], $after['writes']);
+        $this->assertSame($before['credits'], $after['credits']);
+    }
+
+    #[DataProvider('releaseTypes')]
+    public function test_settled_failed_attempt_blocks_the_active_purchase_and_records_the_right_yard(string $kind, string $type): void
+    {
+        $this->setUpSaturation(seedCoverage: $kind === 'hauler');
+        $episode = $this->primary();
+        if ($kind === 'probe') {
+            $sync = app(AgentSynchronizer::class);
+            $sync->observe($this->agent, 'market', 'X1-TEST-ROCK', app(SpaceTradersApi::class)->market($this->agent, 'X1-TEST-ROCK'));
+            $sync->observe($this->agent, 'market_listing', 'X1-TEST-PORT', ['symbol' => 'X1-TEST-PORT', 'imports' => [], 'exports' => [], 'exchange' => [['symbol' => 'IRON_ORE']]]);
+        }
+        $this->schedulerPass();
+        $runner = app(AutomationRunner::class);
+        $run = $kind === 'hauler'
+            ? $runner->previewHaulerPurchase($this->agent, 'LOCAL-2', 'X1-TEST-ROCK', ['minutes' => 15], $episode)
+            : $runner->previewProbePurchase($this->agent, 'LOCAL-2', 'X1-TEST-ROCK', ['minutes' => 15], $episode);
+        $runner->startCampaign($this->agent, $run, $episode);
+        $runner->advance($run->id);
+        $action = ShipAction::where('automation_run_id', $run->id)->where('command', 'buy_ship')->sole();
+        $this->assertSame($type, $action->arguments['shipType']);
+        $action->update(['state' => 'rejected', 'settled_at' => now(), 'outcome' => []]);
+        $this->travel(10)->seconds();
+        $runner->advance($run->id);
+
+        $this->assertSame('blocked', $run->fresh()->state->value);
+        $this->assertSame(ucfirst($kind).' purchase already attempted for this run.', $run->fresh()->blocked_reason);
+        $this->assertSame('failed', $episode->fresh()->state[$kind.'_shipyard_rejected']['X1-TEST-ROCK']['reason']);
+        $this->assertSame([$action->id], ShipAction::where('automation_run_id', $run->id)->pluck('id')->all());
+    }
+
+    #[DataProvider('competingSends')]
+    public function test_late_delivery_keeps_shared_slot_while_another_send_could_explain_it(string $state, bool $overlap): void
+    {
+        $this->setUpSaturation();
+        $episode = $this->primary();
+        $bootstrap = app(CampaignProbeBootstrap::class);
+        $ack = $this->haulerPurchase($episode, 'lost-hauler');
+        $this->editFixture(fn (&$world) => $world['ships'][] = FakeSpaceTraders::lightHauler('LOCAL-9', 'X1-TEST-ROCK'));
+        app(AgentSynchronizer::class)->sync($this->agent, false);
+        $transaction = ['agentSymbol' => 'LOCAL', 'waypointSymbol' => 'X1-TEST-ROCK', 'shipType' => 'SHIP_LIGHT_HAULER',
+            'timestamp' => now()->toIso8601String(), 'price' => 350000];
+        if (! $overlap) {
+            $this->travel(10)->seconds();
+        }
+        $other = $this->haulerPurchase($episode, 'competing-hauler', $state);
+        if ($state === 'pending') {
+            $other->update(['sent_at' => null]);
+        }
+        $this->editFixture(fn (&$world) => $world['transactions'][] = $transaction);
+
+        $bootstrap->reconcileDeliveries($episode->grant(), $episode, $this->agent);
+        $this->assertSame(['LOCAL-9'], $ack->fresh()->outcome['hauler_delivery_candidates']);
+        $this->assertSame($overlap ? null : 'LOCAL-9', $bootstrap::deliveredShip($ack->fresh()));
+        $ids = $bootstrap->reservations($this->agent)->pluck('action_id')->all();
+        $this->assertSame($overlap ? [$ack->id, $other->id] : [$other->id], $ids);
+        $this->assertSame($overlap ? 0 : 1, CampaignEvent::where('kind', 'hauler_purchased')->count());
+    }
+
+    public static function competingSends(): array
+    {
+        return [
+            'uncertain overlap' => ['uncertain', true],
+            'sending overlap' => ['sending', true],
+            'pending overlap' => ['pending', true],
+            'later uncertain send' => ['uncertain', false],
+        ];
+    }
+
+    public function test_release_hauler_purchase_cli_keeps_receipt_evidence_and_the_slot(): void
+    {
+        $this->setUpSaturation();
+        $purchase = $this->haulerPurchase($this->primary(), 'receipt-release', outcome: ['body_sha256' => hash('sha256', 'receipt')]);
+        foreach ([true, false] as $dryRun) {
+            $this->artisan('campaign:release-hauler-purchase', ['action' => $purchase->id, '--dry-run' => $dryRun])
+                ->expectsOutputToContain('stored receipt evidence')->assertFailed();
+        }
+        $this->assertSame(['body_sha256' => hash('sha256', 'receipt')], $purchase->fresh()->outcome);
+        $this->assertSame([$purchase->id], app(CampaignProbeBootstrap::class)->reservations($this->agent)->pluck('action_id')->all());
+        $this->assertDatabaseMissing('campaign_events', ['kind' => 'hauler_purchase_released']);
+    }
+
+    #[DataProvider('v7GateTransitions')]
+    public function test_v7_purchase_revalidates_each_gate_after_preview_and_at_arrival(string $gate, string $stage, string $reason): void
+    {
+        $this->setUpSaturation(hubs: 2);
+        $episode = $this->primary();
+        $grant = $episode->grant();
+        $this->schedulerPass();
+        $runner = app(AutomationRunner::class);
+        $probe = 'LOCAL-2';
+        $yard = 'X1-TEST-ROCK';
+        $saturation = app(CampaignSaturation::class);
+        $offer = $this->world()['shipyards'][$yard]['ships'][1];
+        $initial = $saturation->evaluate($grant, $episode, $this->agent, $yard, $offer);
+        $this->assertTrue($initial['can_purchase']);
+        $this->assertCount(9, array_filter($initial['gates'], fn ($evidence) => $evidence['pass']));
+        $run = $runner->previewHaulerPurchase($this->agent, $probe, $yard, ['minutes' => 15], $episode);
+        $this->assertSame(7, $run->plan_version);
+        if ($stage === 'arrival') {
+            $runner->startCampaign($this->agent, $run, $episode);
+            $this->assertSame('running', $run->refresh()->state->value);
+        }
+        match ($gate) {
+            'G1' => $grant->update(['paused_at' => now(), 'pause_reason' => 'operator_pause']),
+            'G2' => $this->haulerPurchase($episode, 'competing-purchase'),
+            'G3' => GameObservation::where('agent_id', $this->agent->id)->where('kind', 'market_listing')->delete(),
+            'G4' => app(FleetClaims::class)->claim($episode, ['source' => $yard, 'buyer' => 'X1-TEST-PORT', 'good' => 'IRON_ORE', 'ship' => 'LOCAL-1']),
+            'G5' => AutomationRun::create(['agent_id' => $this->agent->id, 'active_agent_id' => $this->agent->id,
+                'reset_id' => $this->agent->reset_id, 'ship_symbol' => 'LOCAL-1', 'strategy' => 'trade', 'state' => 'running',
+                'expires_at' => now()->addMinutes(15), 'plan' => ['max_spend' => 2000000], 'totals' => ['phase' => 'buy', 'spending' => 0]]),
+            'G6' => DB::table('fleet_metrics')->where('kind', 'scheduler')->delete(),
+            'G7' => config(['gameplay.host_tier2_4_per_minute' => 1]),
+            'G8' => $episode->update(['next_reset_at' => now()->addHours(23)]),
+            'G9' => $this->haulerPurchase($episode, 'previous-hauler', 'confirmed', ['delivered_ship' => 'LOCAL-9']),
+        };
+        $current = $saturation->evaluate($grant->refresh(), $episode->refresh(), $this->agent, $yard, $offer, $run->id);
+        $this->assertFalse($current['gates'][$gate]['pass'], json_encode($current['gates'][$gate]));
+        $before = $this->world();
+        if ($stage === 'start') {
+            try {
+                $runner->start($this->agent, $run);
+                $this->fail($gate.' was not revalidated at start.');
+            } catch (GameException $exception) {
+                $this->assertStringContainsString($reason, $exception->getMessage());
+            }
+            $this->assertNull($run->fresh()->started_at);
+        } else {
+            $runner->advance($run->id);
+            $this->assertSame('blocked', $run->fresh()->state->value);
+            $this->assertStringContainsString($reason, $run->fresh()->blocked_reason);
+        }
+        $this->assertDatabaseMissing('ship_actions', ['automation_run_id' => $run->id]);
+        $this->assertSame($before['writes'], $this->world()['writes']);
+        $this->assertSame($before['credits'], $this->world()['credits']);
+    }
+
+    public static function v7GateTransitions(): array
+    {
+        $cases = [
+            'G1' => ['outside current C0 campaign authority', 'Campaign authority is paused'],
+            'G2' => ['Shared ship purchase slot is held', 'Shared ship purchase slot is held'],
+            'G3' => ['no_hubs', 'no_hubs'],
+            'G4' => ['spare_corridor', 'spare_corridor'],
+            'G5' => ['liquidity', 'breaches working-capital reserve'],
+            'G6' => ['scheduler_evidence', 'scheduler_evidence'],
+            'G7' => ['ordinary_hour_headroom', 'ordinary_hour_headroom'],
+            'G8' => ['time_to_reset', 'time_to_reset'],
+            'G9' => ['awaiting_auto_arm', 'awaiting_auto_arm'],
+        ];
+        $matrix = [];
+        foreach ($cases as $gate => [$start, $arrival]) {
+            $matrix[$gate.' at start'] = [$gate, 'start', $start];
+            $matrix[$gate.' at arrival'] = [$gate, 'arrival', $arrival];
+        }
+
+        return $matrix;
     }
 
     private function purchaseIntent(): array

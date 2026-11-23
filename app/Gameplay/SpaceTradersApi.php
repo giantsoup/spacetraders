@@ -396,9 +396,9 @@ class SpaceTradersApi
         return Arr::only($data, ['symbol', 'imports', 'exports', 'exchange', 'tradeGoods', 'transactions']);
     }
 
-    public function shipyard(Agent $agent, string $waypoint): array
+    public function shipyard(Agent $agent, string $waypoint, bool $fresh = false): array
     {
-        $data = $this->payload($this->call('get', $this->waypointPath($waypoint).'/shipyard', [], $agent));
+        $data = $this->payload($this->call('get', $this->waypointPath($waypoint).'/shipyard', [], $agent, fresh: $fresh));
 
         return $this->shipyardData($data, $waypoint);
     }
@@ -660,7 +660,7 @@ class SpaceTradersApi
         $this->validate($body, ['data' => 'present|array|max:20', 'data.*' => 'array', 'data.*.'.$identity => 'required|string|distinct|max:80', 'meta.total' => 'required|integer|min:0', 'meta.page' => 'required|integer|in:'.$page, 'meta.limit' => 'required|integer|in:20']);
     }
 
-    private function call(string $method, string $path, array $body = [], ?Agent $agent = null, bool $allowNoContent = false, ?callable $receipt = null, bool $inheritedAuth = false, ?callable $beforeTransport = null): array
+    private function call(string $method, string $path, array $body = [], ?Agent $agent = null, bool $allowNoContent = false, ?callable $receipt = null, bool $inheritedAuth = false, ?callable $beforeTransport = null, bool $fresh = false): array
     {
         $deadline = null;
         if ($this->readGuard) {
@@ -670,7 +670,7 @@ class SpaceTradersApi
             $deadline = ($this->readGuard)();
         }
         try {
-            $response = $this->client->request($method, $path, $body, $agent?->credential(), $deadline, $agent?->account_id, $beforeTransport, $agent?->name);
+            $response = $this->client->request($method, $path, $body, $agent?->credential(), $deadline, $agent?->account_id, $beforeTransport, $agent?->name, fresh: $fresh);
         } catch (ConnectionException) {
             throw new GameException('SpaceTraders connection failed.', uncertain: $method !== 'get', retryAfter: 10);
         }

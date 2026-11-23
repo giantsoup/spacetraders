@@ -171,6 +171,7 @@ class CampaignProbeBootstrap
         DB::transaction(function () use ($agent, $actions) {
             $fleet = Ship::where('agent_id', $agent->id)->orderBy('symbol')->get()->keyBy('symbol');
             $purchases = $this->actions($agent)->get();
+            $outstanding = $this->outstanding($agent);
             $attributed = $purchases->map(self::deliveredShip(...))->filter()->all();
             $usedTransactions = $purchases->filter(fn (ShipAction $action) => self::deliveredShip($action))
                 ->map(fn (ShipAction $action) => $action->outcome['delivery_transaction'] ?? $action->outcome['bootstrap_delivery_transaction']
@@ -211,6 +212,12 @@ class CampaignProbeBootstrap
                             || $otherTransactions->contains(fn (array $tx) => $this->transactionKey($tx) === $key))) {
                         continue 2;
                     }
+                }
+                if ($outstanding->contains(fn (ShipAction $other) => $other->id !== $action->id
+                    && $other->arguments['shipType'] === $action->arguments['shipType']
+                    && ($other->arguments['waypointSymbol'] ?? null) === $action->arguments['waypointSymbol']
+                    && $this->matchingTransaction($agent, $other, [$transaction], includeUnsent: true) !== null)) {
+                    continue;
                 }
                 $pin = $action->arguments['offer_configuration_hash'] ?? null;
                 $configuration = $action->before_state['estimate']['configuration'] ?? null;
@@ -303,14 +310,15 @@ class CampaignProbeBootstrap
         ]);
     }
 
-    private function matchingTransaction(Agent $agent, ShipAction $action, array $transactions): ?array
+    private function matchingTransaction(Agent $agent, ShipAction $action, array $transactions, bool $includeUnsent = false): ?array
     {
         $shipyard = $action->arguments['waypointSymbol'] ?? null;
-        if (! is_string($shipyard) || ! $action->sent_at) {
+        $earliest = $action->sent_at ?? ($includeUnsent ? $action->created_at : null);
+        if (! is_string($shipyard) || ! $earliest) {
             return null;
         }
 
-        return collect($transactions)->first(function ($tx) use ($agent, $shipyard, $action) {
+        return collect($transactions)->first(function ($tx) use ($agent, $shipyard, $action, $earliest) {
             if (! is_array($tx)
                 || ($tx['waypointSymbol'] ?? null) !== $shipyard
                 || (($tx['shipType'] ?? $tx['shipSymbol'] ?? null) !== $action->arguments['shipType'])
@@ -326,7 +334,7 @@ class CampaignProbeBootstrap
                 return false;
             }
             try {
-                return CarbonImmutable::parse($tx['timestamp'])->gte($action->sent_at->subSeconds(5));
+                return CarbonImmutable::parse($tx['timestamp'])->gte($earliest->copy()->subSeconds(5));
             } catch (\Throwable) {
                 return false;
             }
@@ -441,23 +449,30 @@ class CampaignProbeBootstrap
      */
     public function plan(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $busyShips, array &$considered, ?float $deadline = null, string $type = 'SHIP_PROBE'): ?AutomationRun
     {
+        if (microtime(true) >= ($deadline ?? INF)) {
+            return null;
+        }
         $hauler = $type === 'SHIP_LIGHT_HAULER';
         $strategy = $hauler ? 'buy_hauler' : 'buy_probe';
         $policy = $this->purchasePolicy($grant, $episode, $agent, $type);
-        if (! $policy) {
-            return null;
-        }
+        $saturation = app(CampaignSaturation::class);
         if ($hauler) {
-            $evaluation = app(CampaignSaturation::class)->evaluate($grant, $episode, $agent);
-            app(CampaignSaturation::class)->record($grant, $episode, $evaluation);
+            $evaluation = $saturation->evaluate($grant, $episode, $agent, offerIndependentOnly: true);
+            if (! $evaluation['enabled']) {
+                return null;
+            }
+            $saturation->record($grant, $episode, $evaluation);
             $considered[] = ['strategy' => $strategy, 'gates' => $evaluation['gates'], 'hold' => $evaluation['hold']];
-        } else {
+            if (! $policy || ! $evaluation['can_purchase']) {
+                return null;
+            }
+        } elseif ($policy) {
             [$owned, $target] = $this->probeTarget($episode, $agent, $policy);
             if ($owned + $this->inFlightProbePurchases($agent, $episode) >= $target) {
                 return null;
             }
         }
-        if ($this->reservations($agent)->isNotEmpty()) {
+        if (! $policy || $this->reservations($agent)->isNotEmpty() || microtime(true) >= ($deadline ?? INF)) {
             return null;
         }
         $fleet = app(CampaignFleet::class);
@@ -465,7 +480,7 @@ class CampaignProbeBootstrap
         $probes = $fleet->probes($episode);
         $system = $command['nav']['systemSymbol'] ?? ($probes[0]['nav']['systemSymbol'] ?? null);
         if (! $system) {
-            $considered[] = ['strategy' => 'buy_probe', 'rejected' => 'No home system ship available for probe bootstrap.'];
+            $considered[] = ['strategy' => $strategy, 'rejected' => 'No home system ship available for '.$type.' purchase.'];
 
             return null;
         }
@@ -476,7 +491,7 @@ class CampaignProbeBootstrap
         }
 
         $reserve = $this->effectiveReserve($agent, $grant, $policy);
-        if ($agent->credits <= $reserve && ! $hauler) {
+        if ($agent->credits <= $reserve) {
             $considered[] = ['strategy' => $strategy, 'rejected' => 'Credits do not clear working-capital reserve of '.$reserve.' CR.'];
 
             return null;
@@ -491,8 +506,11 @@ class CampaignProbeBootstrap
 
         $points = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
             ->where('kind', 'waypoint')->get()->keyBy('symbol');
-        $candidates = $this->rankCandidates($episode, $agent, $policy, $reserve, $shipyards, $eligibleShips, $points, $considered, $type);
+        $candidates = $this->rankCandidates($episode, $agent, $policy, $reserve, $shipyards, $eligibleShips, $points, $considered, $type, $deadline);
         foreach ($candidates as $candidate) {
+            if (microtime(true) >= ($deadline ?? INF)) {
+                return null;
+            }
             try {
                 if (CampaignLocalEarn::policy($grant, $episode) && $deadline !== null) {
                     app(CampaignLocalEarn::class)->reserve($deadline);
@@ -511,7 +529,7 @@ class CampaignProbeBootstrap
                     $leg = $ship['nav']['waypointSymbol'] === $yard ? null : app(FuelPlanner::class)->leg($agent, $ship, $yard, $reserve);
                     if ($leg && $leg['estimated_seconds'] + 180 > $limits['minutes'] * 60 && app(FuelPlanner::class)->fuelFree($ship)) {
                         if ($hauler) {
-                            app(CampaignSaturation::class)->assertPurchase($grant, $episode, $agent, $yard);
+                            $saturation->assertPurchase($grant, $episode, $agent, $yard, deadline: $deadline);
                         }
 
                         return app(AutomationRunner::class)->previewMeshScout($agent, $ship, $yard, $limits, $episode, 'shipyard');
@@ -519,13 +537,28 @@ class CampaignProbeBootstrap
                 }
 
                 return $hauler
-                    ? app(AutomationRunner::class)->previewHaulerPurchase($agent, $ship['symbol'], $yard, $limits, $episode)
+                    ? app(AutomationRunner::class)->previewHaulerPurchase($agent, $ship['symbol'], $yard, $limits, $episode, $deadline)
                     : app(AutomationRunner::class)->previewProbePurchase($agent, $ship['symbol'], $yard, $limits, $episode);
             } catch (GameException $exception) {
                 if ($exception instanceof LocalEarnBudget || $exception->retryAfter > 0) {
                     throw $exception;
                 }
                 $considered[] = ['strategy' => $strategy, 'ship' => $candidate['ship']['symbol'], 'shipyard' => $candidate['shipyard'], 'rejected' => $exception->getMessage()];
+            }
+        }
+
+        if ($hauler && microtime(true) < ($deadline ?? INF)) {
+            $directory = $points->filter(fn (GameObservation $point) => ($point->data['systemSymbol'] ?? null) === $system
+                && in_array('SHIPYARD', array_column($point->data['traits'] ?? [], 'symbol'), true))->keys();
+            $observed = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+                ->where('kind', 'shipyard')->whereIn('symbol', $directory)->pluck('symbol');
+            if ($directory->diff($observed)->isEmpty()) {
+                $evaluation = $saturation->evaluate($grant, $episode, $agent,
+                    candidateYards: array_unique(array_column($candidates, 'shipyard')), deadline: $deadline);
+                if ($evaluation['search_complete']) {
+                    $saturation->record($grant, $episode, $evaluation);
+                    $considered[] = ['strategy' => $strategy, 'gates' => $evaluation['gates'], 'hold' => $evaluation['hold']];
+                }
             }
         }
 
@@ -579,38 +612,59 @@ class CampaignProbeBootstrap
         }
     }
 
-    public function compose(Agent $agent, string $symbol, string $shipyard, array $limits, CampaignEpisode $episode, ?int $ignoreRunId = null, string $type = 'SHIP_PROBE'): array
+    private function assertTarget(Agent $agent, CampaignEpisode $episode, array $policy, string $type, ?int $ignoreRunId): int
+    {
+        $hauler = $type === 'SHIP_LIGHT_HAULER';
+        [$owned, $target] = $hauler
+            ? [app(CampaignHaulerPurchase::class)->ownedHaulers($episode, $agent), $policy['max_haulers']]
+            : $this->probeTarget($episode, $agent, $policy);
+        if ($owned + $this->reservations($agent, $ignoreRunId, undeliveredType: $type)->count() >= $target) {
+            throw new GameException(($hauler ? 'Hauler' : 'Probe').' target of '.$target.' is already satisfied or in flight.');
+        }
+
+        return $owned;
+    }
+
+    public function compose(Agent $agent, string $symbol, string $shipyard, array $limits, CampaignEpisode $episode, ?int $ignoreRunId = null, string $type = 'SHIP_PROBE', ?float $deadline = null): array
     {
         $grant = $episode->grant();
         $hauler = $type === 'SHIP_LIGHT_HAULER';
+        $label = $hauler ? 'Hauler' : 'Probe';
         $policy = $this->purchasePolicy($grant, $episode, $agent, $type);
         if (! $policy) {
-            throw new GameException('Probe bootstrap is outside current C0 campaign authority.');
+            throw new GameException($label.' purchase is outside current C0 campaign authority.');
+        }
+        $this->assertSlot($agent, $ignoreRunId);
+        $saturation = app(CampaignSaturation::class);
+        if ($hauler) {
+            $saturation->assertGates($grant, $episode, $saturation->evaluate($grant, $episode, $agent, ignoreRun: $ignoreRunId, offerIndependentOnly: true));
+        } else {
+            $this->assertPurchaseBudget($agent);
+            $this->assertTarget($agent, $episode, $policy, $type, $ignoreRunId);
         }
         app(AgentSynchronizer::class)->sync($agent, false);
-        $this->assertSlot($agent, $ignoreRunId);
-        $this->assertPurchaseBudget($agent, $hauler ? 1 : 0);
+        if (! $hauler) {
+            $this->assertPurchaseBudget($agent);
+        }
         $ship = Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->firstOrFail()->snapshot;
         if ($ship['nav']['status'] === 'IN_TRANSIT' || $ship['cargo']['units'] !== 0) {
-            throw new GameException('Probe purchase requires a stationary ship with empty cargo.');
+            throw new GameException($label.' purchase requires a stationary ship with empty cargo.');
         }
         if (ReconMission::holds($agent, $symbol)) {
             throw new GameException('Ship is held by a gate-recon mission.');
         }
-        [$owned, $target] = $hauler
-            ? [app(CampaignHaulerPurchase::class)->ownedHaulers($episode, $agent), $policy['max_haulers']]
-            : $this->probeTarget($episode, $agent, $policy);
-        $inFlight = $this->reservations($agent, $ignoreRunId, undeliveredType: $type)->count();
-        if ($owned + $inFlight >= $target) {
-            throw new GameException(($hauler ? 'Hauler' : 'Probe').' target of '.$target.' is already satisfied or in flight.');
-        }
+        $owned = $this->assertTarget($agent, $episode, $policy, $type, $ignoreRunId);
         $point = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
             ->where('kind', 'waypoint')->where('symbol', $shipyard)->first();
         if (! $point || ($point->data['systemSymbol'] ?? null) !== $ship['nav']['systemSymbol']
             || ! in_array('SHIPYARD', array_column($point->data['traits'] ?? [], 'symbol'), true)) {
-            throw new GameException('Probe purchase requires an observed same-system shipyard.');
+            throw new GameException($label.' purchase requires an observed same-system shipyard.');
         }
 
+        $reserve = max($limits['reserve'] ?? 0, $this->effectiveReserve($agent, $grant, $policy, $ignoreRunId));
+        if ($agent->credits <= $reserve) {
+            throw new GameException($type.' purchase requires credits above working-capital reserve '.$reserve.' CR.');
+        }
         $atYard = $ship['nav']['waypointSymbol'] === $shipyard;
         $yardObs = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
             ->where('kind', 'shipyard')->where('symbol', $shipyard)->first();
@@ -625,7 +679,6 @@ class CampaignProbeBootstrap
             throw new GameException('Shipyard '.$shipyard.' does not list '.$type.'.');
         }
 
-        $reserve = max($limits['reserve'] ?? 0, $this->effectiveReserve($agent, $grant, $policy, $ignoreRunId));
         $fuel = app(FuelPlanner::class);
         $departureCeiling = 0;
         $outboundFuel = 0;
@@ -665,7 +718,7 @@ class CampaignProbeBootstrap
             if ($atYard && ! $offer) {
                 throw new GameException('A complete verified hauler offer is required at the yard.');
             }
-            app(CampaignSaturation::class)->assertPurchase($grant, $episode, $agent, $shipyard, $offer, $ignoreRunId, $fuelCeiling);
+            $saturation->assertPurchase($grant, $episode, $agent, $shipyard, $offer, $ignoreRunId, $fuelCeiling, deadline: $deadline);
         }
         if ($offer !== null) {
             $price = $offer['purchasePrice'];
@@ -678,12 +731,12 @@ class CampaignProbeBootstrap
                 throw new GameException($type.' purchase at '.$price.' CR breaches working-capital reserve '.$reserve.' CR.');
             }
         } elseif ($agent->credits - $fuelCeiling <= $reserve) {
-            throw new GameException('Insufficient credits above working-capital reserve for probe purchase.');
+            throw new GameException('Insufficient credits above working-capital reserve for '.$type.' purchase.');
         }
 
         $maxSpend = min(max(0, $agent->credits - $reserve), $policy['max_price'] + $fuelCeiling);
         if ($offer !== null && $maxSpend < $offer['purchasePrice'] + $fuelCeiling) {
-            throw new GameException('Approved spending bound cannot cover probe purchase and fuel.');
+            throw new GameException('Approved spending bound cannot cover '.$type.' purchase and fuel.');
         }
 
         $route = [
@@ -766,24 +819,25 @@ class CampaignProbeBootstrap
             return AutomationStep::trip();
         }
         $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
+        $type = $run->plan['ship_type'] ?? 'SHIP_PROBE';
+        $hauler = $type === 'SHIP_LIGHT_HAULER';
+        $label = $hauler ? 'Hauler' : 'Probe';
         $existing = ShipAction::where('automation_run_id', $run->id)->where('command', 'buy_ship')->latest('id')->first();
         if ($existing) {
-            if (! empty($existing->outcome['delivered_ship']) && empty($existing->outcome['configuration_mismatch'])) {
+            if (self::deliveredShip($existing) && empty($existing->outcome['configuration_mismatch'])) {
                 return AutomationStep::trip();
             }
             $this->recordShipyardRejection($episode, $run->plan['shipyard'], 'failed', null, $type);
 
             return AutomationStep::blocked(! empty($existing->outcome['configuration_mismatch'])
                 ? 'Delivered ship configuration differed from the approved offer. Review required.'
-                : 'Probe purchase already attempted for this run.');
+                : $label.' purchase already attempted for this run.');
         }
 
         $grant = $episode->grant();
-        $type = $run->plan['ship_type'];
-        $hauler = $type === 'SHIP_LIGHT_HAULER';
         $policy = $this->purchasePolicy($grant, $episode, $agent, $type);
         if (! $policy) {
-            return AutomationStep::blocked('Probe bootstrap authority is no longer active.');
+            return AutomationStep::blocked($label.' purchase authority is no longer active.');
         }
 
         $shipyard = $run->plan['shipyard'];
@@ -797,7 +851,7 @@ class CampaignProbeBootstrap
                 $ceiling = min($departure - ($run->totals['fuel_cost'] ?? 0), $run->plan['max_spend'] - ($run->totals['fuel_cost'] ?? 0), max(0, $agent->credits - $reserve));
                 $fuelCost = (int) ceil($units / 100) * $fuel['purchasePrice'];
                 if ($fuelCost > $ceiling || $agent->credits - $fuelCost < $reserve) {
-                    return AutomationStep::blocked('Departure refuel exceeds approved ceiling or current additive reserve for probe bootstrap.');
+                    return AutomationStep::blocked('Departure refuel exceeds approved ceiling or current additive reserve for '.$type.' purchase.');
                 }
 
                 return $ship['nav']['status'] === 'DOCKED'
@@ -818,7 +872,7 @@ class CampaignProbeBootstrap
         }
         $this->assertSlot($agent, $run->id);
 
-        $yard = app(SpaceTradersApi::class)->shipyard($agent, $shipyard);
+        $yard = app(SpaceTradersApi::class)->shipyard($agent, $shipyard, fresh: true);
         app(AgentSynchronizer::class)->observe($agent, 'shipyard', $shipyard, $yard);
         $offer = $this->offer($yard, $type);
         if (! $offer) {
@@ -977,7 +1031,7 @@ class CampaignProbeBootstrap
      * @param  list<array>  $eligibleShips
      * @return list<array{ship: array, shipyard: string, tier: int, distance: float}>
      */
-    private function rankCandidates(CampaignEpisode $episode, Agent $agent, array $policy, int $reserve, array $shipyards, array $eligibleShips, $points, array &$considered, string $type): array
+    private function rankCandidates(CampaignEpisode $episode, Agent $agent, array $policy, int $reserve, array $shipyards, array $eligibleShips, $points, array &$considered, string $type, ?float $deadline): array
     {
         $hauler = $type === 'SHIP_LIGHT_HAULER';
         $strategy = $hauler ? 'buy_hauler' : 'buy_probe';
@@ -1026,6 +1080,9 @@ class CampaignProbeBootstrap
 
             $yardPoint = $points->get($symbol)?->data;
             foreach ($eligibleShips as $ship) {
+                if (microtime(true) >= ($deadline ?? INF)) {
+                    return [];
+                }
                 $atYard = $ship['nav']['waypointSymbol'] === $symbol;
                 if (! $atYard && in_array($ship['symbol'], $anchored, true)) {
                     continue;

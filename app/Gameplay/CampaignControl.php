@@ -270,7 +270,7 @@ class CampaignControl
             }
             foreach (CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->get() as $episode) {
                 $state = $episode->state ?? [];
-                unset($state['pending_pause'], $state['recovery_attempts_since']);
+                unset($state['pending_pause'], $state['recovery_attempts_since'], $state['draining']);
                 $state['losses_reviewed_at'] = now()->toIso8601String();
                 $episode->update(['state' => $state]);
             }

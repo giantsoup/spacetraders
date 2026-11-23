@@ -49,12 +49,12 @@ class SpaceTradersClient
         }
     }
 
-    public function request(string $method, string $path, array $data = [], ?string $token = null, ?float $deadline = null, ?string $account = null, ?callable $beforeTransport = null, ?string $agentSymbol = null): Response
+    public function request(string $method, string $path, array $data = [], ?string $token = null, ?float $deadline = null, ?string $account = null, ?callable $beforeTransport = null, ?string $agentSymbol = null, bool $fresh = false): Response
     {
         $deadline = $this->scopeDeadline === null ? $deadline : min($this->scopeDeadline, $deadline ?? $this->scopeDeadline);
         $read = strtolower($method) === 'get';
         $key = hash('sha256', json_encode([$path, $data, $token]));
-        if ($read && $this->scopeDepth > 0 && isset($this->reads[$key]) && microtime(true) - $this->reads[$key]['at'] < 2) {
+        if ($read && ! $fresh && $this->scopeDepth > 0 && isset($this->reads[$key]) && microtime(true) - $this->reads[$key]['at'] < 2) {
             return $this->reads[$key]['response'];
         }
         if (! $read) {

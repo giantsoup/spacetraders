@@ -50,7 +50,7 @@ class CampaignSaturation
         return collect([$command['symbol'] ?? null])->merge($arms)->merge($delivered)->filter()->unique()->values()->all();
     }
 
-    public function evaluate(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, ?string $yard = null, ?array $offer = null, ?int $ignoreRun = null, int $fuel = 0, ?CampaignRevision $revision = null): array
+    public function evaluate(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, ?string $yard = null, ?array $offer = null, ?int $ignoreRun = null, int $fuel = 0, ?CampaignRevision $revision = null, bool $offerIndependentOnly = false, ?array $candidateYards = null, ?float $deadline = null): array
     {
         $simulate = $revision !== null;
         $revision ??= $grant->revision();
@@ -61,12 +61,6 @@ class CampaignSaturation
         $policy = app(CampaignHaulerPurchase::class)->withWorkingCapital($episode, $agent, $policy);
         $mesh = app(CampaignMesh::class)->target($episode, $agent);
         $purchase = app(CampaignProbeBootstrap::class);
-        $yardOffers = $this->yardOffers($agent, $mesh['yards']);
-        if ($yard === null) {
-            $yard = $yardOffers->sortBy(fn (?array $value) => $value['purchasePrice'] ?? $policy['max_price'])->keys()->first();
-            $offer = $yardOffers->get($yard);
-        }
-        $price = $offer['purchasePrice'] ?? $policy['max_price'];
         $authority = self::authorityReason($grant, $episode, $agent, provisional: $simulate);
         $activePolicy = $grant->exists && $episode->exists && $grant->revision_hash === $revision->content_hash && isset($grant->revision()->body['fleet']['haulers']);
         $reserveReason = null;
@@ -77,18 +71,10 @@ class CampaignSaturation
                 'commitments' => null, 'recon_return' => ReconMission::returnExposure($agent)];
             $reserveReason = $exception->getMessage();
         }
-        $liquid = $agent->credits - $price - $fuel;
         $slot = $purchase->reservations($agent, $ignoreRun);
         $halt = $this->yieldEvidence($episode, $agent, $policy);
-        $pace = $this->pacing($agent);
         $arms = app(CampaignFleet::class)->currentArms($agent)->filter(fn (CampaignGrant $arm) => $arm->available());
-        $idle = $this->idleShare($agent, $arms);
-        $opportunity = $reserveReason ? ['score' => 0, 'limiting_factor' => 'unknown_commitments', 'excluded_claims' => []]
-            : $this->opportunity($grant, $episode, $agent, $revision, $yard, $offer, $price, $fuel, $reserve);
         $hours = max(0, now()->diffInSeconds($episode->next_reset_at, false) / 3600);
-        $reference = $this->referenceYield($agent, $arms, $policy['assumed_net_per_hour']);
-        $payback = $reference['net_per_hour'] > 0 ? $price / $reference['net_per_hour'] : null;
-        $paybackLimit = ($hours - 1) * $policy['payback_fraction'];
         $covered = $mesh['covered']->count();
         $target = $mesh['hub_target'];
         $required = (int) ceil($target * $policy['min_hub_coverage']);
@@ -99,36 +85,72 @@ class CampaignSaturation
             'G2' => ['pass' => $slot->isEmpty(), 'reason' => $slot->isEmpty() ? null : 'shared_purchase_in_flight', 'blockers' => $slot->values()->all()],
             'G3' => ['pass' => $target > 0 && $covered >= $required, 'reason' => $target === 0 ? 'no_hubs' : ($covered < $required ? 'hub_coverage' : null),
                 'covered' => $covered, 'target' => $target, 'required' => $required, 'fraction' => $target ? $covered / $target : null],
-            'G4' => ['pass' => $opportunity['score'] >= $policy['min_unclaimed_score'] && $idle['maximum'] < $policy['max_idle_share'],
-                'reason' => $opportunity['score'] < $policy['min_unclaimed_score'] ? 'spare_corridor' : ($idle['maximum'] >= $policy['max_idle_share'] ? 'idle_share' : null),
-                'idle' => $idle] + $opportunity,
-            'G5' => ['pass' => $reserveReason === null && $liquid >= array_sum($reserve),
-                'reason' => $reserveReason ?? ($liquid < array_sum($reserve) ? 'liquidity' : null),
-                'price' => $price, 'purchase_fuel_ceiling' => $fuel, 'available_credits' => $agent->credits, 'reserve' => $reserveReason ? null : array_sum($reserve), 'reserve_components' => $reserve],
             'G6' => $this->scheduler($agent, $arms, $policy['scheduler']),
             'G7' => $this->requests($agent, $policy, $ignoreRun),
-            'G8' => ['pass' => $hours >= $policy['stop_hours_before_reset'] && $payback !== null && $payback <= $paybackLimit,
-                'reason' => $hours < $policy['stop_hours_before_reset'] ? 'time_to_reset' : ($payback === null ? 'nonpositive_reference_yield' : ($payback > $paybackLimit ? 'payback' : null)),
-                'hours_to_reset' => $hours, 'payback_hours' => $payback, 'limit_hours' => $paybackLimit] + $reference,
-            'G9' => $pace,
+            'G9' => $this->pacing($agent),
         ];
-        $allOverCap = $yardOffers->isNotEmpty() && $yardOffers->every(fn (?array $value) => $value && $value['purchasePrice'] > $policy['max_price']);
         $permanent = match (true) {
             $halt['marginal'] !== null => ['reason' => 'marginal_yield', 'evidence' => $halt['marginal']],
             $hours < $policy['stop_hours_before_reset'] => ['reason' => 'time_to_reset'],
             $owned + $inFlight >= $policy['max_haulers'] => ['reason' => 'hauler_cap'],
-            $allOverCap => ['reason' => 'all_shipyards_over_price_cap'],
-            $offer !== null && $price <= $policy['max_price'] && $payback !== null && $payback > $paybackLimit => ['reason' => 'payback'],
             default => null,
         };
-        $hold = $this->hold($episode, $gates, $permanent, $halt['cannibalization'], $activePolicy, $yard !== null);
-        $pass = collect($gates)->every(fn ($gate) => $gate['pass']) && ! $hold && $yard !== null && $price <= $policy['max_price'];
-        $gaps = app(CampaignDiscovery::class)->directoryGaps($episode, $agent, includeBackoff: true);
+        $gates['G5'] = $this->liquidity($agent, $reserve, $reserveReason, null, 0);
+
+        $searchComplete = true;
+        $aggregate = $yard === null;
+        $price = $offer['purchasePrice'] ?? $policy['max_price'];
+        if (! $offerIndependentOnly) {
+            $yardOffers = $aggregate ? $this->yardOffers($agent, $mesh['yards']) : collect();
+            $choices = $aggregate ? $yardOffers->only($candidateYards) : collect([$yard => $offer]);
+            $idle = $this->idleShare($agent, $arms);
+            $reference = $this->referenceYield($agent, $arms, $policy['assumed_net_per_hour']);
+            $paybackLimit = ($hours - 1) * $policy['payback_fraction'];
+            $best = null;
+            foreach ($choices->isEmpty() ? ['' => null] : $choices as $candidateYard => $candidateOffer) {
+                if (microtime(true) >= ($deadline ?? INF)) {
+                    $searchComplete = false;
+                    break;
+                }
+                $candidatePrice = $candidateOffer['purchasePrice'] ?? $policy['max_price'];
+                $opportunity = $reserveReason ? ['score' => 0, 'limiting_factor' => 'unknown_commitments', 'excluded_claims' => []]
+                    : $this->opportunity($grant, $episode, $agent, $revision, $candidateYard ?: null, $candidateOffer, $candidatePrice, $fuel, $reserve, $deadline);
+                $searchComplete = $searchComplete && ! ($opportunity['search_incomplete'] ?? false);
+                $g4 = ['pass' => $opportunity['score'] >= $policy['min_unclaimed_score'] && $idle['maximum'] < $policy['max_idle_share'],
+                    'reason' => $opportunity['score'] < $policy['min_unclaimed_score'] ? 'spare_corridor' : ($idle['maximum'] >= $policy['max_idle_share'] ? 'idle_share' : null),
+                    'idle' => $idle] + $opportunity;
+                $g5 = $this->liquidity($agent, $reserve, $reserveReason, $candidatePrice, $fuel);
+                $payback = $reference['net_per_hour'] > 0 ? $candidatePrice / $reference['net_per_hour'] : null;
+                $g8 = ['pass' => $hours >= $policy['stop_hours_before_reset'] && $payback !== null && $payback <= $paybackLimit,
+                    'reason' => $hours < $policy['stop_hours_before_reset'] ? 'time_to_reset' : ($payback === null ? 'nonpositive_reference_yield' : ($payback > $paybackLimit ? 'payback' : null)),
+                    'hours_to_reset' => $hours, 'payback_hours' => $payback, 'limit_hours' => $paybackLimit] + $reference;
+                $underCap = $candidatePrice <= $policy['max_price'];
+                $rank = [$underCap && $g4['pass'] && $g5['pass'] && $g8['pass'], $underCap && $g4['pass'], $underCap, -$candidatePrice];
+                if ($best === null || $rank > $best) {
+                    $best = $rank;
+                    [$yard, $offer, $price] = [$candidateYard ?: null, $candidateOffer, $candidatePrice];
+                    [$gates['G4'], $gates['G5'], $gates['G8']] = [$g4, $g5, $g8];
+                }
+            }
+            $known = $yardOffers->isNotEmpty() && $yardOffers->every(fn (?array $value) => $value !== null);
+            if ($searchComplete && $known) {
+                $cheapest = $yardOffers->min('purchasePrice');
+                if ($cheapest > $policy['max_price']) {
+                    $permanent ??= ['reason' => 'all_shipyards_over_price_cap'];
+                } elseif ($reference['net_per_hour'] > 0 && $cheapest / $reference['net_per_hour'] > $paybackLimit) {
+                    $permanent ??= ['reason' => 'payback'];
+                }
+            }
+        }
+        ksort($gates);
+        $hold = $this->hold($episode, $gates, $permanent, $halt['cannibalization'], $activePolicy, $aggregate && $yard !== null && $searchComplete);
+        $pass = $searchComplete && collect($gates)->every(fn ($gate) => $gate['pass']) && ! $hold && ($offerIndependentOnly || ($yard !== null && $price <= $policy['max_price']));
+        $gaps = $offerIndependentOnly ? [] : app(CampaignDiscovery::class)->directoryGaps($episode, $agent, includeBackoff: true);
 
         return [
             'enabled' => true, 'agent' => $agent->name, 'reset_id' => $agent->reset_id, 'revision' => $revision->content_hash, 'phase' => $episode->phase,
-            'active_purchase_authority' => $grant->exists && isset($grant->revision()->body['fleet']['haulers']) && self::authorityReason($grant, $episode, $agent) === null, 'policy_pass' => $pass, 'can_purchase' => $activePolicy && $pass,
-            'yard' => $yard, 'provisional' => $offer === null, 'gates' => $gates, 'hold' => $hold,
+            'active_purchase_authority' => $grant->exists && isset($grant->revision()->body['fleet']['haulers']) && $episode->exists && $authority === null, 'policy_pass' => $pass, 'can_purchase' => $activePolicy && $pass,
+            'yard' => $yard, 'search_complete' => $searchComplete, 'provisional' => $offer === null, 'gates' => $gates, 'hold' => $hold,
             'owned_haulers' => $owned, 'undelivered_haulers' => $inFlight, 'traders' => $mesh['traders'],
             'mesh' => ['hubs' => $mesh['hubs']->map(fn ($hub) => array_diff_key($hub, ['quote' => true]))->values()->all(),
                 'covered_hubs' => $mesh['covered']->all(), 'hub_target' => $target, 'pool_probe_target' => $mesh['pool_probe_target'],
@@ -136,9 +158,14 @@ class CampaignSaturation
         ];
     }
 
-    public function assertPurchase(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, string $yard, ?array $offer = null, ?int $ignoreRun = null, int $fuel = 0, bool $persist = false): void
+    public function assertPurchase(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, string $yard, ?array $offer = null, ?int $ignoreRun = null, int $fuel = 0, bool $persist = false, ?float $deadline = null): void
     {
-        $evaluation = $this->evaluate($grant, $episode, $agent, $yard, $offer, $ignoreRun, $fuel);
+        $evaluation = $this->evaluate($grant, $episode, $agent, $yard, $offer, $ignoreRun, $fuel, deadline: $deadline);
+        $this->assertGates($grant, $episode, $evaluation, $persist);
+    }
+
+    public function assertGates(CampaignGrant $grant, CampaignEpisode $episode, array $evaluation, bool $persist = false): void
+    {
         if ($persist) {
             $this->record($grant, $episode, $evaluation);
         }
@@ -192,18 +219,32 @@ class CampaignSaturation
             return ['permanent' => false, 'reason' => 'incumbent_yield', 'minutes' => 180, 'evidence' => $cannibalization];
         }
         foreach (['G1', 'G2', 'G3', 'G6', 'G7', 'G9', 'G4', 'G5', 'G8'] as $gate) {
-            if (! $gates[$gate]['pass']) {
+            if (isset($gates[$gate]) && ! $gates[$gate]['pass']) {
                 $minutes = match ($gate) {
                     'G6', 'G7' => 30,
                     'G4' => $hasYard ? 60 : null,
                     default => null,
                 };
 
-                return ['permanent' => false, 'reason' => $gates[$gate]['reason'], 'gate' => $gate, 'minutes' => $minutes];
+                $reason = $gate === 'G4' && $minutes && $gates[$gate]['reason'] === 'spare_corridor'
+                    ? 'no_unclaimed_corridor' : $gates[$gate]['reason'];
+
+                return ['permanent' => false, 'reason' => $reason, 'gate' => $gate, 'minutes' => $minutes];
             }
         }
 
         return null;
+    }
+
+    private function liquidity(Agent $agent, array $reserve, ?string $reserveReason, ?int $price, int $fuel): array
+    {
+        $liquid = $agent->credits - ($price ?? 0) - $fuel;
+        $clearsReserve = $price === null ? $liquid > array_sum($reserve) : $liquid >= array_sum($reserve);
+
+        return ['pass' => $reserveReason === null && $clearsReserve,
+            'reason' => $reserveReason ?? ($clearsReserve ? null : 'liquidity'),
+            'price' => $price, 'purchase_fuel_ceiling' => $fuel, 'available_credits' => $agent->credits,
+            'reserve' => $reserveReason ? null : array_sum($reserve), 'reserve_components' => $reserve];
     }
 
     private function yardOffers(Agent $agent, Collection $yards): Collection
@@ -221,7 +262,7 @@ class CampaignSaturation
             });
     }
 
-    private function opportunity(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, CampaignRevision $revision, ?string $yard, ?array $offer, int $price, int $fuel, array $reserve): array
+    private function opportunity(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, CampaignRevision $revision, ?string $yard, ?array $offer, int $price, int $fuel, array $reserve, ?float $deadline): array
     {
         $ship = $yard ? $this->projectedHauler($yard, $offer) : null;
         $armRevision = CampaignRevision::where('content_hash', strtolower($revision->body['fleet']['auto_arm']['revision_hash']))->first();
@@ -264,6 +305,9 @@ class CampaignSaturation
                     continue;
                 }
                 foreach ($waypoints as $buyer => $bid) {
+                    if (microtime(true) >= ($deadline ?? INF)) {
+                        return $best + ['excluded_claims' => $excluded, 'search_incomplete' => true];
+                    }
                     if ($source === $buyer || ($bid['sellPrice'] ?? 0) <= $ask['purchasePrice'] || ! in_array($bid['type'] ?? 'EXCHANGE', ['IMPORT', 'EXCHANGE'], true)) {
                         continue;
                     }
@@ -317,7 +361,7 @@ class CampaignSaturation
     {
         $tank = $offer ? ($offer['fuel']['capacity'] ?? $offer['frame']['fuelCapacity'] ?? 0) : 600;
         $speed = $offer ? ($offer['engine']['speed'] ?? 0) : 15;
-        $hold = $offer ? ($offer['cargo']['capacity'] ?? collect($offer['modules'] ?? [])->sum(fn ($module) => $module['capacity'] ?? 0)) : 80;
+        $hold = $offer ? (CommandRules::offeredCargoCapacity($offer)) : 80;
         if ($tank < 1 || $speed < 1 || $hold < 1 || ($offer && ! ShipCommandExecutor::configurationHash($offer))) {
             return null;
         }
@@ -489,11 +533,11 @@ class CampaignSaturation
                 $busy[] = [$action->created_at->getTimestamp(), in_array($action->state->value, ['pending', 'sending'], true)
                     ? $to : ($action->settled_at ?? $action->updated_at)->getTimestamp()];
             }
-            $transitions = CampaignEvent::where('campaign_grant_id', $arm->id)->whereIn('kind', ['pause', 'resume', 'arm_recovery_started', 'arm_recovery_ended'])->orderBy('id')->get();
+            $transitions = CampaignEvent::where('campaign_grant_id', $arm->id)->whereIn('kind', ['pause', 'drain_pause', 'resume', 'arm_recovery_started', 'arm_recovery_ended'])->orderBy('id')->get();
             $starts = [];
             foreach ($transitions as $event) {
                 $group = str_starts_with($event->kind, 'arm_recovery') ? 'recovery' : 'pause';
-                if (in_array($event->kind, ['pause', 'arm_recovery_started'], true)) {
+                if (in_array($event->kind, ['pause', 'drain_pause', 'arm_recovery_started'], true)) {
                     $starts[$group] ??= $event->created_at->getTimestamp();
                 } elseif (isset($starts[$group])) {
                     $excluded[] = [$starts[$group], $event->created_at->getTimestamp()];
@@ -610,6 +654,16 @@ class CampaignSaturation
         return ['net_per_hour' => FleetMetrics::median($rates) ?? $assumed, 'reference_arms' => count($rates), 'assumed' => $rates === []];
     }
 
+    private function pausedDuring(CampaignGrant $arm, CarbonImmutable $start, CarbonImmutable $end): bool
+    {
+        $holds = ['pause', 'drain_pause'];
+        $events = CampaignEvent::where('campaign_grant_id', $arm->id)->whereIn('kind', [...$holds, 'resume']);
+        $initial = (clone $events)->where('created_at', '<=', $start)->latest('created_at')->latest('id')->value('kind');
+
+        return in_array($initial, $holds, true)
+            || $events->whereIn('kind', $holds)->where('created_at', '>', $start)->where('created_at', '<', $end)->exists();
+    }
+
     private function yieldEvidence(CampaignEpisode $episode, Agent $agent, array $policy): array
     {
         $now = now()->toImmutable();
@@ -643,12 +697,13 @@ class CampaignSaturation
                 if ($incumbent->id === $arm->id) {
                     continue;
                 }
-                $history = CampaignEpisode::where('campaign_grant_id', $incumbent->id)->where('reset_id', $agent->reset_id)->first();
+                $incumbentEpisode = CampaignEpisode::where('campaign_grant_id', $incumbent->id)->where('reset_id', $agent->reset_id)->first();
                 $incumbentLoads = $this->loads($incumbent, $agent->reset_id);
                 $start = $first->subHours(3);
-                if (! $history || $history->opened_at->gt($start) || ($history->closed_at && $history->closed_at->lt($end))
+                if (! $incumbentEpisode || $incumbentEpisode->opened_at->gt($start) || ($incumbentEpisode->closed_at && $incumbentEpisode->closed_at->lt($end))
                     || ! $incumbentLoads->first() || CarbonImmutable::parse($incumbentLoads->first()['finished_at'])->gt($start)
-                    || ($incumbent->expires_at && $incumbent->expires_at->lt($end)) || ($incumbent->paused_at && $incumbent->paused_at->lt($end))) {
+                    || ($incumbent->expires_at && $incumbent->expires_at->lt($end)) || ($incumbent->paused_at && $incumbent->paused_at->lt($end))
+                    || $this->pausedDuring($incumbent, $start, $end)) {
                     continue;
                 }
                 $before[] = $this->netBetween($incumbentLoads, $start, $first) / 3;

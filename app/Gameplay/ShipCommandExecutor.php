@@ -155,9 +155,6 @@ class ShipCommandExecutor
         if ((clone $others)->whereIn('state', ['pending', 'sending'])->exists()) {
             throw new GameException($defer ? 'An action is pending or sending. Wait for it to settle before another command.' : 'An action is pending, uncertain or requires review. Settle it before another command.', retryAfter: $defer ? 5 : 0);
         }
-        if ($ship !== null) {
-            $this->assertConfigurationReviewed($agent, $ship);
-        }
         if (! $agent->canonical_identity || Agent::where('name', $agent->name)->where('reset_id', $agent->reset_id)->whereKeyNot($agent->id)->exists()) {
             throw new GameException('Agent identity is not unique. Synchronize or resolve duplicate imports first.');
         }
@@ -185,7 +182,7 @@ class ShipCommandExecutor
         }
         try {
             $review = CarbonImmutable::parse($action->outcome['reviewed_at']);
-            $reconciled = CarbonImmutable::parse($action->outcome['reconciled_at']);
+            $reconciled = CarbonImmutable::parse($action->outcome['reviewed_reconciled_at'] ?? $action->outcome['reconciled_at']);
             $linkage = app(CampaignProbeBootstrap::class)->linkage($action);
 
             return $linkage && $linkage[0]->plan_version === 7 && $review->gte($reconciled) && $review->lte($reconciled->addMinutes(3))

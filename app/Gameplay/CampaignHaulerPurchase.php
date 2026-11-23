@@ -46,9 +46,9 @@ class CampaignHaulerPurchase
         return app(CampaignProbeBootstrap::class)->plan($grant, $episode, $agent, $busyShips, $considered, $deadline, self::TYPE);
     }
 
-    public function compose(Agent $agent, string $symbol, string $yard, array $limits, CampaignEpisode $episode, ?int $ignoreRunId = null): array
+    public function compose(Agent $agent, string $symbol, string $yard, array $limits, CampaignEpisode $episode, ?int $ignoreRunId = null, ?float $deadline = null): array
     {
-        return app(CampaignProbeBootstrap::class)->compose($agent, $symbol, $yard, $limits, $episode, $ignoreRunId, self::TYPE);
+        return app(CampaignProbeBootstrap::class)->compose($agent, $symbol, $yard, $limits, $episode, $ignoreRunId, self::TYPE, $deadline);
     }
 
     public function next(Agent $agent, array $ship, AutomationRun $run): AutomationStep
@@ -81,9 +81,10 @@ class CampaignHaulerPurchase
             if (isset($action->outcome['pacing_acknowledged'])) {
                 return $action->outcome['pacing_acknowledged'];
             }
-            if ($arm && (app(CampaignSaturation::class)->firstSale($arm, $agent->reset_id)
-                || (! $arm->revoked_at && ! $arm->paused_at && ($action->settled_at ?? $action->created_at)->gt(now()->subMinutes(90))))) {
-                throw new GameException('The exact linked arm must have stalled before confirming its first load.');
+            $stalled = ($action->settled_at ?? $action->created_at)->lte(now()->subMinutes(90));
+            $held = ! empty($action->outcome['configuration_mismatch']) || $arm?->revoked_at || $arm?->paused_at;
+            if ((! $stalled && ! $held) || ($arm && app(CampaignSaturation::class)->firstSale($arm, $agent->reset_id))) {
+                throw new GameException('The delivery must have stalled before confirming its first load.');
             }
             $ack = ['user_id' => $user->id, 'at' => now()->toIso8601String(), 'reason' => $arm ? 'linked arm revoked' : 'exact-action pacing review'];
             if (! $dryRun) {

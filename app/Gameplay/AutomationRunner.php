@@ -82,6 +82,7 @@ class AutomationRunner
             }
             $this->gate->check($run->engine_session_id);
             $this->executor->clear($agent, defer: true, ship: $run->ship_symbol);
+            $this->executor->assertConfigurationReviewed($agent, $run->ship_symbol);
             if ($run->expires_at->isPast() || $run->reset_id !== $agent->reset_id || AutomationRun::where('active_agent_id', $agent->id)->where('ship_symbol', $run->ship_symbol)->exists()) {
                 $this->rejectPreview($run, 'Preview expired, reset or another run already owns this ship.');
             }
@@ -215,17 +216,18 @@ class AutomationRunner
         return $this->previewPurchase($agent, $symbol, $shipyard, $limits, $episode, 'buy_probe');
     }
 
-    public function previewHaulerPurchase(Agent $agent, string $symbol, string $shipyard, array $limits, CampaignEpisode $episode): AutomationRun
+    public function previewHaulerPurchase(Agent $agent, string $symbol, string $shipyard, array $limits, CampaignEpisode $episode, ?float $deadline = null): AutomationRun
     {
-        return $this->previewPurchase($agent, $symbol, $shipyard, $limits, $episode, 'buy_hauler');
+        return $this->previewPurchase($agent, $symbol, $shipyard, $limits, $episode, 'buy_hauler', $deadline);
     }
 
-    private function previewPurchase(Agent $agent, string $symbol, string $shipyard, array $limits, CampaignEpisode $episode, string $strategy): AutomationRun
+    private function previewPurchase(Agent $agent, string $symbol, string $shipyard, array $limits, CampaignEpisode $episode, string $strategy, ?float $deadline = null): AutomationRun
     {
-        return $this->executor->locked($agent, function () use ($agent, $symbol, $shipyard, $limits, $episode, $strategy) {
+        return $this->executor->locked($agent, function () use ($agent, $symbol, $shipyard, $limits, $episode, $strategy, $deadline) {
             $this->executor->clear($agent, defer: true, ship: $symbol);
+            $this->executor->assertConfigurationReviewed($agent, $symbol);
             $purchase = $strategy === 'buy_hauler' ? app(CampaignHaulerPurchase::class) : app(CampaignProbeBootstrap::class);
-            $fresh = $purchase->compose($agent, $symbol, $shipyard, $limits, $episode);
+            $fresh = $purchase->compose($agent, $symbol, $shipyard, $limits, $episode, deadline: $deadline);
 
             return AutomationRun::create([
                 'agent_id' => $agent->id, 'campaign_episode_id' => $episode->id, 'reset_id' => $agent->reset_id,
@@ -254,6 +256,7 @@ class AutomationRunner
     {
         return $this->executor->locked($agent, function () use ($agent, $symbol, $buyer, $limits, $episode) {
             $this->executor->clear($agent, defer: true, ship: $symbol);
+            $this->executor->assertConfigurationReviewed($agent, $symbol);
             $fresh = app(CampaignRecovery::class)->compose($agent, $symbol, $buyer,
                 $limits + ['targeted_recovery' => $this->usesRecoveryReserve($episode->id)]);
 
@@ -665,6 +668,7 @@ class AutomationRunner
     {
         return $this->executor->locked($agent, function () use ($agent, $draft) {
             $this->executor->clear($agent, defer: true, ship: $draft->candidate['ship_symbol'] ?? null);
+            $this->executor->assertConfigurationReviewed($agent, $draft->candidate['ship_symbol'] ?? '');
             $draft->refresh();
             $composed = $this->compose($agent, $draft);
             $plan = $composed['plan'];

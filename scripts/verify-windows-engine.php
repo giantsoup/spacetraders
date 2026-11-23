@@ -1,8 +1,8 @@
 <?php
 
 if (PHP_OS_FAMILY !== 'Windows') {
-    echo 'SKIP Windows-only owned engine verification.
-';
+    echo "SKIP Windows-only owned engine verification.
+";
     exit(0);
 }
 

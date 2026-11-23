@@ -10,7 +10,6 @@ use App\Gameplay\CampaignPlaybook;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\FleetMetrics;
 use App\Gameplay\ShipCommandExecutor;
-use App\Gameplay\SpaceTradersApi;
 use App\Jobs\AdvanceAutomationRun;
 use App\Jobs\ExecuteShipCommand;
 use App\Models\Agent;
@@ -173,7 +172,7 @@ class ArmRequestBudgetTest extends TestCase
     {
         $revision = app(CampaignPlaybook::class)->import($this->armBody(100000));
         app(CampaignControl::class)->approveArm($revision, $this->user, ['label' => 'T1a', 'ship' => 'LOCAL-3'], CarbonImmutable::now()->addHours(12));
-        app(SpaceTradersApi::class)->clearResetCache();
+        app(\App\Gameplay\SpaceTradersApi::class)->clearResetCache();
         FleetMetrics::reset();
         app(CampaignDirector::class)->tickArms();
         FleetMetrics::flush();
@@ -190,7 +189,7 @@ class ArmRequestBudgetTest extends TestCase
 
         // C0 has no arm ship: its pass starts with the reset read, labelled director.
         DB::table('fleet_metrics')->delete();
-        app(SpaceTradersApi::class)->clearResetCache();
+        app(\App\Gameplay\SpaceTradersApi::class)->clearResetCache();
         $body = str_replace(['GIANTSOUP', 'max_credits: 60000'], ['LOCAL', 'max_credits: 100'], file_get_contents(base_path('campaigns/weekly-default.yaml')));
         app(CampaignControl::class)->approve(app(CampaignPlaybook::class)->import($body), $this->user);
         FleetMetrics::reset();

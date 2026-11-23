@@ -12,6 +12,11 @@ use Carbon\CarbonInterface;
 
 class CommandRules
 {
+    public static function offeredCargoCapacity(array $offer): int
+    {
+        return collect($offer['modules'] ?? [])->filter(fn ($module) => str_starts_with($module['symbol'] ?? '', 'MODULE_CARGO_HOLD_'))->sum('capacity');
+    }
+
     public function __construct(private SpaceTradersApi $api, private AgentSynchronizer $sync, private MiningPlanner $planner) {}
 
     public function inspect(Agent $agent, string $symbol, string $command, array $arguments, ?AutomationRun $run = null): array
@@ -507,7 +512,7 @@ class CommandRules
                     }
                 }
                 $estimate['fleet_symbols'] = array_column($this->api->ships($agent), 'symbol');
-                $yard = $this->api->shipyard($agent, $arguments['waypointSymbol']);
+                $yard = $this->api->shipyard($agent, $arguments['waypointSymbol'], fresh: true);
                 $this->sync->observe($agent, 'shipyard', $arguments['waypointSymbol'], $yard);
                 $offer = collect($yard['ships'] ?? [])->firstWhere('type', $arguments['shipType']);
                 if (! $offer || ! isset($offer['frame']['symbol'], $offer['reactor']['symbol'], $offer['engine']['symbol'], $offer['modules'], $offer['mounts'], $offer['crew']['capacity']) || ($setup && $this->planner->capability($offer, true) !== null)) {
@@ -530,7 +535,7 @@ class CommandRules
                 }
                 // Apply the same route preflight to the complete offered ship before buying it.
                 $template = $offer;
-                $template['cargo'] = ['capacity' => collect($offer['modules'])->filter(fn ($m) => str_starts_with($m['symbol'] ?? '', 'MODULE_CARGO_HOLD_'))->sum('capacity'), 'units' => 0, 'inventory' => []];
+                $template['cargo'] = ['capacity' => self::offeredCargoCapacity($offer), 'units' => 0, 'inventory' => []];
                 $template['crew']['current'] = $offer['crew']['capacity'];
                 $template['nav'] = $ship['nav'];
                 $template['fuel'] = ['current' => $offer['frame']['fuelCapacity'] ?? 0, 'capacity' => $offer['frame']['fuelCapacity'] ?? 0];

@@ -222,7 +222,7 @@ Artisan::command('campaign:arm {revision} {ship} {label} {--follow=} {--hours=12
 Artisan::command('campaign:arms {--all-resets}', function () use ($armReset) {
     $rows = CampaignGrant::liveArms()->orderBy('id')->get()->map(function ($grant) use ($armReset) {
         [$own, $active] = $armReset($grant);
-        if (! $this->option('all-resets') && $own !== null && $active !== null && $own !== $active) {
+        if (! $this->option('all-resets') && ($grant->expires_at?->isPast() || ($own !== null && $active !== null && $own !== $active))) {
             return null;
         }
         $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->latest('id')->first();

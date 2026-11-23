@@ -285,6 +285,10 @@ final class FakeSpaceTraders
                 $symbol = explode('/', $path)[4];
                 if (isset($world['shipyards'][$symbol])) {
                     $yard = $world['shipyards'][$symbol];
+                    if (isset($yard['offers_after_read'])) {
+                        $world['shipyards'][$symbol]['ships'] = $yard['offers_after_read'];
+                        unset($world['shipyards'][$symbol]['offers_after_read']);
+                    }
                     $visible = collect($world['ships'])->contains(fn ($s) => $s['nav']['waypointSymbol'] === $symbol && $s['nav']['status'] !== 'IN_TRANSIT');
 
                     return [['data' => ['symbol' => $symbol, 'shipTypes' => $yard['shipTypes'], 'transactions' => $world['transactions']] + ($visible && isset($yard['ships']) ? ['ships' => $yard['ships']] : [])], 200];
@@ -367,7 +371,7 @@ final class FakeSpaceTraders
                 ? collect($world['shipyards'][$args['waypointSymbol']]['ships'])->firstWhere('type', $args['shipType'])
                 : null;
             $offer = $yardOffer ?? $world['offer'];
-            $ship = self::ship('LOCAL-'.(count($world['ships']) + 1), $args['waypointSymbol']);
+            $ship = self::ship($world['symbol'].'-'.(count($world['ships']) + 1), $args['waypointSymbol']);
             $ship['nav']['systemSymbol'] = implode('-', array_slice(explode('-', $args['waypointSymbol']), 0, 2));
             if ($yardOffer || ($world['foundation'] ?? false)) {
                 foreach (['frame', 'reactor', 'engine', 'mounts', 'modules', 'crew'] as $field) {
@@ -384,7 +388,7 @@ final class FakeSpaceTraders
                 $ship['registration']['role'] = 'HAULER';
                 $tank = $offer['frame']['fuelCapacity'];
                 $ship['fuel'] = ['current' => $tank, 'capacity' => $tank];
-                $ship['cargo']['capacity'] = array_sum(array_column($offer['modules'], 'capacity'));
+                $ship['cargo']['capacity'] = array_sum(array_column(array_filter($offer['modules'], fn ($module) => str_starts_with($module['symbol'], 'MODULE_CARGO_HOLD_')), 'capacity'));
             }
             if (isset($world['deliver_mismatched_frame'])) {
                 $ship['frame']['symbol'] = $world['deliver_mismatched_frame'];

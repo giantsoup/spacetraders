@@ -2,7 +2,6 @@
 
 use App\Gameplay\Engine\EngineLease;
 use App\Gameplay\Engine\HostCommands;
-use App\Gameplay\Engine\HostResult;
 use App\Gameplay\Engine\Windows\PowerShell;
 use App\Gameplay\Engine\Windows\ScheduledTaskXml;
 use App\Gameplay\Engine\Windows\WindowsChild;
@@ -31,7 +30,7 @@ $commands = new class extends HostCommands
 {
     public array $failures = [];
 
-    public function run(array $argv, int $timeout = 10, array $env = []): HostResult
+    public function run(array $argv, int $timeout = 10, array $env = []): \App\Gameplay\Engine\HostResult
     {
         $result = parent::run($argv, $timeout, $env);
         if (! $result->successful() && in_array('-EncodedCommand', $argv, true)) {
@@ -134,10 +133,10 @@ POWERSHELL, ['SPACETRADERS_TEST_PIDS' => implode(',', $processes)])->out, true);
     $results['E6_release_ms_including_taskkill'] = round((hrtime(true) - $before) / 1_000_000, 3);
     $registrationFake = new class extends HostCommands
     {
-        public function run(array $argv, int $timeout = 10, array $env = []): HostResult
+        public function run(array $argv, int $timeout = 10, array $env = []): \App\Gameplay\Engine\HostResult
         {
             if (str_ends_with($argv[0], 'schtasks.exe')) {
-                return new HostResult($argv[1] === '/Query' ? 1 : 0);
+                return new \App\Gameplay\Engine\HostResult($argv[1] === '/Query' ? 1 : 0);
             }
 
             return parent::run($argv, $timeout, $env);

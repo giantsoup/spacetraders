@@ -23,8 +23,8 @@ class CampaignSafety
                 ->orWhereIn('automation_run_id', AutomationRun::where('campaign_episode_id', $episode->id)->select('id')))))->exists()) {
             return 'uncertain_action';
         }
-        if (ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('command', 'buy_ship')
-            ->where('outcome->configuration_mismatch', true)->get()->contains(fn (ShipAction $action) => ! ShipCommandExecutor::reviewedHaulerMismatch($action))) {
+        if ($grant->slot === 1 && ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->where('command', 'buy_ship')->where('review_required', true)->where('outcome->configuration_mismatch', true)->exists()) {
             return 'uncertain_action';
         }
         if (! ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereIn('state', ['pending', 'sending'])->exists()

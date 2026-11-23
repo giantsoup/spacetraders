@@ -16,6 +16,7 @@ use App\Models\CampaignEpisode;
 use App\Models\CampaignGrant;
 use App\Models\CampaignRevision;
 use App\Models\LocalEngine;
+use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
 use Illuminate\Support\Facades\Queue;
@@ -33,7 +34,7 @@ trait SaturationFixture
 
     protected CampaignRevision $revision;
 
-    protected function setUpSaturation(int $hubs = 4, bool $remoteYard = false, bool $seedCoverage = true, int $credits = 2200000): void
+    protected function setUpSaturation(int $hubs = 4, bool $remoteYard = false, bool $seedCoverage = true, int $credits = 2200000, string $agentSymbol = 'LOCAL'): void
     {
         $this->travelTo(now()->startOfSecond());
         config(['gameplay.enabled' => true, 'gameplay.local_engine_enabled' => true, 'gameplay.snapshot_seconds' => 180]);
@@ -45,8 +46,10 @@ trait SaturationFixture
         $world['reset'] = now()->subDays(2)->utc()->toDateString();
         $world['next_reset'] = now()->addDays(5)->utc()->toIso8601String();
         $world['credits'] = $credits;
+        $world['symbol'] = $agentSymbol;
+        $world['ships'][0] = FakeSpaceTraders::ship($agentSymbol.'-1');
         $world['ships'][0]['registration']['role'] = 'COMMAND';
-        $world['ships'][] = FakeSpaceTraders::probe('LOCAL-2', 'X1-TEST-ROCK');
+        $world['ships'][] = FakeSpaceTraders::probe($agentSymbol.'-2', 'X1-TEST-ROCK');
         $world['waypoints'][0]['traits'] = [['symbol' => 'MARKETPLACE']];
         $world['waypoints'][1]['traits'] = [['symbol' => 'MARKETPLACE']];
         for ($i = 3; $i <= $hubs; $i++) {
@@ -73,14 +76,14 @@ trait SaturationFixture
             $world['goods'][1],
         ];
         $this->operator = User::factory()->create();
-        $this->agent = $this->operator->agents()->create(['name' => 'LOCAL', 'token' => 'synthetic-agent', 'faction' => 'VOID',
-            'reset_id' => $world['reset'], 'canonical_identity' => AgentSynchronizer::identity($world['reset'], 'LOCAL')]);
+        $this->agent = $this->operator->agents()->create(['name' => $agentSymbol, 'token' => 'synthetic-agent', 'faction' => 'VOID',
+            'reset_id' => $world['reset'], 'canonical_identity' => AgentSynchronizer::identity($world['reset'], $agentSymbol)]);
         file_put_contents($this->fixture, json_encode($world, JSON_THROW_ON_ERROR));
         FakeSpaceTraders::install($this->fixture);
         $playbook = app(CampaignPlaybook::class);
-        $this->armRevision = $playbook->import(str_replace('GIANTSOUP', 'LOCAL', file_get_contents(base_path('campaigns/arm-trade.yaml'))));
+        $this->armRevision = $playbook->import(str_replace('GIANTSOUP', $agentSymbol, file_get_contents(base_path('campaigns/arm-trade.yaml'))));
         $body = Yaml::parse(file_get_contents(base_path('campaigns/weekly-system-saturation.yaml')));
-        $body['agent']['symbol'] = 'LOCAL';
+        $body['agent']['symbol'] = $agentSymbol;
         $body['fleet']['auto_arm']['revision_hash'] = $this->armRevision->content_hash;
         $this->revision = $playbook->import(Yaml::dump($body, 12));
         $sync = app(AgentSynchronizer::class);
@@ -103,7 +106,7 @@ trait SaturationFixture
                 continue;
             }
             if ($i > 0) {
-                $world['ships'][] = FakeSpaceTraders::probe('LOCAL-'.($i + 2), $symbol);
+                $world['ships'][] = FakeSpaceTraders::probe($this->agent->name.'-'.($i + 2), $symbol);
             }
             $goods = $world['market_goods'][$symbol] ?? $world['goods'];
             $sync->observe($this->agent, 'market', $symbol, [
@@ -179,6 +182,20 @@ trait SaturationFixture
         return CampaignEpisode::create(['agent_id' => $this->agent->id, 'campaign_grant_id' => $grant->id,
             'reset_id' => $this->agent->reset_id, 'phase' => 'earn', 'opened_at' => now(),
             'start_credits' => $this->agent->fresh()->credits, 'next_reset_at' => $this->world()['next_reset'], 'state' => []]);
+    }
+
+    protected function haulerPurchase(CampaignEpisode $episode, string $key, string $state = 'acknowledged', array $outcome = [], bool $requiresReview = false): ShipAction
+    {
+        $run = AutomationRun::create(['agent_id' => $this->agent->id, 'campaign_episode_id' => $episode->id,
+            'reset_id' => $this->agent->reset_id, 'ship_symbol' => $this->agent->name.'-2', 'strategy' => 'buy_hauler',
+            'state' => 'stopped', 'plan_version' => 7, 'expires_at' => now()->addMinutes(3), 'plan' => [], 'totals' => []]);
+
+        return ShipAction::create(['agent_id' => $this->agent->id, 'automation_run_id' => $run->id,
+            'ship_symbol' => $run->ship_symbol, 'reset_id' => $this->agent->reset_id, 'key' => $key,
+            'origin' => 'automation', 'command' => 'buy_ship', 'state' => $state,
+            'arguments' => ['shipType' => 'SHIP_LIGHT_HAULER', 'waypointSymbol' => 'X1-TEST-ROCK'],
+            'before_state' => ['estimate' => ['fleet_symbols' => Ship::where('agent_id', $this->agent->id)->pluck('symbol')->all()]],
+            'outcome' => $outcome, 'review_required' => $requiresReview, 'sent_at' => now(), 'settled_at' => now(), 'expires_at' => now()->addMinutes(3)]);
     }
 
     protected function tearDownSaturation(): void
