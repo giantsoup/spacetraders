@@ -111,6 +111,38 @@ class FleetMetrics
         self::event('director_pass', $ship, $outcome, $requests, $extra);
     }
 
+    public function meshPassEvidence(string $agent): array
+    {
+        $rows = DB::table('fleet_metrics')->where('kind', 'director_pass')->where('agent_symbol', $agent)->where('ship', 'director')
+            ->where('created_at', '>=', now()->subHour())->orderBy('created_at')->get(['data', 'created_at']);
+        $eligible = $successful = $skipped = 0;
+        $previous = $maxGap = null;
+        foreach ($rows as $row) {
+            $stages = json_decode($row->data, true)['mesh_polling'] ?? [];
+            if (($stages['routine']['mode'] ?? null) === 'normal') {
+                $eligible++;
+            }
+            if (! collect($stages)->contains(fn (array $stage) => ! empty($stage['successful']))) {
+                $skipped++;
+
+                continue;
+            }
+            $successful++;
+            $time = CarbonImmutable::parse($row->created_at)->timestamp;
+            if ($previous !== null) {
+                $maxGap = max($maxGap ?? 0, $time - $previous);
+            }
+            $previous = $time;
+        }
+
+        return ['eligible' => $eligible, 'successful' => $successful, 'skipped' => $skipped, 'max_successful_pass_gap_seconds' => $maxGap];
+    }
+
+    public static function meshAllowance(int $used, int $unused): void
+    {
+        self::event('mesh_allowance', self::current(), 'released', $used, ['unused' => $unused]);
+    }
+
     private static function event(string $kind, ?string $ship, string $outcome, int $requests, array $extra = []): void
     {
         try {

@@ -164,7 +164,8 @@ class CampaignSaturation
             'owned_haulers' => $owned, 'undelivered_haulers' => $inFlight, 'traders' => $mesh['traders'],
             'mesh' => ['hubs' => $mesh['hubs']->map(fn ($hub) => array_diff_key($hub, ['quote' => true]))->values()->all(),
                 'covered_hubs' => $mesh['covered']->all(), 'hub_target' => $target, 'pool_probe_target' => $mesh['pool_probe_target'],
-                'eligible_pool_probes' => $mesh['pool_probe_count'], 'directory_gaps' => $gaps],
+                'eligible_pool_probes' => $mesh['pool_probe_count'], 'directory_gaps' => $gaps]
+                + (isset($mesh['mesh_model']) ? $mesh['mesh_model'] + ['governor' => app(MeshGovernor::class)->evaluate($agent, $episode)] : []),
         ];
     }
 

@@ -113,6 +113,14 @@ class CampaignProbeBootstrap
             }
             $result->put('run:'.$run->id, ['run_id' => $run->id, 'type' => $type]);
         }
+        if ($undeliveredType === null) {
+            $positioning = AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+                ->whereIn('plan->mesh_work', ['yard', 'purchase'])->when($ignoreRunId, fn ($query) => $query->whereKeyNot($ignoreRunId))
+                ->where(fn ($query) => $query->where('state', 'preview')->orWhereNotNull('active_agent_id'))->get();
+            foreach ($positioning as $run) {
+                $result->put('run:'.$run->id, ['run_id' => $run->id, 'type' => 'SHIP_PROBE']);
+            }
+        }
         foreach ($this->outstanding($agent) as $action) {
             $type = $action->arguments['shipType'];
             if ($action->id === $ignoreActionId || ($ignoreRunId && $action->automation_run_id === $ignoreRunId)
@@ -239,6 +247,7 @@ class CampaignProbeBootstrap
                 $evidence = $action->arguments['shipType'] === 'SHIP_PROBE'
                     ? ['bootstrap_delivered_probe' => $symbol, 'bootstrap_delivery_transaction' => $transaction]
                     : ['delivered_ship' => $symbol, 'delivery_transaction' => $transaction];
+                $evidence['delivery_attributed_at'] = now()->utc()->toIso8601String();
                 if ($mismatch) {
                     $evidence['configuration_mismatch'] = true;
                 }
@@ -459,7 +468,7 @@ class CampaignProbeBootstrap
      *
      * @param  list<string>  $busyShips
      */
-    public function plan(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $busyShips, array &$considered, ?float $deadline = null, string $type = 'SHIP_PROBE'): ?AutomationRun
+    public function plan(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $busyShips, array &$considered, ?float $deadline = null, string $type = 'SHIP_PROBE', ?array &$meshReads = null, ?array &$purchaseYards = null): ?AutomationRun
     {
         if (microtime(true) >= ($deadline ?? INF)) {
             return null;
@@ -468,6 +477,12 @@ class CampaignProbeBootstrap
         $strategy = $hauler ? 'buy_hauler' : 'buy_probe';
         $policy = $this->purchasePolicy($grant, $episode, $agent, $type);
         $saturation = app(CampaignSaturation::class);
+        if (! $hauler && isset($policy['mesh']['saturation'])) {
+            $meshReads ??= [];
+            $purchaseYards = [];
+
+            return $this->planMesh($grant, $episode, $agent, $policy, $busyShips, $considered, $deadline ?? INF, $meshReads, $purchaseYards);
+        }
         if ($hauler) {
             $evaluation = $saturation->evaluate($grant, $episode, $agent, offerIndependentOnly: true);
             if (! $evaluation['enabled']) {
@@ -510,7 +525,7 @@ class CampaignProbeBootstrap
             return null;
         }
 
-        $shipyards = $this->discoverShipyards($grant, $episode, $agent, $system, $eligibleShips, $deadline, $type);
+        $shipyards = $this->discoverShipyards($grant, $episode, $agent, $system, $eligibleShips, $deadline, $type, $meshReads);
         if (! $hauler && $shipyards === []) {
             $considered[] = ['strategy' => $strategy, 'rejected' => 'No '.$type.' shipyard observed yet in '.$system.'.'];
 
@@ -599,6 +614,137 @@ class CampaignProbeBootstrap
         return null;
     }
 
+    private function planMesh(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $policy, array $busy,
+        array &$considered, float $deadline, array &$reads, array &$purchaseYards): ?AutomationRun
+    {
+        $selector = app(ProbeYardSelector::class);
+        $mesh = app(CampaignMesh::class);
+        $mesh->clearPurchaseHold($episode);
+        $model = $mesh->model($episode, $agent);
+        [$owned, $target] = $this->probeTarget($episode, $agent, $policy);
+        if ($owned + $this->inFlightProbePurchases($agent, $episode) >= $target
+            || $this->reservations($agent)->isNotEmpty() || ! $model->system
+            || $selector->cutoff($episode, $grant, $policy)->lte(now())) {
+            return null;
+        }
+        $governor = app(MeshGovernor::class);
+        $status = $governor->evaluate($agent, $episode);
+        if (! in_array($status['mode'], ['normal', 'sampling'], true)) {
+            $considered[] = ['strategy' => 'buy_probe', 'hold' => $status['reason']];
+
+            return null;
+        }
+        $this->discoverShipyards($grant, $episode, $agent, $model->system, [], $deadline, 'SHIP_PROBE', $reads);
+        if ($status['mode'] !== 'normal' || microtime(true) >= $deadline) {
+            return null;
+        }
+        $this->assertPurchaseBudget($agent);
+        $runner = app(AutomationRunner::class);
+        $tried = [];
+        $yield = null;
+        $poll = true;
+        while (microtime(true) < $deadline) {
+            $agent->refresh();
+            $episode->refresh();
+            if (! self::policy($grant->refresh(), $episode) || $this->reservations($agent)->isNotEmpty()) {
+                return null;
+            }
+            $reserve = $this->effectiveReserve($agent, $grant, $policy);
+            $ranked = $selector->rank($episode, $agent, $policy, $busy, $reserve, $deadline, $considered, $purchaseYards);
+            if ($poll && $purchaseYards !== []) {
+                $poll = false;
+                $refreshed = app(MeshPoller::class)->refresh($episode, $agent, $reads, $deadline, phase: 'purchase', purchaseYards: $purchaseYards);
+                if ($refreshed['successful'] !== []) {
+                    continue;
+                }
+            }
+            $candidate = null;
+            foreach ($ranked as $entry) {
+                $key = $entry['yard'].':'.$entry['ship']['symbol'];
+                if (! isset($tried[$key])) {
+                    $candidate = $entry;
+                    $tried[$key] = true;
+                    break;
+                }
+            }
+            if ($candidate === null || microtime(true) >= $deadline) {
+                return null;
+            }
+            if ($candidate['tier'] === 2 && ! collect($ranked)->contains(fn (array $entry) => $entry['tier'] === 1
+                && ! isset($tried[$entry['yard'].':'.$entry['ship']['symbol']]))
+                && isset($grant->revision()->body['fleet']['haulers'])) {
+                $yield ??= app(CampaignSaturation::class)->evaluate($grant, $episode, $agent, deadline: $deadline);
+                if ($yield['can_purchase']) {
+                    $considered[] = ['strategy' => 'buy_probe', 'hold' => 'tier2_yields_to_hauler', 'hauler_capital' => $yield['gates']['G5']];
+                    $purchaseYards = [];
+
+                    return null;
+                }
+            }
+
+            $ship = $candidate['ship'];
+            $yard = $candidate['yard'];
+            $limits = ['minutes' => $grant->limits['run_max_minutes'], 'reserve' => $grant->limits['reserve_credits']];
+            $run = null;
+            try {
+                $started = $mesh->holdPurchase($episode, $ship['symbol'], function () use ($runner, $selector, $episode, $agent, $policy, $busy,
+                    $reserve, $deadline, $candidate, $ship, $yard, $limits, $tried, $key, &$considered, &$run) {
+                    $run = $candidate['position']
+                        ? $runner->previewMeshScout($agent, $ship, $yard, $limits, $episode, 'shipyard')
+                        : $runner->previewProbePurchase($agent, $ship['symbol'], $yard, $limits, $episode, $deadline);
+                    if (! $candidate['position']) {
+                        $ranked = $selector->rank($episode, $agent, $policy, $busy, $reserve, $deadline, $considered, ignoreRun: $run->id);
+                        $winner = collect($ranked)->first(fn (array $entry) => ! $entry['recovery']
+                            && ($key === $entry['yard'].':'.$entry['ship']['symbol'] || ! isset($tried[$entry['yard'].':'.$entry['ship']['symbol']])));
+                        if (! $winner || $key !== $winner['yard'].':'.$winner['ship']['symbol']) {
+                            throw new GameException('Fresh preview changed the ranked yard or purchaser.');
+                        }
+                    }
+
+                    return $runner->startCampaign($agent, $run, $episode, $deadline);
+                });
+                if ($candidate['position']) {
+                    $this->recordMeshYardAttempt($episode, $yard);
+                }
+
+                return $started;
+            } catch (GameException $exception) {
+                $considered[] = ['strategy' => $candidate['position'] ? 'scout' : 'buy_probe', 'ship' => $ship['symbol'], 'yard' => $yard,
+                    'rejected' => $exception->getMessage()];
+                if ($exception->uncertain || ($run && ! $mesh->invalidatePreview($agent, $run))) {
+                    $purchaseYards = [];
+
+                    return null;
+                }
+                if ($exception->retryAfter > 0) {
+                    $purchaseYards = [];
+                    throw $exception;
+                }
+                if ($exception->apiCode !== null || str_contains($exception->getMessage(), 'Shared ship purchase slot')
+                    || str_contains($exception->getMessage(), 'campaign authority')) {
+                    $purchaseYards = [];
+
+                    return null;
+                }
+                if ($candidate['position'] && CampaignMesh::dispatchFailure($exception->getMessage())) {
+                    $mesh->failure($episode, $ship['symbol'], $yard, $run?->id);
+                    if ($candidate['recovery']) {
+                        $this->recordMeshYardAttempt($episode, $yard);
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function recordMeshYardAttempt(CampaignEpisode $episode, string $yard): void
+    {
+        $state = $episode->refresh()->state ?? [];
+        $state['mesh_yard_attempt_at'][$yard] = now()->timestamp;
+        $episode->update(['state' => $state]);
+    }
+
     private function purchasePolicy(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, string $type): ?array
     {
         if ($agent->id !== $episode->agent_id || $agent->reset_id !== $episode->reset_id) {
@@ -617,19 +763,29 @@ class CampaignProbeBootstrap
         }
 
         $symbol = strtoupper($agent->name);
+        $row = $this->traderBudgetEvidence($agent);
+        if (isset($row['purchase_hold_reason']) || ! isset($row['formula_max_traders'])) {
+            throw new GameException('Fleet purchase held for '.$symbol.': '.($row['purchase_hold_reason'] ?? 'missing_request_budget_ceiling').'.');
+        }
+        if (! $row['fleet_verified']) {
+            throw new GameException('Fleet purchase held for '.$symbol.': missing verified fleet.');
+        }
+        $traders = $row['traders'] + $additionalTraders;
+        if ($traders > $row['formula_max_traders']) {
+            throw new GameException('Fleet purchase held for '.$symbol.': '.$traders.' traders exceed trader ceiling '.$row['formula_max_traders'].'.');
+        }
+    }
+
+    public function traderBudgetEvidence(Agent $agent): array
+    {
+        $symbol = strtoupper($agent->name);
         $episodes = CampaignEpisode::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->pluck('id')->all();
         $until = now()->toImmutable();
         $row = app(FleetMetrics::class)->byAgent([
             ['agent_symbol' => $symbol, 'qualified_label' => $symbol.':C0', 'episodes' => $episodes],
         ], $until->subHours(6), $until)[$symbol] ?? [];
-        if (isset($row['purchase_hold_reason']) || ! isset($row['formula_max_traders'])) {
-            throw new GameException('Fleet purchase held for '.$symbol.': '.($row['purchase_hold_reason'] ?? 'missing_request_budget_ceiling').'.');
-        }
 
         $ships = Ship::where('agent_id', $agent->id)->get();
-        if ($ships->isEmpty()) {
-            throw new GameException('Fleet purchase held for '.$symbol.': missing verified fleet.');
-        }
         $traded = AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
             ->where('strategy', 'trade')->whereNotNull('started_at')->distinct()->pluck('ship_symbol')->flip();
         $fleet = app(CampaignFleet::class);
@@ -640,10 +796,8 @@ class CampaignProbeBootstrap
                 || in_array($snapshot['registration']['role'] ?? null, ['COMMAND', 'HAULER', 'TRANSPORT'], true)
                 || in_array($snapshot['frame']['symbol'] ?? null, ['FRAME_SHUTTLE', 'FRAME_LIGHT_FREIGHTER', 'FRAME_HEAVY_FREIGHTER', 'FRAME_BULK_FREIGHTER'], true));
         })->count();
-        // A probe adds no traders, but an already over-cap fleet cannot add purchase overhead.
-        if ($traders + $additionalTraders > $row['formula_max_traders']) {
-            throw new GameException('Fleet purchase held for '.$symbol.': '.($traders + $additionalTraders).' traders exceed trader ceiling '.$row['formula_max_traders'].'.');
-        }
+
+        return $row + ['traders' => $traders, 'fleet_verified' => $ships->isNotEmpty()];
     }
 
     private function assertTarget(Agent $agent, CampaignEpisode $episode, array $policy, string $type, ?int $ignoreRunId): int
@@ -659,14 +813,27 @@ class CampaignProbeBootstrap
         return $owned;
     }
 
+    public function requiresHaulerMeshMovement(CampaignEpisode $episode, array $ship, string $yard): bool
+    {
+        return isset(CampaignMesh::policy($episode)['saturation'])
+            && app(CampaignFleet::class)->isProbe($ship) && ($ship['nav']['waypointSymbol'] ?? null) !== $yard;
+    }
+
     public function compose(Agent $agent, string $symbol, string $shipyard, array $limits, CampaignEpisode $episode, ?int $ignoreRunId = null, string $type = 'SHIP_PROBE', ?float $deadline = null): array
     {
         $grant = $episode->grant();
         $hauler = $type === 'SHIP_LIGHT_HAULER';
+        if (microtime(true) >= ($deadline ?? INF)) {
+            throw new RequestDeferred('Mesh purchase exceeded the pass deadline.', 5);
+        }
         $label = $hauler ? 'Hauler' : 'Probe';
         $policy = $this->purchasePolicy($grant, $episode, $agent, $type);
         if (! $policy) {
             throw new GameException($label.' purchase is outside current C0 campaign authority.');
+        }
+        $meshPurchase = ! $hauler && isset($policy['mesh']['saturation']);
+        if ($meshPurchase && (! RequestBudget::currentMeshAllowance() || app(ProbeYardSelector::class)->cutoff($episode, $grant, $policy)->lte(now()))) {
+            throw new GameException('Mesh purchase lacks current admission or is outside the purchase cutoff.');
         }
         $this->assertSlot($agent, $ignoreRunId);
         $saturation = app(CampaignSaturation::class);
@@ -676,7 +843,7 @@ class CampaignProbeBootstrap
             $this->assertPurchaseBudget($agent);
             $this->assertTarget($agent, $episode, $policy, $type, $ignoreRunId);
         }
-        app(AgentSynchronizer::class)->sync($agent, false);
+        app(AgentSynchronizer::class)->sync($agent, false, freshFleet: $meshPurchase || RequestBudget::currentMeshAllowance() !== null);
         if (! $hauler) {
             $this->assertPurchaseBudget($agent);
         }
@@ -686,6 +853,9 @@ class CampaignProbeBootstrap
         }
         if (ReconMission::holds($agent, $symbol)) {
             throw new GameException('Ship is held by a gate-recon mission.');
+        }
+        if (Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->whereNotNull('stationed_waypoint')->exists()) {
+            throw new GameException('Campaign pool authority changed: operator stationed this probe.');
         }
         $owned = $this->assertTarget($agent, $episode, $policy, $type, $ignoreRunId);
         $point = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
@@ -700,10 +870,23 @@ class CampaignProbeBootstrap
             throw new GameException($type.' purchase requires credits above working-capital reserve '.$reserve.' CR.');
         }
         $atYard = $ship['nav']['waypointSymbol'] === $shipyard;
+        $meshHaulerMovement = $hauler && $this->requiresHaulerMeshMovement($episode, $ship, $shipyard);
+        if ($meshHaulerMovement) {
+            if (! RequestBudget::currentMeshAllowance()) {
+                throw new GameException('Remote mesh hauler purchase requires current movement admission.');
+            }
+            app(CampaignMesh::class)->assertDeparture($episode, $agent, $ship, $shipyard, $ignoreRunId, yard: true);
+        }
+        if ($meshPurchase) {
+            app(CampaignMesh::class)->assertPool($episode, $agent, $ship);
+            if (! $atYard) {
+                throw new GameException('Position the mesh pool purchaser at the selected shipyard before previewing a buy.');
+            }
+        }
         $yardObs = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
             ->where('kind', 'shipyard')->where('symbol', $shipyard)->first();
         if ($atYard || ! $yardObs) {
-            $yardData = app(SpaceTradersApi::class)->shipyard($agent, $shipyard, fresh: $hauler && $atYard);
+            $yardData = app(SpaceTradersApi::class)->shipyard($agent, $shipyard, fresh: ($hauler || $meshPurchase) && $atYard);
             $yardObs = app(AgentSynchronizer::class)->observe($agent, 'shipyard', $shipyard, $yardData);
         }
         if (! $this->offers($yardObs->data, $type)) {
@@ -717,7 +900,7 @@ class CampaignProbeBootstrap
         $offer = $hauler ? $this->freshHaulerOffer($yardObs) : $this->offer($yardObs->data, $type);
         $minutes = $limits['minutes'];
         if ($hauler || ($policy['mesh'] ?? null)) {
-            $cutoff = $episode->next_reset_at->subHour();
+            $cutoff = $meshPurchase ? app(ProbeYardSelector::class)->cutoff($episode, $grant, $policy) : $episode->next_reset_at->subHour();
             $minutes = min($minutes, $grant->limits['run_max_minutes'], (int) floor(now()->diffInSeconds($grant->expires_at ? $cutoff->min($grant->expires_at) : $cutoff, false) / 60));
             if ($minutes < 1 || (! $atYard && (! isset($leg['estimated_seconds']) || $minutes * 60 < $leg['estimated_seconds'] + 180))) {
                 throw new GameException('Purchase route cannot complete within the approved duration.');
@@ -743,7 +926,13 @@ class CampaignProbeBootstrap
             throw new GameException('Insufficient credits above working-capital reserve for '.$type.' purchase.');
         }
 
-        $maxSpend = min(max(0, $agent->credits - $reserve), $policy['max_price'] + $fuelCeiling);
+        $maxPrice = $policy['max_price'];
+        if ($meshPurchase) {
+            $meshPrice = app(ProbeYardSelector::class)->check($episode, $agent, $ship, $shipyard, $policy, $offer['purchasePrice'] ?? 0, $reserve,
+                $ignoreRunId, remainingFuel: $fuelCeiling, approved: $limits['mesh_purchase']['ceiling'] ?? null);
+            $maxPrice = $meshPrice['ceiling'];
+        }
+        $maxSpend = min(max(0, $agent->credits - $reserve), $maxPrice + $fuelCeiling);
         if ($offer !== null && $maxSpend < $offer['purchasePrice'] + $fuelCeiling) {
             throw new GameException('Approved spending bound cannot cover '.$type.' purchase and fuel.');
         }
@@ -753,7 +942,7 @@ class CampaignProbeBootstrap
             'minutes' => $minutes,
             'shipyard' => $shipyard,
             'ship_type' => $type,
-            'max_price' => $policy['max_price'],
+            'max_price' => $maxPrice,
             'min_working_capital' => $policy['min_working_capital'],
             'reserve' => $reserve,
             'max_spend' => $maxSpend,
@@ -775,6 +964,10 @@ class CampaignProbeBootstrap
             'participating_ships' => [$symbol],
         ]);
         if ($hauler) {
+            if ($meshHaulerMovement) {
+                $plan['mesh_work'] = 'hauler_purchase';
+                $plan['mesh_allowance'] = RequestBudget::currentMeshAllowance();
+            }
             $plan['offer_configuration_hash'] = CampaignHaulerPurchase::offerProfile($offer)['hash'] ?? null;
             $plan['grant_id'] = $grant->id;
             $plan['revision_hash'] = $grant->revision_hash;
@@ -791,6 +984,15 @@ class CampaignProbeBootstrap
 
             return ['plan' => $plan, 'fingerprint' => hash('sha256', json_encode([$agent->reset_id, $approved], JSON_THROW_ON_ERROR)), 'saturation' => $evaluation];
         }
+        if ($meshPurchase) {
+            $plan['mesh_work'] = 'purchase';
+            $plan['mesh_allowance'] = RequestBudget::currentMeshAllowance();
+            $plan['mesh_purchase'] = [
+                'ceiling' => $maxPrice, 'tier' => $meshPrice['gain']['tier'], 'gain' => $meshPrice['gain'],
+                'cash' => $meshPrice['cash'], 'cutoff' => $cutoff->timestamp, 'purchaser' => $symbol, 'yard' => $shipyard,
+                'reset' => $agent->reset_id, 'grant' => $grant->id, 'revision' => $grant->revision_hash,
+            ];
+        }
         $fingerprint = hash('sha256', json_encode([
             $agent->reset_id,
             $plan['initial_credits'],
@@ -804,6 +1006,7 @@ class CampaignProbeBootstrap
             $plan['reserve'],
             $plan['owned_probes'],
             $plan['observed_price'],
+            ...($meshPurchase ? [$plan['mesh_purchase']] : []),
         ]));
 
         return ['plan' => $plan, 'fingerprint' => $fingerprint];
@@ -943,10 +1146,19 @@ class CampaignProbeBootstrap
                 max(0, $run->plan['route']['fuel_ceiling'] - ($run->totals['fuel_cost'] ?? 0)), persist: true);
         }
 
+        $maxTotal = $price;
+        if (isset($run->plan['mesh_purchase'])) {
+            $paid = (int) ($run->totals['fuel_cost'] ?? 0);
+            $approved = $run->plan['mesh_purchase']['ceiling'];
+            $current = app(ProbeYardSelector::class)->check($episode, $agent, $ship, $shipyard, $policy, $price, $reserve, $run->id,
+                $paid, max(0, $run->plan['route']['fuel_ceiling'] - $paid), $approved);
+            $maxTotal = min($current['ceiling'], $remainingSpend, $run->plan['max_loss'] + ($run->totals['credit_delta'] ?? 0));
+        }
+
         return AutomationStep::act('buy_ship', [
             'shipType' => $type,
             'waypointSymbol' => $shipyard,
-            'maxTotal' => $price,
+            'maxTotal' => $maxTotal,
             'reserve' => $reserve,
         ] + ($pin ? ['offer_configuration_hash' => $pin] : []));
     }
@@ -970,6 +1182,7 @@ class CampaignProbeBootstrap
         if ($action) {
             DB::transaction(fn () => $this->recordDelivery($action));
         }
+        app(MeshGovernor::class)->release($run->plan['mesh_allowance'] ?? null);
     }
 
     /**
@@ -1005,7 +1218,7 @@ class CampaignProbeBootstrap
      * @param  list<array>  $eligibleShips
      * @return array<string, GameObservation>
      */
-    private function discoverShipyards(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, string $system, array $eligibleShips, ?float $deadline, string $type): array
+    private function discoverShipyards(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, string $system, array $eligibleShips, ?float $deadline, string $type, ?array &$meshReads = null): array
     {
         $waypoints = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
             ->where('kind', 'waypoint')->get()
@@ -1022,18 +1235,29 @@ class CampaignProbeBootstrap
         $api = app(SpaceTradersApi::class);
         $sync = app(AgentSynchronizer::class);
         $reads = 0;
+        $saturation = CampaignMesh::policy($episode)['saturation'] ?? null;
+        $mesh = $saturation !== null;
+        if ($mesh) {
+            $meshReads ??= [];
+        }
+        $recoveryCooldown = $saturation['yard_recovery_cooldown_seconds'] ?? 0;
+        $attempts = $episode->state['mesh_yard_attempt_at'] ?? [];
 
         // First refresh any shipyard where an eligible ship is already parked (to see live prices),
         // then inspect unobserved shipyards up to MAX_SHIPYARD_READS_PER_PASS.
         $toRead = [];
         foreach ($waypoints as $symbol) {
             $obs = $existing->get($symbol);
+            if ($mesh && $type === CampaignHaulerPurchase::TYPE && $obs && ! $this->offers($obs->data, $type)) {
+                continue;
+            }
             if (in_array($symbol, $occupied, true) && (! $obs || empty($obs->data['ships']) || $obs->observed_at->lt(now()->subSeconds(config('gameplay.snapshot_seconds'))))) {
                 $toRead[] = $symbol;
             }
         }
         foreach ($waypoints as $symbol) {
-            if (! $existing->has($symbol) && ! in_array($symbol, $toRead, true)) {
+            if (! $existing->has($symbol) && ! in_array($symbol, $toRead, true)
+                && (! $mesh || ($attempts[$symbol] ?? 0) <= now()->timestamp - $recoveryCooldown)) {
                 $toRead[] = $symbol;
             }
         }
@@ -1046,8 +1270,20 @@ class CampaignProbeBootstrap
             }
             $reads++;
             try {
-                $sync->observe($agent, 'shipyard', $symbol, $api->shipyard($agent, $symbol));
+                if ($mesh) {
+                    app(MeshPoller::class)->read($episode, $agent, $symbol, 'shipyard', null, 'directory', $meshReads);
+                } else {
+                    $sync->observe($agent, 'shipyard', $symbol, $api->shipyard($agent, $symbol));
+                }
             } catch (GameException $exception) {
+                if ($mesh && $type === CampaignHaulerPurchase::TYPE && $exception instanceof RequestDeferred) {
+                    break;
+                }
+                if ($mesh && in_array($exception->httpStatus, [400, 403, 404, 422], true)) {
+                    $this->recordMeshYardAttempt($episode, $symbol);
+
+                    continue;
+                }
                 if ($exception instanceof LocalEarnBudget || $exception->retryAfter > 0) {
                     throw $exception;
                 }

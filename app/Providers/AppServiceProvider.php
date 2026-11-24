@@ -2,8 +2,10 @@
 
 namespace App\Providers;
 
+use App\Gameplay\CampaignMesh;
 use App\Gameplay\DeploymentGate;
 use App\Gameplay\HostLock;
+use App\Gameplay\MeshPlanner;
 use App\Gameplay\SpaceTradersApi;
 use App\Queue\DeploymentDatabaseQueue;
 use App\Queue\EngineWorkerGate;
@@ -29,6 +31,8 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->scoped(SpaceTradersClient::class);
         $this->app->scoped(SpaceTradersApi::class);
+        $this->app->scoped(CampaignMesh::class);
+        $this->app->scoped(MeshPlanner::class);
         $this->app->singleton(HostLock::class);
         $this->app->singleton(DeploymentGate::class);
         $this->app->singleton(EngineWorkerGate::class);

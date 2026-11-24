@@ -25,6 +25,132 @@ class RequestBudget
         }
     }
 
+    private static ?array $meshScope = null;
+
+    public static function forMeshAllowance(?string $id, callable $work, ?string $agent = null, ?string $reset = null, ?int $run = null): mixed
+    {
+        $previous = self::$meshScope;
+        self::$meshScope = $id === null && $agent === null ? null : compact('id', 'agent', 'reset', 'run');
+        try {
+            return self::forAgent($agent, $work);
+        } finally {
+            self::$meshScope = $previous;
+        }
+    }
+
+    public static function currentMeshAllowance(): ?string
+    {
+        return self::$meshScope['id'] ?? null;
+    }
+
+    public function admitMesh(string $agent, string $reset, array $limits, int $charge, int $seconds): ?string
+    {
+        return $this->change(function (array &$state) use ($agent, $reset, $limits, $charge, $seconds) {
+            $now = $this->now();
+            $this->pruneMesh($state, $now);
+            $usage = $this->usageReport($state, null, null, $agent);
+            $limits['hour'] = min($limits['hour'], $usage['agent']['cap_per_hour'] ?? PHP_INT_MAX);
+            $room = $this->meshRoom($state, $agent, $reset, $limits, $usage, $now);
+            if ($charge < 1 || $room < $charge || $seconds < 1) {
+                return null;
+            }
+            $id = bin2hex(random_bytes(16));
+            $expires = $now + $seconds;
+            $state['mesh_allowances'][$id] = compact('agent', 'reset', 'limits', 'expires')
+                + ['remaining' => $charge, 'used' => 0, 'run' => null];
+
+            return $id;
+        }, true);
+    }
+
+    public function bindMesh(string $id, int $run, int $seconds): void
+    {
+        $bound = $this->change(function (array &$state) use ($id, $run, $seconds) {
+            $this->pruneMesh($state, $this->now());
+            $entry = $state['mesh_allowances'][$id] ?? null;
+            if (! $entry || ($entry['run'] !== null && $entry['run'] !== $run)) {
+                return false;
+            }
+            $state['mesh_allowances'][$id]['run'] = $run;
+            $state['mesh_allowances'][$id]['expires'] = $this->now() + max(1, $seconds);
+
+            return true;
+        }, true);
+        if (! $bound) {
+            throw new RequestDeferred('Mesh allowance expired before work could start.', 10);
+        }
+    }
+
+    public function refreshMesh(string $id, string $agent, string $reset, int $run, array $limits): bool
+    {
+        return $this->change(function (array &$state) use ($id, $agent, $reset, $run, $limits) {
+            $this->pruneMesh($state, $this->now());
+            $entry = $state['mesh_allowances'][$id] ?? null;
+            if (! $entry || $entry['agent'] !== $agent || $entry['reset'] !== $reset || $entry['run'] !== $run) {
+                return false;
+            }
+            $state['mesh_allowances'][$id]['limits'] = $limits;
+
+            return true;
+        }, true);
+    }
+
+    public function hasMesh(?string $id, string $agent, string $reset, int $run): bool
+    {
+        if ($id === null) {
+            return false;
+        }
+        $state = $this->readState($this->directory(false).'/budget.json', true);
+        $entry = $state['mesh_allowances'][$id] ?? null;
+
+        return $entry && $entry['expires'] > $this->now() && $entry['agent'] === $agent
+            && $entry['reset'] === $reset && $entry['run'] === $run;
+    }
+
+    public function releaseMesh(?string $id): array
+    {
+        return $id === null ? [] : $this->change(function (array &$state) use ($id) {
+            $entry = $state['mesh_allowances'][$id] ?? [];
+            unset($state['mesh_allowances'][$id]);
+            $this->pruneMesh($state, $this->now());
+
+            return $entry;
+        });
+    }
+
+    private function pruneMesh(array &$state, float $now): void
+    {
+        $state['mesh_allowances'] = array_filter($state['mesh_allowances'] ?? [], fn ($entry) => $entry['expires'] > $now);
+        foreach ($state['mesh_requests'] ?? [] as $key => $requests) {
+            $requests = array_values(array_filter($requests, fn ($at) => $at > $now - 3600));
+            if ($requests === []) {
+                unset($state['mesh_requests'][$key]);
+            } else {
+                $state['mesh_requests'][$key] = $requests;
+            }
+        }
+    }
+
+    private function meshRoom(array $state, string $agent, string $reset, array $limits, array $usage, float $now, ?string $except = null): int
+    {
+        if ($usage['host']['rate_limits_last_15_minutes'] >= 3
+            || $usage['host']['tier2_4_last_60_seconds'] + 1 >= $limits['host']
+            || $usage['host']['blocked_until'] > $now) {
+            return 0;
+        }
+        $outstanding = 0;
+        foreach ($state['mesh_allowances'] ?? [] as $id => $entry) {
+            if ($id !== $except && $entry['agent'] === $agent && $entry['reset'] === $reset && $entry['expires'] > $now) {
+                $outstanding += $entry['remaining'];
+            }
+        }
+        $hourRoom = min($limits['hour'], $usage['agent']['cap_per_hour'] ?? PHP_INT_MAX)
+            - $usage['agent']['tier2_4_last_hour'] - $limits['arm'] - $outstanding;
+        $traderRoom = $limits['trader'] - count($state['mesh_requests'][$agent.':'.$reset] ?? []) - $outstanding;
+
+        return max(0, min($hourRoom, $traderRoom));
+    }
+
     public function drainAgent(string $symbol, bool $draining, ?string $resetId = null): void
     {
         $this->change(function (&$state) use ($symbol, $draining, $resetId) {
@@ -208,6 +334,20 @@ class RequestBudget
                         $delay = max($delay, $ordinaryDelay);
                     }
                 }
+                $mesh = self::$meshScope;
+                $allowance = null;
+                if ($mesh !== null && ($tier > 1 || $borrow)) {
+                    $this->pruneMesh($state, $now);
+                    $allowance = $state['mesh_allowances'][$mesh['id']] ?? null;
+                    if (! $allowance || $allowance['agent'] !== $agentSymbol
+                        || ($mesh['agent'] !== null && $mesh['agent'] !== $agentSymbol)
+                        || ($mesh['reset'] !== null && $mesh['reset'] !== $allowance['reset'])
+                        || $mesh['run'] !== $allowance['run']
+                        || $this->meshRoom($state, $agentSymbol, $allowance['reset'], $allowance['limits'],
+                            $this->usageReport($state, null, null, $agentSymbol), $now, $mesh['id']) < 1) {
+                        $delay = max($delay, 10.0);
+                    }
+                }
                 if ($delay > 0.001) {
                     if ($delay + $waited > $maxWait) {
                         foreach ($keys as $key) {
@@ -230,6 +370,12 @@ class RequestBudget
                     $bucket['usage']['priorities'][$priority] = ($bucket['usage']['priorities'][$priority] ?? 0) + 1;
                     $bucket['usage']['wait_seconds'] += $waited;
                     $bucket['recent'][] = $now;
+                }
+                if ($allowance !== null) {
+                    $entry = &$state['mesh_allowances'][$mesh['id']];
+                    $entry['remaining'] = max(0, $entry['remaining'] - 1);
+                    $entry['used']++;
+                    $state['mesh_requests'][$allowance['agent'].':'.$allowance['reset']][] = $now;
                 }
                 $this->ordinaryReservation = $tier > 1 || $borrow;
                 if ($tier === 1 && ! $borrow) {
@@ -403,9 +549,20 @@ class RequestBudget
 
     public function usage(?string $token = null, ?string $account = null, ?string $agentSymbol = null, bool $requireTelemetry = false): array
     {
+        return $this->readUsage($token, $account, $agentSymbol, $requireTelemetry);
+    }
+
+    public function usageForMeshRun(string $agentSymbol, string $reset, int $run, string $id): array
+    {
+        return $this->readUsage(null, null, $agentSymbol, true, compact('id', 'reset', 'run'));
+    }
+
+    /** @param  array{id: string, reset: string, run: int}|null  $creditMeshAllowance */
+    private function readUsage(?string $token, ?string $account, ?string $agentSymbol, bool $requireTelemetry, ?array $creditMeshAllowance = null): array
+    {
         $state = $this->readState($this->directory(false).'/budget.json', $requireTelemetry);
         try {
-            return $this->usageReport($state, $token, $account, $agentSymbol);
+            return $this->usageReport($state, $token, $account, $agentSymbol, $creditMeshAllowance);
         } catch (\TypeError $exception) {
             if (! $requireTelemetry) {
                 throw $exception;
@@ -414,7 +571,7 @@ class RequestBudget
         }
     }
 
-    private function usageReport(array $state, ?string $token, ?string $account, ?string $agentSymbol): array
+    private function usageReport(array $state, ?string $token, ?string $account, ?string $agentSymbol, ?array $creditMeshAllowance = null): array
     {
         $now = $this->now();
         $result = [];
@@ -437,6 +594,19 @@ class RequestBudget
             $symbol = strtoupper($agentSymbol);
             $entry = $this->pruneAgentWindow($state['agents']['agent:'.$symbol] ?? [], $now);
             $caps = self::agentCaps();
+            $mesh = array_filter($state['mesh_allowances'] ?? [], fn ($entry) => $entry['agent'] === $symbol && $entry['expires'] > $now);
+            if ($creditMeshAllowance !== null) {
+                ['id' => $id, 'reset' => $reset, 'run' => $run] = $creditMeshAllowance;
+                if (isset($mesh[$id]) && $mesh[$id]['reset'] === $reset && ($mesh[$id]['run'] ?? null) === $run) {
+                    unset($mesh[$id]);
+                }
+            }
+            $result['mesh'] = [
+                'outstanding' => array_sum(array_column($mesh, 'remaining')),
+                'used' => count(array_filter(array_merge(...array_values(array_filter(
+                    $state['mesh_requests'] ?? [], fn ($key) => str_starts_with($key, $symbol.':'), ARRAY_FILTER_USE_KEY,
+                ))), fn ($at) => $at > $now - 3600)),
+            ];
             $result['agent'] = [
                 'symbol' => $symbol,
                 'tier2_4_last_hour' => count($entry['t24']),

@@ -101,7 +101,7 @@ class CampaignSafety
         return $grant->arm() !== null && ($grant->pause_reason === 'arm_loss_stop' || ($limit !== null && $net < -$limit));
     }
 
-    public function check(AutomationRun $run, Agent $agent, ?string $command = null, array $arguments = [], bool $boundaryOnly = false): void
+    public function check(AutomationRun $run, Agent $agent, ?string $command = null, array $arguments = [], bool $boundaryOnly = false, ?int $preflightPrice = null): void
     {
         if (! $run->campaign_episode_id) {
             return;
@@ -132,8 +132,60 @@ class CampaignSafety
         if ($this->windDown($episode) && in_array($command, ['buy', 'buy_ship', 'mine', 'mine_survey'], true)) {
             throw new GameException('Wind-down only permits selling aboard.');
         }
+        if (in_array($run->strategy, ['scout', ...CampaignProbeBootstrap::STRATEGIES], true)) {
+            $operatorShip = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->first();
+            if ($operatorShip && app(CampaignFleet::class)->isProbe($operatorShip->snapshot)) {
+                if ($operatorShip->stationed_waypoint !== null) {
+                    throw new GameException('Campaign pool authority changed: operator stationed this probe.');
+                }
+                if (isset(CampaignMesh::policy($episode)['saturation']) && ! isset($run->plan['mesh_work'])) {
+                    if ($run->strategy === 'scout') {
+                        throw new GameException('Mesh pool scouts require governed campaign authority.');
+                    }
+                    $yard = $run->plan['shipyard'];
+                    if (in_array($command, ['orbit', 'navigate'], true) && $operatorShip->snapshot['nav']['waypointSymbol'] !== $yard) {
+                        if ($command === 'navigate' && ($arguments['waypointSymbol'] ?? null) !== $yard) {
+                            throw new GameException('Purchase route destination changed.');
+                        }
+                        if ($run->strategy === 'buy_hauler') {
+                            throw new GameException('Remote mesh hauler purchase requires current movement admission.');
+                        }
+                        app(CampaignMesh::class)->assertFloor($episode, $agent, $operatorShip->snapshot);
+                    }
+                }
+            }
+        }
+        if (! empty($run->plan['sell_only']) && in_array($command, ['orbit', 'navigate'], true)) {
+            $recovery = app(CampaignRecovery::class);
+            $age = $recovery->verifiedBuyerAge($episode, $run->plan);
+            if ($age !== null) {
+                $recovery->verifiedBuyer($agent, $run->plan['market'], $run->plan['recovery_good'], $age);
+            }
+        }
+        if (isset($run->plan['mesh_work']) && in_array($command, ['orbit', 'dock', 'navigate'], true)) {
+            $ship = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->firstOrFail()->snapshot;
+            $mesh = app(CampaignMesh::class);
+            $destination = $run->plan['destination'] ?? $run->plan['shipyard'];
+            $target = $arguments['waypointSymbol'] ?? null;
+            if (CampaignGrant::pendingFor($grant->user_id, $agent->name)->exists()
+                || $this->windDown($episode) || ($command === 'navigate' && $target !== $destination)) {
+                throw new GameException('Mesh movement authority or destination changed.');
+            }
+            if ($run->plan['mesh_work'] === 'yard') {
+                $mesh->assertYardCutoff($episode, $agent, $ship, $destination);
+            }
+            if ($command === 'navigate' || $ship['nav']['waypointSymbol'] !== $destination) {
+                $travel = app(MeshPlanner::class)->route($mesh->model($episode, $agent), $ship, $destination, $mesh->secondsLeft($episode, $grant));
+                if ($travel === null || $travel + CampaignMesh::TRANSPORT_CUTOFF_MARGIN_SECONDS >= now()->diffInSeconds($run->expires_at, false)) {
+                    throw new GameException('Mesh movement cannot finish before the run cutoff.');
+                }
+                $mesh->assertDeparture($episode, $agent, $ship, $destination, $run->id, $run->plan['mesh_work'] !== 'market');
+            } else {
+                $mesh->assertPool($episode, $agent, $ship);
+            }
+        }
         if ($command === 'buy_ship' || ($command === 'refuel' && in_array($run->strategy, CampaignProbeBootstrap::STRATEGIES, true))) {
-            $this->purchaseBoundary($run, $agent, $grant, $episode, $command, $arguments, $boundaryOnly);
+            $this->purchaseBoundary($run, $agent, $grant, $episode, $command, $arguments, $boundaryOnly, $preflightPrice);
         }
         if (in_array($command, ['buy', 'sell'], true)) {
             app(FleetClaims::class)->follow($run, $episode, $command, $arguments);
@@ -153,7 +205,7 @@ class CampaignSafety
         }
     }
 
-    private function purchaseBoundary(AutomationRun $run, Agent $agent, CampaignGrant $grant, CampaignEpisode $episode, string $command, array $arguments, bool $boundaryOnly): void
+    private function purchaseBoundary(AutomationRun $run, Agent $agent, CampaignGrant $grant, CampaignEpisode $episode, string $command, array $arguments, bool $boundaryOnly, ?int $preflightPrice): void
     {
         $hauler = $run->strategy === 'buy_hauler';
         $type = $hauler ? 'SHIP_LIGHT_HAULER' : 'SHIP_PROBE';
@@ -196,6 +248,21 @@ class CampaignSafety
         [$owned, $target] = $hauler ? [$buyer->ownedHaulers($episode, $agent), $policy['max_haulers']] : $bootstrap->probeTarget($episode, $agent, $policy);
         if ($owned + $bootstrap->reservations($agent, $run->id, undeliveredType: $type)->count() >= $target) {
             throw new GameException('Purchase target already reached.');
+        }
+        if (! $hauler && isset($policy['mesh']['saturation'])) {
+            $pin = $run->plan['mesh_purchase'] ?? [];
+            if (($pin['grant'] ?? null) !== $grant->id || ($pin['revision'] ?? null) !== $grant->revision_hash
+                || ($pin['reset'] ?? null) !== $agent->reset_id || ($pin['purchaser'] ?? null) !== $run->ship_symbol
+                || ($pin['yard'] ?? null) !== $yard || ($pin['cutoff'] ?? 0) <= now()->timestamp
+                || $this->priceReview($grant, $episode, $agent)) {
+                throw new GameException('Mesh purchase authority or price review changed before spend.');
+            }
+            $paid = (int) ($run->totals['fuel_cost'] ?? 0);
+            $current = app(ProbeYardSelector::class)->check($episode, $agent, $ship, $yard, $policy,
+                $preflightPrice ?? $maxTotal, $reserve, $run->id, $paid, max(0, $run->plan['route']['fuel_ceiling'] - $paid), $pin['ceiling']);
+            if ($maxTotal > $current['ceiling'] || ($preflightPrice !== null && $preflightPrice > $maxTotal)) {
+                throw new GameException('Mesh intended spend exceeds the current Tier-'.$current['gain']['tier'].' ceiling.');
+            }
         }
         if ($boundaryOnly) {
             if ($hauler) {

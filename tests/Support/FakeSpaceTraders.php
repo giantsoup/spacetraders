@@ -242,7 +242,8 @@ final class FakeSpaceTraders
         $world['calls'][] = ['method' => $request->method(), 'path' => $path];
         if ($request->method() === 'GET') {
             foreach ($world['ships'] as &$arriving) {
-                if ($arriving['nav']['status'] === 'IN_TRANSIT' && strtotime($arriving['nav']['route']['arrival']) <= now()->timestamp) {
+                if ($arriving['nav']['status'] === 'IN_TRANSIT' && strtotime($arriving['nav']['route']['arrival']) <= now()->timestamp
+                    && ! in_array($arriving['symbol'], $world['hold_arrivals'] ?? [], true)) {
                     $arriving['nav']['status'] = 'IN_ORBIT';
                 }
             }
