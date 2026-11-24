@@ -163,6 +163,15 @@ await withBrowserVerification({ root, php, output, engine: true, resultFile: 're
     assert.equal((await world()).writes.length, writes);
     steps.push('End session cancels an unsent manual preview; restart replays no approval');
     // A fresh mining run from the port can be stopped before any new reservation.
+    const yields = JSON.parse(await fs.readFile(path.join(root, 'resources/data/mining-yields.json'), 'utf8'));
+    await world(w => {
+        const existing = new Set(w.goods.map(g => g.symbol));
+        for (const symbol of yields) {
+            if (!existing.has(symbol)) {
+                w.goods.push({ symbol, type: 'EXCHANGE', tradeVolume: 20, supply: 'MODERATE', purchasePrice: 60, sellPrice: 40 });
+            }
+        }
+    });
     await investigate('Mining');
     await stage('Select LOCAL-1 X1-TEST-ROCK via X1-TEST-PORT');
     await post('Preview automation', '/preview');
