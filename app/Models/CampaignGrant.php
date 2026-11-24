@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
 use LogicException;
 
 class CampaignGrant extends Model
@@ -75,6 +76,24 @@ class CampaignGrant extends Model
     {
         return static::whereNull('slot')->whereNotNull('limits->arm')->whereNull('revoked_at')->whereNull('superseded_at')
             ->when($agentSymbol !== null && $agentSymbol !== '', fn ($q) => $q->where('agent_symbol', strtoupper($agentSymbol)));
+    }
+
+    /** Populate the request's first_episode_reset_id snapshot before creating any new episodes. */
+    public static function loadFirstEpisodeResets(Collection $grants): void
+    {
+        $missing = $grants->filter(fn (self $grant) => ! isset($grant->arm()['reset_id'])
+            && ! array_key_exists('first_episode_reset_id', $grant->getAttributes()));
+        if ($missing->isEmpty()) {
+            return;
+        }
+
+        $firstEpisodes = CampaignEpisode::whereIn('campaign_grant_id', $missing->pluck('id'))
+            ->groupBy('campaign_grant_id')->selectRaw('min(id)');
+        $resets = CampaignEpisode::whereIn('id', $firstEpisodes)->pluck('reset_id', 'campaign_grant_id');
+        foreach ($missing as $grant) {
+            $grant->setAttribute('first_episode_reset_id', $resets->get($grant->id));
+            $grant->syncOriginalAttribute('first_episode_reset_id');
+        }
     }
 
     public function revision(): CampaignRevision

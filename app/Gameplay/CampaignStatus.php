@@ -8,9 +8,12 @@ use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
+use App\Models\CampaignRevision;
 use App\Models\CampaignSample;
+use App\Models\GameObservation;
 use App\Models\LocalEngine;
 use App\Models\Ship;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 
@@ -79,15 +82,113 @@ class CampaignStatus
         $episode = $grant ? CampaignEpisode::where('campaign_grant_id', $grant->id)->latest('id')->first() : null;
         $decision = $grant ? CampaignEvent::where('campaign_grant_id', $grant->id)->where('kind', 'decision')->latest('id')->first() : null;
 
+        $pending = $grant ? CampaignGrant::pendingFor($grant->user_id, $grant->resolvedAgentSymbol())->value('id') : null;
+
         return compact('grant', 'episode', 'decision') + [
+            'busy_reason' => $pending && $grant?->slot === 1 ? app(CampaignControl::class)->busyReason($grant) : null,
             'problems' => $grant?->slot === 1 ? app(CampaignHealth::class)->problems($grant) : [],
-            'pending_grant' => $grant ? CampaignGrant::pendingFor($grant->user_id, $grant->resolvedAgentSymbol())->value('id') : null,
+            'pending_grant' => $pending,
         ];
+    }
+
+    public function saturation(?int $user, ?string $agentSymbol, ?CampaignRevision $candidate = null): array
+    {
+        $agentSymbol ??= $candidate?->body['agent']['symbol'];
+        $authority = $this->authority($user, $agentSymbol);
+        $grant = $authority['grant'];
+        if ($grant?->slot !== 1 && ! $candidate) {
+            return ['enabled' => false, 'reason' => 'no_primary_campaign'];
+        }
+        $symbol = $agentSymbol ?? $grant?->resolvedAgentSymbol();
+        if (! $symbol || ($candidate && strtoupper($symbol) !== $candidate->body['agent']['symbol'])) {
+            throw new GameException('The candidate revision does not match this agent.');
+        }
+        $operator = $user ?? $grant?->user_id;
+        $control = app(CampaignControl::class);
+        $agent = $operator ? $control->agent($operator, $symbol) : null;
+        if (! $agent) {
+            return ['enabled' => (bool) $candidate, 'active_purchase_authority' => false, 'agent' => $symbol, 'reason' => 'no_current_agent'];
+        }
+        if ($grant?->slot !== 1 && $candidate) {
+            $grant = new CampaignGrant(['user_id' => $agent->user_id, 'agent_symbol' => $agent->name, 'slot' => 1,
+                'campaign_revision_id' => $candidate->id, 'revision_hash' => $candidate->content_hash, 'limits' => $candidate->body['limits']]);
+        }
+        $episode = $grant->exists ? $control->currentEpisode($grant, $agent) : null;
+        $revision = $candidate ?? $grant->revision();
+        if (! isset($revision->body['fleet']['haulers'])) {
+            return ['enabled' => false, 'active_purchase_authority' => false, 'reason' => 'no_saturation_policy'];
+        }
+        if (! $episode) {
+            $known = CampaignEpisode::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->latest('id')->first();
+            $schedule = CampaignDirector::cachedSchedule();
+            $next = $known?->next_reset_at ?? (($schedule['reset_id'] ?? null) === $agent->reset_id ? CarbonImmutable::parse($schedule['next_reset']) : null);
+            if (! $next) {
+                return ['enabled' => true, 'active_purchase_authority' => false, 'agent' => $agent->name, 'reset_id' => $agent->reset_id,
+                    'revision' => $revision->content_hash, 'reason' => 'reset_schedule_unknown'];
+            }
+            $episode = new CampaignEpisode(['agent_id' => $agent->id, 'campaign_grant_id' => $grant->id, 'reset_id' => $agent->reset_id, 'next_reset_at' => $next,
+                'opened_at' => $known?->opened_at ?? now(), 'phase' => $revision->body['phases'][0]['id'], 'state' => $known?->state ?? []]);
+        }
+        if ($candidate) {
+            $episode = clone $episode;
+            $episode->setRelation('policyRevision', $candidate);
+            $episode->phase = $this->candidatePhase($episode, $agent, $candidate);
+        }
+
+        return app(CampaignSaturation::class)->evaluate($grant, $episode, $agent, revision: $candidate);
+    }
+
+    private function candidatePhase(CampaignEpisode $episode, Agent $agent, CampaignRevision $revision): string
+    {
+        $phases = $revision->body['phases'];
+        if ($episode->next_reset_at->lte(now()->addHour()) && in_array('wind_down', array_column($phases, 'id'), true)) {
+            return 'wind_down';
+        }
+        $command = app(CampaignFleet::class)->role($episode, 'command', pin: false);
+        $system = $command['nav']['systemSymbol'] ?? null;
+        $markets = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->get()
+            ->filter(fn (GameObservation $market) => FleetClaims::systemOf($market->symbol) === $system && ! empty($market->data['tradeGoods']));
+        $metrics = ['minutes_elapsed_gte' => $episode->opened_at->diffInMinutes(now(), false),
+            'markets_observed_gte' => $markets->count(), 'hours_to_reset_lte' => now()->diffInHours($episode->next_reset_at, false),
+            'credits_gte' => $agent->credits, 'positive_spread_gte' => null];
+        $index = 0;
+        while (isset($phases[$index + 1], $phases[$index]['exit'])) {
+            $gate = $phases[$index]['exit'];
+            if ($command && $metrics['positive_spread_gte'] === null && in_array('positive_spread_gte', CampaignPlaybook::gateMetrics($gate), true)
+                && ! app(CampaignPlaybook::class)->passes($gate, $metrics)) {
+                $candidate = new CampaignGrant(['campaign_revision_id' => $revision->id, 'limits' => $revision->body['limits']]);
+                $considered = [];
+                try {
+                    $metrics['positive_spread_gte'] = collect(app(CampaignTrade::class)->rank($candidate, $episode, $agent, $command, $considered, persist: false))
+                        ->where('score', '>=', CampaignTrade::FLOOR_CR_PER_MINUTE)->count();
+                } catch (GameException) {
+                    $metrics['positive_spread_gte'] = 0;
+                }
+            }
+            if (! app(CampaignPlaybook::class)->passes($gate, $metrics)) {
+                break;
+            }
+            $index++;
+        }
+
+        return $phases[$index]['id'];
+    }
+
+    public function saturationSummary(?CampaignGrant $grant, ?CampaignEpisode $episode, ?Agent $agent): ?array
+    {
+        if (! $grant || ! $episode || ! $agent || ! isset($grant->revision()->body['fleet']['haulers'])) {
+            return null;
+        }
+        $result = app(CampaignSaturation::class)->evaluate($grant, $episode, $agent);
+
+        return ['active_purchase_authority' => $result['active_purchase_authority'], 'hold' => $result['hold'],
+            'coverage' => $result['gates']['G3'], 'pacing' => $result['gates']['G9'], 'owned_haulers' => $result['owned_haulers'],
+            'directory_gaps' => $result['mesh']['directory_gaps']];
     }
 
     public function read(?int $userId = null, ?string $agentSymbol = null): array
     {
-        ['grant' => $grant, 'episode' => $episode, 'decision' => $decision, 'problems' => $problems, 'pending_grant' => $pending] = $this->authority($userId, $agentSymbol);
+        ['grant' => $grant, 'episode' => $episode, 'decision' => $decision, 'problems' => $problems, 'pending_grant' => $pending, 'busy_reason' => $busy] = $this->authority($userId, $agentSymbol);
         $agent = $episode ? Agent::find($episode->agent_id) : null;
         $revision = $grant?->revision();
         $engine = LocalEngine::find(1);
@@ -105,7 +206,7 @@ class CampaignStatus
         }
         $roles = array_flip(Arr::only($episode?->state['role_ships'] ?? [], ['command', 'probe']));
         if ($episode && app(CampaignFleet::class)->poolEnabled($episode)) {
-            foreach (app(CampaignFleet::class)->probes($episode) as $probe) {
+            foreach (app(CampaignFleet::class)->probes($episode, pin: false) as $probe) {
                 $roles[$probe['symbol']] = 'probe';
             }
         }
@@ -120,8 +221,9 @@ class CampaignStatus
                 'pause_reason' => $grant->pause_reason, 'wait_reason' => $grant->wait_reason,
                 'expires_at' => $grant->expires_at?->toIso8601String(), 'last_directed_at' => $grant->last_directed_at?->toIso8601String(),
                 'revision' => ['name' => $revision->name, 'version' => $revision->body['version'], 'hash' => substr($grant->revision_hash, 0, 12)],
-                'pending_grant' => $pending,
+                'pending_grant' => $pending, 'busy_reason' => $busy,
             ] : null,
+            'saturation' => $this->saturationSummary($grant, $episode, $agent),
             'episode' => $episode ? [
                 'id' => $episode->id, 'reset_id' => $episode->reset_id, 'phase' => $episode->phase,
                 'opened_at' => $episode->opened_at->toIso8601String(), 'next_reset_at' => $episode->next_reset_at->toIso8601String(),

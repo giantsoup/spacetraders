@@ -160,7 +160,9 @@ class ArmDirectorTest extends TestCase
     {
         $c0 = app(CampaignControl::class)->approve(app(CampaignPlaybook::class)->import($this->body()), $this->user);
         $arm = $this->arm('T1b', 'LOCAL-3');
-        $this->partialMock(SpaceTradersApi::class)->shouldReceive('resetSchedule')->times(5)->andThrow(new \TypeError('synthetic-secret-must-not-be-logged'));
+        $api = \Mockery::mock(SpaceTradersApi::class, [app(SpaceTradersClient::class)])->makePartial();
+        $this->app->instance(SpaceTradersApi::class, $api);
+        $api->shouldReceive('agent')->times(5)->andThrow(new \TypeError('synthetic-secret-must-not-be-logged'));
         for ($attempt = 1; $attempt <= 5; $attempt++) {
             // C0 was directed this pass window, so the scheduler gives the pass to the arm.
             $c0->update(['last_directed_at' => now()]);
@@ -183,8 +185,35 @@ class ArmDirectorTest extends TestCase
         $this->assertSame('0', DB::table('game_runtime')->where('key', 'arm_director_failures:'.$arm->id)->value('value'));
     }
 
+    public function test_a_shared_arm_harvest_failure_leaves_arm_streaks_and_the_rest_of_dispatch_intact(): void
+    {
+        config(['gameplay.arms_every_pass' => true]);
+        $primary = app(CampaignControl::class)->approve(app(CampaignPlaybook::class)->import($this->body()), $this->user);
+        $arm = $this->arm('T1b', 'LOCAL-3');
+        $streak = 'arm_director_failures:'.$arm->id;
+        DB::table('game_runtime')->insert([['key' => 'director_turn', 'value' => 'arms'], ['key' => $streak, 'value' => '2']]);
+        $this->partialMock(CampaignTrade::class)->shouldReceive('harvestArms')->once()->with($this->agent->reset_id)
+            ->andReturnUsing(function () use ($primary) {
+                $this->assertNull($primary->fresh()->last_directed_at);
+                ShipAction::create(['agent_id' => $this->agent->id, 'ship_symbol' => 'LOCAL-3', 'key' => 'harvest-failure-action',
+                    'reset_id' => $this->agent->reset_id, 'command' => 'dock', 'state' => 'pending', 'origin' => 'manual',
+                    'expires_at' => now()->addMinute(), 'arguments' => []]);
+                throw new \TypeError('Synthetic shared arm harvest failure.');
+            });
+
+        $this->artisan('spacetraders:dispatch-due')->assertSuccessful();
+
+        $this->assertSame('2', DB::table('game_runtime')->where('key', $streak)->value('value'));
+        $this->assertDatabaseMissing('campaign_events', ['kind' => 'director_error']);
+        $this->assertSame(now()->toDateTimeString(), $primary->fresh()->last_directed_at?->toDateTimeString());
+        $action = ShipAction::where('key', 'harvest-failure-action')->firstOrFail();
+        $this->assertNotNull($action->last_dispatched_at);
+        Queue::assertPushed(ExecuteShipCommand::class, fn (ExecuteShipCommand $job) => $job->actionId === $action->id);
+    }
+
     public function test_arms_tick_only_on_passes_where_c0_did_not_attempt(): void
     {
+        config(['gameplay.arms_every_pass' => false]);
         $this->arm('T1b', 'LOCAL-3');
         $mock = $this->partialMock(CampaignDirector::class);
         $mock->shouldReceive('tick')->once()->andReturn(true);
@@ -194,6 +223,7 @@ class ArmDirectorTest extends TestCase
 
     public function test_arms_tick_when_c0_is_throttled(): void
     {
+        config(['gameplay.arms_every_pass' => false]);
         $this->arm('T1b', 'LOCAL-3');
         $mock = $this->partialMock(CampaignDirector::class);
         $mock->shouldReceive('tick')->once()->andReturn(false);
@@ -204,6 +234,7 @@ class ArmDirectorTest extends TestCase
     #[DataProvider('dispatcherIntervals')]
     public function test_slow_c0_and_arms_alternate_when_both_are_due(int $interval): void
     {
+        config(['gameplay.arms_every_pass' => false]);
         $grant = $this->c0();
         $arm = $this->arm('T1b', 'LOCAL-3');
         $schedule = app(SpaceTradersApi::class)->resetSchedule();
@@ -365,7 +396,7 @@ class ArmDirectorTest extends TestCase
         $revision = app(CampaignPlaybook::class)->import($this->armBody());
         $this->artisan('campaign:arm', ['revision' => $revision->id, 'ship' => 'LOCAL-3', 'label' => 'T1b', '--hours' => 12, '--max-load' => 5000])->assertSuccessful();
         $grant = CampaignGrant::liveArms()->firstOrFail();
-        $this->assertSame(['label' => 'T1b', 'ship' => 'LOCAL-3', 'follow' => null, 'max_net_loss' => 50000, 'max_load_spend' => 5000, 'exposure_share' => 0.5], $grant->arm());
+        $this->assertSame(['label' => 'T1b', 'ship' => 'LOCAL-3', 'follow' => null, 'max_net_loss' => 50000, 'max_load_spend' => 5000, 'exposure_share' => 0.5, 'reset_id' => $this->agent->reset_id], $grant->arm());
         $this->assertNull($grant->slot);
         $this->assertTrue($grant->expires_at->between(now()->addHours(12)->subMinute(), now()->addHours(12)->addMinute()));
         $this->artisan('campaign:arms')->expectsOutputToContain('"label": "T1b"')->assertSuccessful();

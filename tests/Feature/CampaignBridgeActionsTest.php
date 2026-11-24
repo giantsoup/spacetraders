@@ -6,8 +6,10 @@ use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\AutomationRunner;
 use App\Gameplay\Bridge\BridgeActions;
 use App\Gameplay\Bridge\BridgeDrain;
+use App\Gameplay\Bridge\BridgeScope;
 use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignDirector;
+use App\Gameplay\CampaignFleet;
 use App\Gameplay\CampaignHealth;
 use App\Gameplay\CampaignPlaybook;
 use App\Gameplay\EngineGate;
@@ -99,6 +101,98 @@ class CampaignBridgeActionsTest extends TestCase
         $this->assertSame(now()->toIso8601String(), $episode->fresh()->state['losses_reviewed_at']);
         $this->assertSame('0', DB::table('game_runtime')->where('key', 'arm_director_failures:'.$arm->id)->value('value'));
         $this->assertDatabaseHas('campaign_events', ['campaign_grant_id' => $arm->id, 'kind' => 'resume']);
+    }
+
+    public function test_prior_reset_arms_are_excluded_from_current_fleet_reviews(): void
+    {
+        [$primary, $agent] = $this->campaign();
+        [$prior] = $this->arm($primary, $agent);
+        [$current] = $this->arm($primary, $agent, 'R2');
+        $limits = $prior->limits;
+        $limits['arm']['reset_id'] = '2026-11-15';
+        DB::table('campaign_grants')->where('id', $prior->id)->update(['limits' => json_encode($limits, JSON_THROW_ON_ERROR)]);
+        app(CampaignControl::class)->pause($prior, 'reset_mismatch');
+
+        $scope = BridgeScope::resolve($this->operator->id, $agent->name);
+        $this->assertSame([$current->id], $scope->arms->pluck('id')->all());
+        $this->assertNull($this->review($agent, 'arm_resume', $prior));
+        $this->submit($agent, $this->review($agent, 'fleet_pause'))->assertSessionHasNoErrors();
+        $this->assertSame('reset_mismatch', $prior->fresh()->pause_reason);
+        $this->assertSame('operator_pause', $current->fresh()->pause_reason);
+    }
+
+    public function test_fleet_resume_releases_a_current_hold_after_an_old_arm_finished_draining(): void
+    {
+        [$primary, $oldAgent] = $this->campaign();
+        [$arm, $episode] = $this->arm($primary, $oldAgent);
+        // Exercise legacy ownership inferred from the arm's first episode.
+        $limits = $arm->limits;
+        $limits['arm']['reset_id'] = null;
+        DB::table('campaign_grants')->where('id', $arm->id)->update(['limits' => json_encode($limits, JSON_THROW_ON_ERROR)]);
+        $control = app(CampaignControl::class);
+        $control->drainPause($arm, 'host_rate_limits', $episode);
+        $episode->update(['state->draining' => null]);
+        $control->pause($arm, 'drain_pause:host_rate_limits', $episode);
+        app(AgentSynchronizer::class)->archivePreviousWorlds($oldAgent->newCollection([$oldAgent]), '2026-11-23');
+        $budget = app(RequestBudget::class);
+        $this->assertTrue($oldAgent->fresh()->isArchived());
+        $this->assertFalse($budget->isDraining($oldAgent->name));
+
+        $agent = $this->operator->agents()->create([
+            'name' => $oldAgent->name, 'faction' => 'VOID', 'token' => 'replacement-fixture-token',
+            'reset_id' => '2026-11-23', 'canonical_identity' => AgentSynchronizer::identity('2026-11-23', $oldAgent->name),
+        ]);
+        $this->episode($primary, $agent, $this->ship($agent, $agent->name.'-1', 'COMMAND'));
+        $budget->drainAgent($agent->name, true, $agent->reset_id);
+
+        $review = $this->reviewFromPage($agent, 'fleet_resume');
+        $this->assertSame([], $review['blockers']);
+        $reply = $this->submit($agent, $review)->assertSessionHasNoErrors();
+        $this->assertStringContainsString('The budget hold cleared.', $reply->getSession()->get('status'));
+        $this->assertFalse($budget->isDraining($agent->name));
+        $this->assertSame('drain_pause:host_rate_limits', $arm->fresh()->pause_reason);
+
+        $budget->drainAgent($agent->name, true, $agent->reset_id);
+        $hold = $budget->drainHoldIds();
+        $control->revokeArm($arm);
+        $this->assertSame($hold, $budget->drainHoldIds());
+    }
+
+    public function test_fleet_resume_preserves_the_hold_when_a_draining_arms_reset_is_unknown(): void
+    {
+        [$primary, $agent] = $this->campaign();
+        $agent->update(['reset_id' => '2026-11-23', 'canonical_identity' => AgentSynchronizer::identity('2026-11-23', $agent->name)]);
+        $this->episode($primary, $agent, Ship::where('agent_id', $agent->id)->sole());
+        $arm = CampaignGrant::create([
+            'user_id' => $primary->user_id, 'agent_symbol' => $agent->name,
+            'campaign_revision_id' => $primary->campaign_revision_id, 'revision_hash' => $primary->revision_hash,
+            'limits' => ['arm' => ['label' => 'R1', 'ship' => $agent->name.'-2', 'reset_id' => null]],
+            'paused_at' => now(), 'pause_reason' => 'drain_pause:host_rate_limits',
+        ]);
+        $budget = app(RequestBudget::class);
+        $budget->drainAgent($agent->name, true, $agent->reset_id);
+        $hold = $budget->drainHoldIds();
+
+        $review = $this->reviewFromPage($agent, 'fleet_resume');
+        $this->assertContains('drain_reset_unknown', array_column($review['blockers'], 'code'));
+        $this->submit($agent, $review)->assertSessionHasErrors('bridge');
+        $this->assertFalse(app(CampaignControl::class)->releaseDrainIfUnused($agent->name, $hold[$agent->name]));
+        $this->assertSame($hold, $budget->drainHoldIds());
+        $this->assertSame('drain_pause:host_rate_limits', $arm->fresh()->pause_reason);
+    }
+
+    public function test_primary_resume_requires_review_of_mismatched_ship_purchase_outside_role_ships(): void
+    {
+        [$primary, $agent] = $this->campaign();
+        [, , $ship] = $this->arm($primary, $agent);
+        $purchase = $this->action($agent, $ship->symbol, 'confirmed', review: true);
+        $purchase->update(['command' => 'buy_ship', 'outcome' => ['configuration_mismatch' => true]]);
+        app(CampaignControl::class)->pause($primary, 'uncertain_action');
+
+        $review = $this->review($agent, 'fleet_resume');
+        $this->assertContains('configuration_mismatch', array_column($review['blockers'], 'code'));
+        $this->submit($agent, $review)->assertSessionHasErrors('bridge');
+        $this->assertSame('uncertain_action', $primary->fresh()->pause_reason);
     }
 
     public function test_arm_resume_review_shows_the_latest_stored_director_error(): void
@@ -674,6 +768,47 @@ class CampaignBridgeActionsTest extends TestCase
         }
     }
 
+    public function test_fleet_resume_batches_legacy_arm_resets_and_preserves_unresolved_reservations(): void
+    {
+        $this->travelTo(now()->setDate(2026, 11, 22)->setTime(12, 0));
+        [$primary, $agent, $episode] = $this->campaign(playbook: 'weekly-probe-bootstrap.yaml');
+        $this->campaign('GIANTSOUP');
+        config(['gameplay.request_budget_enabled' => true]);
+        $control = app(CampaignControl::class);
+        $control->drainPause($primary, 'host_rate_limits');
+        $expected = [$primary->id];
+        for ($index = 1; $index <= 6; $index++) {
+            [$arm] = $this->arm($primary, $agent, 'R'.$index);
+            DB::table('campaign_grants')->where('id', $arm->id)->update(['limits->arm->reset_id' => null]);
+            $control->drainPause($arm, 'host_rate_limits');
+            $expected[] = $arm->id;
+        }
+        [$unresolved, $unresolvedEpisode, $reservedShip] = $this->arm($primary, $agent, 'R7');
+        DB::table('campaign_grants')->where('id', $unresolved->id)->update(['limits->arm->reset_id' => null]);
+        $unresolvedEpisode->delete();
+        $reservedShip->update(['snapshot->registration->role' => 'SATELLITE', 'snapshot->cargo->units' => 8]);
+        $freeProbe = $this->ship($agent, $agent->name.'-9', 'SATELLITE');
+
+        $url = '/campaign/bridge?agent='.$agent->name;
+        $version = $this->get($url)->assertOk()->inertiaPage()['version'];
+        DB::enableQueryLog();
+        try {
+            $review = $this->get($url.'&review=fleet_resume', [
+                'X-Inertia' => 'true', 'X-Inertia-Version' => $version, 'X-Inertia-Partial-Data' => 'reviews',
+                'X-Inertia-Partial-Component' => 'Campaign/Bridge/Brief',
+            ])->assertOk()->json('props.reviews.fleet_resume');
+            $queries = count(DB::getQueryLog());
+        } finally {
+            DB::disableQueryLog();
+        }
+        $this->assertSame($expected, array_keys($review['expected']));
+        $this->assertSame([], $review['blockers']);
+        $this->assertLessThanOrEqual(40, $queries, "Fleet resume review ran $queries queries.");
+        $this->submit($agent, $review)->assertSessionHasNoErrors();
+        $this->assertFalse($primary->fresh()->isDraining());
+        $this->assertSame([$freeProbe->symbol], array_column(app(CampaignFleet::class)->probes($episode), 'symbol'));
+    }
+
     public static function fleetReviewQueryFixtures(): array
     {
         return [
@@ -871,7 +1006,9 @@ class CampaignBridgeActionsTest extends TestCase
         config(['gameplay.enabled' => true]);
         $this->partialMock(EngineGate::class)->shouldReceive('enabled')->andReturn(true)->getMock()
             ->shouldReceive('session')->andReturn('fixture-engine');
-        $this->partialMock(SpaceTradersApi::class)->shouldReceive('resetSchedule')->once()->andThrow(new \TypeError('fixture failure'));
+        $api = $this->partialMock(SpaceTradersApi::class);
+        $api->shouldReceive('resetSchedule')->once()->andReturn(['reset_id' => self::RESET, 'next_reset' => now()->addDay()->toIso8601String()]);
+        $api->shouldReceive('agent')->once()->andThrow(new \TypeError('fixture failure'));
         $this->assertTrue(app(CampaignDirector::class)->tickArms());
         $this->assertSame('director_error', $arm->fresh()->pause_reason);
         $this->submit($agent, $review)->assertSessionHasErrors(['bridge' => 'This changed since you opened the review. Review it again.']);

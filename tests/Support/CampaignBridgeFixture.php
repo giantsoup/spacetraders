@@ -21,9 +21,9 @@ class CampaignBridgeFixture
 
     public const BUYER = 'X1-SK70-D46';
 
-    public static function seed(User $operator, ?string $reset = null): array
+    public static function seed(User $operator, ?string $reset = null, string $playbook = 'weekly-default.yaml'): array
     {
-        $main = self::primary($operator, 'GIANTSOUP', $reset);
+        $main = self::primary($operator, 'GIANTSOUP', $reset, $playbook);
         $other = self::primary($operator, 'SOUPFLEET', $reset);
         $other['primary']->update(['paused_at' => now()->subMinutes(8), 'pause_reason' => 'drain_pause:host_rate_limits']);
 
@@ -110,9 +110,9 @@ class CampaignBridgeFixture
         }
     }
 
-    public static function primary(User $operator, string $symbol, ?string $reset = null): array
+    public static function primary(User $operator, string $symbol, ?string $reset = null, string $playbook = 'weekly-default.yaml'): array
     {
-        $revision = app(CampaignPlaybook::class)->import(str_replace('GIANTSOUP', $symbol, file_get_contents(base_path('campaigns/weekly-default.yaml'))));
+        $revision = app(CampaignPlaybook::class)->import(str_replace('GIANTSOUP', $symbol, file_get_contents(base_path('campaigns/'.$playbook))));
         $primary = app(CampaignControl::class)->approve($revision, $operator, now()->toImmutable()->addDays(5));
         $primary->update(['last_directed_at' => now()->subMinutes(2)]);
         $reset ??= now()->subDays(2)->toDateString();
@@ -150,6 +150,7 @@ class CampaignBridgeFixture
     private static function ship(Agent $agent, int $number, string $role, string $frame): Ship
     {
         return Ship::create(['agent_id' => $agent->id, 'symbol' => $agent->name.'-'.$number, 'observed_at' => now()->subMinutes(2), 'snapshot' => [
+            'symbol' => $agent->name.'-'.$number,
             'registration' => ['role' => $role], 'frame' => ['symbol' => $frame],
             'nav' => ['systemSymbol' => 'X1-SK70', 'waypointSymbol' => self::SOURCE, 'status' => 'DOCKED'],
             'fuel' => ['current' => 85, 'capacity' => 100], 'cargo' => ['units' => 0, 'capacity' => 120, 'inventory' => []],

@@ -106,17 +106,17 @@ class FleetMetrics
     }
 
     /** One director pass. Outcomes: started (a run was started), awaiting_run (a run is active), waiting (anything else: wait, pause, idle). */
-    public static function directorPass(?string $ship, string $outcome, int $requests): void
+    public static function directorPass(?string $ship, string $outcome, int $requests, array $extra = []): void
     {
-        self::event('director_pass', $ship, $outcome, $requests);
+        self::event('director_pass', $ship, $outcome, $requests, $extra);
     }
 
-    private static function event(string $kind, ?string $ship, string $outcome, int $requests): void
+    private static function event(string $kind, ?string $ship, string $outcome, int $requests, array $extra = []): void
     {
         try {
             $agentSymbol = self::resolveAgentSymbol($ship, self::$agent);
             self::$events[] = ['kind' => $kind, 'ship' => $ship ?? 'shared', 'agent_symbol' => $agentSymbol, 'scope' => 'agent',
-                'value' => $requests, 'data' => json_encode(['outcome' => $outcome, 'requests' => $requests]), 'created_at' => now()->toDateTimeString()];
+                'value' => $requests, 'data' => json_encode(['outcome' => $outcome, 'requests' => $requests] + $extra), 'created_at' => now()->toDateTimeString()];
             self::touch();
         } catch (\Throwable) {
         }
@@ -165,7 +165,7 @@ class FleetMetrics
         return self::$agent;
     }
 
-    public static function count(string $method, string $path = '', ?string $category = null, ?string $agentSymbol = null, bool $host = false): void
+    public static function count(string $method, string $path = '', ?string $category = null, ?string $agentSymbol = null, bool $host = false, ?bool $ordinary = null): void
     {
         self::$total++;
         try {
@@ -173,7 +173,7 @@ class FleetMetrics
         } catch (\Throwable) {
             $category = null;
         }
-        self::tally('requests', strtolower($method) === 'get' ? 'reads' : 'writes', $category, $agentSymbol, $host);
+        self::tally('requests', strtolower($method) === 'get' ? 'reads' : 'writes', $category, $agentSymbol, $host, $ordinary);
     }
 
     /** Counts a non-request occurrence (lock_collision, deferral) against the current ship. */
@@ -206,7 +206,7 @@ class FleetMetrics
         return null;
     }
 
-    private static function tally(string $kind, string $field, ?string $category = null, ?string $agentSymbol = null, bool $host = false): void
+    private static function tally(string $kind, string $field, ?string $category = null, ?string $agentSymbol = null, bool $host = false, ?bool $ordinary = null): void
     {
         try {
             $ship = self::$ship ?? 'shared';
@@ -216,6 +216,9 @@ class FleetMetrics
             $bucketKey = implode('|', [$ship, $resolvedAgent, $scope, $workload]);
             self::$pending[$kind][$bucketKey] ??= ['ship' => $ship, 'agent_symbol' => $resolvedAgent, 'scope' => $scope, 'workload' => $workload, 'reads' => 0, 'writes' => 0];
             self::$pending[$kind][$bucketKey][$field]++;
+            if ($ordinary !== null) {
+                self::$pending[$kind][$bucketKey]['ordinary'] = (self::$pending[$kind][$bucketKey]['ordinary'] ?? 0) + (int) $ordinary;
+            }
             if ($category !== null) {
                 self::$pending[$kind][$bucketKey]['categories'][$category] = (self::$pending[$kind][$bucketKey]['categories'][$category] ?? 0) + 1;
             }
@@ -254,6 +257,9 @@ class FleetMetrics
                     $ship = $counts['ship'];
                     $agentSymbol = $counts['agent_symbol'] ?? null;
                     $payload = ['reads' => $counts['reads'], 'writes' => $counts['writes']];
+                    if (isset($counts['ordinary'])) {
+                        $payload['ordinary'] = $counts['ordinary'];
+                    }
                     if (isset($counts['categories'])) {
                         $payload['categories'] = $counts['categories'];
                     }
@@ -277,9 +283,12 @@ class FleetMetrics
         try {
             $lags = array_values(array_filter((array) ($t['lags'] ?? []), 'is_numeric'));
             $data = ['director' => $t['director'] ?? null, 'arms' => $t['arms'] ?? null, 'dispatch' => $t['dispatch'] ?? null,
-                'dispatched' => count($lags), 'dispatch_lag' => self::median($lags),
+                'dispatched' => count($lags), 'dispatch_lag' => self::median($lags), 'dispatch_lags' => $lags,
+                'pre_dispatched' => $t['pre_dispatched'] ?? 0, 'arms_directed' => $t['arms_directed'] ?? 0,
+                'engine_session_id' => $t['engine_session_id'] ?? null,
+                'pre_dispatch' => $t['pre_dispatch'] ?? null, 'handover_refresh_seconds' => $t['handover_refresh_seconds'] ?? 0,
                 'queue_depth' => DB::table(config('queue.connections.database.table', 'jobs'))->where('queue', 'spacetraders')->count()];
-            $total = array_sum(array_map('floatval', array_filter([$data['director'], $data['arms'], $data['dispatch']], 'is_numeric')));
+            $total = array_sum(array_map('floatval', array_filter([$data['director'], $data['arms'], $data['dispatch'], $data['pre_dispatch']], 'is_numeric')));
             DB::table('fleet_metrics')->insert(['kind' => 'scheduler', 'ship' => null, 'agent_symbol' => null, 'scope' => 'host',
                 'value' => $total, 'data' => json_encode($data), 'created_at' => now()->toDateTimeString()]);
         } catch (\Throwable) {

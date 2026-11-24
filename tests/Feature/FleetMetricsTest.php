@@ -74,7 +74,7 @@ class FleetMetricsTest extends TestCase
         FleetMetrics::flush();
         $rows = DB::table('fleet_metrics')->where('kind', 'requests')->get()->keyBy('ship');
         $this->assertEquals(2, $rows['LOCAL-1']->value);
-        $this->assertSame(['reads' => 1, 'writes' => 1, 'categories' => ['agent' => 1, 'write:dock' => 1]], json_decode($rows['LOCAL-1']->data, true));
+        $this->assertSame(['reads' => 1, 'writes' => 1, 'ordinary' => 1, 'categories' => ['agent' => 1, 'write:dock' => 1]], json_decode($rows['LOCAL-1']->data, true));
         $this->assertEquals(1, $rows['LOCAL-2']->value);
         $this->assertEquals(1, $rows['shared']->value);
     }

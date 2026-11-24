@@ -7,6 +7,7 @@ use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignGrant;
+use App\Models\CampaignRevision;
 use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
@@ -21,12 +22,13 @@ class CampaignFleet
             return null;
         }
 
-        return $this->probePolicyForGrant(CampaignGrant::find($episode->campaign_grant_id));
+        return $this->primaryProbePolicy($episode);
     }
 
-    private function probePolicyForGrant(?CampaignGrant $grant): ?array
+    private function primaryProbePolicy(CampaignEpisode $episode, ?CampaignGrant $grant = null, ?CampaignRevision $revision = null): ?array
     {
-        $policy = $grant?->revision()->body['probes'] ?? null;
+        $policy = $episode->getRelationValue('policyRevision')?->body['probes']
+            ?? ($revision ?? ($grant ?? CampaignGrant::find($episode->campaign_grant_id))?->revision())?->body['probes'] ?? null;
         if (! is_array($policy)) {
             return null;
         }
@@ -36,6 +38,7 @@ class CampaignFleet
             'max_price' => $policy['max_price'],
             'min_working_capital' => $policy['min_working_capital'],
             'pool' => (bool) ($policy['pool'] ?? true),
+            'mesh' => $policy['mesh'] ?? null,
         ];
     }
 
@@ -57,27 +60,21 @@ class CampaignFleet
      *
      * @return list<array>
      */
-    public function probes(CampaignEpisode $episode, bool $pinRoles = true): array
+    public function probes(CampaignEpisode $episode, bool $pin = true): array
     {
         if ($this->armShip($episode) !== null) {
             return [];
         }
         if (! $this->poolEnabled($episode)) {
-            $single = $this->role($episode, 'probe', $pinRoles);
+            $single = $this->role($episode, 'probe', $pin);
 
             return $single ? [$single] : [];
         }
         $agent = Agent::findOrFail($episode->agent_id);
         $ships = Ship::where('agent_id', $episode->agent_id)->orderBy('symbol')->get();
-        $command = $this->role($episode, 'command', $pinRoles);
+        $command = $this->role($episode, 'command', $pin);
 
-        return $this->eligiblePool($agent, $ships, $this->liveArmShips($agent), $command['nav']['systemSymbol'] ?? null);
-    }
-
-    private function liveArmShips(Agent $agent): array
-    {
-        return CampaignGrant::liveArms($agent->name)->where('user_id', $agent->user_id)->get()
-            ->map(fn (CampaignGrant $grant) => $grant->arm()['ship'] ?? null)->filter()->all();
+        return $this->eligiblePool($agent, $ships, $this->reservedArmShips($agent, $episode->reset_id), $command['nav']['systemSymbol'] ?? null);
     }
 
     private function eligiblePool(Agent $agent, Collection $ships, array $armShips, ?string $homeSystem): array
@@ -94,7 +91,7 @@ class CampaignFleet
             ->all();
     }
 
-    public function role(CampaignEpisode $episode, string $role, bool $pinRoles = true): ?array
+    public function role(CampaignEpisode $episode, string $role, bool $pin = true): ?array
     {
         $ships = Ship::where('agent_id', $episode->agent_id)->orderBy('symbol')->get();
         $state = $episode->state ?? [];
@@ -104,12 +101,12 @@ class CampaignFleet
             return $role === 'command' ? $ships->firstWhere('symbol', $arm)?->snapshot : null;
         }
         if ($role === 'probe' && $this->poolEnabled($episode)) {
-            $pool = $this->probes($episode, $pinRoles);
+            $pool = $this->probes($episode, $pin);
             if ($pool === []) {
                 return null;
             }
             $pinnedSymbol = $state['role_ships']['probe'] ?? null;
-            $activeShips = AutomationRun::where('active_agent_id', $episode->agent_id)->pluck('ship_symbol')->all();
+            $activeShips = AutomationRun::where('active_agent_id', $episode->agent_id)->where('reset_id', $episode->reset_id)->pluck('ship_symbol')->all();
             $idle = array_values(array_filter($pool, fn ($ship) => ($ship['nav']['status'] ?? null) !== 'IN_TRANSIT'
                 && ! in_array($ship['symbol'], $activeShips, true)
                 && ! $this->pendingForShip($episode, $ship['symbol'])));
@@ -117,7 +114,7 @@ class CampaignFleet
                 ?? ($idle[0] ?? null)
                 ?? collect($pool)->firstWhere('symbol', $pinnedSymbol)
                 ?? $pool[0];
-            if ($pinRoles && ! $pinnedSymbol && ! $episode->closed_at) {
+            if ($pin && $episode->exists && ! $pinnedSymbol && ! $episode->closed_at) {
                 CampaignEpisode::whereKey($episode->id)->whereNull('closed_at')->update(['state->role_ships->probe' => $chosen['symbol']]);
                 $episode->refresh();
             }
@@ -126,8 +123,8 @@ class CampaignFleet
         }
 
         return $role === 'probe'
-            ? $this->legacyProbe($episode, $ships, $pinRoles)
-            : $this->preferredRole($episode, $ships, $role, $pinRoles);
+            ? $this->legacyProbe($episode, $ships, $pin)
+            : $this->preferredRole($episode, $ships, $role, $pin);
     }
 
     private function legacyProbe(CampaignEpisode $episode, Collection $ships, bool $pinRoles, ?Agent $agent = null, ?bool $draining = null): ?array
@@ -163,7 +160,7 @@ class CampaignFleet
         $used = AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('started_at')
             ->whereIn('ship_symbol', $candidates->pluck('symbol'))->oldest('id')->value('ship_symbol');
         $ship = $candidates->firstWhere('symbol', $used) ?? $candidates->first();
-        if ($pinRoles && $ship && ! $episode->closed_at) {
+        if ($pinRoles && $episode->exists && $ship && ! $episode->closed_at) {
             CampaignEpisode::whereKey($episode->id)->whereNull('closed_at')->update(['state->role_ships->'.$role => $ship->symbol]);
             $episode->refresh();
         }
@@ -182,16 +179,71 @@ class CampaignFleet
         return ($grant ?? CampaignGrant::find($episode->campaign_grant_id))?->arm()['ship'] ?? null;
     }
 
-    public function symbols(CampaignEpisode $episode, bool $pinRoles = true): array
+    public function symbols(CampaignEpisode $episode, bool $pin = true): array
     {
         if ($this->poolEnabled($episode)) {
-            $command = $this->role($episode, 'command', $pinRoles)['symbol'] ?? null;
-            $probes = array_column($this->probes($episode, $pinRoles), 'symbol');
+            $command = $this->role($episode, 'command', $pin)['symbol'] ?? null;
+            $probes = array_column($this->probes($episode, $pin), 'symbol');
 
             return array_values(array_unique(array_filter([$command, ...$probes])));
         }
 
-        return array_values(array_filter(array_map(fn ($role) => $this->role($episode, $role, $pinRoles)['symbol'] ?? null, ['command', 'probe'])));
+        return array_values(array_filter(array_map(fn ($role) => $this->role($episode, $role, $pin)['symbol'] ?? null, ['command', 'probe'])));
+    }
+
+    /** Resolve the primary's roles from an already loaded fleet without pinning ships. */
+    public function primaryRoleSymbols(
+        Agent $agent,
+        CampaignEpisode $episode,
+        CampaignGrant $grant,
+        CampaignRevision $revision,
+        Collection $ships,
+        Collection $liveArms,
+    ): array {
+        $command = $this->preferredRole($episode, $ships, 'command', false);
+        if ($this->primaryProbePolicy($episode, $grant, $revision)['pool'] ?? false) {
+            $probes = $this->eligiblePool($agent, $ships, $this->reservedArmShips($agent, $episode->reset_id, $liveArms), $command['nav']['systemSymbol'] ?? null);
+        } else {
+            $probe = $this->legacyProbe($episode, $ships, false, $agent, BridgeDrain::marker($grant, $episode) !== null);
+            $probes = $probe === null ? [] : [$probe];
+        }
+
+        return ['command' => $command['symbol'] ?? null, 'probes' => array_column($probes, 'symbol')];
+    }
+
+    public function currentArms(Agent $agent, ?Collection $grants = null): Collection
+    {
+        $grants ??= CampaignGrant::liveArms($agent->name)->where('user_id', $agent->user_id)->orderBy('id')->get();
+        $resets = $this->armResets($grants, $agent->reset_id);
+
+        return $grants->filter(fn (CampaignGrant $grant) => $resets[$grant->id] !== null && $resets[$grant->id] === $agent->reset_id);
+    }
+
+    /** @return Collection<int, ?string> Reset ownership keyed by arm grant ID. */
+    public function armResets(Collection $grants, ?string $activeReset): Collection
+    {
+        if ($activeReset === null) {
+            return $grants->mapWithKeys(fn (CampaignGrant $grant) => [$grant->id => null]);
+        }
+        CampaignGrant::loadFirstEpisodeResets($grants);
+        $needsSchedule = $grants->contains(function (CampaignGrant $grant) {
+            $stamp = $grant->arm()['reset_id'] ?? $grant->getAttributes()['first_episode_reset_id'] ?? null;
+
+            return ! is_string($stamp) || $stamp === '';
+        });
+        $schedule = $needsSchedule ? CampaignDirector::cachedSchedule() : null;
+
+        return $grants->mapWithKeys(fn (CampaignGrant $grant) => [$grant->id => CampaignDirector::armReset($grant, $activeReset, $schedule)]);
+    }
+
+    public function reservedArmShips(Agent $agent, string $reset, ?Collection $grants = null): array
+    {
+        $grants ??= CampaignGrant::liveArms($agent->name)->where('user_id', $agent->user_id)->get();
+        $resets = $this->armResets($grants, $reset);
+
+        return $grants
+            ->filter(fn (CampaignGrant $grant) => in_array($resets[$grant->id], [$reset, null], true))
+            ->map(fn (CampaignGrant $grant) => $grant->arm()['ship'])->unique()->values()->all();
     }
 
     /** @return array{ships: array<string, array|null>, commandIdentified: bool, roleSymbols: list<string>} */
@@ -206,8 +258,8 @@ class CampaignFleet
             return ['ships' => $ships, 'commandIdentified' => true, 'roleSymbols' => array_keys($ships)];
         }
 
-        $pooled = (bool) ($this->probePolicyForGrant($grant)['pool'] ?? false);
-        $armShips = $pooled || $draining ? $this->liveArmShips($agent) : [];
+        $pooled = (bool) ($this->primaryProbePolicy($episode, $grant)['pool'] ?? false);
+        $armShips = $pooled || $draining ? $this->reservedArmShips($agent, $episode->reset_id) : [];
         if ($pooled) {
             $ships += array_column($this->eligiblePool($agent, $snapshots, $armShips, $command['nav']['systemSymbol'] ?? null), null, 'symbol');
         } else {

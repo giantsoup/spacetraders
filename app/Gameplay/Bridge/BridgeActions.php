@@ -3,6 +3,7 @@
 namespace App\Gameplay\Bridge;
 
 use App\Gameplay\CampaignControl;
+use App\Gameplay\CampaignFleet;
 use App\Gameplay\CampaignSafety;
 use App\Gameplay\CampaignTrade;
 use App\Gameplay\GameException;
@@ -219,7 +220,11 @@ class BridgeActions
     private function scope(int $userId, string $symbol, ?Agent $agent): array
     {
         $primary = CampaignGrant::primaryFor($userId, $symbol)->firstOrFail();
-        $grants = collect([$primary])->merge(CampaignGrant::liveArms($symbol)->where('user_id', $userId)->orderBy('id')->get())->keyBy('id');
+        $liveArms = CampaignGrant::liveArms($symbol)->where('user_id', $userId)->orderBy('id')->get();
+        $armResets = app(CampaignFleet::class)->armResets($liveArms, $agent?->reset_id ?: null);
+        $arms = $agent?->reset_id ? $liveArms->filter(fn ($arm) => $armResets[$arm->id] === $agent->reset_id) : $liveArms;
+        $unknownDrain = $liveArms->contains(fn ($arm) => $armResets[$arm->id] === null && BridgeDrain::marker($arm, null) !== null);
+        $grants = collect([$primary])->merge($arms)->keyBy('id');
         $episodes = $agent?->reset_id ? CampaignEpisode::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
             ->whereIn('campaign_grant_id', $grants->keys())->whereNull('closed_at')->orderByDesc('id')->get()->keyBy('campaign_grant_id') : collect();
         $markers = $grants->map(fn ($grant) => BridgeDrain::marker($grant, $episodes[$grant->id] ?? null))
@@ -236,7 +241,7 @@ class BridgeActions
             ->selectRaw("campaign_episode_id, coalesce(sum(json_extract(data, '$.net')), 0) as net")
             ->groupBy('campaign_episode_id')->pluck('net', 'campaign_episode_id')->all();
 
-        return compact('symbol', 'agent', 'primary', 'grants', 'episodes', 'markers', 'flag', 'holdId', 'holdUnknown', 'authorityEvents', 'nets');
+        return compact('symbol', 'agent', 'primary', 'grants', 'episodes', 'markers', 'unknownDrain', 'flag', 'holdId', 'holdUnknown', 'authorityEvents', 'nets');
     }
 
     private function net(array $scope, CampaignGrant $grant): int
@@ -248,7 +253,7 @@ class BridgeActions
 
     private function isDrained(array $scope): bool
     {
-        return $scope['markers'] !== [] || $scope['flag'];
+        return $scope['markers'] !== [] || $scope['unknownDrain'] || $scope['flag'];
     }
 
     private function resetBlockers(array $scope): array
@@ -261,6 +266,13 @@ class BridgeActions
 
     private function holdBlockers(array $scope): array
     {
+        if ($scope['unknownDrain']) {
+            return [[
+                'code' => 'drain_reset_unknown',
+                'message' => 'An arm has a drain marker and its wipe is unconfirmed. Confirm its wipe before resuming the fleet.',
+            ]];
+        }
+
         return $scope['holdUnknown'] ? [[
             'code' => 'drain_pressure',
             'message' => 'Request budget hold status is unavailable. Reopen this review once it can be read.',

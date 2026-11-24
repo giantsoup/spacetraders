@@ -1,6 +1,8 @@
 <?php
 
 use App\Gameplay\CampaignControl;
+use App\Gameplay\CampaignDirector;
+use App\Gameplay\CampaignHaulerPurchase;
 use App\Gameplay\CampaignPlaybook;
 use App\Gameplay\CampaignProbeBootstrap;
 use App\Gameplay\CampaignReport;
@@ -10,6 +12,7 @@ use App\Gameplay\GameException;
 use App\Gameplay\GateRecon;
 use App\Gameplay\HostLock;
 use App\Gameplay\ReconReport;
+use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
@@ -44,28 +47,30 @@ Artisan::command('campaign:approve {revision} {--user=} {--expires=} {--replace-
     $this->info('Grant: '.$grant->id.($grant->slot === 2 ? ' (pending safe point)' : ' (active)'));
 })->purpose('Approve a revision for unattended execution');
 
-Artisan::command('campaign:release-probe-purchase {action} {--user=} {--dry-run}', function (CampaignProbeBootstrap $bootstrap) {
-    try {
-        $userId = $this->option('user') ?: config('gameplay.operator_id');
-        if (! $userId && User::count() !== 1) {
-            throw new GameException('Select the operator with --user=<id>.');
-        }
-        $user = $userId ? User::find($userId) : User::first();
-        if (! $user) {
-            throw new GameException('Operator not found.');
-        }
-        $action = ShipAction::find($this->argument('action'));
-        if (! $action) {
-            throw new GameException('Action not found.');
-        }
-        $result = $bootstrap->releasePurchase($action, $user, (bool) $this->option('dry-run'));
-    } catch (GameException $exception) {
-        $this->line(json_encode(['released' => false, 'reason' => $exception->getMessage()], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+foreach (['probe' => 'SHIP_PROBE', 'hauler' => 'SHIP_LIGHT_HAULER'] as $kind => $type) {
+    Artisan::command('campaign:release-'.$kind.'-purchase {action} {--user=} {--dry-run}', function (CampaignProbeBootstrap $bootstrap) use ($type) {
+        try {
+            $userId = $this->option('user') ?: config('gameplay.operator_id');
+            if (! $userId && User::count() !== 1) {
+                throw new GameException('Select the operator with --user=<id>.');
+            }
+            $user = $userId ? User::find($userId) : User::first();
+            if (! $user) {
+                throw new GameException('Operator not found.');
+            }
+            $action = ShipAction::find($this->argument('action'));
+            if (! $action) {
+                throw new GameException('Action not found.');
+            }
+            $result = $bootstrap->releasePurchase($action, $user, (bool) $this->option('dry-run'), $type);
+        } catch (GameException $exception) {
+            $this->line(json_encode(['released' => false, 'reason' => $exception->getMessage()], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 
-        return 1;
-    }
-    $this->line(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
-})->purpose('Release a probe purchase only after syncing the agent and reviewing that it never reached the server; uses stored evidence only');
+            return 1;
+        }
+        $this->line(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+    })->purpose('Release a '.$kind.' purchase after stored evidence review');
+}
 
 $operatorId = function ($command): ?int {
     $id = $command->option('user') ?: config('gameplay.operator_id');
@@ -78,6 +83,40 @@ $operatorId = function ($command): ?int {
 
     return User::value('id');
 };
+
+Artisan::command('campaign:ack-hauler-pacing {action} {--user=} {--dry-run}', function (CampaignHaulerPurchase $purchase) use ($operatorId) {
+    try {
+        $user = User::find($operatorId($this)) ?? throw new GameException('Operator not found.');
+        $action = ShipAction::find($this->argument('action')) ?? throw new GameException('Action not found.');
+        $ack = $purchase->acknowledgePacing($action, $user, (bool) $this->option('dry-run'));
+        $this->line(json_encode(['action_id' => $action->id, 'dry_run' => (bool) $this->option('dry-run'), 'pacing_acknowledged' => $ack], JSON_THROW_ON_ERROR));
+
+        return 0;
+    } catch (GameException $exception) {
+        $this->error($exception->getMessage());
+
+        return 1;
+    }
+})->purpose('Acknowledge pacing for one conclusively attributed automatic hauler purchase');
+
+Artisan::command('campaign:saturation {--agent=} {--revision=} {--json}', function (CampaignStatus $status) {
+    $value = $this->option('revision');
+    $candidate = $value === null ? null : (ctype_digit($value) ? CampaignRevision::find($value) : CampaignRevision::where('content_hash', strtolower($value))->first());
+    if ($value !== null && ! $candidate) {
+        throw new GameException('Imported campaign revision not found.');
+    }
+    $user = config('gameplay.operator_id') ?: (User::count() === 1 ? User::value('id') : null);
+    $result = $status->saturation($user, $this->option('agent'), $candidate);
+    if ($this->option('json')) {
+        $this->line(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+
+        return;
+    }
+    $this->line('Saturation '.($result['agent'] ?? '').' '.($result['hold']['reason'] ?? $result['reason'] ?? (($result['can_purchase'] ?? false) ? 'purchase ready' : 'evaluating candidate policy')));
+    foreach ($result['gates'] ?? [] as $gate => $evidence) {
+        $this->line($gate.' '.($evidence['pass'] ? 'pass' : ($evidence['reason'] ?? 'held')));
+    }
+})->purpose('Evaluate system saturation from stored evidence');
 
 Artisan::command('campaign:pause {--agent=} {--user=}', function (CampaignControl $control, HostLock $lock) use ($operatorId) {
     $lock->retry('campaign', fn () => $control->pause($control->resolvePrimary($operatorId($this), $this->option('agent')), 'operator_pause'));
@@ -95,7 +134,7 @@ Artisan::command('campaign:revoke {--agent=} {--user=} {--all}', function (Campa
 })->purpose('Revoke active and pending campaign authority');
 
 Artisan::command('campaign:status {--agent=} {--user=}', function (CampaignStatus $status) use ($operatorId) {
-    ['grant' => $grant, 'episode' => $episode, 'decision' => $event, 'problems' => $problems, 'pending_grant' => $pending] = $status->authority($operatorId($this), $this->option('agent'));
+    ['grant' => $grant, 'episode' => $episode, 'decision' => $event, 'problems' => $problems, 'pending_grant' => $pending, 'busy_reason' => $busy] = $status->authority($operatorId($this), $this->option('agent'));
     if (! $grant) {
         $this->line('No campaign grant.');
 
@@ -105,7 +144,8 @@ Artisan::command('campaign:status {--agent=} {--user=}', function (CampaignStatu
     $this->line(json_encode(['engine_heartbeat_stale' => $stale, 'grant' => $grant->id, 'revision_hash' => $grant->revision_hash, 'operator_user' => $grant->user_id,
         'active' => $grant->available(), 'expires_at' => $grant->expires_at?->toIso8601String(), 'episode' => $episode?->id, 'phase' => $episode?->phase,
         'pause_reason' => $grant->pause_reason, 'wait_reason' => $grant->wait_reason, 'last_decision' => $event ? ['at' => $event->created_at->toIso8601String(), 'choice' => $event->data['choice'] ?? null, 'run_id' => $event->data['run_id'] ?? null, 'rejections' => $event->data['rejections'] ?? []] : null,
-        'pending_grant' => $pending], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+        'pending_grant' => $pending, 'busy_reason' => $busy,
+        'saturation' => $status->saturationSummary($grant, $episode, $episode ? Agent::find($episode->agent_id) : null)], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 
     return $problems ? 1 : 0;
 })->purpose('Show campaign authority and latest decision without contacting SpaceTraders');
@@ -129,15 +169,37 @@ Artisan::command('campaign:report {episode?} {--output=}', function (CampaignRep
     $this->line('JSON: '.$base.'.json');
 })->purpose('Write the campaign episode report as Markdown and JSON');
 
-/** Live arm grants matching a label, or all of them with --all. */
-$arms = function ($command) {
+$armReset = function (CampaignGrant $grant): array {
+    $agent = app(CampaignControl::class)->agent($grant->user_id, $grant->resolvedAgentSymbol());
+    $schedule = CampaignDirector::cachedSchedule();
+    $active = $schedule['reset_id'] ?? $agent?->reset_id;
+    $own = $active ? CampaignDirector::armReset($grant, $active, $schedule)
+        : ($grant->arm()['reset_id'] ?? CampaignEpisode::where('campaign_grant_id', $grant->id)->oldest('id')->value('reset_id'));
+
+    return [$own, $active];
+};
+
+$arms = function ($command, bool $ackPacing = false) use ($operatorId, $armReset) {
     $label = $command->argument('label');
-    if (! $label && ! $command->option('all')) {
-        throw new GameException('Name an arm label or pass --all.');
+    $id = $command->option('grant');
+    $agent = $command->option('agent');
+    $all = $command->option('all');
+    if (($all && ($id !== null || $label !== null)) || ($ackPacing && $id === null)
+        || ($id !== null && ! ctype_digit((string) $id)) || (! $all && $label === null && $id === null)) {
+        throw new GameException('Select a label, an exact grant ID, or --all. Pacing acknowledgement requires an exact grant ID.');
     }
-    $grants = CampaignGrant::liveArms()->orderBy('id')->get()->filter(fn ($grant) => $command->option('all') || $grant->arm()['label'] === $label)->values();
-    if ($grants->isEmpty()) {
-        throw new GameException('No live arm matches.');
+    $userId = $operatorId($command);
+    $query = $ackPacing ? CampaignGrant::whereNotNull('limits->arm')->whereNull('superseded_at') : CampaignGrant::liveArms();
+    $grants = $query->where('user_id', $userId)->when($agent, fn ($query) => $query->where('agent_symbol', strtoupper($agent)))
+        ->when($id !== null, fn ($query) => $query->whereKey($id))->orderBy('id')->get()
+        ->filter(function (CampaignGrant $grant) use ($label, $armReset, $ackPacing) {
+            [$own, $active] = $armReset($grant);
+
+            return $active !== null && $own === $active && ($ackPacing || ! $grant->expires_at?->isPast())
+                && ($label === null || $grant->arm()['label'] === $label);
+        })->values();
+    if ($grants->isEmpty() || (! $all && $grants->count() !== 1)) {
+        throw new GameException('No unique current-reset arm matches. Use --agent or --grant to select it.');
     }
 
     return $grants;
@@ -157,45 +219,53 @@ Artisan::command('campaign:arm {revision} {ship} {label} {--follow=} {--hours=12
     $this->info('Arm grant: '.$grant->id.' '.$grant->arm()['label'].' on '.$grant->arm()['ship'].' until '.$grant->expires_at->toIso8601String());
 })->purpose('Approve one arm ship under its own campaign grant and episode');
 
-Artisan::command('campaign:arms', function () {
-    $rows = CampaignGrant::liveArms()->orderBy('id')->get()->map(function ($grant) {
+Artisan::command('campaign:arms {--all-resets}', function () use ($armReset) {
+    $rows = CampaignGrant::liveArms()->orderBy('id')->get()->map(function ($grant) use ($armReset) {
+        [$own, $active] = $armReset($grant);
+        if (! $this->option('all-resets') && ($grant->expires_at?->isPast() || ($own !== null && $active !== null && $own !== $active))) {
+            return null;
+        }
         $episode = CampaignEpisode::where('campaign_grant_id', $grant->id)->whereNull('closed_at')->latest('id')->first();
         $decision = CampaignEvent::where('campaign_grant_id', $grant->id)->where('kind', 'decision')->latest('id')->first();
         $run = $episode ? AutomationRun::where('campaign_episode_id', $episode->id)->whereNotNull('active_agent_id')->first() : null;
 
-        return ['label' => $grant->arm()['label'], 'ship' => $grant->arm()['ship'], 'follow' => $grant->arm()['follow'], 'grant' => $grant->id,
-            'active' => $grant->available(), 'expires_at' => $grant->expires_at?->toIso8601String(), 'pause_reason' => $grant->pause_reason, 'wait_reason' => $grant->wait_reason,
+        return ['label' => $grant->arm()['label'], 'ship' => $grant->arm()['ship'], 'follow' => $grant->arm()['follow'] ?? null, 'grant' => $grant->id,
+            'agent' => $grant->resolvedAgentSymbol(), 'reset_id' => $own ?: null, 'active' => $active !== null && $own === $active && $grant->available(),
+            'expired' => $grant->expires_at?->isPast() ?? false, 'expires_at' => $grant->expires_at?->toIso8601String(), 'pause_reason' => $grant->pause_reason, 'wait_reason' => $grant->wait_reason,
             'episode' => $episode?->id, 'phase' => $episode?->phase,
             'minutes_since_decision' => $decision ? round($decision->created_at->diffInMinutes(now()), 1) : null,
             'last_decision' => $decision ? ['at' => $decision->created_at->toIso8601String(), 'choice' => $decision->data['choice'] ?? null, 'run_id' => $decision->data['run_id'] ?? null, 'rejections' => $decision->data['rejections'] ?? []] : null,
             'active_run' => $run ? ['id' => $run->id, 'strategy' => $run->strategy, 'state' => $run->state->value, 'symbol' => $run->plan['symbol'] ?? null, 'market' => $run->plan['market'] ?? null] : null];
     });
-    $this->line(json_encode($rows->values()->all(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+    $this->line(json_encode($rows->filter()->values()->all(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 })->purpose('List live arm grants without contacting SpaceTraders');
 
-Artisan::command('campaign:arm-pause {label?} {--all}', function (CampaignControl $control, HostLock $lock) use ($arms) {
-    foreach ($arms($this) as $grant) {
-        $lock->retry('campaign', fn () => $control->pause($grant, 'operator_pause'));
-        $this->info('Arm '.$grant->arm()['label'].' paused.');
-    }
+Artisan::command('campaign:arm-pause {label?} {--all} {--agent=} {--grant=} {--user=}', function (CampaignControl $control, HostLock $lock) use ($arms) {
+    $lock->scoped('campaign', function () use ($arms, $control) {
+        foreach ($arms($this) as $grant) {
+            $control->pause($grant, 'operator_pause');
+            $this->info('Arm '.$grant->arm()['label'].' paused.');
+        }
+    }, 15);
 })->purpose('Pause arm authority and stop its runs');
 
-Artisan::command('campaign:arm-resume {label?} {--all}', function (CampaignControl $control) use ($arms) {
-    foreach ($arms($this) as $grant) {
-        try {
+Artisan::command('campaign:arm-resume {label?} {--all} {--agent=} {--grant=} {--user=}', function (CampaignControl $control, HostLock $lock) use ($arms) {
+    $lock->scoped('campaign', function () use ($arms, $control) {
+        foreach ($arms($this) as $grant) {
             $control->resumeArm($grant);
             $this->info('Arm '.$grant->arm()['label'].' resumed.');
-        } catch (GameException $exception) {
-            $this->error('Arm '.$grant->arm()['label'].': '.$exception->getMessage());
         }
-    }
+    }, 15);
 })->purpose('Resume paused arms after operator review');
 
-Artisan::command('campaign:arm-revoke {label?} {--all}', function (CampaignControl $control) use ($arms) {
-    foreach ($arms($this) as $grant) {
-        $control->revokeArm($grant);
-        $this->info('Arm '.$grant->arm()['label'].' revoked.');
-    }
+Artisan::command('campaign:arm-revoke {label?} {--all} {--agent=} {--grant=} {--user=} {--ack-pacing}', function (CampaignControl $control, HostLock $lock) use ($arms) {
+    $lock->scoped('campaign', function () use ($arms, $control) {
+        $ack = (bool) $this->option('ack-pacing');
+        foreach ($arms($this, $ack) as $grant) {
+            $control->revokeArm($grant, $ack);
+            $this->info('Arm '.$grant->arm()['label'].' revoked.');
+        }
+    }, 15);
 })->purpose('Revoke arm authority, stop its runs and close its episode');
 
 Artisan::command('recon:approve {--agent=} {--ship=} {--user=} {--dry-run} {--cash-floor=} {--envelope=} {--jump-exposure=} {--explore-until=} {--return-deadline=} {--cooldown-estimate-s=} {--max-dwell-minutes=} {--market-reads-per-visit=} {--catalogue-pages-per-system=} {--cash-wait-seconds=} {--ask-recheck-seconds=} {--evaluation-retry-seconds=} {--evaluation-retry-limit=} {--module-less-trial=} {--scaled-score-min=} {--scaled-margin-min=} {--confirm-max-age-min=}', function (GateRecon $recon) {

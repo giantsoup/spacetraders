@@ -2,7 +2,10 @@
 
 namespace App\Gameplay\Bridge;
 
+use App\Enums\ActionState;
 use App\Enums\RunState;
+use App\Gameplay\CampaignProbeBootstrap;
+use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignGrant;
 use App\Models\ShipAction;
@@ -42,10 +45,56 @@ final class BridgeWork
             return collect();
         }
 
-        return ShipAction::where('ship_actions.agent_id', $scope->agent->id)->where('ship_actions.reset_id', $scope->resetId)
+        return $scope->handoverActions?->filter(fn (ShipAction $action) => $action->state === ActionState::Uncertain || $action->review_required)
+            ?? self::actions($scope->agent);
+    }
+
+    public static function actions(Agent $agent, bool $includePending = false): Collection
+    {
+        return ShipAction::where('ship_actions.agent_id', $agent->id)->where('ship_actions.reset_id', $agent->reset_id)
             ->leftJoin('automation_runs as source_run', 'source_run.id', '=', 'ship_actions.automation_run_id')
-            ->where(fn ($query) => $query->where('ship_actions.state', 'uncertain')->orWhere('review_required', true))
-            ->get(['ship_actions.ship_symbol', 'ship_actions.state', 'review_required', 'source_run.campaign_episode_id']);
+            ->where(fn ($query) => $query->whereIn('ship_actions.state', $includePending ? ['pending', 'sending', 'uncertain'] : ['uncertain'])
+                ->orWhere('review_required', true))
+            ->get(['ship_actions.ship_symbol', 'ship_actions.state', 'review_required', 'source_run.campaign_episode_id',
+                'ship_actions.command', 'ship_actions.arguments']);
+    }
+
+    public static function hasHandoverWork(BridgeScope $scope): bool
+    {
+        if ($scope->agent === null) {
+            return false;
+        }
+
+        $symbols = $scope->primaryRoleSymbols;
+        foreach ($symbols as $symbol) {
+            $snapshot = $scope->ships->get($symbol)?->snapshot;
+            if (($snapshot['cargo']['units'] ?? 0) > 0 || ($snapshot['nav']['status'] ?? null) === 'IN_TRANSIT') {
+                return true;
+            }
+        }
+
+        $agentId = $scope->agent->id;
+        $openId = $scope->openEpisodes->get($scope->primary->id)?->id;
+        $episodeIds = $scope->episodes->where('campaign_grant_id', $scope->primary->id)->pluck('id');
+        if ($scope->handoverRuns->contains(function (AutomationRun $run) use ($agentId, $openId, $episodeIds, $symbols) {
+            $purchase = $run->agent_id === $agentId && in_array($run->strategy, CampaignProbeBootstrap::STRATEGIES, true);
+            $roleWork = in_array($run->ship_symbol, $symbols, true) || ($openId !== null && $run->campaign_episode_id === $openId);
+            $campaignWork = $run->agent_id === $agentId && $episodeIds->containsStrict($run->campaign_episode_id);
+
+            return $purchase || ($run->active_agent_id === $agentId && ($roleWork || $campaignWork));
+        })) {
+            return true;
+        }
+
+        return $scope->handoverActions?->contains(function (ShipAction $action) use ($openId, $episodeIds, $symbols) {
+            $pending = in_array($action->state, [ActionState::Pending, ActionState::Sending], true);
+
+            return ($pending || $action->state === ActionState::Uncertain)
+                && (in_array($action->ship_symbol, $symbols, true)
+                    || ($openId !== null && $action->campaign_episode_id === $openId)
+                    || ($pending && $episodeIds->containsStrict($action->campaign_episode_id))
+                    || ($action->command === 'buy_ship' && in_array($action->arguments['shipType'] ?? null, CampaignProbeBootstrap::PURCHASE_TYPES, true)));
+        }) ?? false;
     }
 
     public static function settlementStatus(AutomationRun $run, Collection $reviews): string

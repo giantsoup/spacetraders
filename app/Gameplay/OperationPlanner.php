@@ -19,7 +19,7 @@ class OperationPlanner
         }
     }
 
-    private function project(Agent $agent, array $ship, array $limits): array
+    public function project(Agent $agent, array $ship, array $limits, ?array $projectedQuotes = null): array
     {
         $home = $ship['nav']['waypointSymbol'];
         $destination = $limits['strategy'] === 'scout' ? $limits['destination'] : $limits['market'];
@@ -60,6 +60,10 @@ class OperationPlanner
         $returning['nav']['waypointSymbol'] = $destination;
         $returning['fuel']['current'] -= $outbound['outbound_fuel'];
         $oneWay = $limits['strategy'] === 'scout' && ! empty($limits['one_way']);
+        $observe = $limits['observe_kind'] ?? 'market';
+        if ($observe !== 'market' && ($observe !== 'shipyard' || ! $oneWay)) {
+            throw new GameException('Shipyard observation requires a one-way scout.');
+        }
         $return = $oneWay ? null : $this->fuel->leg($planner, $returning, $home, $limits['reserve'], listings: $listings);
         $fuelUnits = $outbound['outbound_fuel'] + ($return['outbound_fuel'] ?? 0);
         $fuelCeiling = ($oneWay ? $outbound['refuel_ceiling'] : $return['refuel_ceiling']) + $departureCeiling;
@@ -76,15 +80,24 @@ class OperationPlanner
                 throw new GameException('Observation trip refueling must fit the approved cash-loss bound.');
             }
             $listing = $listings->get($destination);
-            if (! $listing) {
-                throw new GameException('Fetch the remote goods directory before approving a price-observation visit. Hidden traits require separately approved scanning/charting support.');
+            if ($observe === 'shipyard') {
+                $point = $this->observation($agent, 'waypoint', $destination)?->data;
+                if (($point['systemSymbol'] ?? null) !== $ship['nav']['systemSymbol']
+                    || ! in_array('SHIPYARD', array_column($point['traits'] ?? [], 'symbol'), true)) {
+                    throw new GameException('A current same-system shipyard observation is required.');
+                }
+                $route['purpose'] = 'Verify detailed ship offers at '.$destination.'.';
+            } else {
+                if (! $listing) {
+                    throw new GameException('Fetch the remote goods directory before approving a price-observation visit. Hidden traits require separately approved scanning/charting support.');
+                }
+                $route['purpose'] = 'Observe prices of '.implode(', ', array_unique(array_column(array_merge($listing->data['imports'], $listing->data['exports'], $listing->data['exchange']), 'symbol'))).' at '.$destination.' to resolve buyer, trade or fuel comparisons.';
             }
-            $route['purpose'] = 'Observe prices of '.implode(', ', array_unique(array_column(array_merge($listing->data['imports'], $listing->data['exports'], $listing->data['exchange']), 'symbol'))).' at '.$destination.' to resolve buyer, trade or fuel comparisons.';
             $route['stop'] = 'One detailed observation, then return home; stop earlier on any limit or safety failure.';
             $route['information_benefit'] = 'Unknown. No chart reward or displaced earnings are assumed.';
         } else {
-            $ask = $this->quote($agent, $home, $limits['symbol']);
-            $bid = $this->quote($agent, $destination, $limits['symbol'], self::buyerAge($limits));
+            $ask = $projectedQuotes['ask'] ?? $this->quote($agent, $home, $limits['symbol']);
+            $bid = $projectedQuotes['bid'] ?? $this->quote($agent, $destination, $limits['symbol'], self::buyerAge($limits));
             $inventory = $limits['units'] * $ask['purchasePrice'];
             // Departure fuel refills the tank for later work, not this trade: it counts toward spending, not margin.
             $costs = app(TradeFuelCost::class)->estimate($agent, $fuelUnits, [$home, $destination], $fuelCeiling - $departureCeiling);
@@ -211,6 +224,15 @@ class OperationPlanner
             return $this->travel($ship, $destination);
         }
         if ($phase === 'observe') {
+            if (($plan['observe_kind'] ?? 'market') === 'shipyard') {
+                $yard = $this->observation($agent, 'shipyard', $destination);
+                $detailed = collect($yard?->data['ships'] ?? [])->contains(fn ($offer) => is_array($offer)
+                    && isset($offer['type'], $offer['purchasePrice']) && ShipCommandExecutor::configurationHash($offer) !== null);
+
+                return $yard && $yard->observed_at->gte($now->subSeconds(5)) && $detailed
+                    ? AutomationStep::trip()
+                    : AutomationStep::wait($now->addSeconds(5));
+            }
             $quote = $this->observation($agent, 'market', $destination);
             if (! $quote || empty($quote->data['tradeGoods']) || $quote->observed_at->lt($now->subSeconds(5))) {
                 return AutomationStep::blocked('Detailed prices still unavailable. The observation question remains unanswered.');

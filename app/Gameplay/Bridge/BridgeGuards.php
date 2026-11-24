@@ -108,10 +108,16 @@ class BridgeGuards
     public function resumeBlockers(CampaignGrant $grant, ?CampaignEpisode $episode, Agent $agent, int $net, ?BridgeArmEvidence $evidence): array
     {
         $blockers = [];
+        if ($grant->arm() && $grant->pause_reason === 'reset_mismatch') {
+            $blockers[] = $this->blocker('reset_mismatch', 'This arm does not have approval for the current wipe.');
+        }
         $draining = BridgeDrain::marker($grant, $episode) !== null;
         $arm = $grant->arm() ? $evidence?->forGrant($grant, $episode, $draining) : null;
         $recovery = $draining && $arm === null ? $this->recoveryFleet($agent, $grant, $episode) : null;
-        if ($arm['heldPrice'] ?? app(CampaignSafety::class)->priceReview($grant, $episode, $agent, fleet: $recovery['roleSymbols'] ?? null)) {
+        $safety = app(CampaignSafety::class);
+        if ($safety->purchaseConfigurationMismatch($grant, $agent)) {
+            $blockers[] = $this->blocker('configuration_mismatch', 'Review the ship purchase configuration on the flight deck.', $agent);
+        } elseif ($arm['heldPrice'] ?? $safety->priceReview($grant, $episode, $agent, fleet: $recovery['roleSymbols'] ?? null)) {
             $blockers[] = $this->blocker('uncertain_action', 'Review the held price on the flight deck.', $agent);
         }
         if ($grant->expires_at?->lte(now())) {

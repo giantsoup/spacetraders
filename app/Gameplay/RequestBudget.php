@@ -135,8 +135,16 @@ class RequestBudget
         return hash('sha256', base_path()).':'.strtoupper($symbol);
     }
 
+    private ?bool $ordinaryReservation = null;
+
+    public function usedOrdinaryCapacity(string $priority): bool
+    {
+        return $this->ordinaryReservation ?? self::tier($priority) > 1;
+    }
+
     public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75): void
     {
+        $this->ordinaryReservation = null;
         $caps = self::agentCaps();
         $agentSymbol = self::$currentAgent ?? (isset($caps['SHARED']) ? 'SHARED' : null);
         $key = $this->storeKey();
@@ -223,6 +231,7 @@ class RequestBudget
                     $bucket['usage']['wait_seconds'] += $waited;
                     $bucket['recent'][] = $now;
                 }
+                $this->ordinaryReservation = $tier > 1 || $borrow;
                 if ($tier === 1 && ! $borrow) {
                     $state['host_tiers']['t1'][] = $now;
                     if ($agentKey !== null) {

@@ -184,7 +184,9 @@ class FleetClaims
                 'system' => $claimedShip['nav']['systemSymbol'] ?? null];
         }
         $runs = AutomationRun::where('campaign_episode_id', $episode->id)->whereIn('strategy', ['trade', 'sell_aboard'])
-            ->where(fn ($query) => $query->whereNotNull('active_agent_id')->orWhere(fn ($preview) => $preview->where('state', 'preview')->where('expires_at', '>', now())))
+            ->where(fn ($query) => $query->whereNotNull('active_agent_id')->orWhere(fn ($preview) => $preview->where('state', 'preview')->where('expires_at', '>', now()))
+                ->orWhereIn('id', ShipAction::where('agent_id', $episode->agent_id)->where('reset_id', $episode->reset_id)
+                    ->whereIn('state', ['pending', 'sending', 'uncertain'])->whereNotNull('automation_run_id')->select('automation_run_id')))
             ->orderByDesc('id')->get();
         foreach ($runs as $run) {
             $ship = Ship::where('agent_id', $episode->agent_id)->where('symbol', $run->ship_symbol)->first()?->snapshot;

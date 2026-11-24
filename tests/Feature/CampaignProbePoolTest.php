@@ -16,6 +16,7 @@ use App\Gameplay\CreditAccounting;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\FuelPlanner;
 use App\Gameplay\GameException;
+use App\Gameplay\RequestDeferred;
 use App\Gameplay\ShipCommandExecutor;
 use App\Models\Agent;
 use App\Models\AutomationRun;
@@ -110,6 +111,32 @@ class CampaignProbePoolTest extends TestCase
                 $this->addToAssertionCount(1);
             }
         }
+    }
+
+    public function test_v6_remote_probe_preview_and_ranking_reject_a_stale_over_cap_price(): void
+    {
+        $yard = 'X1-TEST-YARDB';
+        $sync = app(AgentSynchronizer::class);
+        $sync->observe($this->agent, 'waypoint', $yard, ['symbol' => $yard, 'systemSymbol' => 'X1-TEST', 'type' => 'ORBITAL_STATION',
+            'x' => 4, 'y' => 0, 'traits' => [['symbol' => 'SHIPYARD']]], 'listing');
+        $observation = $sync->observe($this->agent, 'shipyard', $yard, ['shipTypes' => [['type' => 'SHIP_PROBE']], 'ships' => [$this->probeOffer(100000)]]);
+        $observation->update(['observed_at' => now()->subMinutes(31)]);
+        $grant = $this->approve($this->bootstrapBody(target: 2, maxPrice: 50000, minWorkingCapital: 0));
+        $episode = CampaignEpisode::create(['campaign_grant_id' => $grant->id, 'agent_id' => $this->agent->id,
+            'reset_id' => $this->agent->reset_id, 'start_credits' => 150000, 'phase' => 'earn',
+            'opened_at' => now(), 'next_reset_at' => now()->addDays(5)]);
+        $considered = [];
+
+        $this->assertNull(app(CampaignProbeBootstrap::class)->plan($grant, $episode, $this->agent, [], $considered));
+        $this->assertContains('Observed SHIP_PROBE price 100000 CR exceeds max_price.', array_column($considered, 'rejected'));
+        try {
+            app(AutomationRunner::class)->previewProbePurchase($this->agent, 'LOCAL-2', $yard, ['minutes' => 15], $episode);
+            $this->fail('Expected the stored probe price to block preview before departure.');
+        } catch (GameException $exception) {
+            $this->assertStringContainsString('SHIP_PROBE price 100000 CR exceeds max_price 50000 CR', $exception->getMessage());
+        }
+        $this->assertDatabaseMissing('automation_runs', ['strategy' => 'buy_probe']);
+        $this->assertSame([], $this->world()['writes']);
     }
 
     public function test_round_two_purchase_preview_holds_without_budget_evidence(): void
@@ -336,6 +363,40 @@ class CampaignProbePoolTest extends TestCase
         $this->assertNull(CampaignProbeBootstrap::policy($armGrant, $armEpisode));
         $this->assertFalse(app(CampaignFleet::class)->poolEnabled($armEpisode));
         $this->assertNotNull($grant);
+    }
+
+    public function test_retryable_scout_deferral_stops_pool_selection_for_the_pass(): void
+    {
+        $this->editWorld(function (array &$world) {
+            $world['ships'][] = $this->probeShip('LOCAL-3', 'X1-TEST-ROCK');
+            $world['ships'][] = $this->probeShip('LOCAL-4', 'X1-TEST-ROCK');
+        });
+        app(AgentSynchronizer::class)->sync($this->agent);
+        $sync = app(AgentSynchronizer::class);
+        foreach (['X1-TEST-A0FUEL', 'X1-TEST-M1', 'X1-TEST-M2'] as $market) {
+            $sync->observe($this->agent, 'market_listing', $market, [
+                'symbol' => $market, 'imports' => [['symbol' => 'IRON_ORE']], 'exports' => [], 'exchange' => [['symbol' => 'FUEL']],
+            ]);
+        }
+        $grant = $this->approve($this->bootstrapBody(target: 3, maxPrice: 50000, minWorkingCapital: 75000));
+        $episode = CampaignEpisode::create([
+            'campaign_grant_id' => $grant->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
+            'start_credits' => $this->agent->credits, 'phase' => 'earn', 'opened_at' => now(), 'next_reset_at' => now()->addDays(5),
+            'state' => ['last_discovery_at' => now()->toIso8601String(), 'role_ships' => ['command' => 'LOCAL-1', 'probe' => 'LOCAL-2']],
+        ]);
+        AutomationRun::create([
+            'agent_id' => $this->agent->id, 'active_agent_id' => $this->agent->id, 'campaign_episode_id' => $episode->id,
+            'reset_id' => $this->agent->reset_id, 'ship_symbol' => 'LOCAL-1', 'strategy' => 'trade', 'state' => 'running',
+            'started_at' => now(), 'expires_at' => now()->addMinutes(15), 'plan' => [], 'totals' => [],
+        ]);
+        $this->partialMock(AutomationRunner::class)->shouldReceive('preview')->once()
+            ->andThrow(new RequestDeferred('Synthetic market budget deferral.', 10));
+
+        $this->tickDirector();
+
+        $this->assertSame('awaiting_run_start', $grant->fresh()->wait_reason);
+        $this->assertNull($grant->fresh()->paused_at);
+        $this->assertFalse(AutomationRun::where('strategy', 'scout')->exists());
     }
 
     public function test_multi_probe_pool_scouts_distinct_markets_concurrently_while_command_ship_trades(): void
@@ -864,7 +925,7 @@ class CampaignProbePoolTest extends TestCase
         }
     }
 
-    public function test_arrival_target_counts_other_in_flight_purchases_after_manual_probe_purchase(): void
+    public function test_purchase_slot_serializes_probe_runs_and_arrival_rechecks_the_fleet_target(): void
     {
         $this->editWorld(function (array &$world) {
             $world['ships'][1]['nav']['waypointSymbol'] = 'X1-TEST-YARDB';
@@ -878,25 +939,18 @@ class CampaignProbePoolTest extends TestCase
         $this->tickDirector();
         $this->tickDirector();
         $buys = AutomationRun::where('strategy', 'buy_probe')->whereNotNull('active_agent_id')->orderBy('id')->get();
-        $this->assertCount(2, $buys);
+        $this->assertCount(1, $buys);
 
-        // An external manual purchase fills one of the two remaining slots while both runs are active.
+        // Ships acquired outside this app still count at arrival.
         $this->editWorld(function (array &$world) {
             $world['ships'][] = $this->probeShip('LOCAL-4', 'X1-TEST-YARDB');
+            $world['ships'][] = $this->probeShip('LOCAL-5', 'X1-TEST-YARDB');
         });
         app(AgentSynchronizer::class)->sync($this->agent);
         $this->runToCompletion($buys[0]);
         $this->assertSame('blocked', $buys[0]->fresh()->state->value);
         $this->assertStringContainsString('Probe target', $buys[0]->fresh()->blocked_reason);
         $this->assertSame(0, ShipAction::where('command', 'buy_ship')->count());
-
-        // Once the first run releases its slot, the other run can buy exactly the final probe.
-        app(AutomationRunner::class)->stop($buys[0]);
-        app(AutomationRunner::class)->advance($buys[0]->id);
-        $this->runToCompletion($buys[1]);
-        $this->assertSame('completed', $buys[1]->fresh()->state->value, $buys[1]->fresh()->blocked_reason ?? '');
-        $this->assertSame(4, app(CampaignProbeBootstrap::class)->ownedProbeCount($this->agent->fresh()));
-        $this->assertSame(1, ShipAction::where('command', 'buy_ship')->count());
     }
 
     public function test_arrival_price_spike_blocks_and_backs_off_shipyard(): void

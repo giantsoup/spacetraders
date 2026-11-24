@@ -109,7 +109,7 @@ class CampaignLocalEarnReplacement
         $levels = ['proof' => 0, 'first_scaled' => 1, 'scaled' => 2];
         $evidence = [];
         foreach (CampaignEpisode::where('agent_id', $c0->agent_id)->where('reset_id', $c0->reset_id)->whereNull('closed_at')
-            ->whereIn('campaign_grant_id', CampaignGrant::liveArms()->select('id'))->get() as $arm) {
+            ->whereIn('campaign_grant_id', app(CampaignFleet::class)->currentArms(Agent::findOrFail($c0->agent_id))->pluck('id'))->get() as $arm) {
             $trades->recordResults($arm);
             $own = $trades->results($arm);
             $combined = $trades->learningResults($arm);
