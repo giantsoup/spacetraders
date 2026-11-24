@@ -2,12 +2,8 @@
 
 namespace App\Gameplay\Bridge;
 
-use App\Gameplay\CampaignControl;
-use App\Gameplay\CampaignFleet;
 use App\Gameplay\RequestBudget;
 use App\Gameplay\RequestDeferred;
-use App\Models\AutomationRun;
-use App\Models\ShipAction;
 
 final class BridgePlan
 {
@@ -62,8 +58,8 @@ final class BridgePlan
         }
 
         $primary = $scope->primary;
-        $expired = $primary->pause_reason === 'grant_expired' || $primary->expires_at?->lte(now());
-        if ($expired && self::hasWorkToSettle($scope)) {
+        $expired = $scope->primaryExpired;
+        if ($expired && BridgeWork::hasHandoverWork($scope)) {
             return 'New playbook queued. Waiting for the main campaign to settle.';
         }
         if (! $expired && ($primary->paused_at || BridgeDrain::marker($primary, $scope->openEpisodes->get($primary->id)) !== null)) {
@@ -71,33 +67,6 @@ final class BridgePlan
         }
 
         return 'New playbook queued for the next safe point';
-    }
-
-    private static function hasWorkToSettle(BridgeScope $scope): bool
-    {
-        if ($scope->agent && app(CampaignControl::class)->busy($scope->primary)) {
-            return true;
-        }
-
-        $episodeIds = $scope->episodes->where('campaign_grant_id', $scope->primary->id)->pluck('id');
-        if ($episodeIds->isEmpty()) {
-            return false;
-        }
-        if ($scope->activeRuns->contains(fn (AutomationRun $run) => $episodeIds->contains($run->campaign_episode_id))) {
-            return true;
-        }
-
-        $pending = ShipAction::where('agent_id', $scope->agent->id)->where('reset_id', $scope->resetId)
-            ->whereIn('state', ['pending', 'sending']);
-        if (! (clone $pending)->exists()) {
-            return false;
-        }
-
-        $episode = $scope->openEpisodes->get($scope->primary->id);
-        $symbols = $episode ? app(CampaignFleet::class)->symbols($episode, pin: false) : [];
-
-        return $pending->where(fn ($query) => $query->whereIn('ship_symbol', $symbols)
-            ->orWhereIn('automation_run_id', AutomationRun::whereIn('campaign_episode_id', $episodeIds)->select('id')))->exists();
     }
 
     private static function budget(?string $symbol): array

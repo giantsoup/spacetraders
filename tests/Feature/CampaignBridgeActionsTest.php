@@ -121,6 +121,66 @@ class CampaignBridgeActionsTest extends TestCase
         $this->assertSame('operator_pause', $current->fresh()->pause_reason);
     }
 
+    public function test_fleet_resume_releases_a_current_hold_after_an_old_arm_finished_draining(): void
+    {
+        [$primary, $oldAgent] = $this->campaign();
+        [$arm, $episode] = $this->arm($primary, $oldAgent);
+        // Exercise legacy ownership inferred from the arm's first episode.
+        $limits = $arm->limits;
+        $limits['arm']['reset_id'] = null;
+        DB::table('campaign_grants')->where('id', $arm->id)->update(['limits' => json_encode($limits, JSON_THROW_ON_ERROR)]);
+        $control = app(CampaignControl::class);
+        $control->drainPause($arm, 'host_rate_limits', $episode);
+        $episode->update(['state->draining' => null]);
+        $control->pause($arm, 'drain_pause:host_rate_limits', $episode);
+        app(AgentSynchronizer::class)->archivePreviousWorlds($oldAgent->newCollection([$oldAgent]), '2026-11-23');
+        $budget = app(RequestBudget::class);
+        $this->assertTrue($oldAgent->fresh()->isArchived());
+        $this->assertFalse($budget->isDraining($oldAgent->name));
+
+        $agent = $this->operator->agents()->create([
+            'name' => $oldAgent->name, 'faction' => 'VOID', 'token' => 'replacement-fixture-token',
+            'reset_id' => '2026-11-23', 'canonical_identity' => AgentSynchronizer::identity('2026-11-23', $oldAgent->name),
+        ]);
+        $this->episode($primary, $agent, $this->ship($agent, $agent->name.'-1', 'COMMAND'));
+        $budget->drainAgent($agent->name, true, $agent->reset_id);
+
+        $review = $this->reviewFromPage($agent, 'fleet_resume');
+        $this->assertSame([], $review['blockers']);
+        $reply = $this->submit($agent, $review)->assertSessionHasNoErrors();
+        $this->assertStringContainsString('The budget hold cleared.', $reply->getSession()->get('status'));
+        $this->assertFalse($budget->isDraining($agent->name));
+        $this->assertSame('drain_pause:host_rate_limits', $arm->fresh()->pause_reason);
+
+        $budget->drainAgent($agent->name, true, $agent->reset_id);
+        $hold = $budget->drainHoldIds();
+        $control->revokeArm($arm);
+        $this->assertSame($hold, $budget->drainHoldIds());
+    }
+
+    public function test_fleet_resume_preserves_the_hold_when_a_draining_arms_reset_is_unknown(): void
+    {
+        [$primary, $agent] = $this->campaign();
+        $agent->update(['reset_id' => '2026-11-23', 'canonical_identity' => AgentSynchronizer::identity('2026-11-23', $agent->name)]);
+        $this->episode($primary, $agent, Ship::where('agent_id', $agent->id)->sole());
+        $arm = CampaignGrant::create([
+            'user_id' => $primary->user_id, 'agent_symbol' => $agent->name,
+            'campaign_revision_id' => $primary->campaign_revision_id, 'revision_hash' => $primary->revision_hash,
+            'limits' => ['arm' => ['label' => 'R1', 'ship' => $agent->name.'-2', 'reset_id' => null]],
+            'paused_at' => now(), 'pause_reason' => 'drain_pause:host_rate_limits',
+        ]);
+        $budget = app(RequestBudget::class);
+        $budget->drainAgent($agent->name, true, $agent->reset_id);
+        $hold = $budget->drainHoldIds();
+
+        $review = $this->reviewFromPage($agent, 'fleet_resume');
+        $this->assertContains('drain_reset_unknown', array_column($review['blockers'], 'code'));
+        $this->submit($agent, $review)->assertSessionHasErrors('bridge');
+        $this->assertFalse(app(CampaignControl::class)->releaseDrainIfUnused($agent->name, $hold[$agent->name]));
+        $this->assertSame($hold, $budget->drainHoldIds());
+        $this->assertSame('drain_pause:host_rate_limits', $arm->fresh()->pause_reason);
+    }
+
     public function test_primary_resume_requires_review_of_mismatched_ship_purchase_outside_role_ships(): void
     {
         [$primary, $agent] = $this->campaign();

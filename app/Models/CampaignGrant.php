@@ -78,6 +78,7 @@ class CampaignGrant extends Model
             ->when($agentSymbol !== null && $agentSymbol !== '', fn ($q) => $q->where('agent_symbol', strtoupper($agentSymbol)));
     }
 
+    /** Populate the request's first_episode_reset_id snapshot before creating any new episodes. */
     public static function loadFirstEpisodeResets(Collection $grants): void
     {
         $missing = $grants->filter(fn (self $grant) => ! isset($grant->arm()['reset_id'])

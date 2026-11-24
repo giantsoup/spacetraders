@@ -262,7 +262,7 @@ class CampaignControl
             if ($episode && $harvestResults) {
                 app(CampaignTrade::class)->recordResults($episode);
             }
-            $wasDraining = BridgeDrain::marker($grant, $episode) !== null;
+            $wasDraining = $reconcileDrain && $this->drainingGrants(collect([$grant]))->isNotEmpty();
             DB::transaction(function () use ($grant, $episode, $resetId) {
                 if (CampaignSafety::lossStop($grant, CampaignSafety::recordedNet($episode))) {
                     throw new GameException('Arm remains past its loss stop. Retire it and approve a new arm after review.');
@@ -271,7 +271,7 @@ class CampaignControl
                 DB::table('game_runtime')->upsert([['key' => 'arm_director_failures:'.$grant->id, 'value' => '0']], ['key'], ['value']);
                 $this->event($grant, null, 'resume', $resetId === null ? [] : ['reset_id' => $resetId]);
             });
-            if ($reconcileDrain && $wasDraining) {
+            if ($wasDraining) {
                 $this->releaseDrainIfUnused($grant->resolvedAgentSymbol());
             }
         }, 15);
@@ -284,7 +284,7 @@ class CampaignControl
             if (! $ackPacing && (! $grant->arm() || $grant->revoked_at)) {
                 return;
             }
-            $wasDraining = ! $grant->revoked_at && $reconcileDrain && $this->hasDrainMarker($grant);
+            $wasDraining = ! $grant->revoked_at && $reconcileDrain && $this->drainingGrants(collect([$grant]))->isNotEmpty();
             DB::transaction(function () use ($grant, $ackPacing, $resetId) {
                 if ($ackPacing) {
                     $action = ShipAction::find($grant->arm()['purchase_action_id'] ?? null)
@@ -470,11 +470,11 @@ class CampaignControl
     /** Reconcile only after committing authority changes. This method never sets a budget hold. */
     public function releaseDrainIfUnused(string $symbol, ?string $reviewedHoldId = null): bool
     {
-        $stillDraining = CampaignGrant::where('agent_symbol', $symbol)
+        $grants = CampaignGrant::where('agent_symbol', $symbol)
             ->whereNull('revoked_at')->whereNull('superseded_at')
             ->where(fn ($q) => $q->where('slot', 1)->orWhere(fn ($q) => $q->whereNull('slot')->whereNotNull('limits->arm')))
-            ->get()->contains(fn (CampaignGrant $grant) => $this->hasDrainMarker($grant));
-        if ($stillDraining) {
+            ->get();
+        if ($this->drainingGrants($grants)->isNotEmpty()) {
             return false;
         }
         $budget = app(RequestBudget::class);
@@ -486,6 +486,44 @@ class CampaignControl
         }
 
         return true;
+    }
+
+    private function drainingGrants(Collection $grants): Collection
+    {
+        if ($grants->isEmpty()) {
+            return $grants;
+        }
+
+        $agents = Agent::unarchived()->whereIn('user_id', $grants->pluck('user_id')->unique())
+            ->whereIn('name', $grants->pluck('agent_symbol')->unique())
+            ->orderBy('id')->get()->keyBy(fn (Agent $agent) => $agent->user_id.':'.$agent->name)
+            ->filter(fn (Agent $agent) => $agent->reset_id !== null && $agent->reset_id !== '');
+        $openEpisodes = CampaignEpisode::whereIn('campaign_grant_id', $grants->pluck('id'))
+            ->whereNull('closed_at')->latest('id')->get()->groupBy('campaign_grant_id');
+
+        $ownershipKey = fn (CampaignGrant $grant) => $grant->user_id.':'.$grant->agent_symbol;
+        $arms = $grants->filter(fn (CampaignGrant $grant) => $grant->arm() !== null);
+        CampaignGrant::loadFirstEpisodeResets($arms);
+        $resets = $arms->groupBy($ownershipKey)->map(fn (Collection $group, string $key) => app(CampaignFleet::class)
+            ->armResets($group, $agents->get($key)?->reset_id));
+
+        return $grants->filter(function (CampaignGrant $grant) use ($agents, $openEpisodes, $ownershipKey, $resets) {
+            $key = $ownershipKey($grant);
+            $agent = $agents->get($key);
+            $armReset = $resets->get($key)?->get($grant->id);
+            if ($agent && $armReset !== null && $armReset !== $agent->reset_id) {
+                return false;
+            }
+            $episodes = $openEpisodes->get($grant->id, collect());
+            if (! $agent && $grant->arm()) {
+                return BridgeDrain::marker($grant, null) !== null
+                    || $episodes->contains(fn (CampaignEpisode $episode) => BridgeDrain::marker($grant, $episode) !== null);
+            }
+            $episode = $agent ? $episodes->first(fn (CampaignEpisode $episode) => $episode->agent_id === $agent->id
+                && $episode->reset_id === $agent->reset_id) : null;
+
+            return BridgeDrain::marker($grant, $episode) !== null;
+        });
     }
 
     /** Resolve a single primary grant for an operator, requiring explicit agent symbol when >1 primary (including paused) exists. */
@@ -563,7 +601,7 @@ class CampaignControl
                         ->where(fn ($q) => $q->whereNotNull('slot')->orWhere(fn ($arms) => $arms->whereNull('slot')->whereNotNull('limits->arm')->whereNull('revoked_at')->whereNull('superseded_at')))
                         ->get();
                 }
-                $drained = $toClose->filter(fn ($item) => $this->hasDrainMarker($item))->map(fn ($item) => $item->resolvedAgentSymbol())->unique();
+                $drained = $this->drainingGrants($toClose)->map(fn ($item) => $item->resolvedAgentSymbol())->unique();
                 $toClose->each(fn ($item) => $this->close($item));
 
                 return $drained;

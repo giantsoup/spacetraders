@@ -27,6 +27,7 @@ class ShipPurpose
         ?Collection $episodes = null,
         ?Collection $activeRuns = null,
         ?Collection $armGrants = null,
+        ?array $probeSymbols = null,
     ): array {
         if ($ships->isEmpty()) {
             return [];
@@ -73,10 +74,9 @@ class ShipPurpose
                 ->all()
             : [];
 
-        $fleet = app(CampaignFleet::class);
         $commandSymbol = $episode?->state['role_ships']['command']
             ?? ($episode ? $ships->first(fn ($ship) => ($ship->snapshot['registration']['role'] ?? null) === 'COMMAND')?->symbol : null);
-        $probeSymbols = $episode ? array_column($fleet->probes($episode, pin: false), 'symbol') : [];
+        $probeSymbols ??= $episode ? array_column(app(CampaignFleet::class)->probes($episode, pin: false), 'symbol') : [];
         $activeBuyer = $this->activeBuyer($episode, $commandSymbol, $activeRuns);
 
         $purposes = [];

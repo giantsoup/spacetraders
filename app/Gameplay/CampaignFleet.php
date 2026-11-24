@@ -7,6 +7,7 @@ use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignGrant;
+use App\Models\CampaignRevision;
 use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
@@ -24,10 +25,10 @@ class CampaignFleet
         return $this->primaryProbePolicy($episode);
     }
 
-    private function primaryProbePolicy(CampaignEpisode $episode, ?CampaignGrant $grant = null): ?array
+    private function primaryProbePolicy(CampaignEpisode $episode, ?CampaignGrant $grant = null, ?CampaignRevision $revision = null): ?array
     {
         $policy = $episode->getRelationValue('policyRevision')?->body['probes']
-            ?? ($grant ?? CampaignGrant::find($episode->campaign_grant_id))?->revision()->body['probes'] ?? null;
+            ?? ($revision ?? ($grant ?? CampaignGrant::find($episode->campaign_grant_id))?->revision())?->body['probes'] ?? null;
         if (! is_array($policy)) {
             return null;
         }
@@ -190,9 +191,40 @@ class CampaignFleet
         return array_values(array_filter(array_map(fn ($role) => $this->role($episode, $role, $pin)['symbol'] ?? null, ['command', 'probe'])));
     }
 
+    /** Resolve the primary's roles from an already loaded fleet without pinning ships. */
+    public function primaryRoleSymbols(
+        Agent $agent,
+        CampaignEpisode $episode,
+        CampaignGrant $grant,
+        CampaignRevision $revision,
+        Collection $ships,
+        Collection $liveArms,
+    ): array {
+        $command = $this->preferredRole($episode, $ships, 'command', false);
+        if ($this->primaryProbePolicy($episode, $grant, $revision)['pool'] ?? false) {
+            $probes = $this->eligiblePool($agent, $ships, $this->reservedArmShips($agent, $episode->reset_id, $liveArms), $command['nav']['systemSymbol'] ?? null);
+        } else {
+            $probe = $this->legacyProbe($episode, $ships, false, $agent, BridgeDrain::marker($grant, $episode) !== null);
+            $probes = $probe === null ? [] : [$probe];
+        }
+
+        return ['command' => $command['symbol'] ?? null, 'probes' => array_column($probes, 'symbol')];
+    }
+
     public function currentArms(Agent $agent, ?Collection $grants = null): Collection
     {
         $grants ??= CampaignGrant::liveArms($agent->name)->where('user_id', $agent->user_id)->orderBy('id')->get();
+        $resets = $this->armResets($grants, $agent->reset_id);
+
+        return $grants->filter(fn (CampaignGrant $grant) => $resets[$grant->id] !== null && $resets[$grant->id] === $agent->reset_id);
+    }
+
+    /** @return Collection<int, ?string> Reset ownership keyed by arm grant ID. */
+    public function armResets(Collection $grants, ?string $activeReset): Collection
+    {
+        if ($activeReset === null) {
+            return $grants->mapWithKeys(fn (CampaignGrant $grant) => [$grant->id => null]);
+        }
         CampaignGrant::loadFirstEpisodeResets($grants);
         $needsSchedule = $grants->contains(function (CampaignGrant $grant) {
             $stamp = $grant->arm()['reset_id'] ?? $grant->getAttributes()['first_episode_reset_id'] ?? null;
@@ -201,17 +233,16 @@ class CampaignFleet
         });
         $schedule = $needsSchedule ? CampaignDirector::cachedSchedule() : null;
 
-        return $grants->filter(fn (CampaignGrant $grant) => CampaignDirector::armReset($grant, $agent->reset_id, $schedule) === $agent->reset_id);
+        return $grants->mapWithKeys(fn (CampaignGrant $grant) => [$grant->id => CampaignDirector::armReset($grant, $activeReset, $schedule)]);
     }
 
-    public function reservedArmShips(Agent $agent, string $reset): array
+    public function reservedArmShips(Agent $agent, string $reset, ?Collection $grants = null): array
     {
-        $schedule = CampaignDirector::cachedSchedule();
-        $grants = CampaignGrant::liveArms($agent->name)->where('user_id', $agent->user_id)->get();
-        CampaignGrant::loadFirstEpisodeResets($grants);
+        $grants ??= CampaignGrant::liveArms($agent->name)->where('user_id', $agent->user_id)->get();
+        $resets = $this->armResets($grants, $reset);
 
         return $grants
-            ->filter(fn (CampaignGrant $grant) => in_array(CampaignDirector::armReset($grant, $reset, $schedule), [$reset, null], true))
+            ->filter(fn (CampaignGrant $grant) => in_array($resets[$grant->id], [$reset, null], true))
             ->map(fn (CampaignGrant $grant) => $grant->arm()['ship'])->unique()->values()->all();
     }
 

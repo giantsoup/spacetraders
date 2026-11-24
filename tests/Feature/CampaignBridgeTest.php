@@ -2,7 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Gameplay\CampaignControl;
+use App\Models\AutomationRun;
 use App\Models\CampaignEvent;
+use App\Models\CampaignGrant;
+use App\Models\Ship;
+use App\Models\ShipAction;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -184,5 +189,84 @@ class CampaignBridgeTest extends TestCase
         } finally {
             DB::disableQueryLog();
         }
+    }
+
+    public function test_queued_replacement_handover_stays_within_the_query_budget(): void
+    {
+        $fixture = CampaignBridgeFixture::seed($this->operator, playbook: 'weekly-probe-bootstrap.yaml');
+        ['primary' => $primary, 'agent' => $agent, 'episode' => $episode] = $fixture;
+        CampaignBridgeFixture::primary($this->operator, 'SOUPBURN');
+        CampaignBridgeFixture::arm($this->operator, $episode, $agent, 12, 'operator_pause');
+        CampaignBridgeFixture::arm($this->operator, $episode, $agent, 13, 'operator_pause');
+        $primary->update(['paused_at' => now(), 'pause_reason' => 'grant_expired']);
+        CampaignGrant::create([
+            'user_id' => $primary->user_id, 'agent_symbol' => $primary->agent_symbol,
+            'campaign_revision_id' => $primary->campaign_revision_id, 'revision_hash' => $primary->revision_hash,
+            'limits' => $primary->limits, 'slot' => 2,
+        ]);
+        $run = AutomationRun::where('campaign_episode_id', $episode->id)->sole();
+
+        $this->actingAs($this->operator);
+        $assertQueryBudget = function (string $state) {
+            $queries = [];
+            DB::enableQueryLog();
+            try {
+                foreach (self::reads() as $label => [$path, $component]) {
+                    DB::flushQueryLog();
+                    $response = $this->get(self::BRIEF.$path.'?agent=GIANTSOUP')->assertOk();
+                    $queries[$label] = count(DB::getQueryLog());
+                    $response->assertInertia(fn (Assert $page) => $page->component('Campaign/Bridge/'.$component));
+                }
+            } finally {
+                DB::disableQueryLog();
+            }
+
+            $this->assertLessThanOrEqual(40, max($queries), $state.' '.json_encode($queries, JSON_THROW_ON_ERROR));
+        };
+
+        $assertPending = function (?string $reason) use ($primary) {
+            $this->assertSame($reason, app(CampaignControl::class)->busyReason($primary, includePause: false)['reason'] ?? null);
+            $this->get(self::BRIEF.'?agent=GIANTSOUP')->assertOk()
+                ->assertInertia(fn (Assert $page) => $page->where('plan.pending', $reason === null
+                    ? 'New playbook queued for the next safe point'
+                    : 'New playbook queued. Waiting for the main campaign to settle.'));
+        };
+        $assertQueryBudget('busy');
+        $assertPending('role_work');
+        $run->update(['active_agent_id' => null, 'state' => 'stopped']);
+        $assertQueryBudget('idle');
+        $assertPending(null);
+
+        $probe = Ship::where('agent_id', $agent->id)->where('symbol', 'GIANTSOUP-7')->sole();
+        $secondProbe = $probe->replicate();
+        $secondProbe->fill(['symbol' => 'GIANTSOUP-F', 'snapshot->symbol' => 'GIANTSOUP-F'])->save();
+        $secondProbe->update(['snapshot->cargo->units' => 1]);
+        $assertPending('cargo');
+        $secondProbe->update(['snapshot->cargo->units' => 0, 'snapshot->nav->status' => 'IN_TRANSIT']);
+        $assertPending('transit');
+        $secondProbe->update(['stationed_waypoint' => CampaignBridgeFixture::SOURCE]);
+        $assertPending(null);
+
+        $purchase = ShipAction::create([
+            'agent_id' => $agent->id, 'reset_id' => $agent->reset_id, 'ship_symbol' => 'GIANTSOUP-9',
+            'key' => 'queued-replacement-hauler-purchase', 'state' => 'uncertain', 'origin' => 'automation',
+            'command' => 'buy_ship', 'arguments' => ['shipType' => 'SHIP_LIGHT_HAULER'], 'expires_at' => now()->addMinute(),
+        ]);
+        $assertPending('unsettled_purchase');
+        $purchase->update(['state' => 'confirmed']);
+        $assertPending(null);
+
+        $tradingArm = $fixture['trading_arm']['episode'];
+        $armRun = AutomationRun::where('campaign_episode_id', $tradingArm->id)->sole();
+        $armRun->update(['strategy' => 'buy_hauler']);
+        $assertPending('unsettled_purchase');
+        $armRun->update(['strategy' => 'trade']);
+        $assertPending(null);
+
+        $purchase->update(['command' => 'sell', 'state' => 'sending', 'automation_run_id' => $run->id]);
+        $assertPending('role_work');
+        $episode->update(['closed_at' => now()]);
+        $this->get(self::BRIEF.'?agent=GIANTSOUP')->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->where('plan.pending', 'New playbook queued. Waiting for the main campaign to settle.'));
     }
 }
