@@ -51,6 +51,9 @@ class CampaignControl
                 app(CampaignPlaybook::class)->validate($revision->body);
                 CampaignGrant::pendingFor($user->id, $symbol)->get()->each(fn ($grant) => $grant->update(['slot' => null, 'superseded_at' => now()]));
                 $current = CampaignGrant::primaryFor($user->id, $symbol)->first();
+                if ($current) {
+                    $this->cleanupRetainedMesh($current);
+                }
                 $busy = $current && ($this->hasDrainMarker($current) || $this->busy($current));
                 if ($current && ! $busy) {
                     $this->supersede($current);
@@ -353,6 +356,9 @@ class CampaignControl
             if ($action = $purchases->actions($agent)->whereIn('state', ['pending', 'sending', 'uncertain'])->first()) {
                 return ['reason' => 'unsettled_purchase', 'action_id' => $action->id, 'ship' => $action->ship_symbol];
             }
+            if ($episode->exists && app(CampaignMesh::class)->yardWork($episode, $agent)) {
+                return ['reason' => 'retained_mesh_purchase'];
+            }
             if ($run = $purchases->activeRuns($agent)->first()) {
                 return ['reason' => 'unsettled_purchase', 'run_id' => $run->id, 'ship' => $run->ship_symbol];
             }
@@ -388,6 +394,9 @@ class CampaignControl
             $agent = $this->agent($pending->user_id, $symbol);
             $activate = fn () => DB::transaction(function () use ($pending, $symbol) {
                 $current = CampaignGrant::primaryFor($pending->user_id, $symbol)->first();
+                if ($current) {
+                    $this->cleanupRetainedMesh($current);
+                }
                 if ($pending->refresh()->slot !== 2 || ($current && $this->busyReason($current))) {
                     return;
                 }
@@ -404,6 +413,18 @@ class CampaignControl
                     throw $exception;
                 }
             }
+        }
+    }
+
+    private function cleanupRetainedMesh(CampaignGrant $grant): void
+    {
+        if (! isset($grant->revision()->body['probes']['mesh']['saturation'])) {
+            return;
+        }
+        $agent = $this->agent($grant->user_id, $grant->resolvedAgentSymbol());
+        $episode = $agent ? $this->currentEpisode($grant, $agent) : null;
+        if ($episode) {
+            app(CampaignMesh::class)->cleanRetained($episode, $agent);
         }
     }
 

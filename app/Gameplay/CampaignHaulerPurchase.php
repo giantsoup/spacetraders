@@ -79,9 +79,9 @@ class CampaignHaulerPurchase
             ->get()->filter(fn (Ship $ship) => CampaignProbeBootstrap::matchesType($ship->snapshot, self::TYPE))->count();
     }
 
-    public function plan(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $busyShips, array &$considered, float $deadline): ?AutomationRun
+    public function plan(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $busyShips, array &$considered, float $deadline, ?array &$meshReads = null): ?AutomationRun
     {
-        return app(CampaignProbeBootstrap::class)->plan($grant, $episode, $agent, $busyShips, $considered, $deadline, self::TYPE);
+        return app(CampaignProbeBootstrap::class)->plan($grant, $episode, $agent, $busyShips, $considered, $deadline, self::TYPE, $meshReads);
     }
 
     public function compose(Agent $agent, string $symbol, string $yard, array $limits, CampaignEpisode $episode, ?int $ignoreRunId = null, ?float $deadline = null): array

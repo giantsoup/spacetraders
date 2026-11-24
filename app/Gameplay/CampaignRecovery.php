@@ -2,16 +2,18 @@
 
 namespace App\Gameplay;
 
+use App\Gameplay\Bridge\BridgeDrain;
 use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
+use App\Models\CampaignGrant;
 use App\Models\GameObservation;
 use App\Models\Ship;
 use Carbon\CarbonImmutable;
 
 class CampaignRecovery
 {
-    public function compose(Agent $agent, string $symbol, string $buyer, array $limits): array
+    public function compose(Agent $agent, string $symbol, string $buyer, array $limits, ?int $verifiedBuyerAge = null): array
     {
         $sync = app(AgentSynchronizer::class);
         if ($limits['targeted_recovery'] ?? false) {
@@ -31,21 +33,24 @@ class CampaignRecovery
             // Plan the safe leg now; the run must confirm the mode write before it can navigate.
             $ship['nav']['flightMode'] = 'CRUISE';
         }
-        $market = app(SpaceTradersApi::class)->market($agent, $buyer);
-        app(AgentSynchronizer::class)->observe($agent, 'market', $buyer, $market);
         $good = array_key_first(MiningPlanner::inventory($ship));
-        $known = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $buyer)->first();
+        $atBuyer = $ship['nav']['waypointSymbol'] === $buyer;
+        $meshRecovery = $verifiedBuyerAge !== null || ! empty($limits['mesh_settlement_only']);
+        if (! $meshRecovery) {
+            $market = app(SpaceTradersApi::class)->market($agent, $buyer);
+            $sync->observe($agent, 'market', $buyer, $market);
+        }
+        $known = $verifiedBuyerAge === null ? $this->buyerObservation($agent, $buyer) : $this->verifiedBuyer($agent, $buyer, $good, $verifiedBuyerAge);
         $quote = collect($known?->data['tradeGoods'] ?? [])->firstWhere('symbol', $good);
         if (! $quote || $quote['sellPrice'] < 1 || $quote['tradeVolume'] < 1) {
             throw new GameException('Recovery requires a known buyer for the cargo good.');
         }
         $cost = app(CampaignTrade::class)->averageCosts($agent, $symbol)[$good] ?? 0;
         $fuel = app(FuelPlanner::class);
-        $atBuyer = $ship['nav']['waypointSymbol'] === $buyer;
-        // recover() runs before the director's role-market refresh, so this ship's own fuel quote may
-        // be stale. One read at a FUEL listing lets a part-empty tank top up before departure.
+        // Mesh recovery refreshes evidence through the director's shared pass budget.
         $here = $ship['nav']['waypointSymbol'];
-        if (! $atBuyer && $ship['fuel']['current'] < $ship['fuel']['capacity'] && $fuel->listsFuel($agent, $here) && ! $fuel->sellerQuote($agent, $here)) {
+        if (! $meshRecovery && ! $atBuyer && $ship['fuel']['current'] < $ship['fuel']['capacity']
+            && $fuel->listsFuel($agent, $here) && ! $fuel->sellerQuote($agent, $here)) {
             try {
                 app(AgentSynchronizer::class)->observe($agent, 'market', $here, app(SpaceTradersApi::class)->market($agent, $here));
             } catch (GameException $exception) {
@@ -84,10 +89,46 @@ class CampaignRecovery
             'initial_waypoint' => $ship['nav']['waypointSymbol'], 'initial_status' => $ship['nav']['status'],
             'initial_configuration' => $initialConfiguration, 'restore_cruise' => $restoreCruise, 'equipment' => OpportunityEvaluator::equipment($ship),
             'participating_ships' => [$symbol], 'route' => $route,
-            'quote_signature' => OpportunityEvaluator::quoteSignature($market)]);
+            'quote_signature' => OpportunityEvaluator::quoteSignature($market ?? $known->data)]);
         $fingerprint = hash('sha256', json_encode(array_intersect_key($plan, array_flip(['initial_credits', 'initial_inventory', 'initial_fuel', 'initial_waypoint', 'initial_status', 'initial_configuration', 'equipment', 'quote_signature']))));
 
         return ['plan' => $plan, 'fingerprint' => $fingerprint];
+    }
+
+    public function settlementOnly(CampaignEpisode $episode, bool $requested = false): bool
+    {
+        $grant = $episode->grant();
+
+        return $requested || BridgeDrain::marker($grant, $episode) !== null
+            || ($episode->state['pending_pause'] ?? null) === 'consecutive_losing_loads'
+            || app(CampaignSafety::class)->windDown($episode)
+            || CampaignGrant::pendingFor($grant->user_id, $grant->resolvedAgentSymbol())->exists();
+    }
+
+    public function verifiedBuyerAge(CampaignEpisode $episode, array $plan = []): ?int
+    {
+        return isset(CampaignMesh::policy($episode)['saturation']) && ! $this->settlementOnly($episode, $plan['mesh_settlement_only'] ?? false)
+            ? $episode->grant()->revision()->body['trade']['quote_max_age_seconds']
+            : null;
+    }
+
+    private function buyerObservation(Agent $agent, string $buyer): ?GameObservation
+    {
+        return GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->where('kind', 'market')->where('symbol', $buyer)->first();
+    }
+
+    public function verifiedBuyer(Agent $agent, string $buyer, string $good, int $verifiedBuyerAge): GameObservation
+    {
+        $known = $this->buyerObservation($agent, $buyer);
+        $quote = collect($known?->data['tradeGoods'] ?? [])->firstWhere('symbol', $good);
+        if (! $known?->observer_ship || ! empty($known->data['invalidated_by_action'])
+            || $known->observed_at->lt(now()->subSeconds($verifiedBuyerAge))
+            || ($quote['sellPrice'] ?? 0) < 1 || ($quote['tradeVolume'] ?? 0) < 1) {
+            throw new GameException('Recovery requires a fresh verified buyer quote before departure.');
+        }
+
+        return $known;
     }
 
     public function next(Agent $agent, array $ship, AutomationRun $run): AutomationStep

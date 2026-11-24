@@ -217,8 +217,23 @@ class ShipCommandExecutor
                 throw new GameException('Purchase run stopped or expired before transport.');
             }
             $this->gate->check($run->engine_session_id);
-            app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments, boundaryOnly: true);
+            $price = $action->before_state['estimate']['purchasePrice'] ?? null;
+            app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments, boundaryOnly: true, preflightPrice: $price);
         }
+    }
+
+    private function checkCampaignTransport(Agent $agent, ShipAction $action, AutomationRun $run): void
+    {
+        $agent->refresh();
+        $action->refresh();
+        $run->refresh();
+        if ($action->state !== ActionState::Sending || $action->expires_at->isPast() || $action->reset_id !== $agent->reset_id
+            || ! empty($action->outcome['stop_requested_at']) || $run->active_agent_id !== $agent->id
+            || $run->stop_requested_at || $run->expires_at->isPast() || ! in_array($run->state, [RunState::Running, RunState::Waiting], true)) {
+            throw new GameException('Campaign action authority expired or stopped before transport.');
+        }
+        $this->gate->check($action->engine_session_id);
+        app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments, boundaryOnly: true);
     }
 
     // A price review holds only its own ship for automation; a review without a ship (contracts) or a manual command holds the agent.
@@ -274,9 +289,12 @@ class ShipCommandExecutor
             return;
         }
         $recovery = $run && (! empty($run->plan['sell_only']) || $action->command === 'sell');
-        $settlementScope = ($recovery && ($paced || $budget->isDraining($agent->name)))
+        $settlementScope = ($recovery && (! empty($run->plan['mesh_settlement_only']) || $paced || $budget->isDraining($agent->name)))
             || ($loaded && ! $buyPhase && in_array($action->command, ['orbit', 'navigate', 'dock', 'refuel'], true));
-        $work = function () use ($agent, $action, $run, $prefetched, &$received, &$reserved, $recon, $outbound, &$refusedBeforeTransport) {
+        $guardedMovement = $run?->campaign_episode_id && (isset($run->plan['mesh_work'])
+            || in_array($run->strategy, ['scout', 'sell_aboard', ...CampaignProbeBootstrap::STRATEGIES], true))
+            && in_array($action->command, ['navigate', 'orbit', 'dock', 'refuel'], true);
+        $work = function () use ($agent, $action, $run, $prefetched, &$received, &$reserved, $recon, $outbound, $guardedMovement, &$refusedBeforeTransport) {
             try {
                 $this->gate->check($action->engine_session_id);
                 $this->clear($agent, $action->id, defer: $run !== null, ship: $run ? $action->ship_symbol : null);
@@ -304,7 +322,7 @@ class ShipCommandExecutor
                 }
                 $before = $this->rules->validate($agent, $action->ship_symbol, $action->command, $action->arguments, $fresh, $run);
                 if ($run) {
-                    app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments);
+                    app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments, preflightPrice: $before['estimate']['purchasePrice'] ?? null);
                 }
                 $this->unchangedApproval($action, $before);
                 // Stop and reservation contend on a database transaction, independently of the host lock.
@@ -315,7 +333,7 @@ class ShipCommandExecutor
                         app(GateRecon::class)->validateOutboundIntent($run, $action);
                     }
                     if ($run) {
-                        app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments, boundaryOnly: true);
+                        app(CampaignSafety::class)->check($run, $agent, $action->command, $action->arguments, boundaryOnly: true, preflightPrice: $before['estimate']['purchasePrice'] ?? null);
                     }
                     if ($action->expires_at->isPast()) {
                         throw new GameException('Intent expired during preflight. Create a fresh preview.');
@@ -341,6 +359,11 @@ class ShipCommandExecutor
                         $this->checkPurchaseTransport($agent, $action, $run);
                         $refusedBeforeTransport = false;
                     },
+                    $guardedMovement => function () use ($run, $agent, $action, &$refusedBeforeTransport) {
+                        $refusedBeforeTransport = true;
+                        $this->checkCampaignTransport($agent, $action, $run);
+                        $refusedBeforeTransport = false;
+                    },
                     default => null,
                 };
                 $data = $this->api->mutate($agent, $action->ship_symbol, $action->command, $action->arguments, function (array $receipt) use ($action, &$received) {
@@ -351,7 +374,7 @@ class ShipCommandExecutor
                 $action->update(['outcome' => array_merge($action->fresh()->outcome ?? [], ['response' => $data, 'response_validated' => true, 'response_received_at' => now()->utc()->toIso8601String()])]);
                 $this->confirm($agent, $action, $data, $before, $run);
             } catch (RequestDeferred $e) {
-                if ($refusedBeforeTransport && $action->command === 'buy_ship') {
+                if ($refusedBeforeTransport && ($action->command === 'buy_ship' || $guardedMovement)) {
                     $this->rejectUnsentPurchase($action, $run, $e->getMessage());
 
                     return;
@@ -377,7 +400,7 @@ class ShipCommandExecutor
                     }
                 }
             } catch (GameException $e) {
-                if ($refusedBeforeTransport && $action->command === 'buy_ship') {
+                if ($refusedBeforeTransport && ($action->command === 'buy_ship' || $guardedMovement)) {
                     $this->rejectUnsentPurchase($action, $run, $e->getMessage());
 
                     return;
@@ -406,7 +429,7 @@ class ShipCommandExecutor
                         'sent_at' => null,
                         'outcome->pretransport_deferrals' => (int) ($action->outcome['pretransport_deferrals'] ?? 0) + 1,
                     ];
-                } elseif ($recon && $action->state === ActionState::Pending) {
+                } elseif (($recon || isset($run?->plan['mesh_work'])) && $action->state === ActionState::Pending) {
                     $localRefusal = $this->localRefusal('preflight', $e->getMessage());
                 }
                 $action->update(['state' => $uncertain ? ActionState::Uncertain : ActionState::Rejected,
@@ -415,7 +438,7 @@ class ShipCommandExecutor
                     $this->block($run, $e->getMessage());
                 }
             } catch (\Throwable $e) {
-                if ($refusedBeforeTransport && $action->command === 'buy_ship') {
+                if ($refusedBeforeTransport && ($action->command === 'buy_ship' || $guardedMovement)) {
                     $this->rejectUnsentPurchase($action, $run, 'Purchase authority could not be verified before transport.');
 
                     return;
@@ -436,12 +459,47 @@ class ShipCommandExecutor
                 }
             }
         };
-        if ($settlementScope) {
-            app(SpaceTradersClient::class)->scope($work, priority: 'settlement');
-        } elseif ($paced) {
-            app(SpaceTradersClient::class)->scope($work, priority: 'run');
+        $execute = function () use ($work, $settlementScope, $paced) {
+            if ($settlementScope) {
+                app(SpaceTradersClient::class)->scope($work, priority: 'settlement');
+            } elseif ($paced) {
+                app(SpaceTradersClient::class)->scope($work, priority: 'run');
+            } else {
+                $work();
+            }
+        };
+        if (isset($run?->plan['mesh_work'])) {
+            try {
+                app(MeshGovernor::class)->run($agent, $run, $execute);
+            } catch (RequestDeferred $exception) {
+                FleetMetrics::observe($exception);
+                $action->refresh();
+                $run->refresh();
+                if ($action->state !== ActionState::Pending || $action->sent_at) {
+                    return;
+                }
+                $expired = ! $action->expires_at->isFuture() || ! $run->expires_at->isFuture();
+                $allowance = $run->plan['mesh_allowance'] ?? null;
+                try {
+                    $lost = ! $expired && ! app(RequestBudget::class)->hasMesh($allowance, $agent->name, $agent->reset_id, $run->id);
+                } catch (RequestDeferred) {
+                    $lost = false;
+                }
+                if ($expired || $lost || $run->stop_requested_at || ! $run->active_agent_id || $action->reset_id !== $agent->reset_id) {
+                    DB::transaction(function () use ($action, $run, $expired) {
+                        $this->rejectUnsentPurchase($action, $run, $expired ? 'Mesh intent or run expired before transport.' : 'Mesh run lost its authority or request allowance before transport.');
+                        if ($run->fresh()->state === RunState::Blocked) {
+                            $run->update(['active_agent_id' => null, 'next_action_at' => null]);
+                        }
+                    });
+                    app(MeshGovernor::class)->release($allowance);
+
+                    return;
+                }
+                $action->update(['message' => $exception->getMessage()]);
+            }
         } else {
-            $work();
+            $execute();
         }
     }
 

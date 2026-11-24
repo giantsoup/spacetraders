@@ -48,11 +48,19 @@ class CampaignSaturationTest extends TestCase
         $candidateBody = $this->revision->body;
         $candidateBody['fleet']['haulers']['min_hub_coverage'] = .75;
         $candidate = app(CampaignPlaybook::class)->import(Yaml::dump($candidateBody, 12));
+        $meshCandidateBody = Yaml::parseFile(base_path('campaigns/weekly-system-saturation-mesh.yaml'));
+        $meshCandidateBody['agent']['symbol'] = 'LOCAL';
+        $meshCandidateBody['fleet']['auto_arm']['revision_hash'] = $this->armRevision->content_hash;
+        $meshCandidate = app(CampaignPlaybook::class)->import(Yaml::dump($meshCandidateBody, 12));
+        app(AgentSynchronizer::class)->observe($this->agent, 'waypoint', 'X1-TEST-FUEL', $this->point('X1-TEST-FUEL', 11), 'listing');
+        app(AgentSynchronizer::class)->observe($this->agent, 'market_listing', 'X1-TEST-FUEL', ['imports' => [], 'exports' => [], 'exchange' => [['symbol' => 'FUEL']]]);
+        app(AgentSynchronizer::class)->observe($this->agent, 'waypoint', 'X1-TEST-PROVISIONAL', $this->point('X1-TEST-PROVISIONAL', 12), 'listing');
         $calls = $this->world()['calls'];
         DB::enableQueryLog();
         DB::flushQueryLog();
         $active = app(CampaignStatus::class)->saturation($this->operator->id, 'LOCAL');
         $simulation = app(CampaignStatus::class)->saturation($this->operator->id, 'LOCAL', $candidate);
+        $meshSimulation = app(CampaignStatus::class)->saturation($this->operator->id, 'LOCAL', $meshCandidate);
         $writes = array_filter(DB::getQueryLog(), fn ($row) => ! preg_match('/^\s*select\b/i', $row['query']));
         DB::disableQueryLog();
 
@@ -65,6 +73,11 @@ class CampaignSaturationTest extends TestCase
         $this->assertFalse($simulation['can_purchase']);
         $this->assertSame(3, $simulation['gates']['G3']['required']);
         $this->assertSame(4, $active['gates']['G3']['required']);
+        $this->assertSame(4, $active['mesh']['pool_probe_target']);
+        $this->assertSame(6, $meshSimulation['mesh']['pool_probe_target']);
+        $this->assertSame('shared_purchase_in_flight', $meshSimulation['gates']['G2']['reason']);
+        $this->assertTrue($meshSimulation['active_purchase_authority']);
+        $this->assertFalse($meshSimulation['can_purchase']);
     }
 
     public function test_spare_corridor_projects_proof_and_excludes_c0s_claim(): void

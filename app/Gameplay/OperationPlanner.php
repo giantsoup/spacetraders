@@ -3,6 +3,7 @@
 namespace App\Gameplay;
 
 use App\Models\Agent;
+use App\Models\CampaignEpisode;
 use App\Models\GameObservation;
 use Carbon\CarbonImmutable;
 
@@ -10,17 +11,21 @@ class OperationPlanner
 {
     public function __construct(private FuelPlanner $fuel) {}
 
-    public function preview(Agent $agent, array $ship, array $limits): array
+    public function preview(Agent $agent, array $ship, array $limits, ?CampaignEpisode $episode = null): array
     {
         try {
-            return $this->project($agent, $ship, $limits);
+            return $this->project($agent, $ship, $limits, episode: $episode);
         } catch (GameException $exception) {
             throw ! empty($limits['campaign_trade']['local_earn']) || ! empty($limits['campaign_local_earn']) ? LocalEarnRefusal::planning($exception) : $exception;
         }
     }
 
-    public function project(Agent $agent, array $ship, array $limits, ?array $projectedQuotes = null): array
+    public function project(Agent $agent, array $ship, array $limits, ?array $projectedQuotes = null, ?CampaignEpisode $episode = null): array
     {
+        $saturationScout = $episode && isset(CampaignMesh::policy($episode)['saturation']);
+        if ($saturationScout) {
+            app(CampaignMesh::class)->authorizeScout($episode, $agent, $ship, $limits);
+        }
         $home = $ship['nav']['waypointSymbol'];
         $destination = $limits['strategy'] === 'scout' ? $limits['destination'] : $limits['market'];
         if ($home === $destination) {
@@ -88,10 +93,10 @@ class OperationPlanner
                 }
                 $route['purpose'] = 'Verify detailed ship offers at '.$destination.'.';
             } else {
-                if (! $listing) {
+                if (! $listing && (! $saturationScout || empty(app(CampaignMesh::class)->model($episode, $agent)->targets[$destination]['provisional']))) {
                     throw new GameException('Fetch the remote goods directory before approving a price-observation visit. Hidden traits require separately approved scanning/charting support.');
                 }
-                $route['purpose'] = 'Observe prices of '.implode(', ', array_unique(array_column(array_merge($listing->data['imports'], $listing->data['exports'], $listing->data['exchange']), 'symbol'))).' at '.$destination.' to resolve buyer, trade or fuel comparisons.';
+                $route['purpose'] = ! $listing ? 'Observe and classify the marketplace at '.$destination.'.' : 'Observe prices of '.implode(', ', array_unique(array_column(array_merge($listing->data['imports'], $listing->data['exports'], $listing->data['exchange']), 'symbol'))).' at '.$destination.' to resolve buyer, trade or fuel comparisons.';
             }
             $route['stop'] = 'One detailed observation, then return home; stop earlier on any limit or safety failure.';
             $route['information_benefit'] = 'Unknown. No chart reward or displaced earnings are assumed.';

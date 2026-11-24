@@ -1,6 +1,7 @@
 <?php
 
 use App\Gameplay\FleetMetrics;
+use App\Gameplay\HostLock;
 use App\Models\Ship;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Artisan;
@@ -9,7 +10,7 @@ Artisan::command('ship:station {ship} {waypoint?} {--clear}', function () {
     $symbol = strtoupper(trim((string) $this->argument('ship')));
     $ship = Ship::where('symbol', $symbol)->latest('id')->firstOrFail();
     if ($this->option('clear')) {
-        $ship->update(['stationed_waypoint' => null]);
+        app(HostLock::class)->scoped('agent-'.$ship->agent_id, fn () => $ship->refresh()->update(['stationed_waypoint' => null]));
         $this->info("{$ship->symbol} released from station back to fleet.");
 
         return 0;
@@ -22,7 +23,7 @@ Artisan::command('ship:station {ship} {waypoint?} {--clear}', function () {
 
         return 0;
     }
-    $ship->update(['stationed_waypoint' => $waypoint]);
+    app(HostLock::class)->scoped('agent-'.$ship->agent_id, fn () => $ship->refresh()->update(['stationed_waypoint' => $waypoint]));
     $this->info("{$ship->symbol} stationed at {$waypoint}.");
 
     return 0;

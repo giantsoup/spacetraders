@@ -109,11 +109,11 @@ class AgentSynchronizer
     }
 
     // Caller holds the agent lock for synchronization, previews and gameplay writes.
-    public function sync(Agent $agent, bool $discover = true, bool $freshReset = false): void
+    public function sync(Agent $agent, bool $discover = true, bool $freshReset = false, bool $freshFleet = false): void
     {
         $this->guardReset($agent, $freshReset);
-        $balance = $this->api->agent($agent);
-        $fleet = $this->api->ships($agent);
+        $balance = $this->api->agent($agent, fresh: $freshFleet);
+        $fleet = $this->api->ships($agent, fresh: $freshFleet);
         DB::transaction(function () use ($agent, $balance, $fleet) {
             foreach ($fleet as $ship) {
                 $this->saveShip($agent, $ship);
@@ -167,9 +167,9 @@ class AgentSynchronizer
         $this->observe($agent, 'discovery', 'local', $coverage, 'listing');
     }
 
-    public function refreshShip(Agent $agent, string $symbol): Ship
+    public function refreshShip(Agent $agent, string $symbol, bool $fresh = false): Ship
     {
-        return $this->saveShip($agent, $this->api->ship($agent, $symbol));
+        return $this->saveShip($agent, $this->api->ship($agent, $symbol, fresh: $fresh));
     }
 
     public function saveShip(Agent $agent, array $data): Ship

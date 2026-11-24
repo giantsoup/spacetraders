@@ -282,9 +282,9 @@ class SpaceTradersApi
         return ['agents' => array_map(fn ($a) => Arr::only($a, ['symbol', 'credits', 'shipCount', 'headquarters', 'startingFaction']), $body['data']), 'total' => $body['meta']['total']];
     }
 
-    public function agent(Agent $agent): array
+    public function agent(Agent $agent, bool $fresh = false): array
     {
-        $data = $this->payload($this->call('get', '/my/agent', [], $agent));
+        $data = $this->payload($this->call('get', '/my/agent', [], $agent, fresh: $fresh));
         $this->validate($data, ['symbol' => 'required|string|max:80', 'credits' => 'required|integer|min:0', 'shipCount' => 'sometimes|integer|min:0']);
         if ($data['symbol'] !== $agent->name) {
             throw new GameException('Credential belongs to a different agent. Re-import it.');
@@ -293,14 +293,14 @@ class SpaceTradersApi
         return Arr::only($data, ['symbol', 'credits', 'shipCount']);
     }
 
-    public function ships(Agent $agent): array
+    public function ships(Agent $agent, bool $fresh = false): array
     {
-        return array_map($this->shipData(...), $this->pages('/my/ships', $agent));
+        return array_map($this->shipData(...), $this->pages('/my/ships', $agent, fresh: $fresh));
     }
 
-    public function ship(Agent $agent, string $symbol): array
+    public function ship(Agent $agent, string $symbol, bool $fresh = false): array
     {
-        $ship = $this->shipData($this->payload($this->call('get', '/my/ships/'.$symbol, [], $agent)));
+        $ship = $this->shipData($this->payload($this->call('get', '/my/ships/'.$symbol, [], $agent, fresh: $fresh)));
         if ($ship['symbol'] !== $symbol) {
             throw new GameException('SpaceTraders returned a different ship.');
         }
@@ -377,9 +377,9 @@ class SpaceTradersApi
         return $rows;
     }
 
-    public function market(Agent $agent, string $waypoint): array
+    public function market(Agent $agent, string $waypoint, bool $fresh = false): array
     {
-        $data = $this->payload($this->call('get', $this->waypointPath($waypoint).'/market', [], $agent));
+        $data = $this->payload($this->call('get', $this->waypointPath($waypoint).'/market', [], $agent, fresh: $fresh));
 
         return $this->marketData($data, $waypoint);
     }
@@ -636,12 +636,12 @@ class SpaceTradersApi
         return '/systems/'.implode('-', array_slice(explode('-', $waypoint), 0, 2)).'/waypoints/'.$waypoint;
     }
 
-    private function pages(string $path, Agent $agent, string $identity = 'symbol'): array
+    private function pages(string $path, Agent $agent, string $identity = 'symbol', bool $fresh = false): array
     {
         $all = [];
         $total = null;
         for ($page = 1; $page <= config('gameplay.max_pages'); $page++) {
-            $body = $this->call('get', $path, ['page' => $page, 'limit' => 20], $agent);
+            $body = $this->call('get', $path, ['page' => $page, 'limit' => 20], $agent, fresh: $fresh);
             $this->validatePage($body, $page, $identity);
             $total ??= $body['meta']['total'];
             $all = array_merge($all, $body['data']);

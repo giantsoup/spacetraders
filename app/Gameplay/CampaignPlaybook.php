@@ -52,10 +52,14 @@ class CampaignPlaybook
         }
         if (array_key_exists('mesh', $body['probes'] ?? [])) {
             $mesh = $body['probes']['mesh'];
+            $hasSaturation = is_array($mesh) && array_key_exists('saturation', $mesh);
             $this->integerPolicy($mesh, [
                 'max_probes' => [1, 64], 'base' => [1, 64], 'per_trader' => [0, 64], 'read_interval_seconds' => [1, 3600],
-                'demand_read_interval_seconds' => [1, 3599], 'reads_per_pass' => [1, 4], 'dispatches_per_pass' => [1, 6],
-            ]);
+                'demand_read_interval_seconds' => [1, 3599], 'reads_per_pass' => [1, $hasSaturation ? 8 : 4], 'dispatches_per_pass' => [1, 6],
+            ], ['saturation']);
+            if ($hasSaturation) {
+                $this->validateMeshSaturation($mesh);
+            }
             if (($body['probes']['pool'] ?? null) !== true || $mesh['demand_read_interval_seconds'] > $mesh['read_interval_seconds']
                 || $mesh['demand_read_interval_seconds'] >= ($body['trade']['quote_max_age_seconds'] ?? 180)) {
                 throw new GameException('Mesh requires a probe pool and a demand refresh interval within quote lifetime and background cadence.');
@@ -65,6 +69,9 @@ class CampaignPlaybook
             $this->validateFleet($body['fleet'], isset($body['probes']['mesh']));
         }
         if (array_key_exists('local_earn', $body['trade'])) {
+            if (isset($body['probes']['mesh']['saturation'])) {
+                throw new GameException('Mesh saturation cannot be combined with local Earn.');
+            }
             $policy = $body['trade']['local_earn'];
             $this->keys($policy, ['projection_limit', 'max_attempts', 'position_evidence_max_age_seconds', 'max_positionings_without_trade']);
             foreach (['projection_limit' => [1, 24], 'max_attempts' => [1, 5],
@@ -134,6 +141,35 @@ class CampaignPlaybook
             if (isset($prediction['gte']) === isset($prediction['lte']) || ($prediction['metric'] === 'credits' && ! isset($prediction['at_hours']))) {
                 throw new GameException('Predictions require exactly one threshold and timed credit predictions require at_hours.');
             }
+        }
+    }
+
+    private function validateMeshSaturation(array $mesh): void
+    {
+        $policy = $mesh['saturation'];
+        $this->integerPolicy($policy, [
+            'demand_max' => [1, $mesh['reads_per_pass']],
+            'tier2_read_interval_seconds' => [$mesh['read_interval_seconds'], 7200],
+            'yard_read_interval_seconds' => [60, 3600],
+            'purchase_yard_read_interval_seconds' => [60, 3600],
+            'patrol_quality_pct' => [10, 90],
+            'value_seconds' => [600, 14400],
+            'hysteresis_seconds' => [0, 3600],
+            'min_dwell_seconds' => [0, 3600],
+            'patrol_quote_min_age_seconds' => [300, 7200],
+            'patrol_cooldown_seconds' => [600, 7200],
+            'yard_recovery_cooldown_seconds' => [300, 7200],
+            'travel_credits_per_second' => [0, 1000],
+            'free_capital_share_pct' => [1, 100],
+            'proof_fuel_buffer_credits' => [0, 100000],
+            'tier2_price_inflation_cap_pct' => [0, 200],
+            'stop_purchases_hours_before_reset' => [0, 168],
+            'governor_headroom_pct' => [50, 100],
+        ], ['tier2']);
+        if (! is_bool($policy['tier2'] ?? null)
+            || $policy['purchase_yard_read_interval_seconds'] > $policy['yard_read_interval_seconds']
+            || $policy['hysteresis_seconds'] >= $policy['value_seconds']) {
+            throw new GameException('Invalid probe mesh saturation policy.');
         }
     }
 

@@ -24,7 +24,17 @@ class CampaignDiscovery
         $sync = app(AgentSynchronizer::class);
         if (isset($cursor['systems'][$cursor['system']])) {
             $system = $cursor['systems'][$cursor['system']];
-            $page = $api->cataloguePage($agent, $system, $cursor['page']);
+            try {
+                $work = fn () => $api->cataloguePage($agent, $system, $cursor['page']);
+                $page = isset(CampaignMesh::policy($episode)['saturation'])
+                    ? app(MeshGovernor::class)->immediate($agent, $episode, 'directory', $work) : $work();
+            } catch (RequestDeferred $exception) {
+                if (! isset(CampaignMesh::policy($episode)['saturation'])) {
+                    throw $exception;
+                }
+
+                return;
+            }
             foreach ($page['rows'] as $point) {
                 $sync->observe($agent, 'waypoint', $point['symbol'], $point, 'listing');
             }
@@ -114,10 +124,16 @@ class CampaignDiscovery
             if (isset($reads[$symbol])) {
                 continue;
             }
-            $reads[$symbol] = true;
             try {
-                $market = app(SpaceTradersApi::class)->market($agent, $symbol);
-                app(AgentSynchronizer::class)->observe($agent, 'market', $symbol, $market);
+                if (isset(CampaignMesh::policy($episode)['saturation'])) {
+                    if (! app(MeshPoller::class)->read($episode, $agent, $symbol, 'market', null, 'directory', $reads)) {
+                        continue;
+                    }
+                } else {
+                    $reads[$symbol] = true;
+                    $market = app(SpaceTradersApi::class)->market($agent, $symbol);
+                    app(AgentSynchronizer::class)->observe($agent, 'market', $symbol, $market);
+                }
                 unset($failures[$symbol]);
             } catch (RequestDeferred) {
                 break;

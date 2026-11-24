@@ -511,7 +511,7 @@ class CommandRules
                         throw new GameException('An operational miner already exists. Setup purchase is unnecessary.');
                     }
                 }
-                $estimate['fleet_symbols'] = array_column($this->api->ships($agent), 'symbol');
+                $estimate['fleet_symbols'] = array_column($this->api->ships($agent, fresh: isset($run?->plan['mesh_purchase'])), 'symbol');
                 $yard = $this->api->shipyard($agent, $arguments['waypointSymbol'], fresh: true);
                 $this->sync->observe($agent, 'shipyard', $arguments['waypointSymbol'], $yard);
                 $offer = collect($yard['ships'] ?? [])->firstWhere('type', $arguments['shipType']);
@@ -528,6 +528,9 @@ class CommandRules
                     throw new GameException('The complete ship configuration is not verified as mining capable.');
                 }
                 $cost = $offer['purchasePrice'];
+                if (isset($run?->plan['mesh_purchase']) && (! is_int($cost) || $cost < 1)) {
+                    throw new GameException('A positive detailed probe price is required before mesh spending.');
+                }
                 $estimate['ship_type'] = $arguments['shipType'];
                 $estimate['shipyard_waypoint'] = $arguments['waypointSymbol'];
                 $estimate['purchasePrice'] = $cost;

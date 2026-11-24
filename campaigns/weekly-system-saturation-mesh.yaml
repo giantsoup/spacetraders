@@ -1,0 +1,84 @@
+# Bootstrap the probe mesh, then expand trader capacity one verified Light Hauler at a time.
+name: weekly-system-saturation-mesh
+version: 1
+agent: { symbol: GIANTSOUP, faction: VOID }
+limits:
+  reserve_credits: 0
+  fuel_reserve: next_leg
+  run_max_minutes: 15
+probes:
+  target: 4
+  max_price: 50000
+  min_working_capital: 75000
+  pool: true
+  mesh:
+    max_probes: 32
+    base: 4
+    per_trader: 2
+    read_interval_seconds: 300
+    demand_read_interval_seconds: 120
+    reads_per_pass: 8
+    dispatches_per_pass: 4
+    saturation:
+      tier2: true
+      demand_max: 8
+      tier2_read_interval_seconds: 1800
+      yard_read_interval_seconds: 900
+      purchase_yard_read_interval_seconds: 300
+      patrol_quality_pct: 50
+      value_seconds: 3600
+      hysteresis_seconds: 900
+      min_dwell_seconds: 600
+      patrol_quote_min_age_seconds: 300
+      patrol_cooldown_seconds: 600
+      yard_recovery_cooldown_seconds: 900
+      travel_credits_per_second: 5
+      free_capital_share_pct: 50
+      proof_fuel_buffer_credits: 15000
+      tier2_price_inflation_cap_pct: 25
+      stop_purchases_hours_before_reset: 12
+      governor_headroom_pct: 90
+fleet:
+  haulers:
+    ship_type: SHIP_LIGHT_HAULER
+    max_haulers: 16
+    max_price: 600000
+    max_concurrent_purchases: 1
+    min_working_capital: 200000
+    working_capital_per_trader: 150000
+    payback_fraction: 0.33
+    assumed_net_per_hour: 40000
+    min_unclaimed_score: 1500
+    min_marginal_net_per_hour: 25000
+    max_idle_share: 0.25
+    min_hub_coverage: 0.8
+    stop_hours_before_reset: 24
+    request_headroom: 0.8
+    scheduler: { max_idle_arm_wait_seconds: 180, max_dispatch_lag_seconds: 30, max_queue_depth: 20 }
+  auto_arm:
+    revision_hash: 68d1f4ab8b254ff4ccb9acc4f5ef7821026979353b25334dec3986054e9196a8
+    label_prefix: H
+    frames: [FRAME_LIGHT_FREIGHTER]
+    max_net_loss: 100000
+    exposure_share: 0.5
+trade:
+  proof: { max_units_batches: 1, max_credits: 60000, min_realized_ratio: 0.8 }
+  lot: { max_buyer_batches: 5, first_scaled_max_buyer_batches: 3, default_batch_decay: 0.04 }
+  losses: { losing_load: reprove, pause_after_consecutive_losing_loads: 2 }
+  switch: { bid_below_first_seen: 0.9, better_pair_ratio: 1.1 }
+  quote_max_age_seconds: 180
+phases:
+  - id: discover
+    exit: { any: [ { minutes_elapsed_gte: 90 }, { markets_observed_gte: 8 }, { positive_spread_gte: 1 } ] }
+    activities: [ { role: command, strategy: scout }, { role: probe, strategy: scout } ]
+  - id: earn
+    exit: { hours_to_reset_lte: 1 }
+    activities:
+      - { role: command, strategy: trade }
+      - { role: probe, strategy: scout }
+  - id: wind_down
+    activities: [ { role: command, strategy: sell_aboard } ]
+predictions:
+  - { metric: proof_realized_ratio, gte: 0.8 }
+  - { metric: minutes_to_first_profit, lte: 30 }
+  - { metric: freshness_holds, lte: 2 }
