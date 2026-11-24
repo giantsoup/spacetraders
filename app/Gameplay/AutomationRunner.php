@@ -369,6 +369,7 @@ class AutomationRunner
                 }
                 $prefetchedMarket = null;
                 $prefetchedMarketSymbol = null;
+                $market = [];
                 if ($run->strategy === 'gate_recon') {
                     $step = app(GateRecon::class)->next($agent, $ship, $run);
                 } elseif (in_array($run->strategy, CampaignProbeBootstrap::STRATEGIES, true)) {
@@ -392,24 +393,24 @@ class AutomationRunner
                     $step = app(CampaignRecovery::class)->next($agent, $ship, $run);
                 } else {
                     $yardScout = ($run->plan['observe_kind'] ?? 'market') === 'shipyard';
-                    if (! $yardScout) {
+                    $mining = $run->strategy === 'mining';
+                    if (! $yardScout && ! $mining) {
                         $this->refreshBuyer($agent, $run->plan['market'], $run->ship_symbol);
                     }
-                    if (($run->plan['strategy'] ?? 'mining') !== 'mining') {
+                    if (! $mining) {
                         $siteMarket = $this->refreshOrigin($agent, $run->plan['site'], $run->ship_symbol);
                         if ($siteMarket !== null && $ship['nav']['waypointSymbol'] === $run->plan['site']) {
                             $prefetchedMarket = $siteMarket;
                             $prefetchedMarketSymbol = $run->plan['site'];
                         }
                     }
-                    $market = [];
                     if (! $yardScout && ! isset($run->plan['mesh_episode']) && ($run->plan['strategy'] ?? 'mining') === 'scout' && $run->totals['phase'] === 'observe' && ($run->totals['travel_fuel'] ?? 0) === 0 && $ship['nav']['status'] !== 'IN_TRANSIT') {
                         $this->sync->observe($agent, 'market', $run->plan['market'], $this->api->market($agent, $run->plan['market']));
                     }
                     if ($ship['nav']['waypointSymbol'] === $run->plan['market'] && $ship['nav']['status'] !== 'IN_TRANSIT' && $yardScout) {
                         $this->sync->observe($agent, 'shipyard', $run->plan['market'], $this->api->shipyard($agent, $run->plan['market']));
                     } elseif ($ship['nav']['waypointSymbol'] === $run->plan['market'] && $ship['nav']['status'] !== 'IN_TRANSIT') {
-                        $market = $this->api->market($agent, $run->plan['market']);
+                        $market = $this->api->market($agent, $run->plan['market'], fresh: $mining);
                         $this->sync->observe($agent, 'market', $run->plan['market'], $market);
                         $prefetchedMarket = $market;
                         $prefetchedMarketSymbol = $run->plan['market'];
@@ -424,9 +425,18 @@ class AutomationRunner
                         }
                     }
                     app(CampaignTrade::class)->finishLoading($agent, $run);
-                    $step = ($run->plan['strategy'] ?? 'mining') === 'mining'
+                    $step = $mining
                         ? $this->planner->next($ship, $run->plan, $run->totals, $market, now()->toImmutable())
                         : app(OperationPlanner::class)->next($agent, $ship, $run->plan, $run->totals, now()->toImmutable());
+                    if ($mining && MiningPlanner::startsLoad($ship, $run->plan, $run->totals, $step->command)) {
+                        $buyer = $run->plan['market'];
+                        if ($prefetchedMarketSymbol !== $buyer) {
+                            $prefetchedMarket = $this->api->market($agent, $buyer, fresh: true);
+                            $this->sync->observe($agent, 'market', $buyer, $prefetchedMarket);
+                            $prefetchedMarketSymbol = $buyer;
+                        }
+                        $this->planner->assertDepartureBids($prefetchedMarket, $buyer, $this->planner->requiredDepartureYields($agent, $run->plan));
+                    }
                 }
                 $enqueuedAction = null;
                 match ($step->kind) {
@@ -436,7 +446,7 @@ class AutomationRunner
                         'gate_recon' => app(GateRecon::class)->complete($run),
                         'buy_probe', 'buy_hauler' => app(CampaignProbeBootstrap::class)->complete($run, $ship),
                         'contracts' => $this->completeContract($run, $ship),
-                        default => $this->completeTrip($run, $ship),
+                        default => $this->completeTrip($run, $ship, $market),
                     },
                     'depart' => $run->update(['totals' => array_merge($run->totals, ['phase' => 'sell']), 'next_action_at' => now(), 'state' => RunState::Running]),
                     'act' => $enqueuedAction = $this->enqueue($run, $step),
@@ -459,6 +469,7 @@ class AutomationRunner
                 }
                 $outcome = match ($step->kind) {
                     'blocked' => self::isHold($step->reason) ? 'held' : 'blocked',
+                    'trip' => $run->state === RunState::Blocked ? (self::isHold($run->blocked_reason) ? 'held' : 'blocked') : 'waited',
                     'act' => 'wrote',
                     default => 'waited',
                 };
@@ -491,7 +502,7 @@ class AutomationRunner
     /** Freshness or price holds, follower waits and exposure shortening: planned pauses, not failures. */
     private static function isHold(?string $message): bool
     {
-        return $message !== null && (bool) preg_match('/freshness hold|unknown or stale|arm exposure|follower waiting/i', $message);
+        return $message !== null && (bool) preg_match('/freshness hold|unknown or stale|mining departure held|arm exposure|follower waiting/i', $message);
     }
 
     private function prepare(Agent $agent, array $ship, array $limits): array
@@ -515,13 +526,10 @@ class AutomationRunner
         if ($limits['extraction_headroom'] < 1 || $limits['extraction_headroom'] > $ship['cargo']['capacity']) {
             throw new GameException('Extraction headroom must be within cargo capacity.');
         }
-        if (! empty($limits['survey_signature'])) {
-            app(SurveyPool::class)->usable($agent, $limits['survey_signature'], $limits['site']);
-        }
         $point = $this->api->waypoint($agent, $limits['site']);
         $this->sync->observe($agent, 'waypoint', $limits['site'], $point, 'read');
         $this->refreshBuyer($agent, $limits['market']);
-        $route = $this->planner->route($agent, $ship, $limits['site'], $limits['market']);
+        $route = $this->planner->route($agent, $ship, $limits['site'], $limits['market'], $this->planner->surveyYields($agent, $limits));
         if ($limits['reserve'] < $route['minimum_reserve'] || $agent->credits < $limits['reserve'] + $limits['max_spend'] || $limits['max_spend'] < $route['fuel_ceiling']) {
             throw new GameException('This route requires a reserve of at least '.$route['minimum_reserve'].' CR and a fuel spending ceiling of at least '.$route['fuel_ceiling'].' CR. Their sum must fit the available '.$agent->credits.' CR.');
         }
@@ -630,7 +638,7 @@ class AutomationRunner
         return $created;
     }
 
-    private function completeTrip(AutomationRun $run, array $ship): void
+    private function completeTrip(AutomationRun $run, array $ship, array $market): void
     {
         $totals = $run->totals;
         if (empty($run->plan['sell_only']) && empty($run->plan['one_way']) && ($run->plan['strategy'] ?? 'mining') !== 'mining' && $totals['phase'] !== 'return') {
@@ -658,7 +666,20 @@ class AutomationRunner
         }
         // Observed economics support another explicitly bounded trip. Revalidate route each cycle.
         $agent = Agent::findOrFail($run->agent_id);
-        $this->planner->route($agent, $ship, $run->plan['site'], $run->plan['market']);
+        $surveyYields = null;
+        if ($run->strategy === 'mining') {
+            try {
+                $surveyYields = $this->planner->surveyYields($agent, $run->plan);
+                if ($run->plan['site'] !== $run->plan['market']) {
+                    $this->planner->assertDepartureBids($market, $run->plan['market'], $surveyYields ?? $this->planner->allYields());
+                }
+            } catch (GameException $e) {
+                $run->update(['totals' => $totals, 'state' => RunState::Blocked, 'blocked_reason' => $e->getMessage()]);
+
+                return;
+            }
+        }
+        $this->planner->route($agent, $ship, $run->plan['site'], $run->plan['market'], $surveyYields);
         $totals['phase'] = 'mine';
         $totals['load_attempts'] = 0;
         unset($totals['load_started_at']);
@@ -694,21 +715,33 @@ class AutomationRunner
         $this->sync->sync($agent, false);
         $candidate = $draft->candidate;
         $ship = Ship::where('agent_id', $agent->id)->where('symbol', $candidate['ship_symbol'])->firstOrFail()->snapshot;
-        $points = $this->api->waypoints($agent, $ship['nav']['systemSymbol']);
-        foreach ($points as $point) {
-            $this->sync->observe($agent, 'waypoint', $point['symbol'], $point);
+        $mining = $candidate['strategy'] === 'mining';
+        $symbols = [$ship['nav']['waypointSymbol']];
+        $contract = null;
+        if ($mining) {
+            $symbols[] = $candidate['site'];
+        } else {
+            $contract = $this->api->contract($agent, $candidate['contract_id']);
+            $this->sync->observe($agent, 'contract', $contract['id'], $contract);
+            $remaining = array_filter($contract['terms']['deliver'], fn ($term) => $term['unitsFulfilled'] < $term['unitsRequired']);
+            $symbols = array_merge($symbols, array_column($remaining, 'destinationSymbol'));
+        }
+        if ($candidate['market'] !== null) {
+            $symbols[] = $candidate['market'];
+        }
+        $points = [];
+        foreach (array_unique($symbols) as $symbol) {
+            $points[$symbol] = $this->api->waypoint($agent, $symbol);
+            $this->sync->observe($agent, 'waypoint', $symbol, $points[$symbol]);
         }
         $limits = $draft->limits;
-        if ($candidate['strategy'] === 'mining') {
+        if ($mining) {
             $limits += ['max_extractions' => 1, 'extraction_headroom' => $ship['cargo']['capacity'], 'site_seconds' => 300];
             if ($limits['extraction_headroom'] < 1 || $limits['extraction_headroom'] > $ship['cargo']['capacity']) {
                 throw new GameException('Extraction headroom must be within cargo capacity.');
             }
-            if (! empty($limits['survey_signature'])) {
-                app(SurveyPool::class)->usable($agent, $limits['survey_signature'], $candidate['site']);
-            }
         }
-        $market = $candidate['market'] ? $this->api->market($agent, $candidate['market']) : [];
+        $market = $candidate['market'] ? $this->api->market($agent, $candidate['market'], fresh: $mining) : [];
         if ($candidate['market']) {
             $this->sync->observe($agent, 'market', $candidate['market'], $market);
         }
@@ -716,11 +749,16 @@ class AutomationRunner
             'participating_ships' => [$ship['symbol']], 'capital' => app(CycleAccounting::class)->capital($agent, [$ship['symbol']]),
             'initial_waypoint' => $ship['nav']['waypointSymbol'], 'initial_status' => $ship['nav']['status'], 'site' => $candidate['site'], 'market' => $candidate['market'],
             'equipment' => OpportunityEvaluator::equipment($ship), 'market_quote_signature' => OpportunityEvaluator::quoteSignature($market), 'setup_cost' => 0]);
-        if ($candidate['strategy'] === 'mining') {
+        if ($mining) {
             if ($ship['cargo']['units'] !== 0 || $ship['nav']['status'] === 'IN_TRANSIT') {
                 throw new GameException('Mining requires stationary empty cargo.');
             }
-            $plan['route'] = $route = $this->planner->route($agent, $ship, $candidate['site'], $candidate['market']);
+            $surveyYields = $this->planner->surveyYields($agent, $plan);
+            if ($ship['nav']['waypointSymbol'] !== $candidate['site']) {
+                $this->planner->assertDepartureBids($market, $candidate['market'], $surveyYields ?? $this->planner->allYields());
+            }
+            $now = CarbonImmutable::now();
+            $plan['route'] = $route = $this->planner->evaluateRoute($ship, $candidate['site'], $candidate['market'], $points, $market, $now, $agent->credits, $now, $agent, $surveyYields);
             if ($limits['reserve'] < $route['minimum_reserve'] || $limits['max_spend'] < $route['fuel_ceiling']) {
                 throw new GameException('Mining reserve or fuel spending ceiling is below the verified route requirement.');
             }
@@ -729,9 +767,7 @@ class AutomationRunner
             $plan['estimated_net'] = $sameQuote ? $candidate['estimated_net'] : null;
             $plan['trial_required'] = ! $sameQuote || $candidate['trial_required'];
         } else {
-            $contract = $this->api->contract($agent, $candidate['contract_id']);
-            $this->sync->observe($agent, 'contract', $contract['id'], $contract);
-            $plan['contract_plan'] = $route = $this->contracts->plan($ship, $contract, array_column($points, null, 'symbol'), $candidate['market'] ? [$candidate['market'] => $market] : [], $candidate['market'], $candidate['use_existing_cargo'], now()->toImmutable());
+            $plan['contract_plan'] = $route = $this->contracts->plan($ship, $contract, $points, $candidate['market'] ? [$candidate['market'] => $market] : [], $candidate['market'], $candidate['use_existing_cargo'], now()->toImmutable());
             if ($route['purchase_cost'] > $limits['max_spend'] || $route['purchase_cost'] > $limits['max_loss'] || $route['deliveries'] > $limits['delivery_limit'] || $route['purchase_batches'] > $limits['purchase_limit'] || $route['duration_seconds'] > $limits['minutes'] * 60) {
                 throw new GameException('Contract acquisition, loss, delivery, purchase or timing bounds cannot cover the remaining work.');
             }

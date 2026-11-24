@@ -8,6 +8,10 @@ use Carbon\CarbonImmutable;
 
 class MiningPlanner
 {
+    public const SITE_TYPES = ['ASTEROID', 'ASTEROID_FIELD', 'ENGINEERED_ASTEROID'];
+
+    public const FUEL_BLOCKER = 'Insufficient fuel for the conservative route estimate. Refuel manually first.';
+
     public function capability(array $ship, bool $template = false): ?string
     {
         $mounts = $ship['mounts'] ?? [];
@@ -40,15 +44,15 @@ class MiningPlanner
         return null;
     }
 
-    public function route(Agent $agent, array $ship, string $site, string $market): array
+    public function route(Agent $agent, array $ship, string $site, string $market, ?array $surveyDeposits = null): array
     {
         $points = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->get()->mapWithKeys(fn ($o) => [$o->symbol => $o->data])->all();
         $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $market)->first();
 
-        return $this->evaluateRoute($ship, $site, $market, $points, $quote?->data ?? [], $quote?->observed_at, $agent->credits, CarbonImmutable::now(), $agent);
+        return $this->evaluateRoute($ship, $site, $market, $points, $quote?->data ?? [], $quote?->observed_at, $agent->credits, CarbonImmutable::now(), $agent, $surveyDeposits);
     }
 
-    public function evaluateRoute(array $ship, string $site, string $market, array $points, array $quote, ?CarbonImmutable $observedAt, int $credits, CarbonImmutable $now, ?Agent $agent = null): array
+    public function evaluateRoute(array $ship, string $site, string $market, array $points, array $quote, ?CarbonImmutable $observedAt, int $credits, CarbonImmutable $now, ?Agent $agent = null, ?array $surveyDeposits = null): array
     {
         if ($reason = $this->capability($ship)) {
             throw new GameException($reason);
@@ -65,34 +69,110 @@ class MiningPlanner
         if ($reason = self::hazard($mine)) {
             throw new GameException($reason);
         }
-        if (! $observedAt || ! empty($quote['invalidated_by_action']) || $observedAt->lt($now->subSeconds(180)) || empty($quote['tradeGoods'])) {
+        $fuel = $this->routeFuel($ship, $start, $mine, $buyer, $agent);
+        if ($fuel === null) {
+            throw new GameException(self::FUEL_BLOCKER);
+        }
+
+        return $this->quotedRoute($site, $market, $quote, $observedAt, $credits, $now, $ship['fuel']['capacity'], $fuel, $this->possibleYields($ship), $surveyDeposits);
+    }
+
+    public function possibleYields(array $ship): array
+    {
+        $deposits = [];
+        foreach ($ship['mounts'] as $mount) {
+            if (str_starts_with($mount['symbol'] ?? '', 'MOUNT_MINING_LASER_')) {
+                $deposits = array_merge($deposits, empty($mount['deposits']) ? $this->allYields() : $mount['deposits']);
+            }
+        }
+
+        return array_values(array_unique($deposits));
+    }
+
+    public function allYields(): array
+    {
+        return json_decode(file_get_contents(resource_path('data/mining-yields.json')), true, flags: JSON_THROW_ON_ERROR);
+    }
+
+    public function routeFuel(array $ship, array $start, array $mine, array $buyer, ?Agent $agent = null): ?int
+    {
+        $units = fn ($from, $to) => $agent ? app(FuelPlanner::class)->units($agent, $ship, $from, $to) : self::fuelEstimate($from, $to);
+        $outbound = $units($mine, $buyer) + config('gameplay.fuel_reserve_units');
+        $initial = $units($start, $mine) + $outbound;
+        $repeat = $units($buyer, $mine) + $outbound;
+
+        return $ship['fuel']['capacity'] >= max($initial, $repeat) && $ship['fuel']['current'] >= $initial ? $initial : null;
+    }
+
+    public static function hasFreshPrices(array $quote, ?CarbonImmutable $observedAt, CarbonImmutable $now): bool
+    {
+        return $observedAt && $observedAt->betweenIncluded($now->subSeconds(config('gameplay.snapshot_seconds')), $now)
+            && empty($quote['invalidated_by_action']) && ! empty($quote['tradeGoods']);
+    }
+
+    public function quotedRoute(string $site, string $market, array $quote, ?CarbonImmutable $observedAt, int $credits, CarbonImmutable $now, int $capacity, int $fuel, array $possibleYields, ?array $surveyDeposits = null): array
+    {
+        if (! self::hasFreshPrices($quote, $observedAt, $now)) {
             throw new GameException('Buyer prices are unknown or stale. Synchronize at that market; approve a manual scouting navigation first if no ship is there.');
         }
         $goods = collect($quote['tradeGoods'])->keyBy('symbol');
-        $deposits = array_unique(array_merge(...array_map(fn ($m) => ! empty($m['deposits']) ? $m['deposits'] : json_decode(file_get_contents(resource_path('data/mining-yields.json')), true, flags: JSON_THROW_ON_ERROR), array_filter($ship['mounts'], fn ($m) => str_starts_with($m['symbol'], 'MOUNT_MINING_LASER_')))));
-        if ($deposits === [] || ! collect($deposits)->contains(fn ($symbol) => isset($goods[$symbol]) && $goods[$symbol]['sellPrice'] > 0)) {
-            throw new GameException('No verified buyer for this laser\'s possible yields.');
+        $positiveBid = fn ($symbol) => ($goods[$symbol]['sellPrice'] ?? 0) > 0;
+        $deposits = $surveyDeposits ?? $possibleYields;
+        $knownBuyers = array_values(array_filter($deposits, $positiveBid));
+        if ($knownBuyers === [] || ($surveyDeposits !== null && array_filter($possibleYields, $positiveBid) === [])) {
+            throw new GameException("No verified buyer for this laser's possible yields.");
         }
         $fuelPrice = $goods['FUEL']['purchasePrice'] ?? null;
         if (! is_int($fuelPrice) || $fuelPrice < 1) {
             throw new GameException('The buyer must offer observed fuel for a safe return.');
         }
-        $fuelPlanner = app(FuelPlanner::class);
-        $units = fn ($from, $to) => $agent ? $fuelPlanner->units($agent, $ship, $from, $to) : self::fuelEstimate($from, $to);
-        $initial = $units($start, $mine) + $units($mine, $buyer) + config('gameplay.fuel_reserve_units');
-        $repeat = $units($buyer, $mine) + $units($mine, $buyer) + config('gameplay.fuel_reserve_units');
-        if ($ship['fuel']['capacity'] < max($initial, $repeat) || $ship['fuel']['current'] < $initial) {
-            throw new GameException('Insufficient fuel for the conservative route estimate. Refuel manually first.');
-        }
-        $fuelCeiling = (int) ceil($ship['fuel']['capacity'] / 100) * $fuelPrice * 2;
+        $fuelCeiling = (int) ceil($capacity / 100) * $fuelPrice * 2;
 
         return [
             'site' => $site, 'market' => $market, 'possible_yields' => $deposits,
-            'known_buyers' => array_values(array_intersect($deposits, array_keys($goods->all()))),
-            'unknown_yields' => array_values(array_diff($deposits, array_keys($goods->all()))),
-            'fuel_estimate' => $initial, 'fuel_ceiling' => $fuelCeiling, 'minimum_reserve' => max($fuelCeiling, (int) ceil($credits * 0.01)),
+            'known_buyers' => $knownBuyers,
+            'unknown_yields' => array_values(array_diff($deposits, $knownBuyers)),
+            'fuel_estimate' => $fuel, 'fuel_ceiling' => $fuelCeiling, 'minimum_reserve' => max($fuelCeiling, (int) ceil($credits * 0.01)),
             'quote_at' => $observedAt->toIso8601String(),
         ];
+    }
+
+    public function surveyYields(Agent $agent, array $plan): ?array
+    {
+        return empty($plan['survey_signature'])
+            ? null
+            : app(SurveyPool::class)->depositSymbols($agent, $plan['survey_signature'], $plan['site']);
+    }
+
+    public function requiredDepartureYields(Agent $agent, array $plan): array
+    {
+        return $this->surveyYields($agent, $plan) ?? $this->allYields();
+    }
+
+    public function missingBids(array $market, array $required): array
+    {
+        $bids = array_column($market['tradeGoods'] ?? [], 'sellPrice', 'symbol');
+
+        return array_values(array_filter($required, fn ($symbol) => ($bids[$symbol] ?? 0) <= 0));
+    }
+
+    public function assertDepartureBids(array $market, string $buyer, array $required): void
+    {
+        if (empty($market['tradeGoods'])) {
+            throw new GameException("Mining departure held: $buyer has no fresh trade prices.");
+        }
+        $missing = $this->missingBids($market, $required);
+        if ($required === [] || $missing !== []) {
+            $detail = $missing ? 'missing positive bids for '.implode(', ', $missing) : 'required yields could not be established';
+            throw new GameException("Mining departure held at $buyer: $detail.");
+        }
+    }
+
+    public static function startsLoad(array $ship, array $plan, array $totals, ?string $command): bool
+    {
+        return $totals['phase'] === 'mine' && ($totals['load_attempts'] ?? 0) === 0
+            && $ship['nav']['waypointSymbol'] !== $plan['site']
+            && in_array($command, ['orbit', 'navigate'], true);
     }
 
     public function next(array $ship, array $plan, array $totals, array $market, CarbonImmutable $now): AutomationStep
@@ -196,7 +276,7 @@ class MiningPlanner
     public static function hazard(array $waypoint): ?string
     {
         $warnings = array_intersect(array_column(array_merge($waypoint['traits'] ?? [], $waypoint['modifiers'] ?? []), 'symbol'), ['UNCHARTED', 'UNSTABLE', 'CRITICAL_LIMIT', 'STRIPPED', 'DEBRIS_FIELD']);
-        if (! in_array($waypoint['type'], ['ASTEROID', 'ASTEROID_FIELD', 'ENGINEERED_ASTEROID'], true) || $warnings !== []) {
+        if (! in_array($waypoint['type'], self::SITE_TYPES, true) || $warnings !== []) {
             return 'Mining site is unverified, unsafe or inaccessible'.($warnings ? ': '.implode(', ', $warnings) : '.');
         }
 

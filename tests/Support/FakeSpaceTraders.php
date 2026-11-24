@@ -99,6 +99,16 @@ final class FakeSpaceTraders
         ];
     }
 
+    public static function withAllMiningBids(array $goods): array
+    {
+        $yields = json_decode(file_get_contents(resource_path('data/mining-yields.json')), true, flags: JSON_THROW_ON_ERROR);
+        foreach (array_diff($yields, array_column($goods, 'symbol')) as $ore) {
+            $goods[] = ['symbol' => $ore, 'sellPrice' => 25, 'purchasePrice' => 30, 'tradeVolume' => 10];
+        }
+
+        return $goods;
+    }
+
     public static function install(string $file): void
     {
         if (! app()->environment(['local', 'testing']) || ! is_file($file)) {
@@ -276,7 +286,8 @@ final class FakeSpaceTraders
 
                     return [['error' => ['code' => $code]], $code];
                 }
-                $visible = collect($world['ships'])->contains(fn ($s) => $s['nav']['waypointSymbol'] === $symbol && $s['nav']['status'] !== 'IN_TRANSIT');
+                $visible = in_array($symbol, $world['priced_markets'] ?? [], true)
+                    || collect($world['ships'])->contains(fn ($s) => $s['nav']['waypointSymbol'] === $symbol && $s['nav']['status'] !== 'IN_TRANSIT');
                 $goods = $world['market_goods'][$symbol] ?? $world['goods'];
 
                 return [['data' => ['symbol' => $symbol, 'imports' => [], 'exports' => [], 'exchange' => array_map(fn ($g) => ['symbol' => $g['symbol']], $goods), 'transactions' => $world['transactions']] + ($visible ? ['tradeGoods' => $goods] : [])], 200];

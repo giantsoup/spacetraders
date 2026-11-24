@@ -20,7 +20,9 @@ class LocalAutomationController extends Controller
     {
         abort_unless(Ship::where('agent_id', $agent->id)->get()->contains(fn ($s) => $s->snapshot['nav']['systemSymbol'] === $request->validated('system')), 422, 'Choose a system in the owned observed fleet.');
 
-        return $response->result(fn () => $investigator->create($agent, $request->validated('strategy'), $request->validated('system')));
+        $focus = array_filter(['buyer' => $request->validated('buyer'), 'sites' => $request->validated('sites')]);
+
+        return $response->result(fn () => $investigator->create($agent, $request->validated('strategy'), $request->validated('system'), $focus));
     }
 
     public function advance(LocalAutomationRequest $request, Agent $agent, int $investigation, OpportunityInvestigator $investigator, AgentDashboardController $response)

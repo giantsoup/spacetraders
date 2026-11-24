@@ -29,6 +29,11 @@ class SurveyPool
         return $survey->data['signed'];
     }
 
+    public function depositSymbols(Agent $agent, string $signature, string $waypoint): array
+    {
+        return array_values(array_unique(array_column($this->usable($agent, $signature, $waypoint)['deposits'], 'symbol')));
+    }
+
     public function invalidate(Agent $agent, string $signature, bool $exhausted): void
     {
         if ($survey = $this->find($agent, $signature)) {
