@@ -26,11 +26,25 @@ class CampaignProbeBootstrap
 
     public const STRATEGIES = ['buy_probe', 'buy_hauler'];
 
+    public const ALL_PURCHASE_TYPES = ['SHIP_PROBE', 'SHIP_LIGHT_HAULER', 'SHIP_LIGHT_SHUTTLE', 'SHIP_MINING_DRONE', 'SHIP_SIPHON_DRONE', 'SHIP_SURVEYOR'];
+
+    public const ALL_STRATEGIES = ['buy_probe', 'buy_hauler', 'buy_fleet'];
+
     public const SHIPYARD_BACKOFF_MINUTES = 30;
 
     public const SHIPYARD_OFFER_FRESH_MINUTES = 30;
 
     public const MAX_SHIPYARD_READS_PER_PASS = 2;
+
+    public static function isPurchaseType(?string $type): bool
+    {
+        return in_array($type, self::ALL_PURCHASE_TYPES, true);
+    }
+
+    public static function isPurchaseStrategy(?string $strategy): bool
+    {
+        return in_array($strategy, self::ALL_STRATEGIES, true);
+    }
 
     public static function policy(CampaignGrant $grant, CampaignEpisode $episode): ?array
     {
@@ -79,13 +93,13 @@ class CampaignProbeBootstrap
     public function actions(Agent $agent): Builder
     {
         return ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
-            ->where('command', 'buy_ship')->whereIn('arguments->shipType', self::PURCHASE_TYPES);
+            ->where('command', 'buy_ship')->whereIn('arguments->shipType', self::ALL_PURCHASE_TYPES);
     }
 
     public function activeRuns(Agent $agent): Builder
     {
         return AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
-            ->whereIn('strategy', self::STRATEGIES)->whereNotNull('active_agent_id');
+            ->whereIn('strategy', self::ALL_STRATEGIES)->whereNotNull('active_agent_id');
     }
 
     public static function deliveredShip(ShipAction $action): ?string
@@ -103,11 +117,19 @@ class CampaignProbeBootstrap
     public function reservations(Agent $agent, ?int $ignoreRunId = null, ?int $ignoreActionId = null, ?string $undeliveredType = null): Collection
     {
         $runs = $this->activeRuns($agent)->when($ignoreRunId, fn ($query) => $query->whereKeyNot($ignoreRunId))->get()->keyBy('id');
+        $previews = AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->where('strategy', 'buy_fleet')->where('plan_version', 8)->where('state', 'preview')->where('expires_at', '>', now())
+            ->when($ignoreRunId, fn ($query) => $query->whereKeyNot($ignoreRunId))->get()->keyBy('id');
+        $runs = $runs->union($previews);
         $deliveredRuns = $undeliveredType ? $this->actions($agent)->whereIn('automation_run_id', $runs->keys())->get()
             ->filter(fn (ShipAction $action) => self::deliveredShip($action))->pluck('automation_run_id')->all() : [];
         $result = collect();
         foreach ($runs as $run) {
-            $type = $run->strategy === 'buy_hauler' ? 'SHIP_LIGHT_HAULER' : 'SHIP_PROBE';
+            $type = match ($run->strategy) {
+                'buy_hauler' => 'SHIP_LIGHT_HAULER',
+                'buy_fleet' => $run->plan['ship_type'] ?? null,
+                default => 'SHIP_PROBE',
+            };
             if ($undeliveredType && ($type !== $undeliveredType || in_array($run->id, $deliveredRuns, true) || ! empty($run->totals['purchased_ships']))) {
                 continue;
             }
@@ -144,10 +166,12 @@ class CampaignProbeBootstrap
 
     public static function matchesType(array $ship, string $type): bool
     {
-        return $type === 'SHIP_PROBE'
-            ? app(CampaignFleet::class)->isProbe($ship)
-            : (($ship['type'] ?? $ship['registration']['type'] ?? null) === 'SHIP_LIGHT_HAULER'
-                || ($ship['frame']['symbol'] ?? null) === 'FRAME_LIGHT_FREIGHTER');
+        return match ($type) {
+            'SHIP_PROBE' => app(CampaignFleet::class)->isProbe($ship),
+            'SHIP_LIGHT_HAULER' => ($ship['type'] ?? $ship['registration']['type'] ?? null) === 'SHIP_LIGHT_HAULER'
+                || ($ship['frame']['symbol'] ?? null) === 'FRAME_LIGHT_FREIGHTER',
+            default => app(HullCatalog::class)->matchesShip($ship, $type),
+        };
     }
 
     public function plausibleUnattributed(Agent $agent, array $ship): bool
@@ -195,7 +219,11 @@ class CampaignProbeBootstrap
                 }
                 $type = $action->arguments['shipType'];
                 $outcome = $action->outcome ?? [];
-                $field = $type === 'SHIP_PROBE' ? 'probe_delivery_candidates' : 'hauler_delivery_candidates';
+                $field = match ($type) {
+                    'SHIP_PROBE' => 'probe_delivery_candidates',
+                    'SHIP_LIGHT_HAULER' => 'hauler_delivery_candidates',
+                    default => 'fleet_delivery_candidates',
+                };
                 $reconciled = collect($outcome['fleet'] ?? [])->keyBy('symbol');
                 $plausible = $fleet->filter(fn (Ship $ship) => self::matchesType($ship->snapshot, $type)
                     && ! in_array($ship->symbol, $baseline, true) && ! in_array($ship->symbol, $attributed, true));
@@ -286,10 +314,17 @@ class CampaignProbeBootstrap
         }
         $run = AutomationRun::find($action->automation_run_id);
         $episode = $run ? CampaignEpisode::find($run->campaign_episode_id) : null;
+        $type = $action->arguments['shipType'] ?? null;
+        $versioned = $run?->strategy === 'buy_fleet';
+        $matchesRun = $versioned
+            ? $run->plan_version === 8 && in_array($type, app(HullCatalog::class)->economicTypes(), true)
+                && ($run->plan['ship_type'] ?? null) === $type && ($run->plan['shipyard'] ?? null) === ($action->arguments['waypointSymbol'] ?? null)
+                && $run->ship_symbol === $action->ship_symbol
+            : ($type === 'SHIP_PROBE' ? $run?->strategy === 'buy_probe' : ($type === 'SHIP_LIGHT_HAULER' && $run?->strategy === 'buy_hauler' && $run->plan_version === 7));
         if (! $episode || ($episodeId && (int) $episodeId !== $episode->id)
             || $run->agent_id !== $action->agent_id || $run->reset_id !== $action->reset_id
             || $episode->agent_id !== $action->agent_id || $episode->reset_id !== $action->reset_id
-            || ($action->arguments['shipType'] === 'SHIP_PROBE' ? $run->strategy !== 'buy_probe' : ($run->strategy !== 'buy_hauler' || $run->plan_version !== 7))) {
+            || ! $matchesRun) {
             throw new GameException('Campaign purchase linkage is invalid.');
         }
         $grant = CampaignGrant::find($episode->campaign_grant_id)
@@ -298,6 +333,12 @@ class CampaignProbeBootstrap
         $agent = Agent::find($action->agent_id);
         if (! $agent || $grant->user_id !== $agent->user_id || $grant->resolvedAgentSymbol() !== $agent->name || $grant->arm()) {
             throw new GameException('Campaign purchase grant belongs to a different operator or agent.');
+        }
+
+        if ($versioned && (($run->plan['grant_id'] ?? $grant->id) !== $grant->id
+            || ($run->plan['revision_hash'] ?? $grant->revision_hash) !== $grant->revision_hash
+            || ($run->plan['campaign_episode_id'] ?? $episode->id) !== $episode->id)) {
+            throw new GameException('Fleet purchase is not linked to its originating campaign authority.');
         }
 
         return [$run, $episode, $grant];
@@ -315,7 +356,11 @@ class CampaignProbeBootstrap
             return;
         }
         [$run, $episode, $grant] = $linked;
-        $kind = $run->strategy === 'buy_probe' ? 'probe_purchased' : 'hauler_purchased';
+        $kind = match ($run->strategy) {
+            'buy_probe' => 'probe_purchased',
+            'buy_fleet' => 'fleet_purchased',
+            default => 'hauler_purchased',
+        };
         $events = CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', $kind);
         if ((clone $events)->where('data->action_id', $action->id)->exists()
             || ($kind === 'probe_purchased' && (clone $events)->where('data->run_id', $run->id)->where('data->ship', $ship)->whereNull('data->action_id')->exists()
@@ -328,7 +373,7 @@ class CampaignProbeBootstrap
             'run_id' => $run->id, 'action_id' => $action->id, 'ship' => $ship, 'shipyard' => $action->arguments['waypointSymbol'],
             'price' => $action->outcome['transaction_total'] ?? $tx['price'] ?? $tx['totalPrice'] ?? null,
             'delivered_at' => $tx['timestamp'] ?? $action->settled_at?->toIso8601String(),
-        ]);
+        ] + ($run->strategy === 'buy_fleet' ? ['ship_type' => $action->arguments['shipType']] : []));
     }
 
     private function matchingTransaction(Agent $agent, ShipAction $action, array $transactions, bool $includeUnsent = false): ?array
@@ -370,7 +415,7 @@ class CampaignProbeBootstrap
             if (! $agent) {
                 throw new GameException('This operator does not operate the action agent.');
             }
-            if ($agent->isArchived() || ! in_array($type, self::PURCHASE_TYPES, true) || $action->reset_id !== $agent->reset_id || $action->command !== 'buy_ship'
+            if ($agent->isArchived() || ! self::isPurchaseType($type) || $action->reset_id !== $agent->reset_id || $action->command !== 'buy_ship'
                 || ($action->arguments['shipType'] ?? null) !== $type || $action->state->value !== 'acknowledged') {
                 throw new GameException('Only an acknowledged '.$type.' buy_ship action in the current reset can be released.');
             }
@@ -396,7 +441,7 @@ class CampaignProbeBootstrap
                 throw new GameException('A matching shipyard transaction was recorded; the slot stays held because stored evidence shows the purchase may have happened. Syncing cannot clear this evidence.');
             }
             $attributed = $this->actions($agent)->get()->map(self::deliveredShip(...))->filter()->all();
-            $candidates = array_merge($action->outcome['probe_delivery_candidates'] ?? [], $action->outcome['hauler_delivery_candidates'] ?? []);
+            $candidates = array_merge($action->outcome['probe_delivery_candidates'] ?? [], $action->outcome['hauler_delivery_candidates'] ?? [], $action->outcome['fleet_delivery_candidates'] ?? []);
             foreach ($action->outcome['fleet'] ?? [] as $snapshot) {
                 if (isset($snapshot['symbol']) && self::matchesType($snapshot, $type)) {
                     $candidates[] = $snapshot['symbol'];
@@ -407,7 +452,11 @@ class CampaignProbeBootstrap
                     $candidates[] = $ship->symbol;
                 }
             }
-            $name = $type === 'SHIP_PROBE' ? 'probe' : 'hauler';
+            $name = match ($type) {
+                'SHIP_PROBE' => 'probe',
+                'SHIP_LIGHT_HAULER' => 'hauler',
+                default => 'fleet',
+            };
             if ($new = array_values(array_diff($candidates, $beforeFleet, $attributed))[0] ?? null) {
                 throw new GameException('Unattributed new '.$name.' '.$new.' may be this delivery. Sync the agent first.');
             }
@@ -430,13 +479,21 @@ class CampaignProbeBootstrap
         return array_sum($this->reserveParts($agent, $grant, $policy, $ignoreRunId));
     }
 
-    public function reserveParts(Agent $agent, CampaignGrant $grant, array $policy, ?int $ignoreRunId = null): array
+    public function reserveParts(Agent $agent, CampaignGrant $grant, array $policy, ?int $ignoreRunId = null, ?string $incomingType = null, ?CampaignEpisode $episode = null, ?bool $versioned = null): array
     {
-        $commitments = AutomationRun::where('active_agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+        $body = $episode?->getRelationValue('policyRevision')?->body ?? $grant->revision()->body;
+        $versioned ??= CampaignPlaybook::saturationPolicy($body) !== null;
+        $activeCommitments = AutomationRun::where('active_agent_id', $agent->id)->where('reset_id', $agent->reset_id)
             ->where('strategy', '!=', 'gate_recon')
             ->when($ignoreRunId !== null, fn ($query) => $query->where('id', '!=', $ignoreRunId))
-            ->get()
-            ->sum(function ($run) use ($agent) {
+            ->get()->keyBy(fn (AutomationRun $run) => 'run:'.$run->id)
+            ->map(function ($run) use ($agent, $versioned) {
+                if ($versioned && self::isPurchaseStrategy($run->strategy)) {
+                    return max(0, ($run->plan['max_spend'] ?? 0) - ($run->totals['spending'] ?? 0));
+                }
+                if ($versioned && isset($run->plan['legs'])) {
+                    return $this->tradeCommitment($agent, $run);
+                }
                 if ($run->strategy === 'trade' && ($run->totals['phase'] ?? null) === 'buy') {
                     return max(0, (int) ($run->plan['max_spend'] ?? 0) - (int) ($run->totals['spending'] ?? 0));
                 }
@@ -445,7 +502,7 @@ class CampaignProbeBootstrap
                     return 0;
                 }
                 try {
-                    return app(CampaignTrade::class)->fuelReserve($agent, $run->ship_symbol, $run->plan['market']);
+                    return app(CampaignTrade::class)->fuelReserve($agent, $run->ship_symbol, $run->plan['market'], $versioned ? $run : null);
                 } catch (GameException $e) {
                     // As with manual spending, stale delivery quotes preserve the approved cash ceilings.
                     $planned = $run->plan['campaign_trade'] ?? [];
@@ -458,8 +515,75 @@ class CampaignProbeBootstrap
                 }
             });
 
+        if ($versioned) {
+            $recon = AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('strategy', 'gate_recon')->select('id');
+            $booked = DB::table('credit_reservations')->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+                ->whereIn('state', ['pending', 'reserved', 'sending', 'uncertain'])
+                ->where(fn ($query) => $query->whereNull('automation_run_id')->orWhereNotIn('automation_run_id', $recon))
+                ->when($ignoreRunId, fn ($query) => $query->where('owner_key', '!=', 'run:'.$ignoreRunId))->get()->groupBy('owner_key');
+            foreach ($booked as $owner => $rows) {
+                $amount = $rows->groupBy('purpose')->sum(fn ($purpose) => max($purpose->whereNull('ship_action_id')->max('exposure') ?? 0,
+                    $purpose->whereNotNull('ship_action_id')->sum('exposure')));
+                $activeCommitments->put($owner, max($activeCommitments->get($owner, 0), $amount));
+            }
+            $episode ??= CampaignEpisode::where('campaign_grant_id', $grant->id)->where('agent_id', $agent->id)
+                ->where('reset_id', $agent->reset_id)->whereNull('closed_at')->latest('id')->first();
+            $frames = $episode ? $this->traderFrames($agent, $episode) : [];
+            $haulers = $body['fleet']['haulers'] ?? [];
+            $parts = app(HullCatalog::class)->reserveParts($frames, $incomingType, $grant->limits['reserve_credits'], $activeCommitments->sum(),
+                ReconMission::returnExposure($agent), max(200000, $policy['min_working_capital'] ?? 0), $haulers['working_capital_per_trader'] ?? 150000);
+            unset($parts['total']);
+
+            return $parts;
+        }
+
         return ['grant' => $grant->limits['reserve_credits'], 'working_capital' => $policy['min_working_capital'],
-            'commitments' => $commitments, 'recon_return' => ReconMission::returnExposure($agent)];
+            'commitments' => $activeCommitments->sum(), 'recon_return' => ReconMission::returnExposure($agent)];
+    }
+
+    public function traderFrames(Agent $agent, CampaignEpisode $episode): array
+    {
+        return Ship::where('agent_id', $agent->id)->whereIn('symbol', app(CampaignSaturation::class)->traderSymbols($episode, $agent))->get()
+            ->map(fn (Ship $ship) => ($ship->snapshot['registration']['role'] ?? null) === 'COMMAND'
+                ? 'command' : ($ship->snapshot['frame']['symbol'] ?? ''))->all();
+    }
+
+    private function tradeCommitment(Agent $agent, AutomationRun $run): int
+    {
+        $index = $run->totals['leg_index'] ?? 0;
+        $leg = $run->plan['legs'][$index] ?? null;
+        if (! $leg) {
+            return 0;
+        }
+        $trade = app(CampaignTrade::class);
+        $fuel = $trade->fuelReserve($agent, $run->ship_symbol, $leg['buyer'], $run);
+        $closed = ! empty($run->totals['leg_acquisition_closed'][$index]) || ($run->totals['phase'] ?? null) === 'deliver'
+            || (isset($leg['latestBuyAt']) && now()->gte($leg['latestBuyAt']))
+            || (isset($run->plan['acquisition_cutoff']) && now()->gte($run->plan['acquisition_cutoff']));
+
+        return $fuel + ($closed ? 0 : max(0, ($leg['maxInventory'] ?? 0) - ($run->totals['leg_purchase_cost'][$index] ?? 0)));
+    }
+
+    public function reviewedPurchaseMismatch(ShipAction $action): bool
+    {
+        if ($action->review_required || ! in_array($action->state->value, ['confirmed', 'acknowledged'], true)
+            || ! self::deliveredShip($action) || empty($action->outcome['operator_note'])
+            || empty($action->outcome['reviewed_at']) || empty($action->outcome['reconciled_at'])
+            || ($action->state->value === 'acknowledged' && ! isset($action->outcome['delivery_transaction']))) {
+            return false;
+        }
+        try {
+            $link = $this->linkage($action);
+            if (($link[0]->plan_version ?? null) === 7) {
+                return ShipCommandExecutor::reviewedHaulerMismatch($action);
+            }
+            $review = CarbonImmutable::parse($action->outcome['reviewed_at']);
+            $reconciled = CarbonImmutable::parse($action->outcome['reviewed_reconciled_at'] ?? $action->outcome['reconciled_at']);
+
+            return ($link[0]->plan_version ?? null) === 8 && $review->betweenIncluded($reconciled, $reconciled->addMinutes(3));
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     /**
@@ -1041,6 +1165,9 @@ class CampaignProbeBootstrap
 
     public function next(Agent $agent, array $ship, AutomationRun $run): AutomationStep
     {
+        if ($run->strategy === 'buy_fleet') {
+            return app(CampaignHaulerPurchase::class)->next($agent, $ship, $run);
+        }
         if ($ship['nav']['status'] === 'IN_TRANSIT') {
             $arrival = CarbonImmutable::parse($ship['nav']['route']['arrival']);
 
@@ -1165,6 +1292,9 @@ class CampaignProbeBootstrap
 
     public function complete(AutomationRun $run, array $ship): void
     {
+        if ($run->strategy === 'buy_fleet' && $run->state === RunState::Completed) {
+            return;
+        }
         $totals = $run->totals;
         $totals['cycles'] = ($totals['cycles'] ?? 0) + 1;
         $totals['ending_fuel'] = $ship['fuel']['current'];

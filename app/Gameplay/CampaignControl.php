@@ -174,6 +174,8 @@ class CampaignControl
     {
         $revision = $episode->getRelationValue('policyRevision') ?? CampaignGrant::find($episode->campaign_grant_id)?->revision();
         $policy = $revision?->body['fleet']['auto_arm'] ?? null;
+        $saturation = CampaignPlaybook::saturationPolicy($revision?->body ?? []);
+        $frames = $saturation['auto_arm_frames'] ?? ['FRAME_LIGHT_FREIGHTER'];
         $command = app(CampaignFleet::class)->role($episode, 'command', pin: false);
         if (! $policy || ! $command || $episode->reset_id !== $agent->reset_id) {
             return collect();
@@ -192,13 +194,14 @@ class CampaignControl
         $actions = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereIn('state', ['pending', 'sending', 'uncertain'])->pluck('ship_symbol')->all();
         $buy = app(CampaignProbeBootstrap::class);
         $mismatched = $buy->actions($agent)->where(fn ($query) => $query->where('review_required', true)->orWhere('outcome->configuration_mismatch', true))
-            ->get()->map(CampaignProbeBootstrap::deliveredShip(...))->all();
+            ->get()->reject(fn (ShipAction $action) => $saturation && $buy->reviewedPurchaseMismatch($action))
+            ->map(CampaignProbeBootstrap::deliveredShip(...))->all();
         $excluded = array_merge([$command['symbol']], $assigned, $runs, $actions, $mismatched);
         $fleet = app(CampaignFleet::class);
 
         return Ship::where('agent_id', $agent->id)->whereNull('stationed_waypoint')->orderBy('symbol')->get()
             ->filter(fn (Ship $ship) => ! in_array($ship->symbol, $excluded, true)
-                && in_array($ship->snapshot['frame']['symbol'] ?? null, $policy['frames'], true) && ! $fleet->isProbe($ship->snapshot)
+                && in_array($ship->snapshot['frame']['symbol'] ?? null, $frames, true) && ! $fleet->isProbe($ship->snapshot)
                 && $ship->snapshot['nav']['systemSymbol'] === $command['nav']['systemSymbol'] && $ship->snapshot['nav']['status'] !== 'IN_TRANSIT'
                 && $ship->snapshot['cargo']['units'] === 0 && ! ReconMission::holds($agent, $ship->symbol) && ! $buy->plausibleUnattributed($agent, $ship->snapshot));
     }
@@ -221,10 +224,9 @@ class CampaignControl
                         return;
                     }
                     $revision = $this->armRevision($primary->revision());
-                    $purchase = app(CampaignProbeBootstrap::class)->actions($agent)->where('arguments->shipType', CampaignHaulerPurchase::TYPE)
-                        ->whereIn('state', ['confirmed', 'acknowledged'])
-                        ->whereIn('automation_run_id', AutomationRun::where('strategy', 'buy_hauler')->where('plan_version', 7)->select('id'))->get()
-                        ->first(fn (ShipAction $action) => CampaignProbeBootstrap::deliveredShip($action) === $ship->symbol);
+                    $versioned = CampaignPlaybook::saturationPolicy($primary->revision()->body) !== null;
+                    $purchase = app(CampaignSaturation::class)->autoPurchases($agent, $versioned)
+                        ->first(fn (ShipAction $action) => $this->matchesAutoArmPurchase($action, $ship, $versioned));
                     $terms = ['ship' => $ship->symbol, 'follow' => null, 'max_net_loss' => $policy['max_net_loss'], 'max_load_spend' => null,
                         'exposure_share' => $policy['exposure_share'], 'automatic' => true, 'purchase_action_id' => $purchase?->id];
                     $expires = ($primary->expires_at ?? $episode->next_reset_at)->min($episode->next_reset_at);
@@ -248,6 +250,31 @@ class CampaignControl
                     });
                 }
             }
+        }
+    }
+
+    private function matchesAutoArmPurchase(ShipAction $action, Ship $ship, bool $versioned): bool
+    {
+        if (! in_array($action->state->value, ['confirmed', 'acknowledged'], true)
+            || CampaignProbeBootstrap::deliveredShip($action) !== $ship->symbol) {
+            return false;
+        }
+        if (! $versioned) {
+            return true;
+        }
+        $type = $action->arguments['shipType'] ?? '';
+        $hulls = app(HullCatalog::class);
+        if (! in_array($type, $hulls->traderTypes(), true) || ! $hulls->matchesShip($ship->snapshot, $type) || $action->review_required
+            || ($action->state->value === 'acknowledged' && ! isset($action->outcome['delivery_transaction']))) {
+            return false;
+        }
+        try {
+            $buy = app(CampaignProbeBootstrap::class);
+            $link = $buy->linkage($action);
+
+            return $link !== null && (empty($action->outcome['configuration_mismatch']) || $buy->reviewedPurchaseMismatch($action));
+        } catch (GameException) {
+            return false;
         }
     }
 

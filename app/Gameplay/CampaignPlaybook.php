@@ -10,6 +10,8 @@ use Symfony\Component\Yaml\Yaml;
 
 class CampaignPlaybook
 {
+    private const SATURATION_TRADER_FRAMES = ['FRAME_LIGHT_FREIGHTER', 'FRAME_SHUTTLE'];
+
     public function import(string $source): CampaignRevision
     {
         if (strlen($source) > 65536) {
@@ -66,7 +68,7 @@ class CampaignPlaybook
             }
         }
         if (array_key_exists('fleet', $body)) {
-            $this->validateFleet($body['fleet'], isset($body['probes']['mesh']));
+            $this->validateFleet($body['fleet'], $body);
         }
         if (array_key_exists('local_earn', $body['trade'])) {
             if (isset($body['probes']['mesh']['saturation'])) {
@@ -183,10 +185,10 @@ class CampaignPlaybook
         }
     }
 
-    private function validateFleet(mixed $fleet, bool $mesh): void
+    private function validateFleet(mixed $fleet, array $body): void
     {
-        $this->keys($fleet, ['haulers', 'auto_arm']);
-        if (! $mesh) {
+        $this->keys($fleet, ['haulers', 'auto_arm', 'saturation']);
+        if (! isset($body['probes']['mesh'])) {
             throw new GameException('Fleet saturation requires a probe mesh.');
         }
         $haulers = $fleet['haulers'] ?? null;
@@ -208,12 +210,168 @@ class CampaignPlaybook
         ]);
         $arm = $fleet['auto_arm'] ?? null;
         $this->integerPolicy($arm, ['max_net_loss' => [0, 10000000]], ['revision_hash', 'label_prefix', 'frames', 'exposure_share']);
+        $hasSaturation = array_key_exists('saturation', $fleet);
+        $saturationEnabled = ($fleet['saturation']['enabled'] ?? false) === true;
         if (! is_string($arm['revision_hash'] ?? null) || ! preg_match('/\A[0-9a-fA-F]{64}\z/', $arm['revision_hash'])
             || ! is_string($arm['label_prefix'] ?? null) || ! preg_match('/\A[A-Z]{1,6}\z/', $arm['label_prefix']) || $arm['label_prefix'] === 'C'
-            || ($arm['frames'] ?? null) !== ['FRAME_LIGHT_FREIGHTER']) {
+            || (! $saturationEnabled && ($arm['frames'] ?? null) !== ['FRAME_LIGHT_FREIGHTER'])) {
             throw new GameException('Invalid auto-arm revision hash, label prefix or frame allowlist.');
         }
         $this->ratio($arm['exposure_share'] ?? null, 'exposure_share');
+        if ($hasSaturation) {
+            $this->validateFleetSaturation($fleet['saturation'], $fleet, $body);
+        }
+    }
+
+    private function validateFleetSaturation(mixed $saturation, array $fleet, array $body): void
+    {
+        if (! isset($body['probes']['mesh']['saturation'])) {
+            throw new GameException('Fleet saturation requires probe mesh saturation.');
+        }
+        $flags = ['enabled', 'compression', 'per_ship_noncredit_locks'];
+        $this->integerPolicy($saturation, [
+            'chain_max_age_seconds' => [1, 3600],
+            'credit_refresh_seconds' => [1, 3600],
+            'price_preflight_max_seconds' => [1, 10],
+            'reprice_tolerance_pct' => [1, 50],
+            'fleet_sync_seconds' => [1, 3600],
+            'start_band_price_pct' => [0, 50],
+            'start_band_profit_pct' => [0, 100],
+            'start_band_profit_min_credits' => [0, 1000000],
+            'pipeline_grace_seconds' => [0, 600],
+            'run_hard_cap_seconds' => [60, 5400],
+            'acquisition_default_floor_seconds' => [60, 5400],
+            'stop_overhead_seconds' => [1, 600],
+            'hurdle_permille' => [1, 1000],
+            'hull_inflation_cap_pct' => [0, 200],
+            'drone_inflation_cap_pct' => [0, 200],
+            'max_haulers' => [1, 16],
+            'max_shuttles' => [0, 16],
+        ], [...$flags, 'auto_arm_frames', 'max_prices', 'corridor', 'stimulation', 'extraction', 'lambda']);
+        foreach ($flags as $flag) {
+            if (! is_bool($saturation[$flag] ?? null)) {
+                throw new GameException('Invalid fleet saturation flag: '.$flag);
+            }
+        }
+        if ($saturation['acquisition_default_floor_seconds'] > $saturation['run_hard_cap_seconds']) {
+            throw new GameException('The default acquisition floor cannot exceed the run hard cap.');
+        }
+        $frames = $saturation['auto_arm_frames'] ?? null;
+        $armFrames = $fleet['auto_arm']['frames'] ?? null;
+        if (! $this->isAllowedList($frames, self::SATURATION_TRADER_FRAMES) || $frames === []
+            || ($saturation['enabled'] && (! $this->isAllowedList($armFrames, self::SATURATION_TRADER_FRAMES)
+                || count($frames) !== count($armFrames) || array_diff($frames, $armFrames)))) {
+            throw new GameException('Fleet saturation and auto-arm require matching, nonempty trader frame allowlists.');
+        }
+        $this->integerPolicy($saturation['max_prices'] ?? null, [
+            'SHIP_LIGHT_HAULER' => [1, 600000],
+            'SHIP_LIGHT_SHUTTLE' => [1, 150000],
+            'SHIP_MINING_DRONE' => [1, 60000],
+            'SHIP_SIPHON_DRONE' => [1, 60000],
+            'SHIP_SURVEYOR' => [1, 50000],
+        ]);
+
+        $corridor = $saturation['corridor'] ?? null;
+        $this->integerPolicy($corridor, [
+            'recovery_seconds_prior' => [300, 7200],
+            'side_depth_batches' => [1, 20],
+            'chain_seed' => [1, 50],
+            'max_chain_legs' => [1, 3],
+            'stale_seconds' => [180, 3600],
+        ], ['chains_enabled']);
+        if (! is_bool($corridor['chains_enabled'] ?? null)) {
+            throw new GameException('Invalid corridor policy: chains_enabled');
+        }
+
+        $stimulation = $saturation['stimulation'] ?? null;
+        $this->integerPolicy($stimulation, [
+            'beta_permille_prior' => [0, 50],
+            'bonus_cap_credits' => [0, 10000],
+            'cycle_loss_credits' => [0, 5000],
+            'episode_loss_cap_credits' => [0, 50000],
+        ], ['enabled']);
+        if (! is_bool($stimulation['enabled'] ?? null) || $stimulation['episode_loss_cap_credits'] < $stimulation['cycle_loss_credits']) {
+            throw new GameException('Invalid stimulation enablement or loss limits.');
+        }
+
+        $extraction = $saturation['extraction'] ?? null;
+        $demandMax = $body['probes']['mesh']['saturation']['demand_max'] ?? 8;
+        $this->integerPolicy($extraction, [
+            'max_extractions_per_minute' => [1, 30],
+            'safety_permille' => [1, 1000],
+            'max_miners' => [0, 32],
+            'max_siphons' => [0, 8],
+            'max_surveyors' => [0, 8],
+            'canary_receipts' => [20, 200],
+            'canary_free_cash_credits' => [1, 100000000],
+            'headroom_prior_units' => [1, 40],
+            'survey_margin_permille' => [1, 500],
+            'demand_slots' => [0, min(2, $demandMax)],
+            'jettison_cap_credits_per_hour' => [0, 5000],
+            'lease_ttl_seconds' => [10, 300],
+            'tender_wait_seconds' => [15, 600],
+            'drift_margin_seconds' => [300, 7200],
+            'extraction_starts_per_pass' => [1, 12],
+        ], ['enabled', 'stationary', 'allow_debris', 'jettison_allowlist']);
+        foreach (['enabled', 'stationary', 'allow_debris'] as $flag) {
+            if (! is_bool($extraction[$flag] ?? null)) {
+                throw new GameException('Invalid extraction flag: '.$flag);
+            }
+        }
+        if ($extraction['stationary'] && ! $extraction['enabled']) {
+            throw new GameException('Stationary extraction requires extraction to be enabled.');
+        }
+        if (! $this->isAllowedList($extraction['jettison_allowlist'] ?? null, [
+            'ICE_WATER', 'QUARTZ_SAND', 'AMMONIA_ICE', 'SILICON_CRYSTALS', 'IRON_ORE', 'COPPER_ORE', 'ALUMINUM_ORE', 'PRECIOUS_STONES',
+        ])) {
+            throw new GameException('Invalid extraction jettison allowlist.');
+        }
+        if (! $saturation['enabled'] && ($corridor['chains_enabled'] || $extraction['enabled']
+            || $stimulation['enabled'] || $saturation['per_ship_noncredit_locks'])) {
+            throw new GameException('Chains, extraction, stimulation and per-ship noncredit locks require fleet saturation to be enabled.');
+        }
+
+        $lambda = $saturation['lambda'] ?? null;
+        $this->integerPolicy($lambda, [
+            'low_permille' => [0, 998],
+            'resume_permille' => [1, 999],
+            'high_permille' => [2, 1000],
+            'max_step_credits' => [1, 50],
+            'resume_passes' => [1, 20],
+        ]);
+        if ($lambda['low_permille'] >= $lambda['resume_permille'] || $lambda['resume_permille'] >= $lambda['high_permille']) {
+            throw new GameException('Lambda thresholds must satisfy low < resume < high.');
+        }
+    }
+
+    private function isAllowedList(mixed $list, array $allowed): bool
+    {
+        if (! is_array($list) || ! array_is_list($list)) {
+            return false;
+        }
+        $seen = [];
+        foreach ($list as $value) {
+            if (! in_array($value, $allowed, true) || isset($seen[$value])) {
+                return false;
+            }
+            $seen[$value] = true;
+        }
+
+        return true;
+    }
+
+    public static function rawSaturationPolicy(array $body): ?array
+    {
+        $policy = $body['fleet']['saturation'] ?? null;
+
+        return is_array($policy) ? $policy : null;
+    }
+
+    public static function saturationPolicy(array $body): ?array
+    {
+        $policy = self::rawSaturationPolicy($body);
+
+        return ($policy['enabled'] ?? false) === true ? $policy : null;
     }
 
     private function ratio(mixed $value, string $key): void

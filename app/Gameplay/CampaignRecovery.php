@@ -74,23 +74,80 @@ class CampaignRecovery
                 $departure['agent']->credits = $agent->credits - $ceiling;
             }
         }
-        $leg = $atBuyer
-            ? ['destination' => $buyer, 'outbound_fuel' => 0, 'required_fuel' => 0, 'refuel_ceiling' => 0]
-            : $fuel->recoveryLeg($departure['agent'] ?? $agent, $departure['ship'] ?? $ship, $buyer, $limits['reserve']);
-        $arrived = $departure['ship'] ?? $ship;
-        $arrived['nav']['waypointSymbol'] = $buyer;
-        $arrived['fuel']['current'] -= $leg['outbound_fuel'];
-        // Second safeguard: after the final sale, top up again if the buyer is itself a verified fuel seller.
-        $postSale = $fuel->departureRefuel($agent, $arrived);
-        $route = ['fuel_ceiling' => ($departure['ceiling'] ?? 0) + ($postSale['ceiling'] ?? 0), 'outbound' => $leg,
-            'departure_refuel_ceiling' => $departure['ceiling'] ?? 0, 'post_sale_refuel_ceiling' => $postSale['ceiling'] ?? 0];
+        $versioned = ($limits['plan_version'] ?? null) === 8;
+        $route = null;
+        if (! $versioned) {
+            try {
+                $leg = $atBuyer
+                    ? ['destination' => $buyer, 'outbound_fuel' => 0, 'required_fuel' => 0, 'refuel_ceiling' => 0]
+                    : $fuel->recoveryLeg($departure['agent'] ?? $agent, $departure['ship'] ?? $ship, $buyer, $limits['reserve']);
+            } catch (GameException $exception) {
+                if ($exception->retryAfter > 0) {
+                    throw $exception;
+                }
+                $versioned = true;
+            }
+        }
+        if ($versioned) {
+            $planner = app(OperationPlanner::class);
+            $route = $atBuyer ? ['hops' => [], 'mode' => 'CRUISE', 'fuel_ceiling' => 0, 'fuel_estimate' => 0, 'estimated_seconds' => 0]
+                : $planner->cruiseRoute($agent, $ship, $buyer, $limits['reserve']);
+            if ($route['fuel_ceiling'] > min($limits['max_spend'], $limits['max_loss'])
+                || $route['fuel_estimate'] > ($limits['max_fuel'] ?? PHP_INT_MAX)
+                || (isset($limits['settlement_deadline']) && now()->addSeconds($route['estimated_seconds'] + 120)->gte(CarbonImmutable::parse($limits['settlement_deadline'])))) {
+                throw new GameException('Recovery route exceeds the approved fuel, credit or settlement bounds.');
+            }
+            $limits['plan_version'] = 8;
+            $limits['proof_eligible'] = false;
+            $limits['hop_index'] = 0;
+            $lots = MiningPlanner::inventory($ship);
+            $basis = app(CampaignTrade::class)->averageCosts($agent, $symbol);
+            foreach ($lots as $cargo => $units) {
+                $bid = collect($known?->data['tradeGoods'] ?? [])->firstWhere('symbol', $cargo);
+                if (($bid['sellPrice'] ?? 0) < 1 || ($bid['tradeVolume'] ?? 0) < 1) {
+                    throw new GameException('Recovery buyer lacks executable bids for the held inventory.');
+                }
+                $limits['recovery_goods'][$cargo] = ['units' => $units, 'cost' => ($basis[$cargo] ?? 0) * $units,
+                    'floor' => (int) ceil($basis[$cargo] ?? 0)];
+            }
+            if (isset($limits['recovery_of'])) {
+                $origin = AutomationRun::whereKey($limits['recovery_of'])->where('agent_id', $agent->id)
+                    ->where('reset_id', $agent->reset_id)->where('ship_symbol', $symbol)->first();
+                if (isset($origin->plan['legs'])) {
+                    $index = $origin->totals['leg_index'] ?? 0;
+                    $original = $origin->plan['legs'][$index] ?? null;
+                    if (($original['good'] ?? null) === $good && ($origin->totals['leg_purchased'][$index] ?? 0) > 0) {
+                        $owned = $origin->totals['leg_purchased'][$index];
+                        $cost = ($origin->totals['leg_purchase_cost'][$index] ?? 0) / $owned;
+                        $limits['recovery_leg_index'] = $index;
+                        $limits['recovery_goods'][$good] = ['units' => $lots[$good], 'cost' => $lots[$good] * $cost, 'floor' => (int) ceil($cost)];
+                    }
+                }
+            }
+        } else {
+            $arrived = $departure['ship'] ?? $ship;
+            $arrived['nav']['waypointSymbol'] = $buyer;
+            $arrived['fuel']['current'] -= $leg['outbound_fuel'];
+            // Second safeguard: after the final sale, top up again if the buyer is itself a verified fuel seller.
+            $postSale = $fuel->departureRefuel($agent, $arrived);
+            $route = ['fuel_ceiling' => ($departure['ceiling'] ?? 0) + ($postSale['ceiling'] ?? 0), 'outbound' => $leg,
+                'departure_refuel_ceiling' => $departure['ceiling'] ?? 0, 'post_sale_refuel_ceiling' => $postSale['ceiling'] ?? 0];
+        }
         $plan = array_merge($limits, ['strategy' => 'sell_aboard', 'recovery_good' => $good, 'sale_floor' => (int) ceil($cost), 'cargo_cost' => $cost * MiningPlanner::inventory($ship)[$good], 'sell_only' => true, 'cycles' => 1, 'site' => $ship['nav']['waypointSymbol'], 'market' => $buyer,
             'initial_credits' => $agent->credits, 'initial_inventory' => MiningPlanner::inventory($ship), 'initial_fuel' => $ship['fuel']['current'],
             'initial_waypoint' => $ship['nav']['waypointSymbol'], 'initial_status' => $ship['nav']['status'],
             'initial_configuration' => $initialConfiguration, 'restore_cruise' => $restoreCruise, 'equipment' => OpportunityEvaluator::equipment($ship),
             'participating_ships' => [$symbol], 'route' => $route,
             'quote_signature' => OpportunityEvaluator::quoteSignature($market ?? $known->data)]);
-        $fingerprint = hash('sha256', json_encode(array_intersect_key($plan, array_flip(['initial_credits', 'initial_inventory', 'initial_fuel', 'initial_waypoint', 'initial_status', 'initial_configuration', 'equipment', 'quote_signature']))));
+        $fingerprintFields = ['initial_credits', 'initial_inventory', 'initial_fuel', 'initial_waypoint', 'initial_status', 'initial_configuration', 'equipment', 'quote_signature'];
+        if ($versioned) {
+            array_push($fingerprintFields, 'route', 'recovery_goods', 'recovery_of', 'recovery_leg_index', 'settlement_deadline');
+        }
+        $evidence = array_intersect_key($plan, array_flip($fingerprintFields));
+        if ($versioned) {
+            $evidence['route']['hops'] = array_map(static fn (array $hop) => array_diff_key($hop, ['quote_age' => true, 'continuation_quote_age' => true]), $route['hops']);
+        }
+        $fingerprint = hash('sha256', json_encode($evidence));
 
         return ['plan' => $plan, 'fingerprint' => $fingerprint];
     }
@@ -141,7 +198,18 @@ class CampaignRecovery
         }
         $fuelCost = $run->totals['fuel_cost'] ?? 0;
         $missing = $ship['fuel']['capacity'] - $ship['fuel']['current'];
-        if ((MiningPlanner::inventory($ship)[$run->plan['recovery_good']] ?? 0) === 0) {
+        $route = $run->plan['route'];
+        $multiHop = isset($route['hops']);
+        $held = MiningPlanner::inventory($ship);
+        $good = $multiHop ? array_key_first($held) : $run->plan['recovery_good'];
+        if ($multiHop && $held !== [] && (array_diff(array_keys($held), array_keys($run->plan['recovery_goods'] ?? $run->plan['initial_inventory'] ?? array_fill_keys([$good], 0)))
+            || (isset($run->plan['settlement_deadline']) && now()->gte($run->plan['settlement_deadline'])))) {
+            return AutomationStep::blocked('Owned cargo or timing differs from the approved recovery. Retain cargo.');
+        }
+        if (($held[$good] ?? 0) === 0) {
+            if ($multiHop) {
+                return AutomationStep::trip();
+            }
             $windDown = app(CampaignSafety::class)->windDown(CampaignEpisode::findOrFail($run->campaign_episode_id));
             $quote = ! $windDown && $ship['nav']['status'] === 'DOCKED' && $missing > 0 ? app(FuelPlanner::class)->sellerQuote($agent, $ship['nav']['waypointSymbol']) : null;
             if ($quote) {
@@ -154,6 +222,10 @@ class CampaignRecovery
             return AutomationStep::trip();
         }
         if ($ship['nav']['waypointSymbol'] !== $run->plan['market']) {
+            if ($multiHop) {
+                return app(OperationPlanner::class)->nextPinnedHop($agent, $ship, $route['hops'], $run->totals['hop_index'] ?? 0,
+                    min($route['fuel_ceiling'], $run->plan['max_spend']) - $fuelCost, $run->plan['reserve'], $run->totals['hop_fuel_cost'] ?? []);
+            }
             $departure = $run->plan['route']['departure_refuel_ceiling'] ?? 0;
             if ($departure > 0 && $missing > 0 && $ship['nav']['waypointSymbol'] === $run->plan['site'] && ($run->totals['travel_fuel'] ?? 0) === 0) {
                 $step = $this->refuel($run, $missing, app(OperationPlanner::class)->quote($agent, $run->plan['site'], 'FUEL'), $departure - $fuelCost);
@@ -178,16 +250,17 @@ class CampaignRecovery
                 return $step;
             }
         }
-        $good = $run->plan['recovery_good'];
-        $quote = app(OperationPlanner::class)->quote($agent, $run->plan['market'], $good);
+        $planner = app(OperationPlanner::class);
+        $quote = $multiHop ? $planner->executionQuote($agent, $ship, $run->plan['market'], $good)
+            : $planner->quote($agent, $run->plan['market'], $good);
         $units = min(MiningPlanner::inventory($ship)[$good], $quote['tradeVolume']);
         if ($units < 1 || $quote['sellPrice'] < 1) {
             return AutomationStep::blocked('Recovery buyer is no longer available. Cargo retained.');
         }
 
-        $floor = $run->plan['sale_floor'];
+        $floor = $run->plan['recovery_goods'][$good]['floor'] ?? $run->plan['sale_floor'];
         if ($quote['sellPrice'] < $floor) {
-            $deadline = CarbonImmutable::parse($run->plan['recovery_started_at'])->addMinutes(10);
+            $deadline = CarbonImmutable::parse($run->plan['recovery_started_at'] ?? $run->started_at)->addMinutes(10);
             $minimum = $deadline->isFuture() ? $floor : $quote['sellPrice'] + 1;
             $alternatives = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')
                 ->where('symbol', '!=', $run->plan['market'])->where('observed_at', '>=', now()->subSeconds(config('gameplay.snapshot_seconds')))->get();
@@ -197,7 +270,11 @@ class CampaignRecovery
                     continue;
                 }
                 try {
-                    app(FuelPlanner::class)->recoveryLeg($agent, $ship, $alternative->symbol);
+                    if ($multiHop) {
+                        app(OperationPlanner::class)->cruiseRoute($agent, $ship, $alternative->symbol, $run->plan['reserve']);
+                    } else {
+                        app(FuelPlanner::class)->recoveryLeg($agent, $ship, $alternative->symbol);
+                    }
                     if ($bid['sellPrice'] >= $floor) {
                         $this->floorObserved($run);
                     }
