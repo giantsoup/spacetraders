@@ -125,6 +125,7 @@ class CampaignControl
             throw new GameException('Arm authority requires the current agent and reset under both locks.');
         }
         $history = CampaignGrant::where('user_id', $agent->user_id)->where('agent_symbol', $symbol)->whereNotNull('limits->arm')->get();
+        CampaignGrant::loadFirstEpisodeResets($history);
         $resets = $history->mapWithKeys(fn (CampaignGrant $grant) => [$grant->id => CampaignDirector::armReset($grant, $agent->reset_id, $schedule)]);
         $live = $history->filter(fn (CampaignGrant $grant) => ! $grant->revoked_at && ! $grant->superseded_at && (! $grant->expires_at || $grant->expires_at->isFuture()));
         $current = $live->filter(fn (CampaignGrant $grant) => $resets[$grant->id] === $agent->reset_id);
@@ -176,6 +177,7 @@ class CampaignControl
         }
         $schedule = CampaignDirector::cachedSchedule();
         $grants = CampaignGrant::where('user_id', $agent->user_id)->where('agent_symbol', $agent->name)->whereNotNull('limits->arm')->get();
+        CampaignGrant::loadFirstEpisodeResets($grants);
         $assigned = $grants->filter(function (CampaignGrant $grant) use ($schedule, $agent, $includeUnresolvedConflicts) {
             $reset = CampaignDirector::armReset($grant, $agent->reset_id, $schedule);
             $live = ! $grant->revoked_at && ! $grant->superseded_at;

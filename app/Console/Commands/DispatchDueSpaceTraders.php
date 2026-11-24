@@ -94,9 +94,15 @@ class DispatchDueSpaceTraders extends Command
         foreach ($turns as $turn) {
             $started = microtime(true);
             if ($turn === 'arms') {
-                $timing['arms_directed'] = $both
-                    ? $director->tickArmsBatch()
-                    : (int) $director->dispatch(true);
+                if ($both) {
+                    try {
+                        $timing['arms_directed'] = $director->tickArmsBatch();
+                    } catch (\Throwable $exception) {
+                        Log::error('Arm director batch failed; exception details redacted.', ['exception_class' => $exception::class]);
+                    }
+                } else {
+                    $timing['arms_directed'] = (int) $director->dispatch(true);
+                }
                 $attempted = $timing['arms_directed'] > 0;
             } else {
                 $attempted = $director->dispatch(false);

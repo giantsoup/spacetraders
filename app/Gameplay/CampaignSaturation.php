@@ -700,8 +700,9 @@ class CampaignSaturation
             $before = [];
             $after = [];
             $schedule = CampaignDirector::cachedSchedule();
-            $history = CampaignGrant::where('user_id', $agent->user_id)->where('agent_symbol', $agent->name)->whereNotNull('limits->arm')->get()
-                ->filter(fn (CampaignGrant $grant) => CampaignDirector::armReset($grant, $agent->reset_id, $schedule) === $agent->reset_id);
+            $history = CampaignGrant::where('user_id', $agent->user_id)->where('agent_symbol', $agent->name)->whereNotNull('limits->arm')->get();
+            CampaignGrant::loadFirstEpisodeResets($history);
+            $history = $history->filter(fn (CampaignGrant $grant) => CampaignDirector::armReset($grant, $agent->reset_id, $schedule) === $agent->reset_id);
             foreach ($history as $incumbent) {
                 if ($incumbent->id === $arm->id) {
                     continue;

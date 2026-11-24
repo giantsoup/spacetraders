@@ -193,6 +193,7 @@ class CampaignFleet
     public function currentArms(Agent $agent, ?Collection $grants = null): Collection
     {
         $grants ??= CampaignGrant::liveArms($agent->name)->where('user_id', $agent->user_id)->orderBy('id')->get();
+        CampaignGrant::loadFirstEpisodeResets($grants);
         $needsSchedule = $grants->contains(function (CampaignGrant $grant) {
             $stamp = $grant->arm()['reset_id'] ?? $grant->getAttributes()['first_episode_reset_id'] ?? null;
 
@@ -206,8 +207,10 @@ class CampaignFleet
     public function reservedArmShips(Agent $agent, string $reset): array
     {
         $schedule = CampaignDirector::cachedSchedule();
+        $grants = CampaignGrant::liveArms($agent->name)->where('user_id', $agent->user_id)->get();
+        CampaignGrant::loadFirstEpisodeResets($grants);
 
-        return CampaignGrant::liveArms($agent->name)->where('user_id', $agent->user_id)->get()
+        return $grants
             ->filter(fn (CampaignGrant $grant) => in_array(CampaignDirector::armReset($grant, $reset, $schedule), [$reset, null], true))
             ->map(fn (CampaignGrant $grant) => $grant->arm()['ship'])->unique()->values()->all();
     }

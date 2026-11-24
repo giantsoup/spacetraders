@@ -216,6 +216,9 @@ class CampaignDirector
                     // A shared schedule failure has no individual arm to charge.
                 }
                 $schedule = self::verifiedSchedule($schedule);
+                if ($schedule) {
+                    CampaignGrant::loadFirstEpisodeResets($grants);
+                }
                 $eligible = collect();
                 $expired = false;
                 foreach ($grants as $grant) {
@@ -805,7 +808,8 @@ class CampaignDirector
                     return;
                 }
                 if ($pendingHandover) {
-                    if (! $this->recover($grant, $episode, $agent, $busyShips, $pendingHandover)) {
+                    $recovery = $fleet->recoveryFleet($grant, $episode, $agent, false);
+                    if (! $this->recover($grant, $episode, $agent, $recovery, false, $busyShips, true)) {
                         $this->decision($grant, $episode, $agent, [], 'awaiting_pending_activation');
                     }
 

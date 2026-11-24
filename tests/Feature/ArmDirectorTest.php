@@ -185,6 +185,32 @@ class ArmDirectorTest extends TestCase
         $this->assertSame('0', DB::table('game_runtime')->where('key', 'arm_director_failures:'.$arm->id)->value('value'));
     }
 
+    public function test_a_shared_arm_harvest_failure_leaves_arm_streaks_and_the_rest_of_dispatch_intact(): void
+    {
+        config(['gameplay.arms_every_pass' => true]);
+        $primary = app(CampaignControl::class)->approve(app(CampaignPlaybook::class)->import($this->body()), $this->user);
+        $arm = $this->arm('T1b', 'LOCAL-3');
+        $streak = 'arm_director_failures:'.$arm->id;
+        DB::table('game_runtime')->insert([['key' => 'director_turn', 'value' => 'arms'], ['key' => $streak, 'value' => '2']]);
+        $this->partialMock(CampaignTrade::class)->shouldReceive('harvestArms')->once()->with($this->agent->reset_id)
+            ->andReturnUsing(function () use ($primary) {
+                $this->assertNull($primary->fresh()->last_directed_at);
+                ShipAction::create(['agent_id' => $this->agent->id, 'ship_symbol' => 'LOCAL-3', 'key' => 'harvest-failure-action',
+                    'reset_id' => $this->agent->reset_id, 'command' => 'dock', 'state' => 'pending', 'origin' => 'manual',
+                    'expires_at' => now()->addMinute(), 'arguments' => []]);
+                throw new \TypeError('Synthetic shared arm harvest failure.');
+            });
+
+        $this->artisan('spacetraders:dispatch-due')->assertSuccessful();
+
+        $this->assertSame('2', DB::table('game_runtime')->where('key', $streak)->value('value'));
+        $this->assertDatabaseMissing('campaign_events', ['kind' => 'director_error']);
+        $this->assertSame(now()->toDateTimeString(), $primary->fresh()->last_directed_at?->toDateTimeString());
+        $action = ShipAction::where('key', 'harvest-failure-action')->firstOrFail();
+        $this->assertNotNull($action->last_dispatched_at);
+        Queue::assertPushed(ExecuteShipCommand::class, fn (ExecuteShipCommand $job) => $job->actionId === $action->id);
+    }
+
     public function test_arms_tick_only_on_passes_where_c0_did_not_attempt(): void
     {
         config(['gameplay.arms_every_pass' => false]);

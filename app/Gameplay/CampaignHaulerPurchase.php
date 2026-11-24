@@ -111,8 +111,10 @@ class CampaignHaulerPurchase
             }
             [, $episode, $primary] = $link;
             $linked = CampaignGrant::where('user_id', $user->id)->where('agent_symbol', $agent->name)->whereNotNull('limits->arm')
-                ->where('limits->arm->purchase_action_id', $action->id)->get()
-                ->filter(fn (CampaignGrant $grant) => CampaignDirector::armReset($grant, $agent->reset_id, CampaignDirector::cachedSchedule()) === $agent->reset_id);
+                ->where('limits->arm->purchase_action_id', $action->id)->get();
+            CampaignGrant::loadFirstEpisodeResets($linked);
+            $schedule = $linked->isNotEmpty() ? CampaignDirector::cachedSchedule() : null;
+            $linked = $linked->filter(fn (CampaignGrant $grant) => CampaignDirector::armReset($grant, $agent->reset_id, $schedule) === $agent->reset_id);
             if (($arm && ($linked->count() !== 1 || ! $linked->contains('id', $arm->id))) || (! $arm && $linked->isNotEmpty())) {
                 throw new GameException('Pacing review must select the exact linked arm grant or an unarmed delivery.');
             }

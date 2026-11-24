@@ -9,6 +9,7 @@ use App\Gameplay\Bridge\BridgeDrain;
 use App\Gameplay\Bridge\BridgeScope;
 use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignDirector;
+use App\Gameplay\CampaignFleet;
 use App\Gameplay\CampaignHealth;
 use App\Gameplay\CampaignPlaybook;
 use App\Gameplay\EngineGate;
@@ -705,6 +706,47 @@ class CampaignBridgeActionsTest extends TestCase
         } finally {
             DB::disableQueryLog();
         }
+    }
+
+    public function test_fleet_resume_batches_legacy_arm_resets_and_preserves_unresolved_reservations(): void
+    {
+        $this->travelTo(now()->setDate(2026, 11, 22)->setTime(12, 0));
+        [$primary, $agent, $episode] = $this->campaign(playbook: 'weekly-probe-bootstrap.yaml');
+        $this->campaign('GIANTSOUP');
+        config(['gameplay.request_budget_enabled' => true]);
+        $control = app(CampaignControl::class);
+        $control->drainPause($primary, 'host_rate_limits');
+        $expected = [$primary->id];
+        for ($index = 1; $index <= 6; $index++) {
+            [$arm] = $this->arm($primary, $agent, 'R'.$index);
+            DB::table('campaign_grants')->where('id', $arm->id)->update(['limits->arm->reset_id' => null]);
+            $control->drainPause($arm, 'host_rate_limits');
+            $expected[] = $arm->id;
+        }
+        [$unresolved, $unresolvedEpisode, $reservedShip] = $this->arm($primary, $agent, 'R7');
+        DB::table('campaign_grants')->where('id', $unresolved->id)->update(['limits->arm->reset_id' => null]);
+        $unresolvedEpisode->delete();
+        $reservedShip->update(['snapshot->registration->role' => 'SATELLITE', 'snapshot->cargo->units' => 8]);
+        $freeProbe = $this->ship($agent, $agent->name.'-9', 'SATELLITE');
+
+        $url = '/campaign/bridge?agent='.$agent->name;
+        $version = $this->get($url)->assertOk()->inertiaPage()['version'];
+        DB::enableQueryLog();
+        try {
+            $review = $this->get($url.'&review=fleet_resume', [
+                'X-Inertia' => 'true', 'X-Inertia-Version' => $version, 'X-Inertia-Partial-Data' => 'reviews',
+                'X-Inertia-Partial-Component' => 'Campaign/Bridge/Brief',
+            ])->assertOk()->json('props.reviews.fleet_resume');
+            $queries = count(DB::getQueryLog());
+        } finally {
+            DB::disableQueryLog();
+        }
+        $this->assertSame($expected, array_keys($review['expected']));
+        $this->assertSame([], $review['blockers']);
+        $this->assertLessThanOrEqual(40, $queries, "Fleet resume review ran $queries queries.");
+        $this->submit($agent, $review)->assertSessionHasNoErrors();
+        $this->assertFalse($primary->fresh()->isDraining());
+        $this->assertSame([$freeProbe->symbol], array_column(app(CampaignFleet::class)->probes($episode), 'symbol'));
     }
 
     public static function fleetReviewQueryFixtures(): array

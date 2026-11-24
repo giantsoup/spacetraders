@@ -528,6 +528,27 @@ class CampaignAutopilotTest extends TestCase
         $this->assertNull($grant->fresh()->slot);
     }
 
+    public function test_a_busy_pooled_command_ship_waits_for_pending_activation_without_a_director_error(): void
+    {
+        $source = str_replace('GIANTSOUP', 'LOCAL', file_get_contents(base_path('campaigns/weekly-probe-bootstrap.yaml')));
+        $grant = $this->approve($source);
+        $episode = CampaignEpisode::create(['campaign_grant_id' => $grant->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
+            'phase' => 'earn', 'opened_at' => now(), 'start_credits' => $this->agent->credits, 'next_reset_at' => now()->addHours(17), 'state' => []]);
+        ShipAction::create(['agent_id' => $this->agent->id, 'ship_symbol' => 'LOCAL-1', 'key' => 'busy-command-handover',
+            'reset_id' => $this->agent->reset_id, 'command' => 'dock', 'state' => 'pending', 'origin' => 'manual',
+            'expires_at' => now()->addMinute(), 'arguments' => []]);
+        $pending = $this->approve($source."\n# pending pooled revision\n");
+        $this->assertSame(2, $pending->slot);
+
+        $this->tick();
+
+        $this->assertDatabaseMissing('campaign_events', ['kind' => 'director_error']);
+        $this->assertDatabaseHas('campaign_events', [
+            'campaign_episode_id' => $episode->id, 'kind' => 'decision', 'data->choice' => 'awaiting_pending_activation',
+        ]);
+        $this->assertSame(2, $pending->fresh()->slot);
+    }
+
     public function test_expired_handover_rotates_two_overdue_arrival_reads_and_preserves_other_blockers(): void
     {
         $this->editWorld(function (&$world) {
