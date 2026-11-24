@@ -33,7 +33,9 @@ class AdviserTest extends TestCase
     {
         parent::setUp();
         $this->file = tempnam(sys_get_temp_dir(), 'adviser-world-');
-        file_put_contents($this->file, json_encode(FakeSpaceTraders::world()));
+        $world = FakeSpaceTraders::world();
+        $world['goods'] = FakeSpaceTraders::withAllMiningBids($world['goods']);
+        file_put_contents($this->file, json_encode($world));
         FakeSpaceTraders::install($this->file);
         $user = User::factory()->create();
         $this->agent = $user->agents()->create(['name' => 'LOCAL', 'token' => 'synthetic-only', 'account_id' => 'synthetic', 'faction' => 'COSMIC', 'reset_id' => '2026-10-25', 'canonical_identity' => AgentSynchronizer::identity('2026-10-25', 'LOCAL')]);

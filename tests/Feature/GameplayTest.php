@@ -849,8 +849,8 @@ class GameplayTest extends TestCase
         }
         $this->assertSame(RunState::Blocked, $run->state);
         $this->assertStringContainsString('No verified buyer', $run->blocked_reason);
-        $this->assertSame(8, Ship::first()->snapshot['cargo']['units']);
-        $this->assertFalse(collect($this->world()['writes'])->contains(fn ($w) => str_contains($w['path'], 'jettison')));
+        $this->assertSame(['DIAMONDS' => 8], MiningPlanner::inventory(Ship::firstOrFail()->snapshot));
+        $this->assertFalse(collect($this->world()['writes'])->contains(fn ($write) => in_array(basename($write['path']), ['sell', 'jettison'], true)));
     }
 
     public function test_repeated_no_yield_is_bounded_and_condition_change_blocks(): void

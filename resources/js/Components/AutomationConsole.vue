@@ -12,11 +12,28 @@ import { assetName, cargoSummary, readableLabel, readableText } from '@/dataPres
 const props = defineProps({ agent: Object, ships: Array, selected: String, engine: Object, operator: Boolean, investigations: Array, drafts: Array, runs: Array, accounting: Object, enabled: Boolean, observations: { type: Array, default: () => [] } });
 const emit = defineEmits(['refresh', 'inspect-run', 'prepare-market']);
 const strategy = ref(props.drafts[0]?.candidate.strategy || props.investigations[0]?.strategy || 'mining');
-const system = ref(props.ships[0]?.snapshot.nav.systemSymbol || '');
+const previousInvestigation = props.investigations.find(i => i.strategy === strategy.value);
+const previousSystem = previousInvestigation?.system_symbol;
+const system = ref(props.ships.some(ship => ship.snapshot.nav.systemSymbol === previousSystem) ? previousSystem : props.ships[0]?.snapshot.nav.systemSymbol || '');
+const previousFocus = previousSystem === system.value && previousInvestigation?.coverage.focus?.buyer ? previousInvestigation.coverage.focus : null;
+const focusBuyer = ref(previousFocus?.buyer || '');
+const focusSites = ref([previousFocus?.sites?.[0] || '', previousFocus?.sites?.[1] || '']);
+const observedWaypoints = computed(() => props.observations.filter(row => row.kind === 'waypoint' && row.data.systemSymbol === system.value)
+    .map(row => row.data).sort((a, b) => a.symbol.localeCompare(b.symbol)));
+const focusBuyers = computed(() => observedWaypoints.value.filter(point => point.traits?.some(trait => trait.symbol === 'MARKETPLACE')));
+const asteroidSites = computed(() => observedWaypoints.value.filter(point => ['ASTEROID', 'ASTEROID_FIELD', 'ENGINEERED_ASTEROID'].includes(point.type)));
 const sort = ref('rate');
 const chosen = ref('');
+watch(system, () => {
+    focusBuyer.value = '';
+    focusSites.value = ['', ''];
+    chosen.value = '';
+});
+watch(focusBuyer, buyer => {
+    if (!buyer) focusSites.value = ['', ''];
+});
 const draftId = ref(props.drafts[0]?.id || null);
-const investigationId = ref(props.investigations.find(i => i.strategy === strategy.value)?.id || null);
+const investigationId = ref(previousInvestigation?.id || null);
 const investigation = computed(() => props.investigations.find(i => i.id === investigationId.value) || props.investigations.find(i => i.strategy === strategy.value));
 const draft = computed(() => props.drafts.find(d => d.id === draftId.value));
 const preview = computed(() => props.runs.find(r => r.state === 'preview' && r.plan_version === 2 && r.draft_id === draft.value?.id));
@@ -25,7 +42,20 @@ const outcome = computed(() => active.value || props.runs.find(r => r.ship_symbo
 const runShip = computed(() => props.ships.find(s => s.symbol === outcome.value?.ship_symbol)?.snapshot);
 const completedContractIds = computed(() => new Set((investigation.value?.observations.contracts || []).filter(contract => contract.fulfilled).map(contract => contract.id)));
 const noOpenContracts = computed(() => investigation.value?.strategy === 'contracts' && Array.isArray(investigation.value.observations.contracts) && investigation.value.observations.contracts.every(contract => contract.fulfilled));
-const candidates = computed(() => (investigation.value?.candidates || []).filter(candidate => !completedContractIds.value.has(candidate.contract_id)).sort((a, b) => Number(b.classification === 'ready') - Number(a.classification === 'ready') || (sort.value === 'net' ? ((b.estimated_net ?? -Infinity) - (a.estimated_net ?? -Infinity) || (a.working_capital ?? Infinity) - (b.working_capital ?? Infinity) || (a.duration_seconds ?? Infinity) - (b.duration_seconds ?? Infinity) || a.id.localeCompare(b.id)) : 0)));
+const investigationFocus = computed(() => investigation.value?.coverage.focus);
+function candidatePriority(candidate) {
+    if (candidate.classification !== 'ready') return 3;
+    const focus = investigationFocus.value;
+    if (!focus?.buyer || candidate.market !== focus.buyer) return 2;
+    return focus.sites?.includes(candidate.site) ? 0 : 1;
+}
+const candidates = computed(() => (investigation.value?.candidates || []).filter(candidate => !completedContractIds.value.has(candidate.contract_id))
+    .sort((a, b) => Number(b.classification === 'ready') - Number(a.classification === 'ready')
+        || (a.classification === 'ready' ? Number(Boolean(a.survey_required_for_departure)) - Number(Boolean(b.survey_required_for_departure)) : 0)
+        || candidatePriority(a) - candidatePriority(b)
+        || (sort.value === 'net'
+            ? (b.estimated_net ?? -Infinity) - (a.estimated_net ?? -Infinity) || (a.working_capital ?? Infinity) - (b.working_capital ?? Infinity) || (a.duration_seconds ?? Infinity) - (b.duration_seconds ?? Infinity) || a.id.localeCompare(b.id)
+            : 0)));
 const readyCount = computed(() => candidates.value.filter(candidate => candidate.classification === 'ready').length);
 const observationTasks = computed(() => [...new Map(candidates.value.filter(candidate => candidate.preparation?.kind === 'observe_market').map(candidate => [`${candidate.ship_symbol}:${candidate.market}`, candidate.preparation])).values()]
     .sort((a, b) => observationDistance(a) - observationDistance(b) || a.market.localeCompare(b.market)).slice(0, 3));
@@ -88,7 +118,13 @@ async function post(path, data = {}, concurrent = false) {
     }
 }
 async function investigate() {
-    const record = await post('investigations', { strategy: strategy.value, system: system.value });
+    const data = { strategy: strategy.value, system: system.value };
+    if (strategy.value === 'mining' && focusBuyer.value) {
+        const sites = focusSites.value.filter(Boolean);
+        data.buyer = focusBuyer.value;
+        if (sites.length) data.sites = sites;
+    }
+    const record = await post('investigations', data);
     if (!record) return;
     investigationId.value = record.id;
     chosen.value = '';
@@ -172,11 +208,31 @@ async function reviewBalance() {
             <fieldset :disabled="busy || investigating || !!active"><legend>Choose a strategy</legend>
                 <div class="strategy-options"><label><input v-model="strategy" type="radio" value="mining" name="automation-strategy" @change="chosen = ''; investigationId = null">Mining</label><label><input v-model="strategy" type="radio" value="contracts" name="automation-strategy" @change="chosen = ''; investigationId = null">Contracts</label></div>
                 <label>Investigation system<select v-model="system"><option value="">Choose an owned system</option><option v-for="s in [...new Set(ships.map(s => s.snapshot.nav.systemSymbol))]" :key="s" :value="s">{{ s }}</option></select></label>
+                <div v-if="strategy === 'mining' && system" class="form-grid">
+                    <label>
+                        <span id="mining-focus-buyer-label">Priority buyer (optional)</span>
+                        <select v-model="focusBuyer" aria-labelledby="mining-focus-buyer-label">
+                            <option value="">Any observed marketplace</option>
+                            <option v-for="point in focusBuyers" :key="point.symbol" :value="point.symbol">{{ point.symbol }}</option>
+                        </select>
+                    </label>
+                    <label v-for="(_, index) in focusSites" :key="index">
+                        <span :id="`mining-focus-site-${index}-label`">Priority site {{ index + 1 }} (optional)</span>
+                        <select v-model="focusSites[index]" class="mining-focus-site" :disabled="!focusBuyer" :aria-describedby="!focusBuyer ? 'mining-focus-sites-help' : undefined" :aria-labelledby="`mining-focus-site-${index}-label`">
+                            <option value="">Any observed asteroid site</option>
+                            <option v-for="point in asteroidSites" :key="point.symbol" :value="point.symbol" :disabled="point.symbol === focusSites[1 - index]">{{ point.symbol }}</option>
+                        </select>
+                    </label>
+                </div>
+                <p v-if="strategy === 'mining' && system && !focusBuyer" id="mining-focus-sites-help" class="muted">Choose a priority buyer to enable priority sites.</p>
                 <div class="button-row"><PrimaryButton :disabled="!system" @click="investigate">Investigate opportunities</PrimaryButton></div>
             </fieldset>
             <div v-if="investigation" class="investigation-progress" aria-live="polite">
                 <p>Investigation #{{ investigation.id }} · {{ readableLabel(investigation.status) }} · {{ investigation.system_symbol }} · {{ investigation.coverage.requests }}/{{ investigation.coverage.request_limit }} requests · {{ investigation.coverage.elapsed_seconds || 0 }}/{{ investigation.coverage.seconds_limit }}s elapsed time</p>
                 <p>Observed <time :datetime="investigation.observations.observed_at">{{ utc(investigation.observations.observed_at) }}</time>. Page limit 10; market limit 24; candidate limit 200. Search covers only this observed system.</p>
+                <p v-if="investigationFocus?.buyer">Priority buyer {{ investigationFocus.buyer }}</p>
+                <p v-if="investigationFocus?.buyer && investigationFocus.sites?.length">Priority sites {{ investigationFocus.sites.join(', ') }}</p>
+                <p v-if="investigation.coverage.focus_warning" class="warning">{{ investigation.coverage.focus_warning }}</p>
                 <p v-for="reason in investigation.coverage.limits_reached" :key="reason" class="warning">{{ readableText(reason) }}</p>
                 <p v-if="investigation.status === 'partial'">Search coverage is partial. Routes with verified prerequisites can still be selected; unexplored markets are not required for every route. A fresh preview checks your selected route again.</p>
                 <div v-if="investigation.status === 'investigating'" class="button-row"><SecondaryButton v-if="!investigating" :disabled="busy" @click="continueInvestigation()">Continue investigation</SecondaryButton><DangerButton @click="cancelInvestigation">Cancel investigation</DangerButton></div>
@@ -184,8 +240,8 @@ async function reviewBalance() {
             <section v-if="investigation?.strategy === 'mining' && ['complete', 'partial'].includes(investigation.status)" aria-labelledby="mining-next-heading">
                 <h3 id="mining-next-heading">{{ readyCount ? `${readyCount} mining ${readyCount === 1 ? 'route' : 'routes'} ready to stage` : 'No mining route is ready yet' }}</h3>
                 <p>Unknown earnings are normal before a first mining trial. Buyer prices, equipment and enough fuel must be verified before selecting a route.</p>
-                <template v-if="!readyCount && observationTasks.length">
-                    <p>Observe buyer prices first. These are nearby markets from the observed candidates, with travel and fuel still subject to preview. Preparing a visit does not move your ship.</p>
+                <template v-if="observationTasks.length">
+                    <p>{{ readyCount ? 'Scout additional buyers to expand the search.' : 'Observe buyer prices before staging a route.' }} Preparing a visit opens a manual preview.</p>
                     <div class="button-row"><SecondaryButton v-for="task in observationTasks" :key="`${task.ship_symbol}:${task.market}`" :disabled="busy || !!active" @click="emit('prepare-market', task)">{{ task.at_market ? 'Refresh prices at' : 'Prepare visit to' }} {{ task.market }} with {{ task.ship_symbol }}</SecondaryButton></div>
                     <p>After arrival, choose Synchronize, then return here and Investigate opportunities again. Market listings alone do not reveal executable prices.</p>
                 </template>
@@ -196,7 +252,7 @@ async function reviewBalance() {
                 <div class="candidate-list">
                     <article v-for="candidate in candidates" :key="candidate.id" class="candidate" :class="{ selected: chosen === candidate.id }">
                         <p v-if="candidate.recommended || candidate.suggested_trial" class="recommendation">{{ candidate.trial_required ? 'Bounded trial available' : 'Best observed opportunity' }}</p>
-                        <h3>{{ candidate.ship_symbol }} · {{ candidate.contract_id || candidate.site }}<template v-if="candidate.market"> → {{ candidate.market }}</template></h3>
+                        <h3>{{ candidate.ship_symbol }}<template v-if="candidate.contract_id || candidate.site"> · {{ candidate.contract_id || candidate.site }}</template><template v-if="candidate.market"> → {{ candidate.market }}</template></h3>
                         <p class="state-tag">{{ classifications[candidate.classification] }}<template v-if="candidate.trial_required"> · Trial required</template></p>
                         <p v-if="candidate.strategy === 'contracts'">{{ candidate.use_existing_cargo ? 'Includes explicitly selected existing cargo; remainder uses verified purchases' : 'Verified purchases; existing cargo stays protected' }}</p>
                         <dl><dt>{{ candidate.estimate_kind === 'contract_cash_contribution' ? 'Contract cash estimate / hourly' : 'Estimated net / hourly' }}</dt><dd>{{ credit(candidate.estimated_net) }} / {{ credit(candidate.estimated_per_hour) }}</dd><dt>Conservative hourly estimate</dt><dd>{{ credit(candidate.conservative_per_hour) }}</dd><dt>Estimated duration</dt><dd>{{ candidate.duration_seconds === null ? 'Unknown' : `${candidate.duration_seconds}s including allowance` }}</dd><dt>Working capital / setup</dt><dd>{{ credit(candidate.working_capital) }} / {{ credit(candidate.setup_cost) }}</dd><dt>Fuel use</dt><dd>{{ candidate.fuel_estimate ?? 'Unknown' }} tank units</dd><dt>Required equipment</dt><dd>{{ candidate.required_equipment.join(', ') }}</dd></dl>
@@ -257,7 +313,14 @@ async function reviewBalance() {
                 <p class="warning">Stopping does not remove an accepted contract’s game obligation. The Mac must stay awake and the engine healthy; completion before the deadline is not guaranteed.</p>
                 <label v-if="!preview.plan.contract_plan.contract.accepted" class="check-row"><Checkbox v-model:checked="acceptContract" />I explicitly approve accepting this contract and its continuing delivery obligation.</label>
             </template>
-            <template v-else><p class="warning">Mining continues within approved extraction bounds when buyer prices age in transit. Sale and refuel require fresh prices at the buyer; cargo is retained if the sale is blocked.</p><p v-if="preview.plan.trial_required" class="warning">Trial required. Yield and earnings are unknown. Up to {{ preview.plan.max_extractions || 1 }} {{ (preview.plan.max_extractions || 1) === 1 ? 'extraction' : 'extractions' }} per trip within the approved headroom and site-time bounds.</p><ol class="ordered-actions"><li v-for="step in preview.plan.ordered_actions" :key="step">{{ step }}</li></ol><p>Ending location {{ preview.plan.market }}. Unsold or unknown cargo stays aboard and blocks execution. Refueling targets a full tank within the spending cap.</p></template>
+            <template v-else>
+                <p v-if="preview.plan.initial_waypoint !== preview.plan.site || (preview.plan.cycles > 1 && preview.plan.market !== preview.plan.site)" class="warning">Travel to the extraction site requires fresh positive buyer bids for {{ preview.plan.survey_signature ? 'every signed survey deposit' : 'all 14 unsurveyed yields' }}, including on repeat trips from the buyer.</p>
+                <p class="warning">Mining continues within approved extraction bounds when buyer prices age in transit. Sale and refuel require fresh prices at the buyer. Cargo stays aboard if the sale is blocked.</p>
+                <p v-if="preview.plan.route?.unknown_yields?.length" class="warning">Missing positive bids at preview · {{ preview.plan.route.unknown_yields.join(', ') }}</p>
+                <p v-if="preview.plan.trial_required" class="warning">Trial required. Yield and earnings are unknown. Up to {{ preview.plan.max_extractions || 1 }} {{ (preview.plan.max_extractions || 1) === 1 ? 'extraction' : 'extractions' }} per trip within the approved headroom and site-time bounds.</p>
+                <ol class="ordered-actions"><li v-for="step in preview.plan.ordered_actions" :key="step">{{ step }}</li></ol>
+                <p>Ending location {{ preview.plan.market }}. Unsold or unknown cargo stays aboard and blocks execution. Refueling targets a full tank within the spending cap.</p>
+            </template>
             <p class="warning">Stop on approved budget, loss, duration, equipment condition, unexplained state, uncertain write, reset or no progress. Prices are local estimates. Cash contribution excludes wear, time and unpriced inventory.</p>
             <p v-if="!engineHealthy" class="warning">Start a healthy engine, then create a fresh preview before approval.</p>
             <div class="button-row"><PrimaryButton :disabled="busy || !enabled || !engineHealthy || dirty || (preview.strategy === 'contracts' && !preview.plan.contract_plan.contract.accepted && !acceptContract)" @click="approve">Approve and start</PrimaryButton><SecondaryButton :disabled="busy" @click="previewPlan">Refresh preview</SecondaryButton></div>
@@ -284,4 +347,9 @@ async function reviewBalance() {
 
 <style scoped>
 .panel{border-bottom:1px solid var(--color-line);background:var(--color-panel);padding:16px 0;box-shadow:none;min-width:0}.panel h2{font-size:17px;letter-spacing:.06em;font-weight:800;color:var(--color-accent);margin-bottom:18px;border-bottom:1px solid var(--color-line);padding-bottom:12px}.panel h3{font-weight:700;color:#cfdbeb;margin:20px 0 8px}.muted{color:var(--color-muted)}.warning{color:#f8d99b}.panel p{margin:8px 0}.panel label{display:grid;gap:7px;font-size:15px;color:#c9d7e8}.panel input:not([type=checkbox]):not([type=radio]),.panel select{display:block;border:1px solid #67829f;background:var(--color-field);color:#f0f5ff;padding:10px;width:100%;min-height:44px;border-radius:12px;font:inherit}.panel input[aria-invalid="true"]{border-color:var(--color-fault)}.panel fieldset{min-width:0}.panel legend{font-size:15px;color:var(--color-muted)}.panel fieldset:disabled{opacity:.65}.panel dl{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px 16px;font-size:15px}.panel dt{color:var(--color-muted)}.panel dd{text-align:right;overflow-wrap:anywhere}.panel details{margin:12px 0}.panel summary{color:var(--color-accent);cursor:pointer}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:20px 0}.button-row{display:flex;flex-wrap:wrap;align-items:center;gap:16px;margin:18px 0}.automation-console{display:grid;gap:22px;min-width:0}.section-title{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:12px}.section-title h2{margin:0}.state-tag{display:inline-block;color:#f8d99b;font-size:12px}.state-tag.healthy,.recommendation{color:var(--color-accent)}.strategy-options{display:flex;flex-wrap:wrap;gap:24px;margin:16px 0}.strategy-options label,.check-row{min-height:44px;display:flex!important;align-items:center;gap:12px!important}.strategy-options input,.check-row input{appearance:auto;accent-color:var(--color-accent);padding:0;width:20px!important;height:20px;min-height:20px!important;flex-shrink:0}.candidate-list{display:grid;gap:16px;margin-top:18px}.candidate{border-radius:14px;padding:16px;border:1px solid var(--color-line);background:var(--color-field);min-width:0}.candidate.selected{border-color:var(--color-accent)}.candidate h3{margin:6px 0!important;overflow-wrap:anywhere}.reasons,.ordered-actions{padding-left:24px;font-size:15px}.reasons{list-style:square}.ordered-actions{list-style:decimal}.ordered-actions li{padding:4px 0}.automation-review{padding:16px!important;border-radius:14px;border-color:#d3b77c!important;background:#202635!important;scroll-margin-top:100px}.automation-notice{padding:16px;border:2px solid var(--color-accent);background:#123429;overflow-wrap:anywhere}.automation-notice.fault{background:#421f2b;border-color:#f1a4b4;color:#ffdde4}.investigation-progress{margin:18px 0;padding:12px;border-left:3px solid #58708b}.check-row{margin:20px 0;font-size:15px}.automation-console summary{min-height:44px!important}.automation-console button{margin-top:4px}.recommendation{font-size:12px;letter-spacing:.03em}@media(max-width:900px){.form-grid{grid-template-columns:1fr}}@media(max-width:600px){.panel{padding:16px 0}.candidate{padding:12px}.automation-console{gap:16px}}
+.panel .mining-focus-site:disabled {
+    border-color: var(--color-line);
+    color: var(--color-muted);
+    cursor: not-allowed;
+}
 </style>
