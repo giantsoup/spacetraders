@@ -249,7 +249,7 @@ class LocalAutomationTest extends TestCase
         app(AutomationStaging::class)->save($this->agent->fresh(), $record, $candidate['id'], ['reserve' => 2000]);
     }
 
-    public function test_candidate_limit_prioritizes_capable_ships_safe_nearby_sites_and_priced_markets(): void
+    public function test_candidate_evaluation_excludes_unreachable_pairs_and_prioritizes_priced_markets(): void
     {
         $observations = $this->investigation('mining')->observations;
         $miner = $observations['ships'][0];
@@ -268,7 +268,7 @@ class LocalAutomationTest extends TestCase
         $observations['waypoints'][$site['symbol']] = $site;
         $observations['markets'] = array_reverse($observations['markets'], true);
         $candidates = app(OpportunityEvaluator::class)->evaluate($observations, 'mining', CarbonImmutable::now());
-        $this->assertCount(200, $candidates);
+        $this->assertCount(3, $candidates);
         $this->assertSame('ready', $candidates[0]['classification']);
         $this->assertSame('LOCAL-1', $candidates[0]['ship_symbol']);
         $this->assertSame('X1-TEST-ROCK', $candidates[0]['site']);
@@ -562,6 +562,7 @@ class LocalAutomationTest extends TestCase
     {
         $this->world(function (&$w) {
             $w['ships'][] = FakeSpaceTraders::ship('LOCAL-2', 'X1-TEST-PORT');
+            $w['goods'] = FakeSpaceTraders::withAllMiningBids($w['goods']);
         });
         $run = $this->preview('mining', ['cycles' => 3], fn ($c) => $c['classification'] === 'ready' && $c['ship_symbol'] === 'LOCAL-1' && $c['market'] === 'X1-TEST-PORT');
         app(AutomationRunner::class)->start($this->agent, $run);

@@ -106,6 +106,17 @@ class CommandRules
             }
         }
 
+        if ($run?->strategy === 'mining' && MiningPlanner::startsLoad($ship, $run->plan, $run->totals, $command)) {
+            $buyer = $run->plan['market'];
+            if ($usablePrefetch && ($prefetched['market_symbol'] ?? null) === $buyer && is_array($prefetched['market'] ?? null)) {
+                $quote = $prefetched['market'];
+            } else {
+                $quote = $this->api->market($agent, $buyer, fresh: true);
+                $this->sync->observe($agent, 'market', $buyer, $quote);
+            }
+            $this->planner->assertDepartureBids($quote, $buyer, $this->planner->requiredDepartureYields($agent, $run->plan));
+        }
+
         return ['ship' => $ship, 'active' => $active, 'market' => $market];
     }
 

@@ -279,7 +279,7 @@ class SpaceTradersApi
             'meta.total' => 'required|integer|min:0',
         ]);
 
-        return ['agents' => array_map(fn ($a) => Arr::only($a, ['symbol', 'credits', 'shipCount', 'headquarters', 'startingFaction']), $body['data']), 'total' => $body['meta']['total']];
+        return ['agents' => array_map(fn ($a) => Arr::only($a, ['symbol', 'credits', 'shipCount', 'headquarters', 'startingFaction']), $body['data']), 'total' => (int) $body['meta']['total']];
     }
 
     public function agent(Agent $agent): array
@@ -313,7 +313,7 @@ class SpaceTradersApi
         $body = $this->call('get', '/systems/'.$system.'/waypoints', ['page' => $page, 'limit' => 20], $agent);
         $this->validatePage($body, $page);
 
-        return ['rows' => $this->waypointRows($body['data'], $system), 'total' => $body['meta']['total']];
+        return ['rows' => $this->waypointRows($body['data'], $system), 'total' => (int) $body['meta']['total']];
     }
 
     public function waypoints(Agent $agent, string $system): array
@@ -377,9 +377,9 @@ class SpaceTradersApi
         return $rows;
     }
 
-    public function market(Agent $agent, string $waypoint): array
+    public function market(Agent $agent, string $waypoint, bool $fresh = false): array
     {
-        $data = $this->payload($this->call('get', $this->waypointPath($waypoint).'/market', [], $agent));
+        $data = $this->payload($this->call('get', $this->waypointPath($waypoint).'/market', [], $agent, fresh: $fresh));
 
         return $this->marketData($data, $waypoint);
     }
@@ -598,7 +598,7 @@ class SpaceTradersApi
             'cargo.inventory.*.symbol' => 'required|string|distinct|max:80|regex:/^[A-Z0-9_]+$/', 'cargo.inventory.*.units' => 'required|integer|min:1',
             'mounts' => 'present|array|max:100', 'modules' => 'present|array|max:100',
             'mounts.*.symbol' => 'required|string|max:80', 'mounts.*.requirements' => 'present|array', 'mounts.*.requirements.*' => 'integer|min:0',
-            'mounts.*.deposits' => 'sometimes|array|max:100', 'mounts.*.deposits.*' => 'string|max:80',
+            'mounts.*.deposits' => 'sometimes|nullable|array|max:100', 'mounts.*.deposits.*' => 'string|max:80',
             'modules.*.symbol' => 'required|string|max:80', 'modules.*.capacity' => 'sometimes|integer|min:0', 'modules.*.requirements' => 'present|array', 'modules.*.requirements.*' => 'integer|min:0', 'crew.current' => 'required|integer|min:0', 'crew.required' => 'required|integer|min:0', 'crew.capacity' => 'required|integer|min:0',
             'frame.moduleSlots' => 'required|integer|min:0', 'frame.mountingPoints' => 'required|integer|min:0',
             'frame.integrity' => 'required|numeric|between:0,1', 'engine.integrity' => 'required|numeric|between:0,1', 'reactor.integrity' => 'required|numeric|between:0,1',
