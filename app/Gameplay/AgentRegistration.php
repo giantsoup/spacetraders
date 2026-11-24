@@ -50,9 +50,11 @@ class AgentRegistration
     public function reset(User $user): string
     {
         try {
+            $synchronizer = app(AgentSynchronizer::class);
+            $synchronizer->retryArchivedDrains($user->id);
             $candidates = $user->agents()->unarchived()->whereNotNull('reset_id')->get();
             $reset = app(SpaceTradersApi::class)->status();
-            app(AgentSynchronizer::class)->archivePreviousWorlds($candidates, $reset);
+            $synchronizer->archivePreviousWorlds($candidates, $reset);
 
             return $reset;
         } catch (GameException $e) {

@@ -226,7 +226,7 @@ class CampaignSaturationTest extends TestCase
 
             public int $limits = 2;
 
-            public function usage(?string $token = null, ?string $account = null, ?string $agentSymbol = null): array
+            public function usage(?string $token = null, ?string $account = null, ?string $agentSymbol = null, bool $requireTelemetry = false): array
             {
                 return ['agent' => ['tier2_4_last_hour' => $this->hour], 'host' => ['tier2_4_last_60_seconds' => $this->minute, 'rate_limits_last_15_minutes' => $this->limits]];
             }

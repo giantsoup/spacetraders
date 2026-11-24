@@ -135,7 +135,14 @@ class CampaignHealth
                         if (! $agent || $agent->isArchived()) {
                             return;
                         }
-                        $reason = app(CampaignSafety::class)->reason($grant->refresh(), $episode->refresh(), $agent);
+                        $safety = app(CampaignSafety::class);
+                        $grant->refresh();
+                        $episode->refresh();
+                        $reason = $safety->reason($grant, $episode, $agent);
+                        if ($reason === 'uncertain_action' && ! $safety->uncertain($agent) && ! $safety->purchaseConfigurationMismatch($grant, $agent)
+                            && $safety->priceReview($grant, $episode, $agent)) {
+                            $reason = $safety->unexplainedBalance($agent) ? 'unexplained_change' : null;
+                        }
                         if (in_array($reason, ['uncertain_action', 'unexplained_change'], true)) {
                             foreach (collect([$grant])->merge($agent->reset_id === $episode->reset_id ? app(CampaignFleet::class)->currentArms($agent) : collect()) as $affected) {
                                 app(CampaignControl::class)->pause($affected, $reason);
@@ -154,30 +161,13 @@ class CampaignHealth
 
     private function pressureChecks(Collection $grants, ?CampaignGrant $control, ?CampaignEpisode $episode, array &$state, ?array $current): void
     {
-        $requestBudget = app(RequestBudget::class);
-        $budget = $requestBudget->usage(agentSymbol: 'GIANTSOUP');
-        $host = $budget['host'];
-        $agent = $budget['agent'];
-        $base = $state['baseline'] ?? null;
-        $requests = $agent['tier2_4_last_hour'] + $agent['tier1_last_hour'];
-        $deferrals = $agent['deferrals_last_hour'];
-        $drop = $base && $current && (($base['loads_per_hour'] > 0 && $current['loads_per_hour'] < $base['loads_per_hour'] * .85)
-            || ($base['cr_per_hour'] > 0 && $current['cr_per_hour'] < $base['cr_per_hour'] * .85));
-        $limits = isset($state['last_drain_at'])
-            ? $requestBudget->countRateLimitsSince($state['last_drain_at']) : $host['rate_limits_last_15_minutes'];
-        $conditions = [
-            'control_degradation' => [$drop && $deferrals / max(1, $requests + $deferrals) > .05, 900],
-            'host_operating_pressure' => [$host['tier2_4_last_60_seconds'] >= 86.4, 300],
-            'host_total_pressure' => [$host['tier2_4_last_60_seconds'] + $host['tier1_last_60_seconds'] >= 102, 300],
-            'host_rate_limits' => [$limits >= 3, 0],
-        ];
+        $budget = app(RequestBudget::class)->usage(agentSymbol: 'GIANTSOUP');
+        $conditions = $this->pressureConditions($budget, $state, $current);
         $priority = ['SOUPFLEET' => 2, 'SOUPBURN' => 1];
         $targets = $grants->filter(fn ($g) => $g->id !== $control?->id && $g->fresh()->available())
             ->sortByDesc(fn ($g) => [$priority[$g->resolvedAgentSymbol()] ?? 0, $g->id]);
-        $marginDrop = ($base['pair_margin'] ?? 0) > 0 && ($current['pair_margin'] ?? null) !== null
-            && $current['pair_margin'] < $base['pair_margin'] * .8 && $this->noMarketDepletion($base, $current);
         foreach ($targets as $target) {
-            $conditions['cannibalization:'.$target->id] = [$marginDrop && $episode && $this->tradesInControlSystem($target, $episode), 900];
+            $conditions['cannibalization:'.$target->id] = [$this->cannibalization($target, $episode, $state['baseline'] ?? null, $current), 900];
         }
         if (now()->timestamp - ($state['last_evaluation'] ?? 0) > 120) {
             $state['breaches'] = [];
@@ -201,14 +191,57 @@ class CampaignHealth
         foreach ($breaches as $reason) {
             $overlap = str_starts_with($reason, 'cannibalization:');
             $target = $overlap ? $targets->firstWhere('id', (int) substr($reason, strlen('cannibalization:'))) : $targets->first();
-            if ($target) {
-                $this->drainWithArms($target, $overlap ? 'shared_system_cannibalization' : $reason);
-                $state['last_drain_at'] = $host['observed_at'];
+            if ($target && $this->drainWithArms($target, $overlap ? 'shared_system_cannibalization' : $reason)) {
+                $state['last_drain_at'] = $budget['host']['observed_at'];
                 $state['breaches'] = [];
 
                 return;
             }
         }
+    }
+
+    /** The current measurements for a drain review, without updating timers or the control baseline. */
+    public function drainPressure(CampaignGrant $target): array
+    {
+        $budget = app(RequestBudget::class)->usage(agentSymbol: 'GIANTSOUP', requireTelemetry: true);
+        $control = CampaignGrant::primaryFor($target->user_id, 'GIANTSOUP')->first();
+        $episode = $control ? CampaignEpisode::where('campaign_grant_id', $control->id)->whereNull('closed_at')->latest('id')->first() : null;
+        $key = 'kill_switch:'.$target->user_id.':'.($episode?->reset_id ?? 'unconfirmed');
+        $state = json_decode(DB::table('game_runtime')->where('key', $key)->value('value') ?? '{}', true) ?: [];
+        $current = $episode ? $this->controlWindow($control, $episode) : null;
+        $conditions = $this->pressureConditions($budget, $state, $current);
+        $conditions['shared_system_cannibalization'] = [
+            $target->id !== $control?->id && $this->cannibalization($target, $episode, $state['baseline'] ?? null, $current), 900,
+        ];
+
+        return array_keys(array_filter($conditions, fn ($condition) => $condition[0]));
+    }
+
+    private function pressureConditions(array $budget, array $state, ?array $current): array
+    {
+        $host = $budget['host'];
+        $agent = $budget['agent'];
+        $base = $state['baseline'] ?? null;
+        $requests = $agent['tier2_4_last_hour'] + $agent['tier1_last_hour'];
+        $deferrals = $agent['deferrals_last_hour'];
+        $drop = $base && $current && ((($base['loads_per_hour'] ?? 0) > 0 && $current['loads_per_hour'] < $base['loads_per_hour'] * .85)
+            || (($base['cr_per_hour'] ?? 0) > 0 && $current['cr_per_hour'] < $base['cr_per_hour'] * .85));
+        $limits = isset($state['last_drain_at'])
+            ? app(RequestBudget::class)->countRateLimitsSince($state['last_drain_at']) : $host['rate_limits_last_15_minutes'];
+
+        return [
+            'control_degradation' => [$drop && $deferrals / max(1, $requests + $deferrals) > .05, 900],
+            'host_operating_pressure' => [$host['tier2_4_last_60_seconds'] >= 86.4, 300],
+            'host_total_pressure' => [$host['tier2_4_last_60_seconds'] + $host['tier1_last_60_seconds'] >= 102, 300],
+            'host_rate_limits' => [$limits >= 3, 0],
+        ];
+    }
+
+    private function cannibalization(CampaignGrant $target, ?CampaignEpisode $episode, ?array $base, ?array $current): bool
+    {
+        return $episode && ($base['pair_margin'] ?? 0) > 0 && ($current['pair_margin'] ?? null) !== null
+            && $current['pair_margin'] < $base['pair_margin'] * .8 && $this->noMarketDepletion($base, $current)
+            && $this->tradesInControlSystem($target, $episode);
     }
 
     private function tradesInControlSystem(CampaignGrant $grant, CampaignEpisode $control): bool
@@ -225,15 +258,28 @@ class CampaignHealth
             ->whereIn('data->ship', $ships)->where('data->buyer', 'like', 'X1-SK70-%')->exists();
     }
 
-    private function drainWithArms(CampaignGrant $grant, string $reason): void
+    private function drainWithArms(CampaignGrant $grant, string $reason): bool
     {
         $control = app(CampaignControl::class);
         $agent = $control->agent($grant->user_id, $grant->resolvedAgentSymbol());
-        $arms = $agent && $control->currentEpisode($grant, $agent)
-            ? app(CampaignFleet::class)->currentArms($agent)->filter(fn (CampaignGrant $arm) => ! $arm->paused_at)
-            : collect();
-        foreach (collect([$grant])->merge($arms) as $affected) {
-            app(CampaignControl::class)->drainPause($affected, $reason);
+        $drain = function () use ($control, $agent, $grant, $reason) {
+            $arms = $agent && $control->currentEpisode($grant, $agent->refresh())
+                ? app(CampaignFleet::class)->currentArms($agent)->filter(fn (CampaignGrant $arm) => ! $arm->paused_at)
+                : collect();
+            foreach (collect([$grant])->merge($arms) as $affected) {
+                $control->drainPause($affected, $reason);
+            }
+
+            return true;
+        };
+        try {
+            return $agent ? app(HostLock::class)->run('agent-'.$agent->id, $drain) : $drain();
+        } catch (GameException $exception) {
+            if ($exception->retryAfter === 0) {
+                throw $exception;
+            }
+
+            return false;
         }
     }
 

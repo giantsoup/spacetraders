@@ -27,6 +27,20 @@ for (const child of ['framework/sessions', 'framework/views', 'framework/cache/d
 }
 const cli = code => JSON.parse(execFileSync(php, ['-r', `require 'vendor/autoload.php'; $app=require 'bootstrap/app.php'; $app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap(); ${code}`], { cwd: root, env, encoding: 'utf8' }));
 const auth = JSON.parse(await fs.readFile(`${directory}/browser.json`, 'utf8'));
+const campaign = cli(String.raw`
+    $operator = App\Models\User::sole();
+    $reset = $operator->agents()->whereName("LOCAL")->sole()->reset_id;
+    $fixture = Tests\Support\CampaignBridgeFixture::seed($operator, $reset);
+    Illuminate\Support\Facades\DB::table('game_runtime')->updateOrInsert([
+        'key' => 'reset_schedule:'.hash('sha256', App\Services\SpaceTradersClient::BASE_URL),
+    ], ['value' => json_encode([
+        'reset_id' => $fixture['agent']->reset_id, 'next_reset' => $fixture['episode']->next_reset_at->toIso8601String(),
+        'observed_at' => now()->toIso8601String(),
+    ])]);
+    echo json_encode(['operator' => $operator->id, 'ship' => $fixture['arm']['ship']->symbol,
+        'source' => Tests\Support\CampaignBridgeFixture::SOURCE, 'buyer' => Tests\Support\CampaignBridgeFixture::BUYER]);
+`);
+env.SPACETRADERS_OPERATOR_ID = String(campaign.operator);
 const output = path.resolve(process.env.QA_ARTIFACT_DIR || path.join(root, 'storage/app/mvp-evidence/style-refactor', baseline ? 'before' : 'after'));
 await fs.mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE } : {}) });
@@ -124,6 +138,19 @@ try {
     await capture('guide', '/guide');
     await capture('agent-guide', `/agents/${auth.agent_id}/guide`);
     await capture('flight-deck', `/agents/${auth.agent_id}`);
+    await capture('system-map', `/agents/${auth.agent_id}/map`);
+    await capture('campaign-classic', '/campaign?agent=GIANTSOUP');
+    await capture('campaign-strategy', '/campaign/strategy?agent=GIANTSOUP&from=bridge');
+    const bridge = '/campaign/bridge';
+    const scope = '?agent=GIANTSOUP';
+    await capture('bridge-brief', bridge + scope);
+    await capture('bridge-routes', bridge + '/routes' + scope);
+    await capture('bridge-route', bridge + '/routes/ICE_WATER/' + campaign.source + '/' + campaign.buyer + scope);
+    await capture('bridge-ended', bridge + '/routes/ended' + scope);
+    await capture('bridge-fleet', bridge + '/fleet' + scope);
+    await capture('bridge-ship', bridge + '/fleet/' + campaign.ship + scope);
+    await capture('bridge-probes', bridge + '/fleet/probes' + scope);
+    await capture('bridge-log', bridge + '/log' + scope);
     const expectedComponents = (await fs.readdir(path.join(root, 'resources/js/Pages'), { recursive: true }))
         .filter(name => name.endsWith('.vue') && !name.includes('Partials/'))
         .map(name => name.slice(0, -4)).sort();

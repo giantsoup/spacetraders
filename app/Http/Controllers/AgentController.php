@@ -19,11 +19,13 @@ class AgentController extends Controller
     public function index(Request $request): Response
     {
         $resetCheckError = null;
+        $synchronizer = app(AgentSynchronizer::class);
+        $synchronizer->retryArchivedDrains($request->user()->id);
         $candidates = $request->user()->agents()->unarchived()->whereNotNull('reset_id')->get();
         if ($candidates->isNotEmpty()) {
             try {
                 $reset = app(SpaceTradersApi::class)->status();
-                app(AgentSynchronizer::class)->archivePreviousWorlds($candidates, $reset);
+                $synchronizer->archivePreviousWorlds($candidates, $reset);
             } catch (GameException) {
                 $resetCheckError = 'Could not finish checking for a world reset. Some agents may belong to a previous world. Refresh to try again.';
             }

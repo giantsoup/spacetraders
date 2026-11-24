@@ -7,6 +7,7 @@ use App\Gameplay\CampaignStatus;
 use App\Gameplay\CampaignStrategy;
 use App\Gameplay\GameException;
 use App\Gameplay\HostLock;
+use App\Http\Controllers\Concerns\SelectsCampaignAgent;
 use App\Models\CampaignGrant;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -16,6 +17,8 @@ use Inertia\Response;
 
 class CampaignStatusController extends Controller
 {
+    use SelectsCampaignAgent;
+
     public function show(Request $request, CampaignStatus $status): Response
     {
         $this->authorizeOperator($request);
@@ -31,7 +34,9 @@ class CampaignStatusController extends Controller
 
         $selection = $this->selection($request);
 
-        return Inertia::render('Campaign/Strategy', $strategy->read($request->user()->id, $selection['selectedAgent']) + $selection);
+        return Inertia::render('Campaign/Strategy', $strategy->read($request->user()->id, $selection['selectedAgent']) + $selection + [
+            'fromBridge' => $request->query('from') === 'bridge',
+        ]);
     }
 
     public function pause(Request $request, CampaignControl $control, HostLock $lock): RedirectResponse
@@ -63,15 +68,9 @@ class CampaignStatusController extends Controller
     private function selection(Request $request): array
     {
         $symbols = CampaignGrant::allPrimaries($request->user()->id)->orderBy('id')->pluck('agent_symbol')->all();
-        $selected = $request->validate(['agent' => 'nullable|string|max:32'])['agent'] ?? null;
-        $selected = $selected ? strtoupper($selected) : null;
+        $selected = $this->requestedCampaignSymbol($request);
         abort_if($selected && ! in_array($selected, $symbols, true), 404);
 
         return ['campaignAgents' => $symbols, 'selectedAgent' => $selected ?? (count($symbols) > 1 ? $symbols[0] : null)];
-    }
-
-    private function authorizeOperator(Request $request): void
-    {
-        abort_unless((string) $request->user()->id === (string) config('gameplay.operator_id'), 404);
     }
 }

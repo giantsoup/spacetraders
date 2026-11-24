@@ -20,41 +20,33 @@ class ShipPurpose
      * @param  Collection<int, Ship>  $ships
      * @return array<string, string|null>
      */
-    public function forAgent(Agent $agent, Collection $ships): array
-    {
+    public function forAgent(
+        Agent $agent,
+        Collection $ships,
+        ?CampaignGrant $grant = null,
+        ?Collection $episodes = null,
+        ?Collection $activeRuns = null,
+        ?Collection $armGrants = null,
+    ): array {
         if ($ships->isEmpty()) {
             return [];
         }
 
         $symbol = strtoupper($agent->name);
-        $grant = CampaignGrant::primaryFor($agent->user_id, $symbol)->first()
+        $grant ??= CampaignGrant::primaryFor($agent->user_id, $symbol)->first()
             ?? CampaignGrant::where('user_id', $agent->user_id)->where('agent_symbol', $symbol)->latest('id')->first();
-        $episode = $grant
-            ? CampaignEpisode::where('campaign_grant_id', $grant->id)
-                ->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
-                ->whereNull('closed_at')
-                ->latest('id')
-                ->first()
-            : null;
-
-        $activeRuns = AutomationRun::where('active_agent_id', $agent->id)
-            ->orderByDesc('id')
-            ->get()
-            ->keyBy('ship_symbol');
+        $episode = $grant ? $this->episode($agent, $grant, $episodes) : null;
+        $activeRuns ??= AutomationRun::where('active_agent_id', $agent->id)->orderByDesc('id')->get();
+        $activeRuns = $activeRuns->keyBy('ship_symbol');
 
         $arms = [];
-        foreach (app(CampaignFleet::class)->currentArms($agent) as $armGrant) {
+        foreach ($armGrants ?? app(CampaignFleet::class)->currentArms($agent) as $armGrant) {
             $arm = $armGrant->arm();
             if (! empty($arm['ship']) && ! empty($arm['label'])) {
-                $armEpisode = CampaignEpisode::where('campaign_grant_id', $armGrant->id)
-                    ->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
-                    ->whereNull('closed_at')
-                    ->latest('id')
-                    ->first();
                 $arms[$arm['ship']] = [
                     'label' => $arm['label'],
                     'paused' => $armGrant->paused_at !== null,
-                    'episode' => $armEpisode,
+                    'episode' => $this->episode($agent, $armGrant, $episodes),
                 ];
             }
         }
@@ -103,6 +95,13 @@ class ShipPurpose
         }
 
         return $purposes;
+    }
+
+    private function episode(Agent $agent, CampaignGrant $grant, ?Collection $episodes): ?CampaignEpisode
+    {
+        return $episodes !== null ? $episodes->get($grant->id)
+            : CampaignEpisode::where('campaign_grant_id', $grant->id)->where('agent_id', $agent->id)
+                ->where('reset_id', $agent->reset_id)->whereNull('closed_at')->latest('id')->first();
     }
 
     /** @param Collection<string, AutomationRun> $activeRuns */
