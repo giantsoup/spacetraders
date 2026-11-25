@@ -7,12 +7,29 @@ use App\Models\AutomationRun;
 use App\Models\GameObservation;
 use App\Models\ObservationHistory;
 use App\Models\Ship;
+use App\Services\SpaceTradersClient;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class AgentSynchronizer
 {
+    private static array $lockedFleetMemo = [];
+
+    public static function clearLockedFleetMemo(): void
+    {
+        self::$lockedFleetMemo = [];
+    }
+
+    private static function forgetLockedFleet(int $agentId): void
+    {
+        foreach (array_keys(self::$lockedFleetMemo) as $key) {
+            if (str_starts_with($key, $agentId.':')) {
+                unset(self::$lockedFleetMemo[$key]);
+            }
+        }
+    }
+
     public function __construct(private SpaceTradersApi $api, private HostLock $lock) {}
 
     public static function identity(string $reset, string $symbol): string
@@ -109,23 +126,68 @@ class AgentSynchronizer
     }
 
     // Caller holds the agent lock for synchronization, previews and gameplay writes.
-    public function sync(Agent $agent, bool $discover = true, bool $freshReset = false, bool $freshFleet = false): void
+    public function sync(Agent $agent, bool $discover = true, bool $freshReset = false, bool $freshFleet = false, float $reuseLockedSeconds = 0): void
     {
-        $this->guardReset($agent, $freshReset);
-        $balance = $this->api->agent($agent, fresh: $freshFleet);
-        $fleet = $this->api->ships($agent, fresh: $freshFleet);
-        DB::transaction(function () use ($agent, $balance, $fleet) {
-            foreach ($fleet as $ship) {
-                $this->saveShip($agent, $ship);
+        $lockKey = 'agent-'.$agent->id;
+        $guarded = false;
+        try {
+            if ($freshFleet && $reuseLockedSeconds > 0 && ! $discover) {
+                $this->guardReset($agent, $freshReset);
+                $guarded = true;
+                $token = $this->lock->token($lockKey);
+                $memo = self::$lockedFleetMemo["{$agent->id}:{$agent->reset_id}"] ?? null;
+                if ($token !== null && $memo !== null && $memo['token'] === $token && $memo['writes'] === SpaceTradersClient::writeCount()
+                    && $memo['reset_id'] === $agent->reset_id && microtime(true) - $memo['fetched_at'] <= $reuseLockedSeconds) {
+                    $agent->refresh();
+
+                    return;
+                }
             }
-            Ship::where('agent_id', $agent->id)->whereNotIn('symbol', array_column($fleet, 'symbol'))->delete();
-            $agent->update(['credits' => $balance['credits'], 'connection_state' => 'connected', 'synced_at' => now()]);
-        });
-        DB::table('game_runtime')->upsert([['key' => 'fleet_sync_at:'.$agent->id, 'value' => now()->toIso8601String()]], ['key'], ['value']);
-        app(CreditAccounting::class)->baseline($agent);
-        if (! $discover) {
-            return;
+            $tokenBefore = $this->lock->token($lockKey);
+            $priorKey = "{$agent->id}:{$agent->reset_id}";
+            $priorMemo = $tokenBefore !== null ? (self::$lockedFleetMemo[$priorKey] ?? null) : null;
+            if (! $guarded) {
+                $this->guardReset($agent, $freshReset);
+            }
+            $hitsBefore = SpaceTradersClient::cacheHitCount();
+            $writesBefore = SpaceTradersClient::writeCount();
+            $balance = $this->api->agent($agent, fresh: $freshFleet);
+            $fleet = $this->api->ships($agent, fresh: $freshFleet);
+            $fetchedAt = microtime(true);
+            $transportFresh = SpaceTradersClient::cacheHitCount() === $hitsBefore && SpaceTradersClient::writeCount() === $writesBefore;
+            DB::transaction(function () use ($agent, $balance, $fleet) {
+                foreach ($fleet as $ship) {
+                    $this->saveShip($agent, $ship);
+                }
+                Ship::where('agent_id', $agent->id)->whereNotIn('symbol', array_column($fleet, 'symbol'))->delete();
+                $agent->update(['credits' => $balance['credits'], 'connection_state' => 'connected', 'synced_at' => now()]);
+            });
+            DB::table('game_runtime')->upsert([['key' => 'fleet_sync_at:'.$agent->id, 'value' => now()->toIso8601String()]], ['key'], ['value']);
+            app(CreditAccounting::class)->baseline($agent);
+            if ($discover) {
+                $this->discover($agent, $fleet);
+            }
+
+            $token = $this->lock->token($lockKey);
+            $writesAfter = SpaceTradersClient::writeCount();
+            $key = "{$agent->id}:{$agent->reset_id}";
+            $maxReuse = (float) config('gameplay.locked_fleet_reuse_seconds', 30);
+            self::forgetLockedFleet($agent->id);
+            if ($token !== null && $transportFresh && $writesAfter === $writesBefore) {
+                self::$lockedFleetMemo[$key] = ['token' => $token, 'writes' => $writesAfter, 'reset_id' => $agent->reset_id, 'fetched_at' => $fetchedAt];
+            } elseif ($token !== null && ! $transportFresh && $priorMemo !== null && $key === $priorKey
+                && $priorMemo['token'] === $token && $priorMemo['writes'] === $writesAfter && $priorMemo['reset_id'] === $agent->reset_id
+                && microtime(true) - $priorMemo['fetched_at'] <= $maxReuse) {
+                self::$lockedFleetMemo[$key] = $priorMemo;
+            }
+        } catch (\Throwable $exception) {
+            self::forgetLockedFleet($agent->id);
+            throw $exception;
         }
+    }
+
+    private function discover(Agent $agent, array $fleet): void
+    {
         $systems = array_unique(array_column(array_column($fleet, 'nav'), 'systemSymbol'));
         if (count($systems) > 3) {
             throw new GameException('Discovery is limited to three local systems.');

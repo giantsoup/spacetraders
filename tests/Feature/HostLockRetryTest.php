@@ -8,6 +8,43 @@ use Tests\TestCase;
 
 class HostLockRetryTest extends TestCase
 {
+    public function test_lock_token_spans_only_one_successful_acquisition(): void
+    {
+        $lock = app(HostLock::class);
+        $key = 'agent-token';
+        $this->assertNull($lock->token($key));
+        $first = $lock->run($key, function () use ($lock, $key) {
+            $first = $lock->token($key);
+            $this->assertNotNull($first);
+            foreach (['run', 'retry'] as $method) {
+                try {
+                    $args = [$key, fn () => $this->fail('Nested acquisition must fail without a scope.')];
+                    if ($method === 'retry') {
+                        $args[] = 0;
+                    }
+                    $lock->$method(...$args);
+                    $this->fail('Expected a contended lock.');
+                } catch (GameException $exception) {
+                    $this->assertSame(2, $exception->retryAfter);
+                    $this->assertSame($first, $lock->token($key));
+                }
+            }
+
+            return $first;
+        });
+        $this->assertNull($lock->token($key));
+        $second = $lock->scoped($key, function () use ($lock, $key) {
+            $token = $lock->token($key);
+            $this->assertSame($token, $lock->run($key, fn () => $lock->scoped($key, fn () => $lock->token($key))));
+            $this->assertSame($token, $lock->token($key));
+
+            return $token;
+        });
+        $this->assertNotNull($second);
+        $this->assertNotSame($first, $second);
+        $this->assertNull($lock->token($key));
+    }
+
     public function test_scoped_wait_retries_acquisition_and_allows_nested_boundaries(): void
     {
         $lock = new class extends HostLock

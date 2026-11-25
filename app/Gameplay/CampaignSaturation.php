@@ -101,40 +101,55 @@ class CampaignSaturation
         $aggregate = $yard === null;
         $offer = CampaignHaulerPurchase::offerProfile($offer) === null ? null : $offer;
         $price = $offer['purchasePrice'] ?? $policy['max_price'];
-        if (! $offerIndependentOnly) {
+        $idlePass = false;
+        if ($offerIndependentOnly) {
+            if ($permanent === null && $halt['cannibalization'] === null && collect($gates)->every(fn ($gate) => $gate['pass'])) {
+                $idle = $this->idleShare($agent, $arms);
+                $idlePass = $idle['maximum'] < $policy['max_idle_share'];
+                if (! $idlePass) {
+                    $gates['G4'] = ['pass' => false, 'reason' => 'idle_share', 'idle' => $idle, 'scope' => 'offer_independent'];
+                }
+            }
+        } else {
             $yardOffers = $aggregate ? $this->yardOffers($agent, $mesh['yards']) : collect();
             $choices = $aggregate ? $yardOffers->only($candidateYards) : collect([$yard => $offer]);
             $idle = $this->idleShare($agent, $arms);
             $reference = $this->referenceYield($agent, $arms, $policy['assumed_net_per_hour']);
             $paybackLimit = ($hours - 1) * $policy['payback_fraction'];
-            $best = null;
-            foreach ($choices->isEmpty() ? ['' => null] : $choices as $candidateYard => $candidateOffer) {
-                if (microtime(true) >= ($deadline ?? INF)) {
-                    $searchComplete = false;
-                    break;
+            FuelPlanner::memoize(function () use ($choices, $deadline, $policy, $fuelByYard, $fuel, $idle, $reserveReason, $grant, $episode, $agent, $revision, $reserve, $reference, $hours, $paybackLimit, &$searchComplete, &$yard, &$offer, &$price, &$gates) {
+                $best = null;
+                foreach ($choices->isEmpty() ? ['' => null] : $choices as $candidateYard => $candidateOffer) {
+                    if (microtime(true) >= ($deadline ?? INF)) {
+                        $searchComplete = false;
+                        break;
+                    }
+                    $candidatePrice = $candidateOffer['purchasePrice'] ?? $policy['max_price'];
+                    $candidateFuel = $fuelByYard[$candidateYard] ?? $fuel;
+                    if ($candidateYard !== '' && $idle['maximum'] >= $policy['max_idle_share']) {
+                        $g4 = ['pass' => false, 'reason' => 'idle_share', 'idle' => $idle, 'scope' => 'offer_independent',
+                            'score' => 0, 'limiting_factor' => 'idle_share', 'excluded_claims' => []];
+                    } else {
+                        $opportunity = $reserveReason ? ['score' => 0, 'limiting_factor' => 'unknown_commitments', 'excluded_claims' => []]
+                            : $this->opportunity($grant, $episode, $agent, $revision, $candidateYard ?: null, $candidateOffer, $candidatePrice, $candidateFuel, $reserve, $deadline);
+                        $searchComplete = $searchComplete && ! ($opportunity['search_incomplete'] ?? false);
+                        $g4 = ['pass' => $candidateYard !== '' && $opportunity['score'] >= $policy['min_unclaimed_score'],
+                            'reason' => $candidateYard === '' ? 'no_eligible_yard' : ($opportunity['score'] < $policy['min_unclaimed_score'] ? 'spare_corridor' : null),
+                            'idle' => $idle] + $opportunity;
+                    }
+                    $g5 = $this->liquidity($agent, $reserve, $reserveReason, $candidateYard === '' ? null : $candidatePrice, $candidateFuel);
+                    $payback = $reference['net_per_hour'] > 0 ? $candidatePrice / $reference['net_per_hour'] : null;
+                    $g8 = ['pass' => $hours >= $policy['stop_hours_before_reset'] && $payback !== null && $payback <= $paybackLimit,
+                        'reason' => $hours < $policy['stop_hours_before_reset'] ? 'time_to_reset' : ($payback === null ? 'nonpositive_reference_yield' : ($payback > $paybackLimit ? 'payback' : null)),
+                        'hours_to_reset' => $hours, 'payback_hours' => $payback, 'limit_hours' => $paybackLimit] + $reference;
+                    $underCap = $candidatePrice <= $policy['max_price'];
+                    $rank = [$underCap && $g4['pass'] && $g5['pass'] && $g8['pass'], $underCap && $g4['pass'], $underCap, -$candidatePrice];
+                    if ($best === null || $rank > $best) {
+                        $best = $rank;
+                        [$yard, $offer, $price] = [$candidateYard ?: null, $candidateOffer, $candidatePrice];
+                        [$gates['G4'], $gates['G5'], $gates['G8']] = [$g4, $g5, $g8];
+                    }
                 }
-                $candidatePrice = $candidateOffer['purchasePrice'] ?? $policy['max_price'];
-                $candidateFuel = $fuelByYard[$candidateYard] ?? $fuel;
-                $opportunity = $reserveReason ? ['score' => 0, 'limiting_factor' => 'unknown_commitments', 'excluded_claims' => []]
-                    : $this->opportunity($grant, $episode, $agent, $revision, $candidateYard ?: null, $candidateOffer, $candidatePrice, $candidateFuel, $reserve, $deadline);
-                $searchComplete = $searchComplete && ! ($opportunity['search_incomplete'] ?? false);
-                $g4 = ['pass' => $candidateYard !== '' && $opportunity['score'] >= $policy['min_unclaimed_score'] && $idle['maximum'] < $policy['max_idle_share'],
-                    'reason' => $candidateYard === '' ? 'no_eligible_yard'
-                        : ($opportunity['score'] < $policy['min_unclaimed_score'] ? 'spare_corridor' : ($idle['maximum'] >= $policy['max_idle_share'] ? 'idle_share' : null)),
-                    'idle' => $idle] + $opportunity;
-                $g5 = $this->liquidity($agent, $reserve, $reserveReason, $candidateYard === '' ? null : $candidatePrice, $candidateFuel);
-                $payback = $reference['net_per_hour'] > 0 ? $candidatePrice / $reference['net_per_hour'] : null;
-                $g8 = ['pass' => $hours >= $policy['stop_hours_before_reset'] && $payback !== null && $payback <= $paybackLimit,
-                    'reason' => $hours < $policy['stop_hours_before_reset'] ? 'time_to_reset' : ($payback === null ? 'nonpositive_reference_yield' : ($payback > $paybackLimit ? 'payback' : null)),
-                    'hours_to_reset' => $hours, 'payback_hours' => $payback, 'limit_hours' => $paybackLimit] + $reference;
-                $underCap = $candidatePrice <= $policy['max_price'];
-                $rank = [$underCap && $g4['pass'] && $g5['pass'] && $g8['pass'], $underCap && $g4['pass'], $underCap, -$candidatePrice];
-                if ($best === null || $rank > $best) {
-                    $best = $rank;
-                    [$yard, $offer, $price] = [$candidateYard ?: null, $candidateOffer, $candidatePrice];
-                    [$gates['G4'], $gates['G5'], $gates['G8']] = [$g4, $g5, $g8];
-                }
-            }
+            });
             $known = $yardOffers->isNotEmpty() && $yardOffers->every(fn (?array $value) => $value !== null);
             if ($searchComplete && $known && $mesh['system'] !== null) {
                 $catalogue = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
@@ -166,7 +181,7 @@ class CampaignSaturation
                 'covered_hubs' => $mesh['covered']->all(), 'hub_target' => $target, 'pool_probe_target' => $mesh['pool_probe_target'],
                 'eligible_pool_probes' => $mesh['pool_probe_count'], 'directory_gaps' => $gaps]
                 + (isset($mesh['mesh_model']) ? $mesh['mesh_model'] + ['governor' => app(MeshGovernor::class)->evaluate($agent, $episode)] : []),
-        ];
+        ] + ($idlePass ? ['idle_pass' => true] : []);
     }
 
     public function assertPurchase(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, string $yard, ?array $offer = null, ?int $ignoreRun = null, int $fuel = 0, bool $persist = false, ?float $deadline = null): array
@@ -189,6 +204,12 @@ class CampaignSaturation
         }
     }
 
+    public static function isOfferIndependentHold(?array $hold): bool
+    {
+        return ($hold['scope'] ?? null) === 'offer_independent'
+            || (($hold['gate'] ?? null) === 'G4' && ($hold['reason'] ?? null) === 'idle_share');
+    }
+
     public function record(CampaignGrant $grant, CampaignEpisode $episode, array $evaluation): void
     {
         if (! ($evaluation['enabled'] ?? false)) {
@@ -197,8 +218,10 @@ class CampaignSaturation
         $state = $episode->refresh()->state ?? [];
         $prior = $state['saturation_hold'] ?? null;
         $hold = $evaluation['hold'];
-        if ($hold === null && ! isset($evaluation['gates']['G4'])
-            && (in_array($prior['gate'] ?? null, ['G4', 'G5', 'G8'], true) || ($prior['reason'] ?? null) === 'max_price')) {
+        $priorYardGate = in_array($prior['gate'] ?? null, ['G4', 'G5', 'G8'], true) || ($prior['reason'] ?? null) === 'max_price';
+        $priorOfferIndependent = self::isOfferIndependentHold($prior);
+        if ($priorYardGate && (self::isOfferIndependentHold($hold) && ! $priorOfferIndependent
+            || $hold === null && ! isset($evaluation['gates']['G4']) && ! ($priorOfferIndependent && ($evaluation['idle_pass'] ?? false)))) {
             return;
         }
         if ($hold && ! $hold['permanent'] && ! empty($hold['minutes']) && ! isset($hold['held_until'])) {
@@ -229,7 +252,7 @@ class CampaignSaturation
         if ($permanent) {
             return ['permanent' => true, 'held_until' => null] + $permanent;
         }
-        if ($prior && ! empty($prior['held_until']) && CarbonImmutable::parse($prior['held_until'])->isFuture()) {
+        if (! self::isOfferIndependentHold($prior) && ! empty($prior['held_until']) && CarbonImmutable::parse($prior['held_until'])->isFuture()) {
             return $prior;
         }
         if ($cannibalization) {
@@ -237,6 +260,9 @@ class CampaignSaturation
         }
         foreach (['G1', 'G2', 'G3', 'G6', 'G7', 'G9', 'G5', 'G4', 'G8'] as $gate) {
             if (isset($gates[$gate]) && ! $gates[$gate]['pass']) {
+                if ($gate === 'G4' && $gates[$gate]['reason'] === 'idle_share') {
+                    return ['permanent' => false, 'reason' => 'idle_share', 'gate' => 'G4', 'minutes' => null, 'scope' => 'offer_independent'];
+                }
                 $minutes = match ($gate) {
                     'G6', 'G7' => 30,
                     'G4' => $hasYard ? 60 : null,
@@ -276,97 +302,100 @@ class CampaignSaturation
 
     private function opportunity(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, CampaignRevision $revision, ?string $yard, ?array $offer, int $price, int $fuel, array $reserve, ?float $deadline): array
     {
-        $ship = $yard ? $this->projectedHauler($yard, $offer) : null;
-        $armRevision = CampaignRevision::where('content_hash', strtolower($revision->body['fleet']['auto_arm']['revision_hash']))->first();
-        $basis = $agent->credits - $price - $fuel;
-        if (! $ship || ! $armRevision || $basis <= 0) {
-            return ['score' => 0, 'excluded_claims' => [], 'limiting_factor' => ! $ship ? 'unknown_yard_or_configuration' : ($armRevision ? 'post_purchase_credits' : 'arm_revision_unavailable')];
-        }
-        $arm = new CampaignGrant(['limits' => ['arm' => ['exposure_share' => $revision->body['fleet']['auto_arm']['exposure_share']]]]);
-        $funded = clone $agent;
-        $funded->credits = $basis;
-        $trade = app(CampaignTrade::class);
-        $exposure = $trade->allowance($arm, $funded);
-        $cash = $basis - $reserve['commitments'] - $reserve['recon_return'];
-        $settings = $armRevision->body['trade'];
-        $maxSeconds = $armRevision->body['limits']['run_max_minutes'] * 60;
-        $system = $ship['nav']['systemSymbol'];
-        $claims = $this->claims($grant, $episode, $system);
-        $excluded = [];
-        $markets = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')
-            ->orderBy('symbol')->get()->filter(fn (GameObservation $market) => FleetClaims::systemOf($market->symbol) === $system && empty($market->data['invalidated_by_action']));
-        $quotes = [];
-        foreach ($markets as $market) {
-            foreach ($market->data['tradeGoods'] ?? [] as $quote) {
-                if (in_array($quote['symbol'], ['FUEL', 'ANTIMATTER'], true) || ($quote['tradeVolume'] ?? 0) < 1) {
-                    continue;
-                }
-                $quotes[$quote['symbol']][$market->symbol] = $quote + ['observed_at' => $market->observed_at->toIso8601String()];
+        return FuelPlanner::memoize(function () use ($grant, $episode, $agent, $revision, $yard, $offer, $price, $fuel, $reserve, $deadline) {
+            $ship = $yard ? $this->projectedHauler($yard, $offer) : null;
+            $armRevision = CampaignRevision::where('content_hash', strtolower($revision->body['fleet']['auto_arm']['revision_hash']))->first();
+            $basis = $agent->credits - $price - $fuel;
+            if (! $ship || ! $armRevision || $basis <= 0) {
+                return ['score' => 0, 'excluded_claims' => [], 'limiting_factor' => ! $ship ? 'unknown_yard_or_configuration' : ($armRevision ? 'post_purchase_credits' : 'arm_revision_unavailable')];
             }
-        }
-        $reference = CampaignEpisode::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereNull('closed_at')
-            ->whereIn('campaign_grant_id', CampaignGrant::primaryFor($grant->user_id, $agent->name)->select('id'))->first();
-        $results = $reference ? $trade->learningResults($reference) : [];
-        $best = ['score' => 0, 'limiting_factor' => 'no_priced_pair'];
-        $lastFailure = null;
-        $fuelPlanner = app(FuelPlanner::class);
-        $departure = $fuelPlanner->departureRefuel($funded, $ship);
-        foreach ($quotes as $good => $waypoints) {
-            foreach ($waypoints as $source => $ask) {
-                if (($ask['purchasePrice'] ?? 0) < 1 || ! in_array($ask['type'] ?? 'EXCHANGE', ['EXPORT', 'EXCHANGE'], true)) {
-                    continue;
-                }
-                foreach ($waypoints as $buyer => $bid) {
-                    if (microtime(true) >= ($deadline ?? INF)) {
-                        return $best + ['excluded_claims' => $excluded, 'search_incomplete' => true];
-                    }
-                    if ($source === $buyer || ($bid['sellPrice'] ?? 0) <= $ask['purchasePrice'] || ! in_array($bid['type'] ?? 'EXCHANGE', ['IMPORT', 'EXCHANGE'], true)) {
+            $arm = new CampaignGrant(['limits' => ['arm' => ['exposure_share' => $revision->body['fleet']['auto_arm']['exposure_share']]]]);
+            $funded = clone $agent;
+            $funded->credits = $basis;
+            $trade = app(CampaignTrade::class);
+            $exposure = $trade->allowance($arm, $funded);
+            $cash = $basis - $reserve['commitments'] - $reserve['recon_return'];
+            $settings = $armRevision->body['trade'];
+            $maxSeconds = $armRevision->body['limits']['run_max_minutes'] * 60;
+            $system = $ship['nav']['systemSymbol'];
+            $claims = $this->claims($grant, $episode, $system);
+            $excluded = [];
+            $markets = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')
+                ->orderBy('symbol')->get()->filter(fn (GameObservation $market) => FleetClaims::systemOf($market->symbol) === $system && empty($market->data['invalidated_by_action']));
+            $quotes = [];
+            foreach ($markets as $market) {
+                foreach ($market->data['tradeGoods'] ?? [] as $quote) {
+                    if (in_array($quote['symbol'], ['FUEL', 'ANTIMATTER'], true) || ($quote['tradeVolume'] ?? 0) < 1) {
                         continue;
                     }
-                    if (isset($claims[$good.'@'.$source]) || isset($claims[$good.'@'.$buyer])) {
-                        $excluded[$good.'@'.$source.'→'.$buyer] = $claims[$good.'@'.$source] ?? $claims[$good.'@'.$buyer];
-
+                    $quotes[$quote['symbol']][$market->symbol] = $quote + ['observed_at' => $market->observed_at->toIso8601String()];
+                }
+            }
+            $reference = CampaignEpisode::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereNull('closed_at')
+                ->whereIn('campaign_grant_id', CampaignGrant::primaryFor($grant->user_id, $agent->name)->select('id'))->first();
+            $results = $reference ? $trade->learningResults($reference) : [];
+            $salesByKey = $reference ? $trade->confirmedSales($reference) : collect();
+            $best = ['score' => 0, 'limiting_factor' => 'no_priced_pair'];
+            $lastFailure = null;
+            $fuelPlanner = app(FuelPlanner::class);
+            $departure = $fuelPlanner->departureRefuel($funded, $ship);
+            foreach ($quotes as $good => $waypoints) {
+                foreach ($waypoints as $source => $ask) {
+                    if (($ask['purchasePrice'] ?? 0) < 1 || ! in_array($ask['type'] ?? 'EXCHANGE', ['EXPORT', 'EXCHANGE'], true)) {
                         continue;
                     }
-                    try {
-                        $mode = $reference ? $trade->mode($reference, $good, $buyer, $results, $settings['proof']['min_realized_ratio']) : 'proof';
-                        $decay = $reference ? $trade->decay($reference, $good, $buyer, $settings['lot']['default_batch_decay']) : $settings['lot']['default_batch_decay'];
-                        $projection = $trade->projectPair($funded, $ship, $departure, ['good' => $good, 'source' => $source, 'market' => $buyer],
-                            $ask, $bid, $settings, $maxSeconds, $mode, $decay, $exposure, arm: true, cashAfterRecon: $cash);
-                        if (! isset($projection['candidate'])) {
-                            throw new GameException('Projected first load exceeds the pinned arm duration.');
+                    foreach ($waypoints as $buyer => $bid) {
+                        if (microtime(true) >= ($deadline ?? INF)) {
+                            return $best + ['excluded_claims' => $excluded, 'search_incomplete' => true];
                         }
-                        $candidate = $projection['candidate'];
-                        $positionSeconds = $projection['position']['estimated_seconds'] ?? null;
-                        if ($positionSeconds === null || ($projection['return']['continuation'] ?? null) !== $source) {
-                            throw new GameException('Projected load lacks a verified return to its starting fuel seller.');
+                        if ($source === $buyer || ($bid['sellPrice'] ?? 0) <= $ask['purchasePrice'] || ! in_array($bid['type'] ?? 'EXCHANGE', ['IMPORT', 'EXCHANGE'], true)) {
+                            continue;
                         }
-                        $secondsToLoad = $positionSeconds + (int) ceil($candidate['units'] / $ask['tradeVolume']) * 10 + 10;
-                        $this->checkQuoteLife($agent, $source, $ask, $settings['quote_max_age_seconds'], $secondsToLoad, $positionSeconds);
-                        $this->checkQuoteLife($agent, $buyer, $bid, $settings['quote_max_age_seconds'], $secondsToLoad);
-                        $atSource = $projection['at_source'];
-                        $available = clone $funded;
-                        $available->credits = max(0, $cash - ($departure['ceiling'] ?? 0) - ($source !== $yard ? $projection['position']['refuel_ceiling'] : 0));
-                        $topUp = $fuelPlanner->departureRefuel($available, $atSource);
-                        $allowance = $candidate['max_inventory'] + $candidate['fuel_safety_ceiling'] + ($topUp['ceiling'] ?? 0);
-                        $plan = ['strategy' => 'trade', 'market' => $buyer, 'symbol' => $good, 'units' => $candidate['units'],
-                            'min_sell_price' => (int) ceil($candidate['predicted_cost'] / $candidate['units']), 'min_margin' => 1,
-                            'max_inventory' => $candidate['max_inventory'], 'max_fuel' => $atSource['fuel']['capacity'],
-                            'max_loss' => PHP_INT_MAX, 'reserve' => $armRevision->body['limits']['reserve_credits'],
-                            'max_spend' => min(max(0, $available->credits - $armRevision->body['limits']['reserve_credits']), $allowance),
-                            'campaign_trade' => $candidate];
-                        app(OperationPlanner::class)->project($available, $atSource, $plan, ['ask' => $ask, 'bid' => $bid]);
-                        if ($candidate['score'] > $best['score']) {
-                            $best = $candidate;
+                        if (isset($claims[$good.'@'.$source]) || isset($claims[$good.'@'.$buyer])) {
+                            $excluded[$good.'@'.$source.'→'.$buyer] = $claims[$good.'@'.$source] ?? $claims[$good.'@'.$buyer];
+
+                            continue;
                         }
-                    } catch (GameException $exception) {
-                        $lastFailure = $exception->getMessage();
+                        try {
+                            $mode = $reference ? $trade->mode($reference, $good, $buyer, $results, $settings['proof']['min_realized_ratio']) : 'proof';
+                            $decay = $reference ? $trade->decay($reference, $good, $buyer, $settings['lot']['default_batch_decay'], $salesByKey->get($good.'@'.$buyer, collect())) : $settings['lot']['default_batch_decay'];
+                            $projection = $trade->projectPair($funded, $ship, $departure, ['good' => $good, 'source' => $source, 'market' => $buyer],
+                                $ask, $bid, $settings, $maxSeconds, $mode, $decay, $exposure, arm: true, cashAfterRecon: $cash);
+                            if (! isset($projection['candidate'])) {
+                                throw new GameException('Projected first load exceeds the pinned arm duration.');
+                            }
+                            $candidate = $projection['candidate'];
+                            $positionSeconds = $projection['position']['estimated_seconds'] ?? null;
+                            if ($positionSeconds === null || ($projection['return']['continuation'] ?? null) !== $source) {
+                                throw new GameException('Projected load lacks a verified return to its starting fuel seller.');
+                            }
+                            $secondsToLoad = $positionSeconds + (int) ceil($candidate['units'] / $ask['tradeVolume']) * 10 + 10;
+                            $this->checkQuoteLife($agent, $source, $ask, $settings['quote_max_age_seconds'], $secondsToLoad, $positionSeconds);
+                            $this->checkQuoteLife($agent, $buyer, $bid, $settings['quote_max_age_seconds'], $secondsToLoad);
+                            $atSource = $projection['at_source'];
+                            $available = clone $funded;
+                            $available->credits = max(0, $cash - ($departure['ceiling'] ?? 0) - ($source !== $yard ? $projection['position']['refuel_ceiling'] : 0));
+                            $topUp = $fuelPlanner->departureRefuel($available, $atSource);
+                            $allowance = $candidate['max_inventory'] + $candidate['fuel_safety_ceiling'] + ($topUp['ceiling'] ?? 0);
+                            $plan = ['strategy' => 'trade', 'market' => $buyer, 'symbol' => $good, 'units' => $candidate['units'],
+                                'min_sell_price' => (int) ceil($candidate['predicted_cost'] / $candidate['units']), 'min_margin' => 1,
+                                'max_inventory' => $candidate['max_inventory'], 'max_fuel' => $atSource['fuel']['capacity'],
+                                'max_loss' => PHP_INT_MAX, 'reserve' => $armRevision->body['limits']['reserve_credits'],
+                                'max_spend' => min(max(0, $available->credits - $armRevision->body['limits']['reserve_credits']), $allowance),
+                                'campaign_trade' => $candidate];
+                            app(OperationPlanner::class)->project($available, $atSource, $plan, ['ask' => $ask, 'bid' => $bid]);
+                            if ($candidate['score'] > $best['score']) {
+                                $best = $candidate;
+                            }
+                        } catch (GameException $exception) {
+                            $lastFailure = $exception->getMessage();
+                        }
                     }
                 }
             }
-        }
 
-        return $best + ['excluded_claims' => $excluded, 'last_refusal' => $lastFailure, 'projected_exposure' => $exposure, 'cash_after_commitments' => $cash];
+            return $best + ['excluded_claims' => $excluded, 'last_refusal' => $lastFailure, 'projected_exposure' => $exposure, 'cash_after_commitments' => $cash];
+        });
     }
 
     private function projectedHauler(string $yard, ?array $offer): array
@@ -466,7 +495,7 @@ class CampaignSaturation
             'median_dispatch_lag_seconds' => $lag, 'p90_queue_depth' => $p90, 'passes' => $rows->count()];
     }
 
-    public function requests(Agent $agent, array $policy, ?int $ignoreRun = null): array
+    public function requests(Agent $agent, array $policy, ?int $ignoreRun = null, ?array $usage = null): array
     {
         if (RequestBudget::agentCaps() !== []) {
             try {
@@ -479,7 +508,7 @@ class CampaignSaturation
                 return ['pass' => false, 'reason' => $exception->getMessage(), 'staged' => true];
             }
         }
-        $usage = app(RequestBudget::class)->usage(agentSymbol: $agent->name);
+        $usage ??= app(RequestBudget::class)->usage(agentSymbol: $agent->name);
         $symbols = app(CampaignFleet::class)->currentArms($agent)->filter(fn (CampaignGrant $arm) => $arm->available())->map(fn ($arm) => $arm->arm()['ship']);
         $ordinary = DB::table('fleet_metrics')->where('kind', 'requests')->where('agent_symbol', $agent->name)->whereIn('ship', $symbols)
             ->where('created_at', '>=', now()->subHour()->toDateTimeString())->get(['ship', 'data'])->groupBy('ship')

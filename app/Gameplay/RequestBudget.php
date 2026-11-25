@@ -43,15 +43,24 @@ class RequestBudget
         return self::$meshScope['id'] ?? null;
     }
 
-    public function admitMesh(string $agent, string $reset, array $limits, int $charge, int $seconds): ?string
+    public function admitMesh(string $agent, string $reset, array $limits, int $charge, int $seconds, ?float $deadline = null, ?array &$denial = null): ?string
     {
-        return $this->change(function (array &$state) use ($agent, $reset, $limits, $charge, $seconds) {
+        $denial = null;
+
+        return $this->changeWithDeadline(function (array &$state) use ($agent, $reset, $limits, $charge, $seconds, &$denial) {
             $now = $this->now();
             $this->pruneMesh($state, $now);
             $usage = $this->usageReport($state, null, null, $agent);
             $limits['hour'] = min($limits['hour'], $usage['agent']['cap_per_hour'] ?? PHP_INT_MAX);
-            $room = $this->meshRoom($state, $agent, $reset, $limits, $usage, $now);
-            if ($charge < 1 || $room < $charge || $seconds < 1) {
+            $detail = $this->meshRoomDetail($state, $agent, $reset, $limits, $usage, $now);
+            if ($charge < 1 || $seconds < 1) {
+                $denial = ['cause' => 'mesh_admission', 'retry_after' => 10];
+
+                return null;
+            }
+            if ($detail['room'] < $charge) {
+                $denial = ['cause' => $detail['cause'] ?? 'mesh_headroom', 'retry_after' => $detail['retry_after'] ?? 10];
+
                 return null;
             }
             $id = bin2hex(random_bytes(16));
@@ -60,12 +69,12 @@ class RequestBudget
                 + ['remaining' => $charge, 'used' => 0, 'run' => null];
 
             return $id;
-        }, true);
+        }, $deadline, true);
     }
 
-    public function bindMesh(string $id, int $run, int $seconds): void
+    public function bindMesh(string $id, int $run, int $seconds, ?float $deadline = null): void
     {
-        $bound = $this->change(function (array &$state) use ($id, $run, $seconds) {
+        $bound = $this->changeWithDeadline(function (array &$state) use ($id, $run, $seconds) {
             $this->pruneMesh($state, $this->now());
             $entry = $state['mesh_allowances'][$id] ?? null;
             if (! $entry || ($entry['run'] !== null && $entry['run'] !== $run)) {
@@ -75,15 +84,15 @@ class RequestBudget
             $state['mesh_allowances'][$id]['expires'] = $this->now() + max(1, $seconds);
 
             return true;
-        }, true);
+        }, $deadline, true);
         if (! $bound) {
-            throw new RequestDeferred('Mesh allowance expired before work could start.', 10);
+            throw (new RequestDeferred('Mesh allowance expired before work could start.', 10, delaySource: 'mesh_allowance'))->withDeadline($deadline);
         }
     }
 
-    public function refreshMesh(string $id, string $agent, string $reset, int $run, array $limits): bool
+    public function refreshMesh(string $id, string $agent, string $reset, int $run, array $limits, ?float $deadline = null): bool
     {
-        return $this->change(function (array &$state) use ($id, $agent, $reset, $run, $limits) {
+        return $this->changeWithDeadline(function (array &$state) use ($id, $agent, $reset, $run, $limits) {
             $this->pruneMesh($state, $this->now());
             $entry = $state['mesh_allowances'][$id] ?? null;
             if (! $entry || $entry['agent'] !== $agent || $entry['reset'] !== $reset || $entry['run'] !== $run) {
@@ -92,7 +101,7 @@ class RequestBudget
             $state['mesh_allowances'][$id]['limits'] = $limits;
 
             return true;
-        }, true);
+        }, $deadline, true);
     }
 
     public function hasMesh(?string $id, string $agent, string $reset, int $run): bool
@@ -107,15 +116,15 @@ class RequestBudget
             && $entry['reset'] === $reset && $entry['run'] === $run;
     }
 
-    public function releaseMesh(?string $id): array
+    public function releaseMesh(?string $id, ?float $deadline = null): array
     {
-        return $id === null ? [] : $this->change(function (array &$state) use ($id) {
+        return $id === null ? [] : $this->changeWithDeadline(function (array &$state) use ($id) {
             $entry = $state['mesh_allowances'][$id] ?? [];
             unset($state['mesh_allowances'][$id]);
             $this->pruneMesh($state, $this->now());
 
             return $entry;
-        });
+        }, $deadline);
     }
 
     private function pruneMesh(array &$state, float $now): void
@@ -131,12 +140,21 @@ class RequestBudget
         }
     }
 
-    private function meshRoom(array $state, string $agent, string $reset, array $limits, array $usage, float $now, ?string $except = null): int
+    private function meshRoomDetail(array $state, string $agent, string $reset, array $limits, array $usage, float $now, ?string $except = null): array
     {
-        if ($usage['host']['rate_limits_last_15_minutes'] >= 3
-            || $usage['host']['tier2_4_last_60_seconds'] + 1 >= $limits['host']
-            || $usage['host']['blocked_until'] > $now) {
-            return 0;
+        $blockedUntil = $usage['host']['blocked_until'];
+        if ($blockedUntil > $now) {
+            return ['room' => 0, 'cause' => 'blocked_until', 'retry_after' => max(1, (int) ceil($blockedUntil - $now))];
+        }
+        if ($usage['host']['rate_limits_last_15_minutes'] >= 3) {
+            return ['room' => 0, 'cause' => 'host_rate_limits', 'retry_after' => 10];
+        }
+        if ($usage['host']['tier2_4_last_60_seconds'] + 1 >= $limits['host']) {
+            $hostWindow = $this->pruneHostTiers($state['host_tiers'] ?? [], $now)['t24'];
+            $index = count($hostWindow) - $limits['host'] + 1;
+            $retryAfter = isset($hostWindow[$index]) ? max(1, (int) ceil($hostWindow[$index] + 60 - $now)) : 10;
+
+            return ['room' => 0, 'cause' => 'host_minute_headroom', 'retry_after' => $retryAfter];
         }
         $outstanding = 0;
         foreach ($state['mesh_allowances'] ?? [] as $id => $entry) {
@@ -148,7 +166,9 @@ class RequestBudget
             - $usage['agent']['tier2_4_last_hour'] - $limits['arm'] - $outstanding;
         $traderRoom = $limits['trader'] - count($state['mesh_requests'][$agent.':'.$reset] ?? []) - $outstanding;
 
-        return max(0, min($hourRoom, $traderRoom));
+        $room = max(0, min($hourRoom, $traderRoom));
+
+        return $room < 1 ? ['room' => 0, 'cause' => 'mesh_headroom', 'retry_after' => 10] : ['room' => $room];
     }
 
     public function drainAgent(string $symbol, bool $draining, ?string $resetId = null): void
@@ -197,11 +217,11 @@ class RequestBudget
     {
         $file = $this->directory(false).'/budget.json';
         if (file_exists($file) && ! is_file($file)) {
-            throw new RequestDeferred('Host request-budget drain state could not be read.', 10);
+            throw new RequestDeferred('Host request-budget drain state could not be read.', 10, delaySource: 'budget_storage');
         }
         $state = $this->readState($file, $requireTelemetry);
         if (array_key_exists('draining', $state) && ! is_array($state['draining'])) {
-            throw new RequestDeferred('Host request-budget drain state could not be read.', 10);
+            throw new RequestDeferred('Host request-budget drain state could not be read.', 10, delaySource: 'budget_storage');
         }
         $prefix = hash('sha256', base_path()).':';
         $holds = [];
@@ -222,7 +242,7 @@ class RequestBudget
     {
         return $this->change(function (&$state) use ($symbol, $expectedId) {
             if (array_key_exists('draining', $state) && ! is_array($state['draining'])) {
-                throw new RequestDeferred('Host request-budget drain state could not be read.', 10);
+                throw new RequestDeferred('Host request-budget drain state could not be read.', 10, delaySource: 'budget_storage');
             }
             $key = $this->drainKey($symbol);
             if ($this->drainHoldId($state['draining'][$key] ?? false) !== $expectedId) {
@@ -252,7 +272,7 @@ class RequestBudget
         if (! is_array($hold) || ! is_numeric($hold['since'] ?? null) || $hold['since'] <= 0
             || ! array_key_exists('reset_id', $hold) || ($hold['reset_id'] !== null && ! is_string($hold['reset_id']))
             || (array_key_exists('id', $hold) && (! is_string($hold['id']) || ! preg_match('/\A[a-f0-9]{32}\z/', $hold['id'])))) {
-            throw new RequestDeferred('Host request-budget drain state could not be read.', 10);
+            throw new RequestDeferred('Host request-budget drain state could not be read.', 10, delaySource: 'budget_storage');
         }
     }
 
@@ -268,7 +288,7 @@ class RequestBudget
         return $this->ordinaryReservation ?? self::tier($priority) > 1;
     }
 
-    public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75): void
+    public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75, ?float $baseMaxWait = null, ?float $deadline = null): void
     {
         $this->ordinaryReservation = null;
         $caps = self::agentCaps();
@@ -276,12 +296,14 @@ class RequestBudget
         $key = $this->storeKey();
         $localDelay = (self::$processPauses[$key] ?? 0) - $this->now();
         if ($localDelay > 0) {
-            throw new RequestDeferred('SpaceTraders transport is paused after response-budget recording failed.', (int) ceil($localDelay));
+            throw (new RequestDeferred('SpaceTraders transport is paused after response-budget recording failed.', (int) ceil($localDelay),
+                delaySource: 'process_pause', context: ['delay_seconds' => $localDelay, 'waited_seconds' => 0.0, 'max_wait_seconds' => $maxWait]))
+                ->withDeadline($deadline);
         }
         unset(self::$processPauses[$key]);
         $waited = 0.0;
         do {
-            $delay = $this->change(function (&$state) use ($token, $account, $priority, $waited, $maxWait, $agentSymbol, $caps) {
+            [$delay, $cause, $secondaryCause] = $this->changeWithDeadline(function (&$state) use ($token, $account, $priority, $waited, $maxWait, $agentSymbol, $caps) {
                 $now = $this->now();
                 $keys = $this->keys($token, $account);
                 $tier = self::tier($priority);
@@ -292,13 +314,20 @@ class RequestBudget
                     default => 3,
                 };
                 $delay = $tier > 1 && $agentSymbol && ! empty($state['draining'][$this->drainKey($agentSymbol)]) ? 60.0 : 0.0;
+                $cause = $delay > 0 ? 'drain_hold' : null;
+                $considerDelay = function (float $seconds, string $source) use (&$delay, &$cause) {
+                    if ($seconds > $delay) {
+                        $delay = $seconds;
+                        $cause = $source;
+                    }
+                };
                 foreach ($keys as $key) {
                     $bucket = $this->refill($state['buckets'][$key] ?? [], $now);
                     $state['buckets'][$key] = $bucket;
-                    $delay = max($delay, $bucket['blocked_until'] - $now);
+                    $considerDelay($bucket['blocked_until'] - $now, 'blocked_until');
                     if (config('gameplay.request_budget_enabled')) {
                         $needed = min($floor, $bucket['capacity'] - 1) + 1;
-                        $delay = max($delay, ($needed - $bucket['tokens']) / $bucket['rate']);
+                        $considerDelay(($needed - $bucket['tokens']) / $bucket['rate'], 'bucket_tokens');
                     }
                 }
                 $agentKey = $agentSymbol ? 'agent:'.strtoupper($agentSymbol) : null;
@@ -317,35 +346,46 @@ class RequestBudget
                     $cap = $caps[$agentSymbol] ?? (isset($caps['SHARED']) ? 0 : PHP_INT_MAX);
                     // Tiers 3-4 shed at 80% of the ordinary host envelope.
                     $hostCeiling = $tier >= 3 ? (int) floor($hostTier24Limit * 0.8) : $hostTier24Limit;
-                    $ordinaryDelay = max(
-                        count($ordinary) >= $hostCeiling ? max(1.0, ($ordinary[0] ?? $now) + 60.0 - $now) : 0.0,
-                        count($agentOrdinary) >= $cap ? max(5.0, ($agentOrdinary[0] ?? $now) + 3600.0 - $now) : 0.0,
-                    );
+                    $hostDelay = count($ordinary) >= $hostCeiling ? max(1.0, ($ordinary[0] ?? $now) + 60.0 - $now) : 0.0;
+                    $accountDelay = count($agentOrdinary) >= $cap ? max(5.0, ($agentOrdinary[0] ?? $now) + 3600.0 - $now) : 0.0;
+                    $ordinaryDelay = max($hostDelay, $accountDelay);
+                    $ordinaryCause = $hostDelay >= $accountDelay ? 'host_rate' : 'account_rate';
                     if ($tier === 1) {
                         $reserve = $agentSymbol === 'SHARED' ? 180 : max(1, (int) config('gameplay.agent_tier1_reserve_per_hour', 300));
-                        $protectedDelay = max(
-                            count($protected) >= $hostTier1Reserve ? max(1.0, $protected[0] + 60.0 - $now) : 0.0,
-                            count($agentProtected) >= $reserve ? max(1.0, $agentProtected[0] + 3600.0 - $now) : 0.0,
-                        );
+                        $protectedHostDelay = count($protected) >= $hostTier1Reserve ? max(1.0, $protected[0] + 60.0 - $now) : 0.0;
+                        $protectedAccountDelay = count($agentProtected) >= $reserve ? max(1.0, $agentProtected[0] + 3600.0 - $now) : 0.0;
+                        $protectedDelay = max($protectedHostDelay, $protectedAccountDelay);
+                        $protectedCause = $protectedHostDelay >= $protectedAccountDelay ? 'host_rate' : 'account_rate';
                         // Settlement can borrow only when both ordinary windows have space.
                         $borrow = $protectedDelay > 0 && $ordinaryDelay === 0.0;
-                        $delay = max($delay, min($protectedDelay, $ordinaryDelay));
+                        $considerDelay(min($protectedDelay, $ordinaryDelay), $protectedDelay < $ordinaryDelay ? $protectedCause : $ordinaryCause);
                     } else {
-                        $delay = max($delay, $ordinaryDelay);
+                        $considerDelay($ordinaryDelay, $ordinaryCause);
                     }
                 }
                 $mesh = self::$meshScope;
                 $allowance = null;
+                $secondaryCause = null;
                 if ($mesh !== null && ($tier > 1 || $borrow)) {
                     $this->pruneMesh($state, $now);
-                    $allowance = $state['mesh_allowances'][$mesh['id']] ?? null;
+                    $allowance = $mesh['id'] === null ? null : ($state['mesh_allowances'][$mesh['id']] ?? null);
                     if (! $allowance || $allowance['agent'] !== $agentSymbol
                         || ($mesh['agent'] !== null && $mesh['agent'] !== $agentSymbol)
                         || ($mesh['reset'] !== null && $mesh['reset'] !== $allowance['reset'])
-                        || $mesh['run'] !== $allowance['run']
-                        || $this->meshRoom($state, $agentSymbol, $allowance['reset'], $allowance['limits'],
-                            $this->usageReport($state, null, null, $agentSymbol), $now, $mesh['id']) < 1) {
-                        $delay = max($delay, 10.0);
+                        || $mesh['run'] !== $allowance['run']) {
+                        $meshCause = 'mesh_allowance';
+                    } else {
+                        $detail = $this->meshRoomDetail($state, $agentSymbol, $allowance['reset'], $allowance['limits'],
+                            $this->usageReport($state, null, null, $agentSymbol), $now, $mesh['id']);
+                        $meshCause = $detail['room'] < 1 ? $detail['cause'] : null;
+                    }
+                    if ($meshCause !== null) {
+                        $meshDelay = 10.0;
+                        if ($meshDelay <= $delay) {
+                            $secondaryCause = $meshCause;
+                        } else {
+                            $considerDelay($meshDelay, $meshCause);
+                        }
                     }
                 }
                 if ($delay > 0.001) {
@@ -361,7 +401,7 @@ class RequestBudget
                         }
                     }
 
-                    return $delay;
+                    return [$delay, $cause, $secondaryCause];
                 }
                 foreach ($keys as $key) {
                     $bucket = &$state['buckets'][$key];
@@ -390,13 +430,22 @@ class RequestBudget
                     }
                 }
 
-                return 0.0;
-            });
+                return [0.0, null, null];
+            }, $deadline);
             if ($delay <= 0.001) {
                 return;
             }
-            if ($delay + $waited > $maxWait) {
-                throw new RequestDeferred('SpaceTraders request budget is cooling down.', max(1, (int) ceil($delay)));
+            $remainingDeadline = $deadline !== null ? max(0.0, $deadline - microtime(true)) : INF;
+            $effectiveMaxWait = min($maxWait, $waited + $remainingDeadline);
+            if ($delay + $waited > $effectiveMaxWait) {
+                $deadlineCapped = ($baseMaxWait !== null && $effectiveMaxWait < $baseMaxWait && $delay + $waited <= $baseMaxWait)
+                    || ($deadline !== null && $delay > $remainingDeadline && $delay + $waited <= ($baseMaxWait ?? $maxWait));
+                $context = ['delay_seconds' => $delay, 'waited_seconds' => $waited, 'max_wait_seconds' => $effectiveMaxWait];
+                if ($secondaryCause !== null) {
+                    $context['secondary_delay_source'] = $secondaryCause;
+                }
+                throw (new RequestDeferred('SpaceTraders request budget is cooling down.', max(1, (int) ceil($delay)), $cause, $deadlineCapped, $context))
+                    ->withDeadline($deadline);
             }
             $this->pause($delay);
             $waited += $delay;
@@ -567,7 +616,7 @@ class RequestBudget
             if (! $requireTelemetry) {
                 throw $exception;
             }
-            throw new RequestDeferred('Host request-budget telemetry could not be read.', 10);
+            throw new RequestDeferred('Host request-budget telemetry could not be read.', 10, delaySource: 'budget_storage');
         }
     }
 
@@ -713,16 +762,16 @@ class RequestBudget
         if (! is_string($directory) || (PHP_OS_FAMILY === 'Windows'
             ? ! preg_match('~\A[A-Za-z]:[\\\\/]~', $directory)
             : ! str_starts_with($directory, '/'))) {
-            throw new RequestDeferred('Host request-budget storage requires an absolute shared path.', 10);
+            throw new RequestDeferred('Host request-budget storage requires an absolute shared path.', 10, delaySource: 'budget_storage');
         }
         if (is_link($directory)) {
-            throw new RequestDeferred('Host request-budget storage is unsafe.', 10);
+            throw new RequestDeferred('Host request-budget storage is unsafe.', 10, delaySource: 'budget_storage');
         }
         if (PHP_OS_FAMILY === 'Windows') {
             $directory = rtrim(str_replace('\\', '/', $directory), '/');
             foreach (explode('/', substr($directory, 3)) as $component) {
                 if ($component === '' || str_contains($component, ':') || rtrim($component, '. ') !== $component) {
-                    throw new RequestDeferred('Host request-budget storage is unsafe.', 10);
+                    throw new RequestDeferred('Host request-budget storage is unsafe.', 10, delaySource: 'budget_storage');
                 }
             }
             $this->windowsPathIdentity($directory);
@@ -732,21 +781,21 @@ class RequestBudget
                 return $directory;
             }
             if (! @mkdir($directory, 0700, true) && ! is_dir($directory)) {
-                throw new RequestDeferred('Host request-budget storage is unavailable.', 10);
+                throw new RequestDeferred('Host request-budget storage is unavailable.', 10, delaySource: 'budget_storage');
             }
         }
         if (PHP_OS_FAMILY === 'Windows') {
             $this->windowsDirectory($directory, $create);
         } else {
             if (fileowner($directory) !== posix_geteuid()) {
-                throw new RequestDeferred('Host request-budget storage is unavailable.', 10);
+                throw new RequestDeferred('Host request-budget storage is unavailable.', 10, delaySource: 'budget_storage');
             }
             if ($create) {
                 @chmod($directory, 0700);
             }
         }
         if (is_link($directory.'/budget.json') || is_link($directory.'/budget.lock')) {
-            throw new RequestDeferred('Host request-budget storage is unsafe.', 10);
+            throw new RequestDeferred('Host request-budget storage is unsafe.', 10, delaySource: 'budget_storage');
         }
 
         return $directory;
@@ -808,7 +857,7 @@ POWERSHELL;
             ], env: ['SPACETRADERS_BUDGET_DIRECTORY' => $directory, 'SPACETRADERS_BUDGET_CREATE' => $create ? '1' : '0'], timeout: 10);
             $process->mustRun();
         } catch (\Throwable) {
-            throw new RequestDeferred('Host request-budget storage is unavailable.', 10);
+            throw new RequestDeferred('Host request-budget storage is unavailable.', 10, delaySource: 'budget_storage');
         }
         self::$windowsDirectories[$key] = ['identity' => $identity, 'secured' => $create, 'until' => microtime(true) + 60];
     }
@@ -822,7 +871,7 @@ POWERSHELL;
             $stat = @lstat($ancestor);
             if ($stat !== false) {
                 if (($stat['mode'] & 0170000) !== 0040000) {
-                    throw new RequestDeferred('Host request-budget storage is unsafe.', 10);
+                    throw new RequestDeferred('Host request-budget storage is unsafe.', 10, delaySource: 'budget_storage');
                 }
                 $cacheable = $cacheable && $stat['ino'] > 0;
                 $identity[] = [$stat['dev'], $stat['ino'], $stat['ctime']];
@@ -836,7 +885,7 @@ POWERSHELL;
             clearstatcache(true, $file);
             $stat = @lstat($file);
             if ($stat !== false && ($stat['mode'] & 0170000) !== 0100000) {
-                throw new RequestDeferred('Host request-budget storage is unsafe.', 10);
+                throw new RequestDeferred('Host request-budget storage is unsafe.', 10, delaySource: 'budget_storage');
             }
         }
 
@@ -854,28 +903,42 @@ POWERSHELL;
 
             return $state;
         } catch (\Throwable) {
-            throw new RequestDeferred('Host request-budget state could not be read.', 10);
+            throw new RequestDeferred('Host request-budget state could not be read.', 10, delaySource: 'budget_storage');
         }
     }
 
-    private function change(callable $work, bool $requireState = false): mixed
+    private function changeWithDeadline(callable $work, ?float $deadline, bool $requireState = false): mixed
+    {
+        try {
+            return $this->change($work, $deadline, $requireState);
+        } catch (RequestDeferred $exception) {
+            throw $exception->withDeadline($deadline);
+        }
+    }
+
+    private function change(callable $work, ?float $deadline = null, bool $requireState = false): mixed
     {
         $directory = $this->directory(true);
         $file = $directory.'/budget.json';
         $lock = $directory.'/budget.lock';
         $handle = @fopen($lock, 'c');
         if (! $handle) {
-            throw new RequestDeferred('Host request-budget storage is unavailable.', 10);
+            throw new RequestDeferred('Host request-budget storage is unavailable.', 10, delaySource: 'budget_storage');
         }
-        $deadline = hrtime(true) + 1500000000;
-        while (! flock($handle, LOCK_EX | LOCK_NB)) {
-            if (hrtime(true) >= $deadline) {
-                fclose($handle);
-                throw new RequestDeferred('Host request-budget storage is busy.', 1);
-            }
-            usleep(5000);
-        }
+        $lockDeadline = hrtime(true) + 1500000000;
+        $locked = false;
         try {
+            while (microtime(true) < ($deadline ?? INF) && ! ($locked = flock($handle, LOCK_EX | LOCK_NB))) {
+                $remaining = min(($deadline ?? INF) - microtime(true), ($lockDeadline - hrtime(true)) / 1e9);
+                if ($remaining <= 0) {
+                    break;
+                }
+                usleep((int) (min(0.005, $remaining) * 1e6));
+            }
+            $deadlineCapped = microtime(true) >= ($deadline ?? INF);
+            if (! $locked || $deadlineCapped) {
+                throw new RequestDeferred('Host request-budget storage is busy.', 1, delaySource: 'budget_lock', deadlineCapped: $deadlineCapped);
+            }
             @chmod($lock, 0600);
             $state = $this->readState($file, $requireState);
             $result = $work($state);
@@ -885,13 +948,17 @@ POWERSHELL;
             }
 
             return $result;
+        } catch (RequestDeferred $exception) {
+            throw $exception;
         } catch (\Throwable) {
             if (isset($temporary) && $temporary && is_file($temporary)) {
                 @unlink($temporary);
             }
-            throw new RequestDeferred('Host request-budget state could not be persisted.', 10);
+            throw new RequestDeferred('Host request-budget state could not be persisted.', 10, delaySource: 'budget_storage');
         } finally {
-            flock($handle, LOCK_UN);
+            if ($locked) {
+                flock($handle, LOCK_UN);
+            }
             fclose($handle);
         }
     }

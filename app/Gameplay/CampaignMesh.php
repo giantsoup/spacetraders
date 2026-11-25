@@ -181,7 +181,7 @@ class CampaignMesh
                 $cooldowns[$bucket] = max($cooldowns[$bucket] ?? 0, $probe['mesh_arrival']);
             }
             $destination = $context['commitments'][$probe['symbol']] ?? null;
-            $activeBucket = $model->targets[$destination]['bucket'] ?? null;
+            $activeBucket = $destination === null ? null : ($model->targets[$destination]['bucket'] ?? null);
             if ($activeBucket !== null && $activeBucket === $bucket && $destination !== $origin) {
                 $cooldowns[$activeBucket] = now()->timestamp;
             }
@@ -375,9 +375,9 @@ class CampaignMesh
             ->where(fn ($query) => $query->whereNotNull('active_agent_id')->orWhere('state', 'preview'))->exists();
     }
 
-    public function invalidatePreview(Agent $agent, AutomationRun $run): bool
+    public function invalidatePreview(Agent $agent, AutomationRun $run, ?float $deadline = null): bool
     {
-        $work = function () use ($agent, $run) {
+        $work = function () use ($agent, $run, $deadline) {
             $run->refresh();
             if ($run->agent_id !== $agent->id || $run->reset_id !== $agent->reset_id || $run->started_at || $run->active_agent_id
                 || ! in_array($run->state, [RunState::Preview, RunState::Stopped], true)
@@ -389,7 +389,7 @@ class CampaignMesh
             if ($run->state === RunState::Preview) {
                 $run->update(['state' => RunState::Stopped, 'blocked_reason' => 'Mesh preview requires fresh ranked admission.']);
             }
-            if (isset($run->plan['mesh_allowance']) && app(MeshGovernor::class)->release($run->plan['mesh_allowance'])) {
+            if (isset($run->plan['mesh_allowance']) && app(MeshGovernor::class)->release($run->plan['mesh_allowance'], $deadline)) {
                 $plan = $run->plan;
                 unset($plan['mesh_allowance']);
                 $run->update(['plan' => $plan]);
@@ -519,11 +519,11 @@ class CampaignMesh
         return array_values(array_unique(array_filter([...$active, ...$ranked])));
     }
 
-    public function refresh(CampaignEpisode $episode, Agent $agent, array &$read, float $deadline, ?string $buyer = null): void
+    public function refresh(CampaignEpisode $episode, Agent $agent, array &$read, float $deadline, ?string $buyer = null, ?array &$detailedRead = null): void
     {
         $policy = self::policy($episode);
         if (isset($policy['saturation'])) {
-            app(MeshPoller::class)->refresh($episode, $agent, $read, $deadline, $buyer);
+            app(MeshPoller::class)->refresh($episode, $agent, $read, $deadline, $buyer, detailedRead: $detailedRead);
 
             return;
         }
@@ -556,6 +556,9 @@ class CampaignMesh
                 $observer = $occupied->get($symbol)->sortBy('symbol')->first()->symbol;
                 $data = FleetMetrics::as($observer, fn () => app(SpaceTradersApi::class)->market($agent, $symbol));
                 app(AgentSynchronizer::class)->observe($agent, 'market', $symbol, $data);
+                if (! empty($data['tradeGoods'])) {
+                    $detailedRead[$symbol] = true;
+                }
             } catch (GameException $exception) {
                 if ($exception->retryAfter > 0) {
                     return;

@@ -24,6 +24,8 @@ use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -246,6 +248,114 @@ class TradeFuelEconomicsTest extends TestCase
         $this->assertSame(92, $cost->price($this->agent, ['X1-TEST-A4', 'X1-TEST-H49']));
         $this->agent->reset_id = 'different-reset';
         $this->assertNull($cost->price($this->agent, ['X1-TEST-A4', 'X1-TEST-H49']));
+    }
+
+    public function test_batch_memo_reduces_fuel_and_sales_queries_with_identical_corridor_projections(): void
+    {
+        $this->startTrade();
+        $episode = CampaignEpisode::sole();
+        $agent = $this->agent->fresh();
+        $ship = Ship::where('symbol', 'LOCAL-1')->sole()->snapshot;
+        $trade = app(CampaignTrade::class);
+        $sync = app(AgentSynchronizer::class);
+        $rules = $this->grant->revision()->body['trade'];
+        $source = 'X1-TEST-A4';
+        $buyer = 'X1-TEST-H49';
+        $routes = [];
+        $point = GameObservation::where('kind', 'waypoint')->where('symbol', $buyer)->sole()->data;
+        $market = GameObservation::where('kind', 'market')->where('symbol', $buyer)->sole()->data;
+        $ask = app(OperationPlanner::class)->quote($agent, $source, 'FUEL');
+        for ($i = 1; $i <= 8; $i++) {
+            $symbol = 'X1-TEST-M'.$i;
+            $sync->observe($agent, 'waypoint', $symbol, array_replace($point, ['symbol' => $symbol, 'x' => 10 + $i]));
+            $market['symbol'] = $symbol;
+            $market['tradeGoods'][0]['sellPrice'] = 110 + $i;
+            $sync->observe($agent, 'market', $symbol, $market);
+            $routes[] = [['source' => $source, 'market' => $symbol, 'good' => 'FUEL'],
+                app(OperationPlanner::class)->quote($agent, $symbol, 'FUEL')];
+        }
+
+        $queries = 0;
+        DB::listen(function ($query) use (&$queries) {
+            if (str_starts_with($query->sql, 'select ') && (str_contains($query->sql, '"game_observations"')
+                || str_contains($query->sql, '"ship_actions"') && in_array('sell', $query->bindings, true))) {
+                $queries++;
+            }
+        });
+        $project = function (?Collection $salesByKey = null) use ($trade, $episode, $agent, $ship, $routes, $ask, $rules) {
+            $result = [];
+            foreach ($routes as [$pair, $bid]) {
+                $decay = $trade->decay($episode, 'FUEL', $pair['market'], $rules['lot']['default_batch_decay'], $salesByKey?->get('FUEL@'.$pair['market'], collect()));
+                $result[] = $trade->projectPair($agent, $ship, null, $pair, $ask, $bid, $rules, 900, 'proof', $decay)['candidate'];
+            }
+
+            return $result;
+        };
+        $measure = function (callable $work) use (&$queries) {
+            $queries = 0;
+            $start = hrtime(true);
+            $result = $work();
+
+            return [$result, $queries, (hrtime(true) - $start) / 1e6];
+        };
+        $beforeMs = $afterMs = [];
+        for ($run = 0; $run < 5; $run++) {
+            [$before, $beforeQueries, $beforeMs[]] = $measure($project);
+            [$after, $afterQueries, $afterMs[]] = $measure(fn () => FuelPlanner::memoize(fn () => $project($trade->confirmedSales($episode))));
+            $this->assertCount(8, $before);
+            $this->assertSame($before, $after);
+            $this->assertGreaterThan(0, $afterQueries);
+            $this->assertGreaterThanOrEqual(5 * $afterQueries, $beforeQueries);
+        }
+        if (getenv('CAMPAIGN_QUERY_BENCHMARK')) {
+            fwrite(STDERR, json_encode(compact('beforeQueries', 'afterQueries', 'beforeMs', 'afterMs'), JSON_THROW_ON_ERROR).PHP_EOL);
+        }
+
+        $considered = [];
+        $ranked = collect($trade->rank($this->grant, $episode, $agent, $ship, $considered, persist: false));
+        foreach ($after as $expected) {
+            $candidate = $ranked->first(fn ($row) => $row['key'] === $expected['key'] && $row['source'] === $expected['source']);
+            $this->assertNotNull($candidate);
+            $this->assertSame($expected, array_intersect_key($candidate, $expected));
+        }
+        $newQuote = GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-M1')->sole();
+        $data = $newQuote->data;
+        $data['tradeGoods'][0]['sellPrice'] += 6;
+        $newQuote->update(['data' => $data, 'observed_at' => now()]);
+        $again = collect($trade->rank($this->grant, $episode, $agent, $ship, $considered, persist: false));
+        $this->assertSame($data['tradeGoods'][0]['sellPrice'], $again->firstWhere('key', 'FUEL@X1-TEST-M1')['bid']);
+    }
+
+    public function test_preloaded_sales_preserve_partial_batch_resets_and_default_decay(): void
+    {
+        $run = $this->startTrade();
+        $episode = CampaignEpisode::sole();
+        $trade = app(CampaignTrade::class);
+        foreach ([[40, 100], [40, 80], [15, 70], [40, 65], [40, 52]] as $index => [$units, $price]) {
+            ShipAction::create([
+                'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id, 'key' => 'sale-fixture-'.$index,
+                'automation_run_id' => $run->id, 'ship_symbol' => $run->ship_symbol, 'origin' => 'automation',
+                'command' => 'sell', 'state' => 'confirmed', 'arguments' => ['symbol' => 'FUEL'], 'expires_at' => now()->addMinute(),
+                'before_state' => ['ship' => ['nav' => ['waypointSymbol' => 'X1-TEST-H49']], 'estimate' => ['quote' => ['tradeVolume' => 40]]],
+                'outcome' => ['units' => $units, 'transaction_total' => $units * $price],
+            ]);
+        }
+        $sales = $trade->confirmedSales($episode)->get('FUEL@X1-TEST-H49');
+        $this->assertSame([40, 40, 15, 40, 40], $sales->map(fn ($sale) => $sale->outcome['units'])->all());
+        $actual = $trade->decay($episode, 'FUEL', 'X1-TEST-H49', null, $sales);
+        $this->assertEqualsWithDelta(0.2, $actual, 0.0001);
+        $this->assertSame($actual, $trade->decay($episode, 'FUEL', 'X1-TEST-H49'));
+        $this->assertSame(0.08, $trade->decay($episode, 'FUEL', 'X1-TEST-H49', 0.08, collect()));
+
+        $considered = [];
+        $ship = Ship::where('symbol', 'LOCAL-1')->sole()->snapshot;
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+        $trade->rank($this->grant, $episode->replicate(), $this->agent->fresh(), $ship, $considered);
+        $trade->rank($this->grant, $episode, $this->agent->fresh(), $ship, $considered, persist: false);
+        $writes = array_filter(DB::getQueryLog(), fn ($query) => ! str_starts_with($query['query'], 'select '));
+        DB::disableQueryLog();
+        $this->assertSame([], $writes);
     }
 
     public static function previewFailures(): array

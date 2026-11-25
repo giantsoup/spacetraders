@@ -156,10 +156,10 @@ class GameplayTest extends TestCase
         {
             public array $priorities = [];
 
-            public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75): void
+            public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75, ?float $baseMaxWait = null, ?float $deadline = null): void
             {
                 $this->priorities[] = $priority;
-                parent::reserve($token, $account, $priority, $maxWait);
+                parent::reserve($token, $account, $priority, $maxWait, $baseMaxWait, $deadline);
             }
         };
         app()->instance(RequestBudget::class, $budget);

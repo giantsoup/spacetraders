@@ -8,6 +8,13 @@ class HostLock
 
     private array $nested = [];
 
+    private array $tokens = [];
+
+    public function token(string $key): ?string
+    {
+        return $this->tokens[$key] ?? null;
+    }
+
     public function holds(string $key): bool
     {
         return isset($this->held[$key]);
@@ -48,7 +55,8 @@ class HostLock
 
     public function run(string $key, callable $work): mixed
     {
-        if (isset($this->held[$key]) && ($this->nested[$key] ?? false)) {
+        $held = $this->holds($key);
+        if ($held && ($this->nested[$key] ?? false)) {
             return $work();
         }
         $directory = config('gameplay.lock_path');
@@ -63,11 +71,16 @@ class HostLock
             throw new GameException('Another operation owns this command boundary. Retry shortly.', retryAfter: 2);
         }
         try {
-            $this->held[$key] = true;
+            if (! $held) {
+                $this->tokens[$key] = bin2hex(random_bytes(8));
+                $this->held[$key] = true;
+            }
 
             return $work();
         } finally {
-            unset($this->held[$key]);
+            if (! $held) {
+                unset($this->held[$key], $this->tokens[$key]);
+            }
             flock($handle, LOCK_UN);
             fclose($handle);
         }

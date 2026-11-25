@@ -7,8 +7,10 @@ use App\Gameplay\AutomationRunner;
 use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignHaulerPurchase;
 use App\Gameplay\CampaignPlaybook;
+use App\Gameplay\CampaignProbeBootstrap;
 use App\Gameplay\CampaignSaturation;
 use App\Gameplay\CampaignStatus;
+use App\Gameplay\CampaignTrade;
 use App\Gameplay\FleetClaims;
 use App\Gameplay\GameException;
 use App\Gameplay\HostLock;
@@ -18,6 +20,7 @@ use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
+use App\Models\GameObservation;
 use App\Models\LocalEngine;
 use App\Models\ShipAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -100,6 +103,45 @@ class CampaignSaturationTest extends TestCase
         $saturation->record($episode->grant(), $episode, $saturation->evaluate($episode->grant(), $episode, $this->agent));
         $this->assertSame(1, CampaignEvent::where('kind', 'saturation')->count());
         $this->assertNotEmpty($episode->state['saturation_hold']['held_until']);
+    }
+
+    public function test_hauler_opportunity_preloads_primary_sales_once_across_corridors(): void
+    {
+        $this->setUpSaturation();
+        $episode = $this->primary();
+        $this->schedulerPass();
+        $trade = app(CampaignTrade::class);
+        $run = AutomationRun::create([
+            'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id, 'campaign_episode_id' => $episode->id,
+            'ship_symbol' => 'LOCAL-1', 'strategy' => 'trade', 'state' => 'completed', 'plan_version' => 1,
+            'plan' => [], 'totals' => [], 'expires_at' => now(),
+        ]);
+        $port = 'X1-TEST-PORT';
+        $second = 'X1-TEST-H3';
+        $bid = GameObservation::where('kind', 'market')->where('symbol', $port)->sole()->data;
+        $bid['tradeGoods'][0]['sellPrice'] = 1000;
+        app(AgentSynchronizer::class)->observe($this->agent, 'market', $second, ['symbol' => $second] + $bid);
+        foreach ([[$port, 8000], [$port, 4000], [$second, 1000], [$second, 800]] as $index => [$buyer, $price]) {
+            ShipAction::create([
+                'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id, 'key' => 'yard-sales-'.$index,
+                'automation_run_id' => $run->id, 'ship_symbol' => $run->ship_symbol, 'origin' => 'automation',
+                'command' => 'sell', 'state' => 'confirmed', 'arguments' => ['symbol' => 'IRON_ORE'], 'expires_at' => now(),
+                'before_state' => ['ship' => ['nav' => ['waypointSymbol' => $buyer]], 'estimate' => ['quote' => ['tradeVolume' => 20]]],
+                'outcome' => ['units' => 20, 'transaction_total' => 20 * $price],
+            ]);
+        }
+        $expected = $trade->decay($episode, 'IRON_ORE', $port);
+        $this->assertSame(0.5, $expected);
+        $reads = 0;
+        DB::listen(function ($query) use (&$reads) {
+            if (str_contains($query->sql, '"ship_actions"') && in_array('sell', $query->bindings, true)) {
+                $reads++;
+            }
+        });
+        $evaluation = app(CampaignSaturation::class)->evaluate($episode->grant(), $episode, $this->agent, 'X1-TEST-ROCK');
+        $this->assertSame(1, $reads);
+        $this->assertSame($port, $evaluation['gates']['G4']['buyer']);
+        $this->assertSame($expected, $evaluation['gates']['G4']['decay']);
     }
 
     public function test_zero_hubs_and_missing_scheduler_evidence_are_explicit(): void
@@ -223,6 +265,122 @@ class CampaignSaturationTest extends TestCase
         $this->assertSame('idle_share', $assess()['reason']);
         $episode->update(['state' => ['recovering_since' => now()->toIso8601String()]]);
         $this->assertEquals(0.0, $assess()['idle']['maximum']);
+    }
+
+    #[DataProvider('idleHoldOrigins')]
+    public function test_hauler_plan_records_and_recovers_idle_holds_before_buying(string $origin): void
+    {
+        $this->setUpSaturation();
+        $this->editFixture(fn (&$world) => $world['ships'][] = FakeSpaceTraders::lightHauler('LOCAL-9', 'X1-TEST-ROCK'));
+        app(AgentSynchronizer::class)->sync($this->agent, false);
+        $episode = $this->primary();
+        $grant = $episode->grant();
+        $arm = $this->seedArmEpisode($this->arm('LOCAL-9', 'H1'));
+        $arm->update(['opened_at' => now()->subMinutes(90)]);
+        $this->schedulerPass();
+
+        $saturation = app(CampaignSaturation::class);
+        $plan = app(CampaignHaulerPurchase::class);
+        $considered = [];
+        $hold = ['gate' => 'G4', 'reason' => 'spare_corridor', 'minutes' => null, 'permanent' => false];
+        if ($origin === 'yard') {
+            $episode->update(['state' => ['saturation_hold' => $hold]]);
+        } elseif ($origin === 'worker') {
+            try {
+                $saturation->assertPurchase($grant, $episode, $this->agent, 'X1-TEST-ROCK', persist: true);
+                $this->fail('The worker must refuse a high-idle purchase.');
+            } catch (GameException $exception) {
+                $this->assertStringContainsString('idle_share', $exception->getMessage());
+                $this->assertSame('offer_independent', $episode->refresh()->state['saturation_hold']['scope']);
+            }
+        }
+
+        $calls = $this->world()['calls'];
+        $busy = ['LOCAL-1', 'LOCAL-2', 'LOCAL-3', 'LOCAL-4', 'LOCAL-5', 'LOCAL-9'];
+        $this->assertNull($plan->plan($grant, $episode, $this->agent, $busy, $considered, microtime(true) + 10));
+        $this->assertSame($calls, $this->world()['calls']);
+        $this->assertSame('idle_share', $considered[0]['gates']['G4']['reason']);
+        $expected = $origin === 'yard' ? $hold : ['permanent' => false, 'reason' => 'idle_share', 'gate' => 'G4', 'minutes' => null, 'scope' => 'offer_independent'];
+        $this->assertSame($expected, $episode->refresh()->state['saturation_hold']);
+
+        $full = $saturation->evaluate($grant, $episode, $this->agent, 'X1-TEST-ROCK');
+        $this->assertSame('idle_share', $full['gates']['G4']['limiting_factor']);
+        $this->assertSame([], $full['gates']['G4']['excluded_claims']);
+        $this->assertSame('no_eligible_yard', $saturation->evaluate($grant, $episode, $this->agent, candidateYards: [])['gates']['G4']['reason']);
+
+        $cashConstrained = clone $this->agent;
+        $cashConstrained->credits = 400000;
+        $limited = $saturation->evaluate($grant, $episode, $cashConstrained, 'X1-TEST-ROCK');
+        $this->assertSame('idle_share', $limited['gates']['G4']['reason']);
+        $this->assertSame('G5', $limited['hold']['gate']);
+
+        $arm->update(['state' => ['recovering_since' => now()->toIso8601String()]]);
+        $events = CampaignEvent::where('kind', 'saturation')->count();
+        $this->assertNull($plan->plan($grant, $episode, $this->agent, $busy, $considered, microtime(true) + 10));
+        $this->assertSame($origin === 'yard' ? $hold : null, $episode->refresh()->state['saturation_hold'] ?? null);
+        $this->assertSame($events + ($origin === 'yard' ? 0 : 1), CampaignEvent::where('kind', 'saturation')->count());
+        $saturation->record($grant, $episode, $saturation->evaluate($grant, $episode, $this->agent, offerIndependentOnly: true));
+        $this->assertSame($events + ($origin === 'yard' ? 0 : 1), CampaignEvent::where('kind', 'saturation')->count());
+    }
+
+    public static function idleHoldOrigins(): array
+    {
+        return [['director'], ['worker'], ['yard']];
+    }
+
+    #[DataProvider('timedSaturationHolds')]
+    public function test_recovered_idle_share_clears_only_legacy_idle_holds(string $path, string $reason): void
+    {
+        $this->setUpSaturation(hubs: 2);
+        $episode = $this->primary();
+        $grant = $episode->grant();
+        $this->schedulerPass();
+        $hold = ['gate' => 'G4', 'reason' => $reason, 'minutes' => 60, 'held_until' => now()->addMinutes(45)->toIso8601String()];
+        if ($reason !== 'idle_share') {
+            $hold['permanent'] = false;
+        }
+        $episode->update(['state' => ['saturation_hold' => $hold]]);
+        $expected = $reason === 'idle_share' ? null : $hold;
+        $yard = 'X1-TEST-ROCK';
+        if ($path === 'full') {
+            app(AgentSynchronizer::class)->observe($this->agent, 'shipyard', $yard, $this->world()['shipyards'][$yard]);
+        }
+        $calls = $this->world()['calls'];
+
+        if ($path === 'bootstrap') {
+            $busy = array_column($this->world()['ships'], 'symbol');
+            $considered = [];
+            $this->assertNull(app(CampaignProbeBootstrap::class)->plan($grant, $episode, $this->agent, $busy, $considered,
+                microtime(true) + 10, CampaignHaulerPurchase::TYPE));
+        } else {
+            $saturation = app(CampaignSaturation::class);
+            $evaluation = $saturation->evaluate($grant, $episode, $this->agent, offerIndependentOnly: $path !== 'full');
+            $this->assertSame($expected, $evaluation['hold']);
+            $saturation->record($grant, $episode, $evaluation);
+        }
+
+        $this->assertSame($expected, $episode->refresh()->state['saturation_hold'] ?? null);
+        $this->assertSame($calls, $this->world()['calls']);
+        if ($expected === null) {
+            $this->assertArrayNotHasKey('saturation_hold', $episode->state);
+            $event = CampaignEvent::where('kind', 'saturation')->sole();
+            $this->assertSame('idle_share', $event->data['previous_reason']);
+            $this->assertNull($event->data['hold']);
+        } else {
+            $this->assertDatabaseMissing('campaign_events', ['kind' => 'saturation']);
+        }
+    }
+
+    public static function timedSaturationHolds(): array
+    {
+        return [
+            'full clears idle hold' => ['full', 'idle_share'],
+            'offer-independent clears idle hold' => ['offer-independent', 'idle_share'],
+            'bootstrap clears idle hold with busy ships' => ['bootstrap', 'idle_share'],
+            'full preserves yard hold' => ['full', 'no_unclaimed_corridor'],
+            'offer-independent preserves yard hold' => ['offer-independent', 'no_unclaimed_corridor'],
+            'bootstrap preserves yard hold' => ['bootstrap', 'no_unclaimed_corridor'],
+        ];
     }
 
     public function test_request_envelope_uses_ordinary_attribution_and_independent_host_pressure(): void

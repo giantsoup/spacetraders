@@ -7,6 +7,7 @@ use App\Gameplay\GameException;
 use App\Gameplay\OperationPlanner;
 use App\Gameplay\OpportunityAssessor;
 use App\Gameplay\SurveyPool;
+use App\Gameplay\TradeFuelCost;
 use App\Models\Agent;
 use App\Models\GameObservation;
 use App\Models\Ship;
@@ -72,6 +73,29 @@ class Opt01FuelListingBatchTest extends TestCase
         $this->assertCount(1, $this->listingQueries($optionQueries));
         $this->assertSame([], array_values(array_filter(array_merge($reportQueries, $optionQueries), fn ($query) => ! str_starts_with($query['query'], 'select '))));
         Http::assertNothingSent();
+    }
+
+    public function test_memo_is_scoped_and_keeps_each_fuel_age_limit_and_explicit_listings(): void
+    {
+        $this->fixture(2);
+        $planner = app(FuelPlanner::class);
+        $cost = app(TradeFuelCost::class);
+        $symbol = 'X1-TEST-M0';
+        $quote = $this->quote($symbol);
+        $quote->update(['observed_at' => now()->subHours(6)]);
+        FuelPlanner::memoize(function () use ($planner, $cost, $symbol, $quote) {
+            $this->assertNotNull($cost->price($this->agent, [$symbol]));
+            $this->assertNull($planner->sellerQuote($this->agent, $symbol));
+            $this->assertTrue($planner->listsFuel($this->agent, $symbol));
+            $this->assertFalse($planner->listsFuel($this->agent, $symbol, collect()));
+            $this->assertNull($planner->marketRow($this->agent, 'X1-TEST-ABSENT'));
+            $row = $quote->replicate(['symbol']);
+            $row->forceFill(['symbol' => 'X1-TEST-ABSENT', 'observed_at' => now()])->save();
+            FuelPlanner::memoize(fn () => $this->assertNull($planner->marketRow($this->agent, $row->symbol)));
+        });
+        $this->assertNotNull($planner->marketRow($this->agent, 'X1-TEST-ABSENT'));
+        $quote->update(['observed_at' => now()->subHours(6)->subSecond()]);
+        $this->assertNull(FuelPlanner::memoize(fn () => $cost->price($this->agent, [$symbol])));
     }
 
     public static function sellerCases(): array
