@@ -6,6 +6,7 @@ use App\Gameplay\AutomationRunner;
 use App\Gameplay\Engine\EngineChildWatch;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\Engine\EngineLease;
+use App\Gameplay\Engine\HeartbeatContention;
 use App\Gameplay\EngineGate;
 use App\Gameplay\HostLock;
 use App\Gameplay\LocalEngineManager;
@@ -21,6 +22,9 @@ use PDOException;
 class SuperviseLocalEngine extends Command
 {
     private const HEARTBEAT_TIMEOUT_SECONDS = 10;
+
+    /** The watchdog may restart a session that faulted with exactly this message (see EngineAutoRecovery). */
+    public const CONTENTION_FAULT_MESSAGE = 'SQLite contention prevented the supervisor heartbeat. Reconcile any reserved action before a fresh preview.';
 
     private const SQLITE_BUSY_TIMEOUT_MS = 1000;
 
@@ -177,7 +181,8 @@ class SuperviseLocalEngine extends Command
                     if ($busyTimeout !== null && $busyTimeout > self::SQLITE_BUSY_TIMEOUT_MS) {
                         $pdo->exec('PRAGMA busy_timeout = '.self::SQLITE_BUSY_TIMEOUT_MS);
                     }
-                    $this->recordFault($gate, $pdo !== null, $children);
+                    $this->recordFault($gate, $pdo !== null, $children, $error instanceof HeartbeatContention
+                        ? self::CONTENTION_FAULT_MESSAGE : 'Supervisor failed. Reconcile any reserved action before a fresh preview.');
                 } finally {
                     $this->killChildren($children);
                 }
@@ -196,7 +201,7 @@ class SuperviseLocalEngine extends Command
         $elapsed = max($this->wallTime() - $lastHeartbeat, (hrtime(true) - $lastHeartbeatMonotonic) / 1e9);
         // EngineGate rejects admissions once the stored heartbeat is 15 seconds old.
         if ($elapsed >= self::HEARTBEAT_TIMEOUT_SECONDS) {
-            throw new \RuntimeException('SQLite contention prevented the supervisor heartbeat for '.self::HEARTBEAT_TIMEOUT_SECONDS.' seconds.', previous: $error);
+            throw new HeartbeatContention('SQLite contention prevented the supervisor heartbeat for '.self::HEARTBEAT_TIMEOUT_SECONDS.' seconds.', previous: $error);
         }
     }
 
@@ -236,11 +241,11 @@ class SuperviseLocalEngine extends Command
         }
     }
 
-    private function recordFault(EngineGate $gate, bool $sqlite, array $children): void
+    private function recordFault(EngineGate $gate, bool $sqlite, array $children, string $message): void
     {
         for ($attempt = 1; ; $attempt++) {
             try {
-                $gate->close('faulted', 'Supervisor failed. Reconcile any reserved action before a fresh preview.');
+                $gate->close('faulted', $message);
 
                 return;
             } catch (\Throwable $error) {

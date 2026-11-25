@@ -100,6 +100,7 @@ class LocalEngineSupervisorBusyTest extends TestCase
         $this->assertSame(9, $failures);
         $this->assertSame(10.0, $this->seconds);
         $this->assertFaultedAndChildrenKilled();
+        $this->assertSame(SuperviseLocalEngine::CONTENTION_FAULT_MESSAGE, LocalEngine::findOrFail(1)->message);
     }
 
     public function test_fault_close_retries_one_lock_and_persists_the_stop(): void

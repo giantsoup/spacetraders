@@ -10,6 +10,7 @@ use App\Gameplay\SpaceTradersApi;
 use App\Queue\DeploymentDatabaseQueue;
 use App\Queue\EngineWorkerGate;
 use App\Services\SpaceTradersClient;
+use App\Support\SqliteLockTelemetry;
 use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Database\Events\ConnectionEstablished;
@@ -77,6 +78,11 @@ class AppServiceProvider extends ServiceProvider
                 $event->connection->statement('PRAGMA fullfsync = ON');
             }
         });
+
+        $lockSeconds = (float) config('gameplay.sqlite_lock_log_seconds');
+        if ($lockSeconds > 0 && ! $this->app->environment('testing')) {
+            (new SqliteLockTelemetry($lockSeconds))->register($this->app['events']);
+        }
 
         if (config('gameplay.fixture_path')) {
             if (! $this->app->environment(['local', 'testing'])) {

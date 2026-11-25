@@ -15,6 +15,12 @@ return [
     // The CLI End (and so a deploy) waits this long plus 30 seconds and succeeds only if shutdown
     // finishes within the allowance. Invalid or non-positive values use 180; the floor is 30.
     'engine_shutdown_seconds' => (int) env('SPACETRADERS_ENGINE_SHUTDOWN_SECONDS', 180),
+    // Log SQLite write transactions and statements at or above this many seconds to engine.log (0 disables).
+    'sqlite_lock_log_seconds' => (float) env('SPACETRADERS_SQLITE_LOCK_LOG_SECONDS', 2),
+    // Let the campaign watchdog restart an engine that faulted only on SQLite heartbeat contention,
+    // when no owned process survives and no action is sending, uncertain or awaiting review.
+    'engine_contention_auto_restart' => (bool) env('SPACETRADERS_ENGINE_CONTENTION_AUTO_RESTART', true),
+    'engine_contention_auto_restart_limit' => (int) env('SPACETRADERS_ENGINE_CONTENTION_AUTO_RESTART_LIMIT', 6),
     'fixture_path' => env('SPACETRADERS_FIXTURE_PATH'),
     'arms_every_pass' => (bool) env('SPACETRADERS_ARMS_EVERY_PASS', true),
     'arm_pass_seconds' => (int) env('SPACETRADERS_ARM_PASS_SECONDS', 20),
