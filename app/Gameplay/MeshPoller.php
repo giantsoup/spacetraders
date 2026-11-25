@@ -71,7 +71,7 @@ final class MeshPoller
     }
 
     public function refresh(CampaignEpisode $episode, Agent $agent, array &$read, float $deadline, ?string $buyer = null,
-        ?string $phase = null, array $purchaseYards = [], ?int $capacity = null): array
+        ?string $phase = null, array $purchaseYards = [], ?int $capacity = null, ?array &$detailedRead = null): array
     {
         $mesh = app(CampaignMesh::class);
         $policy = CampaignMesh::policy($episode);
@@ -131,7 +131,7 @@ final class MeshPoller
                 continue;
             }
             try {
-                $ok = $this->read($episode, $agent, $item['symbol'], $item['kind'], $item['observer'], $item['needed'] ? 'demand' : 'read', $read);
+                $ok = $this->read($episode, $agent, $item['symbol'], $item['kind'], $item['observer'], $item['needed'] ? 'demand' : 'read', $read, $detailedRead, $deadline);
                 if ($ok) {
                     $successful[] = $item['key'];
                 }
@@ -151,7 +151,7 @@ final class MeshPoller
         ];
     }
 
-    public function read(CampaignEpisode $episode, Agent $agent, string $symbol, string $kind, ?string $observer, string $priority, array &$read): bool
+    public function read(CampaignEpisode $episode, Agent $agent, string $symbol, string $kind, ?string $observer, string $priority, array &$read, ?array &$detailedRead = null, ?float $deadline = null): bool
     {
         $key = $kind === 'shipyard' ? 'shipyard:'.$symbol : $symbol;
         $governor = app(MeshGovernor::class);
@@ -161,7 +161,7 @@ final class MeshPoller
             return false;
         }
 
-        $work = function () use ($agent, $symbol, $kind, $observer, $key, &$read) {
+        $work = function () use ($agent, $symbol, $kind, $observer, $key, &$read, &$detailedRead) {
             $read[$key] = true;
             try {
                 $data = FleetMetrics::as($observer, fn () => match ($kind) {
@@ -169,6 +169,9 @@ final class MeshPoller
                     default => app(SpaceTradersApi::class)->market($agent, $symbol),
                 });
                 app(AgentSynchronizer::class)->observe($agent, $kind, $symbol, $data, observer: $observer);
+                if ($kind === 'market' && ! empty($data['tradeGoods'])) {
+                    $detailedRead[$symbol] = true;
+                }
 
                 return $observer === null || ! empty($data[$kind === 'shipyard' ? 'ships' : 'tradeGoods']);
             } catch (GameException $exception) {
@@ -182,6 +185,6 @@ final class MeshPoller
 
         return $priority === 'settlement'
             ? app(SpaceTradersClient::class)->scope($work, priority: 'settlement')
-            : $governor->immediate($agent, $episode, $priority, $work);
+            : $governor->immediate($agent, $episode, $priority, $work, $deadline);
     }
 }

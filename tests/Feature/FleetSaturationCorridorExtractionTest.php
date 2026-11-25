@@ -1269,7 +1269,7 @@ class FleetSaturationCorridorExtractionTest extends TestCase
 
             public function __construct(private readonly mixed $onWrite) {}
 
-            public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75): void
+            public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75, ?float $baseMaxWait = null, ?float $deadline = null): void
             {
                 if ($priority === 'write' && ++$this->writes === 1) {
                     ($this->onWrite)();

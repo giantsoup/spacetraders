@@ -34,10 +34,11 @@ final class MeshGovernor
         try {
             $usage = $allowance === null || $saturation !== null ? $this->budget->usage(agentSymbol: $agent->name, requireTelemetry: true)
                 : $this->budget->usageForMeshRun($agent->name, $agent->reset_id, $run->id, $allowance);
-        } catch (RequestDeferred) {
-            return ['mode' => 'hold', 'reason' => 'missing_telemetry', 'room' => 0] + ($saturation === null ? [] : [
-                'shadow_price' => array_replace($this->shadowDefaults(), app(RequestShadowPrice::class)->loadState($agent), ['hold_reason' => 'missing_telemetry']),
-            ]);
+        } catch (RequestDeferred $exception) {
+            return ['mode' => 'hold', 'reason' => 'missing_telemetry', 'room' => 0, 'cause' => $exception->delaySource ?: 'missing_telemetry',
+                'retry_after' => $exception->retryAfter, 'context' => $exception->context] + ($saturation === null ? [] : [
+                    'shadow_price' => array_replace($this->shadowDefaults(), app(RequestShadowPrice::class)->loadState($agent), ['hold_reason' => 'missing_telemetry']),
+                ]);
         }
         $staged = RequestBudget::agentCaps() !== [];
         $hour = $staged ? ($usage['agent']['cap_per_hour'] ?? PHP_INT_MAX)
@@ -46,7 +47,7 @@ final class MeshGovernor
         $arm = 0;
         $trader = PHP_INT_MAX;
         $mode = 'normal';
-        $reason = null;
+        $reason = $cause = null;
         $sample = [];
         if ($staged) {
             $bootstrap = app(CampaignProbeBootstrap::class);
@@ -62,16 +63,17 @@ final class MeshGovernor
             if ($ceiling === null || ! $sample['fleet_verified']) {
                 $mode = 'sampling';
                 $reason = $sample['purchase_hold_reason'] ?? 'missing_trader_sample';
+                $cause = 'missing_trader_sample';
             } elseif ($current > $ceiling) {
                 $mode = 'hold';
-                $reason = 'current_traders_exceed_ceiling';
+                $reason = $cause = 'current_traders_exceed_ceiling';
                 $trader = 0;
             } else {
                 $protected = $committed + 1;
                 if ($protected > $ceiling) {
                     $protected = min($ceiling, $committed);
                     $mode = 'degraded';
-                    $reason = 'prospective_trader_headroom';
+                    $reason = $cause = 'prospective_trader_headroom';
                 }
                 $trader = max(0, (int) floor($hour - $sample['agent_overhead_req_hr'] - $protected * $sample['trader_only_req_per_active_trader_hr']));
                 $sample['protected_traders'] = $protected;
@@ -81,7 +83,7 @@ final class MeshGovernor
                 }
             }
         } else {
-            $arm = app(CampaignSaturation::class)->requests($agent, $fleetPolicy + ['request_headroom' => 0.8])['projected_arm_requests'];
+            $arm = app(CampaignSaturation::class)->requests($agent, $fleetPolicy + ['request_headroom' => 0.8], usage: $usage)['projected_arm_requests'];
         }
         if ($saturation !== null) {
             return $this->governSaturation($agent, $saturation, $usage, $mode, $reason, $sample, $staged, $hour, $host, $arm, $trader, $candidates, $proposed);
@@ -96,12 +98,13 @@ final class MeshGovernor
                 $minuteRoom === 0 => 'host_minute_headroom',
                 default => 'agent_hour_or_trader_headroom',
             };
+            $cause = $reason === 'agent_hour_or_trader_headroom' && $cause === 'current_traders_exceed_ceiling' ? $cause : $reason;
         } elseif (in_array($mode, ['normal', 'sampling'], true) && $used / $hour >= $policy['governor_headroom_pct'] / 100) {
             $mode = 'degraded';
-            $reason = 'agent_hour_threshold';
+            $reason = $cause = 'agent_hour_threshold';
         }
 
-        return compact('mode', 'reason', 'room', 'minuteRoom', 'used', 'sample', 'staged') + ['limits' => compact('hour', 'host', 'arm', 'trader')];
+        return compact('mode', 'reason', 'cause', 'room', 'minuteRoom', 'used', 'sample', 'staged') + ['limits' => compact('hour', 'host', 'arm', 'trader')];
     }
 
     private function revisionBody(CampaignEpisode $episode, Agent $agent): array
@@ -233,8 +236,13 @@ final class MeshGovernor
         };
     }
 
-    public function admit(Agent $agent, CampaignEpisode $episode, string $kind, ?int $requests = null, int $sustainedRequests = 0): string
+    public function admit(Agent $agent, CampaignEpisode $episode, string $kind, int|float|null $requests = null, int $sustainedRequests = 0, ?float $deadline = null): string
     {
+        // The previous positional argument carried a microtime deadline.
+        if (is_float($requests)) {
+            $deadline ??= $requests;
+            $requests = null;
+        }
         $charge = max($this->estimate($agent, $kind), $requests ?? 0);
         $saturation = CampaignPlaybook::saturationPolicy($this->revisionBody($episode, $agent));
         $status = $this->govern($agent, $episode, proposed: $charge);
@@ -270,18 +278,27 @@ final class MeshGovernor
                 $status['reason'] = 'sustained_request_capacity';
             }
         }
-        $id = $permitted && $status['room'] >= $charge
-            ? $this->budget->admitMesh($agent->name, $agent->reset_id, $status['limits'], $charge, 120) : null;
+        if (! $permitted) {
+            throw (new RequestDeferred('Mesh request admission held: '.($status['reason'] ?? $status['shadow_price']['hold_reason'] ?? 'insufficient allowance').'.',
+                $status['retry_after'] ?? 10, delaySource: $status['cause'] ?? $status['reason'] ?? $status['shadow_price']['hold_reason'] ?? 'mesh_admission', context: $status['context'] ?? []))
+                ->withDeadline($deadline);
+        }
+        if ($status['room'] < $charge) {
+            throw (new RequestDeferred('Mesh request admission held: insufficient allowance.', 10, delaySource: 'mesh_headroom',
+                context: ['room' => $status['room'], 'charge' => $charge, 'kind' => $kind]))->withDeadline($deadline);
+        }
+        $id = $this->budget->admitMesh($agent->name, $agent->reset_id, $status['limits'], $charge, 120, $deadline, $denial);
         if ($id === null) {
-            throw new RequestDeferred('Mesh request admission held: '.($status['reason'] ?? $status['shadow_price']['hold_reason'] ?? 'insufficient allowance').'.', 10);
+            throw (new RequestDeferred('Mesh request admission held: '.($status['reason'] ?? 'insufficient allowance').'.',
+                $denial['retry_after'] ?? 10, delaySource: $denial['cause'] ?? 'mesh_admission'))->withDeadline($deadline);
         }
 
         return $id;
     }
 
-    public function immediate(Agent $agent, CampaignEpisode $episode, string $kind, callable $work): mixed
+    public function immediate(Agent $agent, CampaignEpisode $episode, string $kind, callable $work, ?float $deadline = null): mixed
     {
-        $id = $this->admit($agent, $episode, $kind);
+        $id = $this->admit($agent, $episode, $kind, deadline: $deadline);
         try {
             $workload = match ($kind) {
                 'demand', 'coverage', 'proof_scout', 'yard' => 'coverage',
@@ -291,27 +308,31 @@ final class MeshGovernor
 
             return FleetMetrics::withWorkload($workload, fn () => RequestBudget::forMeshAllowance($id, $work, $agent->name, $agent->reset_id));
         } finally {
-            $this->release($id);
+            $this->release($id, $deadline);
         }
     }
 
-    public function preview(Agent $agent, CampaignEpisode $episode, string $kind, callable $work, ?int $requests = null, int $sustainedRequests = 0): AutomationRun
+    public function preview(Agent $agent, CampaignEpisode $episode, string $kind, callable $work, ?int $requests = null, int $sustainedRequests = 0, ?float $deadline = null): AutomationRun
     {
-        $id = $this->admit($agent, $episode, $kind, $requests, $sustainedRequests);
+        $id = $this->admit($agent, $episode, $kind, $requests, $sustainedRequests, $deadline);
         try {
             $run = RequestBudget::forMeshAllowance($id, $work, $agent->name, $agent->reset_id);
             if (($run->plan['mesh_allowance'] ?? null) !== $id) {
-                $this->release($id);
+                $this->release($id, $deadline);
             }
 
             return $run;
         } catch (\Throwable $exception) {
-            $this->release($id);
+            try {
+                $this->release($id, $deadline);
+            } catch (\Throwable) {
+                // Keep the preview failure as the caller's deferral.
+            }
             throw $exception;
         }
     }
 
-    public function run(Agent $agent, AutomationRun $run, callable $work): mixed
+    public function run(Agent $agent, AutomationRun $run, callable $work, ?float $deadline = null): mixed
     {
         if (! isset($run->plan['mesh_work'])) {
             return $work();
@@ -326,22 +347,28 @@ final class MeshGovernor
         $id = $run->plan['mesh_allowance'] ?? null;
         if (isset($status['shadow_price']) && in_array($run->strategy, ['buy_fleet', 'buy_hauler', 'buy_probe'], true)
             && $status['mode'] !== 'normal' && ! ShipAction::where('automation_run_id', $run->id)->where('command', 'buy_ship')->whereNotNull('sent_at')->exists()) {
-            throw new RequestDeferred('Fleet purchase admission held: '.($status['reason'] ?? 'request headroom').'.', 10);
+            throw (new RequestDeferred('Fleet purchase admission held: '.($status['reason'] ?? 'request headroom').'.', $status['retry_after'] ?? 10,
+                delaySource: $status['cause'] ?? $status['reason'] ?? 'mesh_admission', context: $status['context'] ?? []))->withDeadline($deadline);
         }
         if ($run->plan['mesh_work'] === 'hauler_purchase' && $status['mode'] === 'hold') {
-            throw new RequestDeferred('Mesh request admission held: '.$status['reason'].'.', 10);
+            throw (new RequestDeferred('Mesh request admission held: '.$status['reason'].'.', $status['retry_after'] ?? 10,
+                delaySource: $status['cause'] ?? $status['reason'] ?? 'mesh_admission', context: $status['context'] ?? []))->withDeadline($deadline);
         }
-        if (! isset($status['limits']) || ! $id || ! $this->budget->refreshMesh($id, $agent->name, $agent->reset_id, $run->id, $status['limits'])) {
-            throw new RequestDeferred('Mesh run lacks a current request allowance.', 10);
+        if (! isset($status['limits'])) {
+            throw (new RequestDeferred('Mesh run lacks a current request allowance.', $status['retry_after'] ?? 10,
+                delaySource: $status['cause'] ?? 'missing_telemetry', context: $status['context'] ?? []))->withDeadline($deadline);
+        }
+        if (! $id || ! $this->budget->refreshMesh($id, $agent->name, $agent->reset_id, $run->id, $status['limits'], $deadline)) {
+            throw (new RequestDeferred('Mesh run lacks a current request allowance.', 10, delaySource: 'mesh_allowance'))->withDeadline($deadline);
         }
 
         return RequestBudget::forMeshAllowance($id, $work, $agent->name, $agent->reset_id, $run->id);
     }
 
-    public function release(?string $id): bool
+    public function release(?string $id, ?float $deadline = null): bool
     {
         try {
-            $entry = $this->budget->releaseMesh($id);
+            $entry = $this->budget->releaseMesh($id, $deadline);
             if ($entry !== []) {
                 FleetMetrics::meshAllowance($entry['used'], $entry['remaining']);
             }

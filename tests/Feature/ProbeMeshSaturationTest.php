@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\AutomationRunner;
 use App\Gameplay\CampaignControl;
+use App\Gameplay\CampaignDirector;
 use App\Gameplay\CampaignHaulerPurchase;
 use App\Gameplay\CampaignMesh;
 use App\Gameplay\CampaignPlaybook;
@@ -13,7 +14,10 @@ use App\Gameplay\CampaignSafety;
 use App\Gameplay\CampaignSaturation;
 use App\Gameplay\CampaignStatus;
 use App\Gameplay\CampaignTrade;
+use App\Gameplay\CreditAccounting;
+use App\Gameplay\EngineGate;
 use App\Gameplay\GameException;
+use App\Gameplay\HostLock;
 use App\Gameplay\MeshGovernor;
 use App\Gameplay\MeshPoller;
 use App\Gameplay\OperationPlanner;
@@ -22,6 +26,8 @@ use App\Gameplay\RequestBudget;
 use App\Gameplay\RequestDeferred;
 use App\Gameplay\ShipCommandExecutor;
 use App\Gameplay\SpaceTradersApi;
+use App\Jobs\AdvanceAutomationRun;
+use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
@@ -31,9 +37,11 @@ use App\Models\ObservationHistory;
 use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
+use App\Services\SpaceTradersClient;
 use Closure;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Yaml\Yaml;
 use Tests\Support\FakeSpaceTraders;
@@ -677,6 +685,771 @@ final class ProbeMeshSaturationTest extends TestCase
         $governor->admit($this->agent, $episode, 'buy');
     }
 
+    #[DataProvider('paginatedDirectorPasses')]
+    public function test_mesh_dispatch_reuses_a_paginated_fleet_across_multiple_scout_starts(bool $trade): void
+    {
+        $this->setUpSaturation(seedCoverage: false, credits: 100000);
+        $points = ['ROCK' => [0, []], 'P' => [1, []], 'A' => [50, ['IRON_ORE']], 'B' => [100, ['IRON_ORE']]];
+        if ($trade) {
+            $points['ROCK'] = [0, ['IRON_ORE', 'FUEL']];
+            $points['PORT'] = [2, ['IRON_ORE', 'FUEL']];
+        }
+        $this->layout($points, ['LOCAL-2' => ['P', 9], 'LOCAL-3' => ['ROCK', 9]]);
+        $this->editFixture(function (&$world) use ($trade) {
+            for ($i = 4; $i <= 24; $i++) {
+                $world['ships'][] = FakeSpaceTraders::lightHauler('LOCAL-'.$i, $trade && $i === 4 ? 'X1-TEST-PORT' : self::YARD);
+            }
+            if ($trade) {
+                $world['market_goods']['X1-TEST-PORT'][0]['sellPrice'] = 8000;
+                $world['market_goods']['X1-TEST-PORT'][0]['purchasePrice'] = 9000;
+                foreach (['X1-TEST-PORT', self::YARD] as $market) {
+                    $world['market_goods'][$market][1]['purchasePrice'] = 5;
+                    $world['market_goods'][$market][1]['sellPrice'] = 3;
+                }
+            }
+        });
+        $sync = app(AgentSynchronizer::class);
+        $sync->sync($this->agent, false);
+        if ($trade) {
+            $api = app(SpaceTradersApi::class);
+            foreach (['X1-TEST-PORT', self::YARD] as $market) {
+                $sync->observe($this->agent, 'market', $market, $api->market($this->agent, $market, fresh: true));
+            }
+        }
+        $episode = $this->primary(revision: $this->meshRevision());
+        config(['gameplay.host_tier2_4_per_minute' => 28]);
+        $this->editBudget(fn (&$state) => $state['host_tiers']['t24'] = []);
+        $before = $this->fleetReads();
+        $this->withoutDeprecationHandling();
+        $this->tickC0();
+
+        $running = AutomationRun::where('campaign_episode_id', $episode->id)->where('state', 'running')->get();
+        $scouts = $running->where('strategy', 'scout');
+        $this->assertGreaterThanOrEqual($trade ? 1 : 2, $scouts->count(), CampaignEvent::where('kind', 'mesh_plan')->get()->toJson());
+        $this->assertSame($trade ? 1 : 0, $running->where('strategy', 'trade')->count());
+        $this->assertSame(2, $this->fleetReads() - $before);
+    }
+
+    public static function paginatedDirectorPasses(): array
+    {
+        return ['scouts only' => [false], 'trade and scouts' => [true]];
+    }
+
+    public function test_cached_fleet_sync_keeps_an_earlier_proven_snapshot_without_extending_its_age(): void
+    {
+        $this->setUpSaturation(seedCoverage: false);
+        $sync = app(AgentSynchronizer::class);
+        $client = app(SpaceTradersClient::class);
+        $lock = app(HostLock::class);
+        $key = 'agent-'.$this->agent->id;
+        $memo = new \ReflectionProperty(AgentSynchronizer::class, 'lockedFleetMemo');
+        AgentSynchronizer::clearLockedFleetMemo();
+
+        $lock->scoped($key, fn () => $client->scope(function () use ($sync, $memo) {
+            $before = $this->fleetReads();
+            $sync->sync($this->agent, false, freshFleet: true);
+            $original = $memo->getValue();
+            $this->assertCount(1, $original);
+            $sync->sync($this->agent, false);
+            $this->assertSame($original, $memo->getValue());
+            $sync->sync($this->agent, false, freshFleet: true, reuseLockedSeconds: 30);
+            $this->assertSame($before + 1, $this->fleetReads());
+        }));
+
+        $lock->scoped($key, fn () => $client->scope(function () use ($sync, $memo, $client) {
+            $before = $this->fleetReads();
+            $sync->sync($this->agent, false, freshFleet: true, reuseLockedSeconds: 30);
+            $this->assertSame($before + 1, $this->fleetReads());
+            $this->partialMock(RequestBudget::class)->shouldReceive('reserve')->withArgs(fn ($token, $account, $priority) => $priority === 'write')
+                ->once()->andThrow(new RequestDeferred('Fixture blocked the write.', 5));
+            try {
+                $client->request('post', '/my/ships');
+                $this->fail('Expected the budget to refuse before transport.');
+            } catch (RequestDeferred) {
+                $this->assertSame([], $this->world()['writes']);
+            }
+            $sync->sync($this->agent, false, freshFleet: true, reuseLockedSeconds: 30);
+            $this->assertSame($before + 2, $this->fleetReads());
+
+            $stored = $memo->getValue();
+            $memoKey = array_key_first($stored);
+            $stored[$memoKey]['fetched_at'] -= 31;
+            $memo->setValue(null, $stored);
+            $sync->sync($this->agent, false);
+            $this->assertSame([], $memo->getValue());
+            $sync->sync($this->agent, false, freshFleet: true, reuseLockedSeconds: 30);
+            $this->assertSame($before + 3, $this->fleetReads());
+        }));
+
+        AgentSynchronizer::clearLockedFleetMemo();
+    }
+
+    public function test_transport_cache_without_a_locked_fetch_cannot_seed_fleet_reuse(): void
+    {
+        $this->setUpSaturation(seedCoverage: false);
+        AgentSynchronizer::clearLockedFleetMemo();
+        $sync = app(AgentSynchronizer::class);
+        app(SpaceTradersClient::class)->scope(function () use ($sync) {
+            $before = $this->fleetReads();
+            $sync->sync($this->agent, false);
+            app(HostLock::class)->scoped('agent-'.$this->agent->id, function () use ($sync, $before) {
+                $sync->sync($this->agent, false);
+                $this->assertSame($before + 1, $this->fleetReads());
+                $sync->sync($this->agent, false, freshFleet: true, reuseLockedSeconds: 30);
+                $this->assertSame($before + 2, $this->fleetReads());
+            });
+        });
+    }
+
+    public function test_failed_agent_refresh_during_reuse_discards_the_snapshot(): void
+    {
+        $this->setUpSaturation(seedCoverage: false);
+        $sync = app(AgentSynchronizer::class);
+        $agent = new class extends Agent
+        {
+            public function refresh()
+            {
+                throw new \RuntimeException('Fixture refresh failure.');
+            }
+        };
+        $agent->setRawAttributes($this->agent->getAttributes(), true);
+        $agent->exists = true;
+        app(HostLock::class)->scoped('agent-'.$this->agent->id, function () use ($sync, $agent) {
+            $before = $this->fleetReads();
+            $sync->sync($this->agent, false, freshFleet: true, reuseLockedSeconds: 30);
+            try {
+                $sync->sync($agent, false, freshFleet: true, reuseLockedSeconds: 30);
+                $this->fail('Expected a failed refresh.');
+            } catch (\RuntimeException $exception) {
+                $this->assertSame('Fixture refresh failure.', $exception->getMessage());
+            }
+            $this->assertSame($before + 1, $this->fleetReads());
+            $sync->sync($this->agent, false, freshFleet: true, reuseLockedSeconds: 30);
+            $this->assertSame($before + 2, $this->fleetReads());
+        });
+    }
+
+    #[DataProvider('fleetSyncFailures')]
+    public function test_fleet_sync_failures_clear_previously_proven_memo(string $boundary): void
+    {
+        $this->setUpSaturation(seedCoverage: false);
+        $sync = app(AgentSynchronizer::class);
+        $lock = app(HostLock::class);
+        $lock->scoped('agent-'.$this->agent->id, function () use ($sync, $lock, $boundary) {
+            $sync->sync($this->agent, false, freshFleet: true, reuseLockedSeconds: 30);
+            $failure = new GameException('Fixture '.$boundary.' failure.');
+            $api = app(SpaceTradersApi::class);
+            if ($boundary === 'baseline') {
+                $this->partialMock(CreditAccounting::class)->shouldReceive('baseline')->once()->andThrow($failure);
+            } else {
+                $api = \Mockery::mock(SpaceTradersApi::class, [app(SpaceTradersClient::class)])->makePartial();
+                $api->shouldReceive($boundary)->once()->andThrow($failure);
+            }
+
+            try {
+                (new AgentSynchronizer($api, $lock))->sync($this->agent, false, freshFleet: true);
+                $this->fail('The fixture must fail during real fleet synchronization.');
+            } catch (GameException $exception) {
+                $this->assertSame($failure, $exception);
+            }
+            $this->app->forgetInstance(CreditAccounting::class);
+            $before = $this->fleetReads();
+            $sync->sync($this->agent, false, freshFleet: true, reuseLockedSeconds: 30);
+            $this->assertSame($before + 1, $this->fleetReads());
+        });
+    }
+
+    public static function fleetSyncFailures(): array
+    {
+        return [['status'], ['agent'], ['ships'], ['baseline']];
+    }
+
+    #[DataProvider('meshMarketReaders')]
+    public function test_mesh_market_reads_supply_trade_detail_without_another_upstream_get(string $reader): void
+    {
+        $this->setUpSaturation();
+        $episode = $this->primary(revision: $this->meshRevision());
+        $grant = $episode->grant();
+        $agent = $this->agent;
+        $director = app(CampaignDirector::class);
+        (new \ReflectionProperty($director, 'deadline'))->setValue($director, microtime(true) + 10);
+        $buyer = 'X1-TEST-PORT';
+        if ($reader === 'demand') {
+            $episode->update(['state' => ['active_buyer' => $buyer]]);
+        }
+        $quote = GameObservation::where('kind', 'market')->where('symbol', $buyer)->sole();
+        $quote->update(['data' => $quote->data + ['invalidated_by_action' => 1], 'observed_at' => now()->subMinutes(5)]);
+        $ship = Ship::where('symbol', 'LOCAL-1')->sole()->snapshot;
+        $candidate = ['key' => 'IRON_ORE@'.$buyer, 'good' => 'IRON_ORE', 'source' => $ship['nav']['waypointSymbol'], 'buyer' => $buyer,
+            'units' => 1, 'score' => 20, 'seconds' => 300, 'max_inventory' => 100, 'fuel_safety_ceiling' => 100, 'departure_refuel' => 0, 'predicted_cost' => 100];
+        $this->partialMock(CampaignTrade::class)->shouldReceive('rank')->twice()->andReturn([$candidate]);
+        $preview = new AutomationRun(['strategy' => 'trade']);
+        $this->partialMock(AutomationRunner::class)->shouldReceive('preview')->once()->andReturn($preview);
+        $before = count($this->world()['calls']);
+
+        app(SpaceTradersClient::class)->scope(function () use ($reader, $director, $episode, $grant, $agent, $buyer, $ship, $preview) {
+            if ($reader === 'recovery') {
+                (new \ReflectionMethod($director, 'positionMeshRecoveryObserver'))->invoke($director, $grant, $episode, $agent, $buyer, false);
+            } else {
+                (new \ReflectionMethod($director, 'pollMesh'))->invoke($director, $episode, $agent, $reader);
+            }
+            $details = (new \ReflectionProperty($director, 'detailedMarketReads'))->getValue($director);
+            $this->assertArrayHasKey($buyer, $details);
+            $considered = [];
+            $result = (new \ReflectionMethod($director, 'trade'))->invokeArgs($director, [$grant, $episode, $agent, $ship, [], &$considered]);
+            $this->assertSame($preview, $result, json_encode($considered));
+        });
+        $paths = array_column(array_slice($this->world()['calls'], $before), 'path');
+        $this->assertSame(1, count(array_keys($paths, '/systems/X1-TEST/waypoints/'.$buyer.'/market', true)));
+    }
+
+    public static function meshMarketReaders(): array
+    {
+        return [['demand'], ['urgent'], ['recovery']];
+    }
+
+    public function test_reserve_storage_failure_after_admission_reaches_dispatch_diagnostics(): void
+    {
+        $episode = $this->dispatchFixture();
+        $brokeBudget = false;
+        $budget = app(RequestBudget::class);
+        $this->partialMock(RequestBudget::class)->shouldReceive('reserve')
+            ->andReturnUsing(function ($token, $account, $priority, $maxWait, $baseMaxWait, $deadline) use ($budget, &$brokeBudget) {
+                if (! $brokeBudget && RequestBudget::currentMeshAllowance() !== null) {
+                    $brokeBudget = true;
+                    file_put_contents(config('gameplay.request_budget_path').'/budget.json', '{fixture-bad-json}');
+                }
+                $budget->reserve($token, $account, $priority, $maxWait, $baseMaxWait, $deadline);
+            });
+        $this->assertFalse($this->dispatchScouts($episode));
+        $this->assertTrue($brokeBudget);
+        $holds = CampaignEvent::where('kind', 'mesh_plan')->latest('id')->firstOrFail()->data['holds'];
+        $hold = collect($holds)->firstWhere('defer_source', 'budget_storage');
+        $this->assertNotNull($hold, json_encode($holds));
+        $this->assertSame(10, $hold['retry_after']);
+        $this->assertGreaterThan(5, $hold['remaining_deadline_seconds']);
+        $this->assertFalse(AutomationRun::where('state', 'running')->exists());
+    }
+
+    #[DataProvider('meshDispatchDeferrals')]
+    public function test_mesh_dispatch_persists_the_original_deferral_and_remaining_deadline(string $source, int $retry): void
+    {
+        $episode = $this->dispatchFixture();
+        if ($source === 'blocked_until') {
+            $this->editBudget(fn (&$state) => $state['buckets']['host']['blocked_until'] = microtime(true) + 2.95);
+        } elseif ($source === 'host_minute_headroom') {
+            $this->editBudget(fn (&$state) => $state['host_tiers']['t24'] = array_fill(0, 76, microtime(true)));
+        } else {
+            $this->partialMock(RequestBudget::class)->shouldReceive('usageForMeshRun')->once()
+                ->andThrow(new RequestDeferred('Fixture telemetry read failed.', $retry, delaySource: 'budget_storage'));
+            $this->partialMock(CampaignMesh::class)->shouldReceive('invalidatePreview')->once()
+                ->andThrow(new \RuntimeException('Fixture preview cleanup failed.'));
+        }
+        $this->assertFalse($this->dispatchScouts($episode));
+        $holds = CampaignEvent::where('kind', 'mesh_plan')->latest('id')->firstOrFail()->data['holds'];
+        $hold = collect($holds)->firstWhere('defer_source', $source);
+        $this->assertNotNull($hold, json_encode($holds));
+        $this->assertSame($retry, $hold['retry_after']);
+        $this->assertFalse($hold['deadline_capped']);
+        $this->assertArrayHasKey('delay_seconds', $hold);
+        $this->assertGreaterThan(5, $hold['remaining_deadline_seconds']);
+        $this->assertLessThan(10, $hold['remaining_deadline_seconds']);
+
+        if ($source === 'budget_storage') {
+            $retained = AutomationRun::where('state', 'preview')->sole();
+            $this->assertNull($retained->started_at);
+            $this->app->forgetInstance(CampaignMesh::class);
+            $this->app->forgetInstance(RequestBudget::class);
+            $this->tickC0();
+            $this->assertSame('stopped', $retained->refresh()->state->value);
+            $this->assertTrue(AutomationRun::where('state', 'running')->where('ship_symbol', $retained->ship_symbol)->exists());
+        }
+    }
+
+    public static function meshDispatchDeferrals(): array
+    {
+        return [['blocked_until', 3], ['host_minute_headroom', 10], ['budget_storage', 6]];
+    }
+
+    public function test_partial_mesh_room_reports_headroom_with_the_estimated_charge(): void
+    {
+        $this->setUpSaturation(seedCoverage: false);
+        $body = $this->meshRevision()->body;
+        $body['probes']['mesh']['saturation']['governor_headroom_pct'] = 100;
+        $episode = $this->primary(revision: app(CampaignPlaybook::class)->import(Yaml::dump($body, 12)));
+        $governor = app(MeshGovernor::class);
+        $limits = $governor->evaluate($this->agent, $episode)['limits'];
+        $this->editBudget(fn (&$state) => $state['agents']['agent:LOCAL']['t24'] =
+            array_fill(0, $limits['hour'] - $limits['arm'] - 4, microtime(true) - 90));
+        $deadline = microtime(true) + 10;
+        try {
+            $governor->admit($this->agent, $episode, 'scout', $deadline);
+            $this->fail('Expected insufficient room for a scout.');
+        } catch (RequestDeferred $exception) {
+            $this->assertSame('mesh_headroom', $exception->delaySource);
+            $this->assertSame(4, $exception->context['room']);
+            $this->assertSame($governor->estimate($this->agent, 'scout'), $exception->context['charge']);
+            $this->assertSame('scout', $exception->context['kind']);
+            $this->assertGreaterThan(9, $exception->context['remaining_deadline_seconds']);
+        }
+    }
+
+    public function test_start_and_transport_expiry_report_their_own_deadline_sources(): void
+    {
+        $episode = $this->dispatchFixture();
+        $deadline = microtime(true) - 1;
+        $runner = app(AutomationRunner::class);
+        $preview = $runner->previewMeshScout($this->agent, $this->probe('LOCAL-2'), 'X1-TEST-A', ['reserve' => 0], $episode);
+        try {
+            $runner->start($this->agent, $preview, deadline: $deadline);
+            $this->fail('An unbound start must defer.');
+        } catch (RequestDeferred $exception) {
+            $this->assertSame('mesh_allowance', $exception->delaySource);
+            $this->assertSame(0.0, $exception->context['remaining_deadline_seconds']);
+        }
+        try {
+            $runner->startCampaign($this->agent, $preview, $episode, $deadline);
+            $this->fail('A start past the pass deadline must defer.');
+        } catch (RequestDeferred $exception) {
+            $this->assertSame('pass_deadline', $exception->delaySource);
+            $this->assertTrue($exception->deadlineCapped);
+            $this->assertSame(0.0, $exception->context['remaining_deadline_seconds']);
+        }
+        $calls = $this->world()['calls'];
+        try {
+            app(SpaceTradersClient::class)->request('get', '/', deadline: $deadline);
+            $this->fail('An expired transport request must defer before HTTP.');
+        } catch (RequestDeferred $exception) {
+            $this->assertSame('transport_deadline', $exception->delaySource);
+            $this->assertTrue($exception->deadlineCapped);
+            $this->assertSame(0.0, $exception->context['remaining_deadline_seconds']);
+            $this->assertSame($calls, $this->world()['calls']);
+        }
+    }
+
+    #[DataProvider('meshStartDeadlineBoundaries')]
+    public function test_mesh_start_does_not_activate_or_queue_after_its_deadline(bool $lockHeld, string $source, int $retry): void
+    {
+        $episode = $this->dispatchFixture();
+        $runner = app(AutomationRunner::class);
+        $preview = $runner->previewMeshScout($this->agent, $this->probe('LOCAL-2'), 'X1-TEST-A', ['reserve' => 0], $episode);
+        $budget = app(RequestBudget::class);
+        $this->partialMock(RequestBudget::class)->shouldReceive('bindMesh')->once()
+            ->andReturnUsing(function ($id, $run, $seconds, $deadline) use ($budget, $lockHeld) {
+                if (! $lockHeld) {
+                    $budget->bindMesh($id, $run, $seconds, $deadline);
+                    time_sleep_until($deadline + 0.001);
+
+                    return;
+                }
+
+                $handle = fopen(config('gameplay.request_budget_path').'/budget.lock', 'c');
+                $this->assertTrue(flock($handle, LOCK_EX | LOCK_NB));
+                try {
+                    $budget->bindMesh($id, $run, $seconds, $deadline);
+                } finally {
+                    fclose($handle);
+                }
+            });
+
+        $deadline = microtime(true) + 1;
+        try {
+            $runner->startCampaign($this->agent, $preview, $episode, $deadline);
+            $this->fail('The mesh start must defer when its deadline expires during bind.');
+        } catch (RequestDeferred $exception) {
+            $this->assertLessThan($deadline + 0.35, microtime(true));
+            $this->assertSame($source, $exception->delaySource);
+            $this->assertSame($retry, $exception->retryAfter);
+            $this->assertTrue($exception->deadlineCapped);
+            $this->assertSame(0.0, $exception->context['remaining_deadline_seconds']);
+        }
+
+        $preview->refresh();
+        $this->assertSame('preview', $preview->state->value);
+        $this->assertNull($preview->started_at);
+        $this->assertNull($preview->active_agent_id);
+        Queue::assertNotPushed(AdvanceAutomationRun::class);
+    }
+
+    public static function meshStartDeadlineBoundaries(): array
+    {
+        return [
+            'budget lock held' => [true, 'budget_lock', 1],
+            'deadline reached immediately after bind' => [false, 'pass_deadline', 10],
+        ];
+    }
+
+    public function test_reserve_recomputes_remaining_deadline_before_sleeping_and_preserves_cooldown_cause(): void
+    {
+        $now = microtime(true);
+        $path = config('gameplay.request_budget_path');
+        if (! is_dir($path)) {
+            mkdir($path, 0700, true);
+        }
+        file_put_contents($path.'/budget.json', json_encode([
+            'buckets' => [
+                'host' => [
+                    'tokens' => 2.0,
+                    'rate' => 2.0,
+                    'capacity' => 2.0,
+                    'updated_at' => $now,
+                    'blocked_until' => $now + 0.35,
+                    'recent' => [],
+                    'usage' => ['requests' => 0, 'priorities' => [], 'wait_seconds' => 0.0, 'deferrals' => 0, 'rate_limits' => 0],
+                ],
+            ],
+            'host_tiers' => ['t1' => [], 't24' => []],
+            'agents' => [],
+            'mesh_allowances' => [],
+            'mesh_requests' => [],
+            'draining' => [],
+        ], JSON_THROW_ON_ERROR));
+
+        $deadline = microtime(true) + 0.05;
+        $started = microtime(true);
+        try {
+            app(RequestBudget::class)->reserve(priority: 'director', maxWait: 0.75, baseMaxWait: 0.75, deadline: $deadline);
+            $this->fail('Expected reserve() to defer before sleeping past the pass deadline.');
+        } catch (RequestDeferred $exception) {
+            $this->assertLessThan(0.25, microtime(true) - $started);
+            $this->assertSame('blocked_until', $exception->delaySource);
+            $this->assertTrue($exception->deadlineCapped);
+            $this->assertSame(1, $exception->retryAfter);
+        }
+    }
+
+    public function test_mesh_start_rechecks_deadline_inside_transaction_before_activating(): void
+    {
+        $episode = $this->dispatchFixture();
+        $preview = app(AutomationRunner::class)->previewMeshScout($this->agent, $this->probe('LOCAL-2'), 'X1-TEST-A', ['reserve' => 0], $episode);
+        $deadline = microtime(true) + 0.25;
+        $this->partialMock(EngineGate::class)->shouldReceive('check')->once()
+            ->andReturnUsing(function () use ($deadline) {
+                time_sleep_until($deadline + 0.002);
+            });
+
+        try {
+            app(AutomationRunner::class)->startCampaign($this->agent, $preview, $episode, $deadline);
+            $this->fail('Expected start() to abort inside DB::transaction() when deadline expires during transaction entry.');
+        } catch (RequestDeferred $exception) {
+            $this->assertSame('pass_deadline', $exception->delaySource);
+            $this->assertTrue($exception->deadlineCapped);
+            $this->assertSame(0.0, $exception->context['remaining_deadline_seconds']);
+        }
+
+        $preview->refresh();
+        $this->assertSame('preview', $preview->state->value);
+        $this->assertNull($preview->started_at);
+        $this->assertNull($preview->active_agent_id);
+        Queue::assertNotPushed(AdvanceAutomationRun::class);
+    }
+
+    public function test_preview_cleanup_bounds_release_wait_when_budget_lock_is_held_past_deadline(): void
+    {
+        $episode = $this->dispatchFixture();
+        $runner = app(AutomationRunner::class);
+        $preview = $runner->previewMeshScout($this->agent, $this->probe('LOCAL-2'), 'X1-TEST-A', ['reserve' => 0], $episode);
+        $allowance = $preview->plan['mesh_allowance'];
+
+        $handle = fopen(config('gameplay.request_budget_path').'/budget.lock', 'c');
+        $this->assertTrue(flock($handle, LOCK_EX | LOCK_NB));
+        $deadline = microtime(true) + 0.05;
+        $started = microtime(true);
+        try {
+            $this->assertTrue(app(CampaignMesh::class)->invalidatePreview($this->agent, $preview, $deadline));
+            $this->assertLessThan(0.4, microtime(true) - $started);
+        } finally {
+            fclose($handle);
+        }
+
+        $preview->refresh();
+        $this->assertSame('stopped', $preview->state->value);
+        $this->assertSame($allowance, $preview->plan['mesh_allowance'] ?? null);
+
+        app(CampaignMesh::class)->cleanRetained($episode, $this->agent);
+        $preview->refresh();
+        $this->assertArrayNotHasKey('mesh_allowance', $preview->plan);
+    }
+
+    #[DataProvider('purchaseDispatchStrategies')]
+    public function test_purchase_dispatch_defers_when_the_pass_deadline_expires_after_planning(string $strategy): void
+    {
+        $hauler = $strategy === 'buy_hauler';
+        $this->setUpSaturation(hubs: 2, seedCoverage: $hauler);
+        $episode = $this->primary();
+        if (! $hauler) {
+            $this->market(self::YARD);
+            $this->market('X1-TEST-PORT', listing: true);
+        }
+        $this->schedulerPass();
+        $runner = app(AutomationRunner::class);
+        $preview = $hauler
+            ? $runner->previewHaulerPurchase($this->agent, 'LOCAL-2', self::YARD, ['minutes' => 15], $episode)
+            : $runner->previewProbePurchase($this->agent, 'LOCAL-2', self::YARD, ['minutes' => 15], $episode);
+
+        $director = app(CampaignDirector::class);
+        $deadline = microtime(true) + 0.5;
+        (new \ReflectionProperty($director, 'deadline'))->setValue($director, $deadline);
+        $finishPlanning = function ($grant, $episode, $agent, $busy, &$considered, $bound) use ($preview, $deadline) {
+            $this->assertSame($deadline, $bound);
+            $this->assertLessThan($deadline, microtime(true));
+            time_sleep_until($deadline + 0.001);
+
+            return $preview;
+        };
+        $probePlan = $this->partialMock(CampaignProbeBootstrap::class)->shouldReceive('plan')->once();
+        if ($hauler) {
+            $probePlan->andReturnNull();
+            $this->partialMock(CampaignHaulerPurchase::class)->shouldReceive('plan')->once()->andReturnUsing($finishPlanning);
+        } else {
+            $probePlan->andReturnUsing($finishPlanning);
+        }
+
+        $busy = $considered = [];
+        $dispatch = new \ReflectionMethod($director, 'dispatchPurchases');
+        $grant = $episode->grant();
+        $args = [$grant, $episode, $this->agent, &$busy, &$considered];
+        $lock = app(HostLock::class);
+        $this->assertFalse($lock->scoped('campaign', fn () => $lock->scoped('agent-'.$this->agent->id,
+            fn () => $dispatch->invokeArgs($director, $args))));
+
+        $this->assertSame('awaiting_run_start', $grant->fresh()->wait_reason);
+        $this->assertSame([], $busy);
+        $preview->refresh();
+        $this->assertSame('preview', $preview->state->value);
+        $this->assertNull($preview->started_at);
+        $this->assertNull($preview->active_agent_id);
+        Queue::assertNotPushed(AdvanceAutomationRun::class);
+    }
+
+    public static function purchaseDispatchStrategies(): array
+    {
+        return [['buy_probe'], ['buy_hauler']];
+    }
+
+    #[DataProvider('previewCleanups')]
+    public function test_preview_bind_failure_invalidates_unsent_intent_and_keeps_original_deferral(bool $cleanupFails): void
+    {
+        $episode = $this->dispatchFixture();
+        if ($cleanupFails) {
+            $mesh = app(CampaignMesh::class);
+            $this->partialMock(CampaignMesh::class)->shouldReceive('invalidatePreview')->once()->andReturnUsing(function ($agent, $run) use ($mesh) {
+                $mesh->invalidatePreview($agent, $run);
+                throw new \RuntimeException('Fixture cleanup failed after stopping the preview.');
+            });
+        }
+        $this->partialMock(RequestBudget::class)->shouldReceive('bindMesh')->once()
+            ->andReturnUsing(function ($id, $run, $seconds, $deadline) {
+                throw (new RequestDeferred('Fixture bind failed.', 4, delaySource: 'budget_lock'))->withDeadline($deadline);
+            });
+        $this->assertFalse($this->dispatchScouts($episode));
+        $run = AutomationRun::where('plan->mesh_work', 'market')->sole();
+        $this->assertSame('stopped', $run->state->value);
+        $this->assertFalse(ShipAction::where('automation_run_id', $run->id)->exists());
+        $hold = collect(CampaignEvent::where('kind', 'mesh_plan')->latest('id')->firstOrFail()->data['holds'])->firstWhere('defer_source', 'budget_lock');
+        $this->assertSame(4, $hold['retry_after']);
+        $this->assertGreaterThan(5, $hold['remaining_deadline_seconds']);
+    }
+
+    public static function previewCleanups(): array
+    {
+        return [[false], [true]];
+    }
+
+    public function test_mesh_plan_deduplicates_hold_timing_but_records_the_first_payload(): void
+    {
+        $this->setUpSaturation(seedCoverage: false);
+        $episode = $this->primary(revision: $this->meshRevision());
+        $director = app(CampaignDirector::class);
+        $record = new \ReflectionMethod($director, 'recordMeshPlan');
+        $hold = ['ship' => 'LOCAL-2', 'hold' => 'Fixture deferral', 'defer_source' => 'blocked_until', 'deadline_capped' => false,
+            'delay_seconds' => 0.5, 'remaining_deadline_seconds' => 1.3, 'retry_after' => 1];
+        $record->invoke($director, $episode->grant(), $episode, ['moves' => []], [], [$hold]);
+        $record->invoke($director, $episode->grant(), $episode, ['moves' => []], [],
+            [array_replace($hold, ['delay_seconds' => 1.5, 'remaining_deadline_seconds' => 2.3, 'retry_after' => 2])]);
+        $this->assertSame([$hold], CampaignEvent::where('kind', 'mesh_plan')->sole()->data['holds']);
+        $record->invoke($director, $episode->grant(), $episode, ['moves' => []], [],
+            [array_replace($hold, ['defer_source' => 'budget_storage'])]);
+        $this->assertSame(2, CampaignEvent::where('kind', 'mesh_plan')->count());
+    }
+
+    public function test_admit_reads_unstaged_usage_once_and_reserve_checks_allowance_expiry(): void
+    {
+        $this->setUpSaturation(seedCoverage: false);
+        $episode = $this->primary(revision: $this->meshRevision());
+        $budget = $this->partialMock(RequestBudget::class);
+        $budget->shouldReceive('usage')->once()->passthru();
+        $governor = app(MeshGovernor::class);
+        $allowance = $governor->admit($this->agent, $episode, 'scout');
+        $this->assertNotEmpty($allowance);
+        $budgetFile = config('gameplay.request_budget_path').'/budget.json';
+        $this->editBudget(fn (&$state) => $state['mesh_allowances'][$allowance]['expires'] = microtime(true) - 1);
+        $deadline = microtime(true) + 5;
+        try {
+            RequestBudget::forMeshAllowance($allowance, fn () => $budget->reserve(deadline: $deadline), $this->agent->name, $this->agent->reset_id);
+            $this->fail('Expected an expired allowance.');
+        } catch (RequestDeferred $exception) {
+            $this->assertSame('mesh_allowance', $exception->delaySource);
+            $this->assertSame(10, $exception->retryAfter);
+            $this->assertGreaterThan(4, $exception->context['remaining_deadline_seconds']);
+        }
+        file_put_contents($budgetFile, '{"buckets":[],"host_tiers":123}');
+        $this->app->forgetInstance(RequestBudget::class);
+        $status = app(MeshGovernor::class)->evaluate($this->agent, $episode);
+        $this->assertSame('budget_storage', $status['cause']);
+        $this->assertSame('missing_telemetry', $status['reason']);
+    }
+
+    public function test_mesh_headroom_preserves_a_longer_account_cooldown(): void
+    {
+        $this->setUpSaturation(seedCoverage: false);
+        config(['gameplay.request_budget_enabled' => true, 'gameplay.request_budget_stage' => 'off', 'gameplay.agent_request_caps' => ['LOCAL' => 100]]);
+        $clock = microtime(true);
+        $budget = new class($clock) extends RequestBudget
+        {
+            public function __construct(private float $clock) {}
+
+            protected function now(): float
+            {
+                return $this->clock;
+            }
+        };
+        $allowance = $budget->admitMesh('LOCAL', $this->agent->reset_id, ['hour' => 100, 'host' => 90, 'arm' => 0, 'trader' => 100], 1, 120);
+        $this->assertNotNull($allowance);
+        $this->editBudget(fn (&$state) => $state['agents']['agent:LOCAL']['t24'] = array_fill(0, 100, $clock - 3570));
+
+        try {
+            RequestBudget::forMeshAllowance($allowance, fn () => $budget->reserve(maxWait: 0), 'LOCAL', $this->agent->reset_id);
+            $this->fail('Expected the exhausted account window to defer the request.');
+        } catch (RequestDeferred $exception) {
+            $this->assertSame(30, $exception->retryAfter);
+            $this->assertSame('account_rate', $exception->delaySource);
+            $this->assertSame('mesh_headroom', $exception->context['secondary_delay_source'] ?? null);
+        }
+    }
+
+    public function test_budget_retry_cap_includes_wait_already_spent(): void
+    {
+        $this->setUpSaturation(seedCoverage: false);
+        $file = config('gameplay.request_budget_path').'/budget.json';
+        $clock = microtime(true);
+        $this->editBudget(fn (&$state) => $state['buckets']['host']['blocked_until'] = $clock + 0.25);
+        $budget = new class($clock, $file) extends RequestBudget
+        {
+            public function __construct(private float $clock, private string $file) {}
+
+            protected function now(): float
+            {
+                return $this->clock;
+            }
+
+            protected function pause(float $seconds): void
+            {
+                $this->clock += $seconds;
+                $state = json_decode(file_get_contents($this->file), true, flags: JSON_THROW_ON_ERROR);
+                $state['buckets']['host']['blocked_until'] = $this->clock + 0.3;
+                file_put_contents($this->file, json_encode($state, JSON_THROW_ON_ERROR));
+            }
+        };
+        try {
+            $budget->reserve(maxWait: 0.5, baseMaxWait: 2, deadline: microtime(true) + 0.6);
+            $this->fail('Expected a deadline-capped deferral after one budget wait.');
+        } catch (RequestDeferred $exception) {
+            $this->assertSame('blocked_until', $exception->delaySource);
+            $this->assertTrue($exception->deadlineCapped);
+            $this->assertSame(0.25, $exception->context['waited_seconds']);
+            $this->assertEqualsWithDelta(0.3, $exception->context['delay_seconds'], 0.001);
+            $this->assertLessThan(0.6, $exception->context['remaining_deadline_seconds']);
+        }
+    }
+
+    #[DataProvider('budgetBoundaries')]
+    public function test_budget_boundaries_keep_storage_and_lock_failures(string $boundary, bool $locked, bool $deadlineCapped = false): void
+    {
+        $this->setUpSaturation(seedCoverage: false);
+        $path = config('gameplay.request_budget_path');
+        $handle = null;
+        if ($locked) {
+            $handle = fopen($path.'/budget.lock', 'c');
+            $this->assertTrue(flock($handle, LOCK_EX | LOCK_NB));
+        } else {
+            file_put_contents($path.'/budget.json', '{fixture-bad-json}');
+        }
+        $budget = app(RequestBudget::class);
+        $deadline = microtime(true) + ($deadlineCapped ? 0.05 : 3);
+        $limits = ['hour' => 300, 'host' => 60, 'arm' => 0, 'trader' => 300];
+        try {
+            match ($boundary) {
+                'admit' => $budget->admitMesh('LOCAL', $this->agent->reset_id, $limits, 1, 120, $deadline),
+                'refresh' => $budget->refreshMesh('fixture', 'LOCAL', $this->agent->reset_id, 1, $limits, $deadline),
+                'bind' => $budget->bindMesh('fixture', 1, 120, $deadline),
+                'reserve' => $budget->reserve(deadline: $deadline),
+            };
+            $this->fail('The damaged or locked store must defer.');
+        } catch (RequestDeferred $exception) {
+            $this->assertSame($locked ? 'budget_lock' : 'budget_storage', $exception->delaySource);
+            $this->assertSame($locked ? 1 : 10, $exception->retryAfter);
+            $this->assertSame($deadlineCapped, $exception->deadlineCapped);
+            if ($deadlineCapped) {
+                $this->assertLessThan($deadline + 0.35, microtime(true));
+                $this->assertSame(0.0, $exception->context['remaining_deadline_seconds']);
+            } else {
+                $this->assertLessThan($locked ? 2 : 3, $exception->context['remaining_deadline_seconds']);
+            }
+        } finally {
+            if ($handle) {
+                fclose($handle);
+            }
+        }
+    }
+
+    public static function budgetBoundaries(): array
+    {
+        $cases = [];
+        foreach (['admit', 'refresh', 'bind', 'reserve'] as $boundary) {
+            $cases[$boundary.' storage'] = [$boundary, false];
+            $cases[$boundary.' lock'] = [$boundary, true];
+            $cases[$boundary.' deadline-capped lock'] = [$boundary, true, true];
+        }
+
+        return $cases;
+    }
+
+    private function dispatchFixture(): CampaignEpisode
+    {
+        $this->setUpSaturation(seedCoverage: false, credits: 100000);
+        $this->layout(['ROCK' => [0, []], 'P' => [1, []], 'A' => [50, ['IRON_ORE']]],
+            ['LOCAL-2' => ['P', 9]]);
+
+        return $this->primary(revision: $this->meshRevision());
+    }
+
+    private function dispatchScouts(CampaignEpisode $episode): bool
+    {
+        $director = app(CampaignDirector::class);
+        $deadline = microtime(true) + 10;
+        (new \ReflectionProperty($director, 'deadline'))->setValue($director, $deadline);
+        $dispatch = new \ReflectionMethod($director, 'dispatchSaturationMesh');
+        $busy = $reserved = $considered = [];
+        $args = [$episode->grant(), $episode, $this->agent, &$busy, &$reserved, &$considered];
+
+        return app(HostLock::class)->scoped('agent-'.$this->agent->id,
+            fn () => app(SpaceTradersClient::class)->scope(fn () => $dispatch->invokeArgs($director, $args), deadline: $deadline));
+    }
+
+    private function editBudget(callable $edit): void
+    {
+        $file = config('gameplay.request_budget_path').'/budget.json';
+        $state = json_decode(file_get_contents($file), true, flags: JSON_THROW_ON_ERROR);
+        $edit($state);
+        file_put_contents($file, json_encode($state, JSON_THROW_ON_ERROR));
+    }
+
+    private function fleetReads(): int
+    {
+        return collect($this->world()['calls'])->where('method', 'GET')->where('path', '/my/ships')->count();
+    }
+
     public function test_director_pins_a_g3_refused_anchor_and_dispatches_the_spare_to_the_uncovered_hub(): void
     {
         $this->setUpSaturation(seedCoverage: false);
@@ -1318,6 +2091,50 @@ final class ProbeMeshSaturationTest extends TestCase
         $this->assertTrue(AutomationRun::where('strategy', 'sell_aboard')->whereNotNull('started_at')->exists());
     }
 
+    public function test_recovery_scout_defers_if_the_pass_expires_after_preview(): void
+    {
+        $this->setUpSaturation(seedCoverage: false);
+        $this->layout(['ROCK' => [0, ['FUEL']], 'PORT' => [3, ['IRON_ORE', 'FUEL']], 'P' => [0, []]], ['LOCAL-2' => ['P', 9]]);
+        $episode = $this->primary(revision: $this->meshRevision());
+        $destination = 'X1-TEST-PORT';
+        $director = app(CampaignDirector::class);
+        $runner = app(AutomationRunner::class);
+        $deadline = microtime(true) + 1;
+        (new \ReflectionProperty($director, 'deadline'))->setValue($director, $deadline);
+        $deferred = null;
+        $previewDeadline = null;
+        $hook = $this->partialMock(AutomationRunner::class);
+        $hook->shouldReceive('previewMeshScout')->once()->andReturnUsing(function ($agent, $ship, $destination, $limits, $episode, $observe, $bound) use ($runner, $deadline, &$previewDeadline) {
+            $previewDeadline = $bound;
+            $run = $runner->previewMeshScout($agent, $ship, $destination, $limits, $episode, $observe, $bound);
+            $this->assertLessThan($deadline, microtime(true));
+            time_sleep_until($deadline + 0.001);
+
+            return $run;
+        });
+        $hook->shouldReceive('startCampaign')->once()->andReturnUsing(function ($agent, $run, $episode, $bound) use ($runner, &$deferred) {
+            try {
+                return $runner->startCampaign($agent, $run, $episode, $bound);
+            } catch (RequestDeferred $exception) {
+                $deferred = $exception;
+
+                throw $exception;
+            }
+        });
+
+        $position = new \ReflectionMethod($director, 'positionMeshRecoveryObserver');
+        $started = app(SpaceTradersClient::class)->scope(fn () => $position->invoke($director, $episode->grant(), $episode, $this->agent, $destination, false));
+
+        $this->assertFalse($started);
+        $this->assertSame($deadline, $previewDeadline);
+        $this->assertSame('pass_deadline', $deferred?->delaySource);
+        $this->assertTrue($deferred->deadlineCapped);
+        $scout = AutomationRun::where('strategy', 'scout')->sole();
+        $this->assertNull($scout->started_at);
+        $this->assertNull($scout->active_agent_id);
+        $this->assertSame([], $this->world()['writes']);
+    }
+
     #[DataProvider('delayedObservers')]
     public function test_cargo_recovery_sells_to_verified_buyer_when_a_delayed_probe_cannot_observe(string $delay): void
     {
@@ -1678,6 +2495,7 @@ final class ProbeMeshSaturationTest extends TestCase
 
     public function test_deterministic_start_rejection_backs_off_only_the_scout_that_changed(): void
     {
+        config(['gameplay.locked_fleet_reuse_seconds' => 0]);
         $this->setUpSaturation(seedCoverage: false, credits: 100000);
         $this->layout([
             'ROCK' => [0, []], 'P' => [1, []], 'A' => [50, ['IRON_ORE']], 'B' => [100, ['IRON_ORE']],
@@ -1702,19 +2520,36 @@ final class ProbeMeshSaturationTest extends TestCase
         $this->assertTrue(AutomationRun::where('ship_symbol', 'LOCAL-3')->where('plan->mesh_work', 'market')->whereNotNull('started_at')->exists());
     }
 
-    public function test_tier_two_only_opportunity_yields_the_slot_to_an_eligible_hauler(): void
+    #[DataProvider('tierTwoYieldCases')]
+    public function test_tier_two_only_opportunity_yields_the_slot_only_to_an_eligible_hauler(bool $idleHold): void
     {
         $this->setUpSaturation(hubs: 4);
         $this->market('X1-TEST-FUEL', tier: 2);
         $this->yardPrice(25000, persist: true);
         $episode = $this->primary(revision: $this->meshRevision());
+        if ($idleHold) {
+            $this->editFixture(fn (&$world) => $world['ships'][] = FakeSpaceTraders::lightHauler('LOCAL-9', self::YARD));
+            app(AgentSynchronizer::class)->sync($this->agent, false);
+            $arm = $this->seedArmEpisode($this->arm('LOCAL-9', 'H1'));
+            $arm->update(['opened_at' => now()->subMinutes(90)]);
+        }
         $this->schedulerPass();
         $considered = [];
         $bootstrap = app(CampaignProbeBootstrap::class);
-        $this->assertNull($bootstrap->plan($episode->grant(), $episode, $this->agent, [], $considered, microtime(true) + 15));
-        $this->assertContains('tier2_yields_to_hauler', array_column($considered, 'hold'), json_encode($considered));
-        $this->assertCount(0, $bootstrap->reservations($this->agent));
-        $this->assertFalse(AutomationRun::where('strategy', 'buy_probe')->exists());
+        $run = $bootstrap->plan($episode->grant(), $episode, $this->agent, [], $considered, microtime(true) + 15);
+        if ($idleHold) {
+            $this->assertSame('buy_probe', $run?->strategy, json_encode($considered));
+            $this->assertNotContains('tier2_yields_to_hauler', array_column($considered, 'hold'));
+        } else {
+            $this->assertNull($run);
+            $this->assertContains('tier2_yields_to_hauler', array_column($considered, 'hold'), json_encode($considered));
+        }
+        $this->assertSame($idleHold, AutomationRun::where('strategy', 'buy_probe')->exists());
+    }
+
+    public static function tierTwoYieldCases(): array
+    {
+        return [[false], [true]];
     }
 
     private function layout(array $points, array $probes): void
@@ -1841,9 +2676,9 @@ final class ProbeMeshSaturationTest extends TestCase
         {
             public function __construct(private Closure $hook) {}
 
-            public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75): void
+            public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75, ?float $baseMaxWait = null, ?float $deadline = null): void
             {
-                parent::reserve($token, $account, $priority, $maxWait);
+                parent::reserve($token, $account, $priority, $maxWait, $baseMaxWait, $deadline);
                 ($this->hook)($priority);
             }
         });

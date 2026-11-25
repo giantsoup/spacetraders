@@ -65,9 +65,15 @@ class CampaignDirector
 
     private array $meshPolling = [];
 
+    private const AWAITED_PAIR_INACTIVITY_SECONDS = 300;
+
     private array $saturationDiagnostics = [];
 
     private array $marketReads = [];
+
+    private array $detailedMarketReads = [];
+
+    private array $detailedRetryAttempted = [];
 
     private bool $meshDiscoveryAttempted = false;
 
@@ -424,7 +430,7 @@ class CampaignDirector
         }
         try {
             FleetMetrics::withWorkload('coverage', function () use ($episode, $agent, $waypoint, $observer) {
-                app(MeshPoller::class)->read($episode, $agent, $waypoint, 'market', $observer, 'demand', $this->marketReads);
+                app(MeshPoller::class)->read($episode, $agent, $waypoint, 'market', $observer, 'demand', $this->marketReads, $this->detailedMarketReads, $this->deadline);
             });
         } catch (GameException $exception) {
             $considered[] = ['destination' => $waypoint, 'hold' => $exception->getMessage()];
@@ -731,11 +737,10 @@ class CampaignDirector
             }
             $market = $markets[$entry->market];
             if ((! $market || $market->observed_at->lte($delivered) || isset($market->data['invalidated_by_action']))
-                && microtime(true) < $this->deadline && $this->parked($agent, $entry->market)) {
+                && microtime(true) < $this->deadline && $this->canRefreshTradeMarket($agent, $entry->market)) {
                 try {
                     $market = FleetMetrics::withWorkload('coverage', fn () => app(MeshGovernor::class)->immediate($agent, $episode, 'demand',
-                        fn () => app(AgentSynchronizer::class)->observe($agent, 'market', $entry->market,
-                            app(SpaceTradersApi::class)->market($agent, $entry->market, fresh: true))));
+                        fn () => $this->refreshTradeMarket($agent, $entry->market, fresh: true), $this->deadline));
                     $markets[$entry->market] = $market;
                 } catch (GameException $exception) {
                     FleetMetrics::observe($exception);
@@ -881,32 +886,36 @@ class CampaignDirector
         ];
     }
 
-    private function startFleetRun(CampaignEpisode $episode, Agent $agent, array $ship, array $limits, string $kind, int $requests, ?callable $book = null): AutomationRun
+    private function startFleetRun(CampaignEpisode $episode, Agent $agent, array $ship, array $limits, string $kind, int $requests, ?callable $book = null, ?float $deadline = null): AutomationRun
     {
+        $deadline ??= $this->deadline;
         $governor = app(MeshGovernor::class);
         $runner = app(AutomationRunner::class);
 
         $workload = in_array($kind, ['coverage', 'proof_scout', 'yard'], true) ? 'coverage' : $limits['strategy'];
 
         return FleetMetrics::withWorkload($workload, fn () => FleetMetrics::as($ship['symbol'], fn () => $governor->preview(
-            $agent, $episode, $kind, function () use ($runner, $episode, $agent, $ship, $limits, $kind, $book) {
+            $agent, $episode, $kind, function () use ($runner, $episode, $agent, $ship, $limits, $kind, $book, $deadline) {
                 $id = RequestBudget::currentMeshAllowance();
                 $run = $runner->preview($agent, $ship['symbol'], array_replace($limits, ['mesh_work' => $kind, 'mesh_allowance' => $id]), $episode);
                 try {
-                    app(RequestBudget::class)->bindMesh($id, $run->id, max(1, (int) now()->diffInSeconds($run->expires_at, false)));
+                    app(RequestBudget::class)->bindMesh($id, $run->id, max(1, (int) now()->diffInSeconds($run->expires_at, false)), $deadline);
                     if ($book) {
                         $book($run);
                     }
 
-                    return $runner->startCampaign($agent, $run, $episode, $this->deadline);
+                    return $runner->startCampaign($agent, $run, $episode, $deadline);
                 } catch (\Throwable $exception) {
-                    $run->refresh();
-                    if (! $run->active_agent_id && ! ($exception instanceof GameException && $exception->uncertain)) {
-                        app(CampaignMesh::class)->invalidatePreview($agent, $run);
+                    try {
+                        if (! ($exception instanceof GameException && $exception->uncertain)) {
+                            app(CampaignMesh::class)->invalidatePreview($agent, $run, $deadline);
+                        }
+                    } catch (\Throwable) {
+                        // Preserve the start failure.
                     }
                     throw $exception;
                 }
-            }, $requests, $limits['sustained_req_hr'] ?? 0,
+            }, $requests, $limits['sustained_req_hr'] ?? 0, $deadline,
         )));
     }
 
@@ -1019,7 +1028,7 @@ class CampaignDirector
                 FleetMetrics::withWorkload('discovery', fn () => app(MeshGovernor::class)->immediate($agent, $episode, 'site', function () use ($agent, $site, $registry) {
                     $point = app(SpaceTradersApi::class)->waypoint($agent, $site);
                     $registry->recordModifiers($agent, $site, $point['modifiers'] ?? [], now()->toImmutable(), modifiersPresent: array_key_exists('modifiers', $point));
-                }));
+                }, $this->deadline));
                 $states[$site] = $registry->siteStatus($agent, $site, $allowDebris);
             } catch (GameException $exception) {
                 $considered[] = ['site' => $site, 'hold' => $exception->getMessage()];
@@ -1222,7 +1231,7 @@ class CampaignDirector
                 if ($run->refresh()->active_agent_id) {
                     $runner->stop($run);
                 } else {
-                    app(CampaignMesh::class)->invalidatePreview($agent, $run);
+                    app(CampaignMesh::class)->invalidatePreview($agent, $run, $this->deadline);
                 }
             }
             $considered[] = ['strategy' => 'tender', 'site' => $site, 'rejected' => $exception->getMessage()];
@@ -1239,10 +1248,19 @@ class CampaignDirector
         return FleetMetrics::withWorkload($kind, fn () => $governor->preview($agent, $episode, $kind, function () use ($runner, $agent, $episode, $ship, $limits, $kind) {
             $id = RequestBudget::currentMeshAllowance();
             $run = $runner->preview($agent, $ship['symbol'], $limits + ['mesh_work' => $kind, 'mesh_allowance' => $id], $episode);
-            app(RequestBudget::class)->bindMesh($id, $run->id, max(1, (int) now()->diffInSeconds($run->expires_at, false)));
+            try {
+                app(RequestBudget::class)->bindMesh($id, $run->id, max(1, (int) now()->diffInSeconds($run->expires_at, false)), $this->deadline);
+            } catch (\Throwable $exception) {
+                try {
+                    app(CampaignMesh::class)->invalidatePreview($agent, $run, $this->deadline);
+                } catch (\Throwable) {
+                    // Preserve the preview failure.
+                }
+                throw $exception;
+            }
 
             return $run;
-        }, $requests, $limits['sustained_req_hr'] ?? 0));
+        }, $requests, $limits['sustained_req_hr'] ?? 0, $this->deadline));
     }
 
     private function dispatchFleetPurchase(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $busy, array $policy, array &$considered): ?AutomationRun
@@ -1348,7 +1366,7 @@ class CampaignDirector
                 });
         } catch (GameException $exception) {
             if ($run && ! $exception->uncertain) {
-                $mesh->invalidatePreview($agent, $run);
+                $mesh->invalidatePreview($agent, $run, $this->deadline);
             }
             throw $exception;
         }
@@ -1704,6 +1722,8 @@ class CampaignDirector
         $this->passOutcome = 'waiting';
         $this->localSummary = [];
         $this->marketReads = [];
+        $this->detailedMarketReads = [];
+        $this->detailedRetryAttempted = [];
         $this->meshPurchaseYards = [];
         $this->meshPolling = [];
         $this->saturationDiagnostics = [];
@@ -2125,7 +2145,7 @@ class CampaignDirector
                             $this->refreshParkedMarket($episode, $agent);
                         }
                     }
-                    $this->refreshRoleMarkets($grant, $episode, $agent, $sync, $busyShips, includeCommand: false);
+                    $this->refreshRoleMarkets($grant, $episode, $agent, $busyShips, includeCommand: false);
                     $startedPool = $this->dispatchPurchases($grant, $episode, $agent, $busyShips, $considered);
                     if ($mesh) {
                         $assigned = $this->probeTargets($episode);
@@ -2250,7 +2270,7 @@ class CampaignDirector
 
                     return;
                 }
-                $this->refreshRoleMarkets($grant, $episode, $agent, $sync, $busyShips, includeCommand: true);
+                $this->refreshRoleMarkets($grant, $episode, $agent, $busyShips, includeCommand: true);
                 if (! $mesh && ! $arm && $episode->phase === 'earn') {
                     if (CampaignLocalEarn::policy($grant, $episode)) {
                         app(CampaignLocalEarn::class)->reserve($this->deadline);
@@ -2582,7 +2602,12 @@ class CampaignDirector
             if (ReconMission::holds($agent, $run->ship_symbol) || ! in_array($run->ship_symbol, $fleet->symbols($episode), true)) {
                 throw new GameException('Retained preview ship is no longer eligible for this campaign episode.');
             }
-            app(AutomationRunner::class)->startCampaign($agent, $run, $episode);
+            app(AutomationRunner::class)->startCampaign(
+                $agent,
+                $run,
+                $episode,
+                in_array($run->strategy, ['buy_probe', 'buy_hauler', 'scout'], true) ? $this->deadline : null,
+            );
             if (! $grant->isDraining()) {
                 $grant->update(['wait_reason' => null]);
             }
@@ -2623,7 +2648,7 @@ class CampaignDirector
             }
             $this->meshDiscoveryAttempted = true;
             $this->measure('mesh_refresh', function () use ($discovery, $episode, $agent) {
-                $discovery->advance($episode, $agent, $this->marketReads, $this->deadline);
+                $discovery->advance($episode, $agent, $this->marketReads, $this->deadline, $this->detailedMarketReads);
             });
 
             return true;
@@ -2634,7 +2659,7 @@ class CampaignDirector
         if (! isset($episode->state['discovery']) && $last && CarbonImmutable::parse($last)->gte(now()->subSeconds($interval))) {
             return false;
         }
-        app(CampaignDiscovery::class)->advance($episode, $agent);
+        app(CampaignDiscovery::class)->advance($episode, $agent, $this->marketReads, detailedRead: $this->detailedMarketReads);
 
         return true;
     }
@@ -2677,6 +2702,156 @@ class CampaignDirector
             'request_budget' => app(RequestBudget::class)->usage($agent->credential(), $agent->account_id), 'observed_at' => now()]);
     }
 
+    private function filterEligibleCandidates(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array $rows, bool $arm, bool $blockedAtCurrentSource, array $rejectedIds, ?array $keepCommit = null): array
+    {
+        if ($rows === []) {
+            return [];
+        }
+        $fleet = app(CampaignFleet::class);
+        $pool = $fleet->poolEnabled($episode);
+        $targets = $pool ? $this->probeTargets($episode, pin: false) : [];
+        $mesh = CampaignMesh::policy($episode);
+        $probes = $mesh ? $fleet->probes($episode, pin: false) : [];
+        $quoteMaxAge = $grant->revision()->body['trade']['quote_max_age_seconds'];
+        $location = $ship['nav']['waypointSymbol'];
+        $parked = [];
+        $observable = [];
+        foreach (Ship::where('agent_id', $agent->id)->get() as $member) {
+            $nav = $member->snapshot['nav'];
+            if (($nav['status'] ?? null) === 'IN_TRANSIT') {
+                $observable[$nav['route']['destination']['symbol'] ?? $nav['waypointSymbol']] = true;
+            } else {
+                $parked[$nav['waypointSymbol']] = true;
+                $observable[$nav['waypointSymbol']] = true;
+            }
+        }
+
+        return array_values(array_filter($rows, function (array $row) use ($grant, $episode, $agent, $arm, $blockedAtCurrentSource, $rejectedIds, $keepCommit, $pool, $targets, $mesh, $probes, $quoteMaxAge, $location, $parked, $observable) {
+            if ($keepCommit && $row['key'] === $keepCommit['key'] && $row['source'] === $keepCommit['source']) {
+                return true;
+            }
+            if (isset($rejectedIds[$row['key'].'|'.$row['source']]) || (! $arm && $this->isPairSuppressed($episode, $agent, $grant, $row))) {
+                return false;
+            }
+            $buyer = $row['buyer'];
+            if ($row['source'] !== $location) {
+                if (! $arm) {
+                    return ! $blockedAtCurrentSource;
+                }
+                if (isset($observable[$buyer])) {
+                    return true;
+                }
+                $age = $this->buyerQuoteAge($agent, $buyer, $row['good']);
+
+                return $age !== null && $age + ($row['position_seconds'] ?? 0) <= $this->commitQuoteLimit();
+            }
+            if (isset($parked[$buyer])) {
+                return true;
+            }
+            if ($pool && in_array($buyer, $targets, true)) {
+                return false;
+            }
+            if ($mesh && $probes !== []) {
+                $age = $this->buyerQuoteAge($agent, $buyer, $row['good']);
+
+                return $age !== null && $age < $quoteMaxAge;
+            }
+
+            return true;
+        }));
+    }
+
+    private function updateEpisodeState(CampaignEpisode $episode, callable $mutator): void
+    {
+        $state = $episode->refresh()->state ?? [];
+        $mutator($state);
+        if ($state !== ($episode->state ?? [])) {
+            $episode->update(['state' => $state]);
+        }
+    }
+
+    private function clearAwaitedPair(CampaignEpisode $episode, string $key, bool $lift = false): void
+    {
+        if (isset($episode->state['awaited_pair_since'][$key]) || ($lift && isset($episode->state['suppressed_pairs'][$key]))) {
+            $this->updateEpisodeState($episode, function (array &$state) use ($key, $lift) {
+                unset($state['awaited_pair_since'][$key]);
+                if ($lift) {
+                    unset($state['suppressed_pairs'][$key]);
+                }
+            });
+        }
+    }
+
+    private function hasBuyerObserverOrQueuedScout(Agent $agent, string $buyer): bool
+    {
+        return $this->buyerObservable($agent, $buyer) || AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->whereNotNull('active_agent_id')->whereNotNull('started_at')->where('strategy', 'scout')->where('plan->destination', $buyer)
+            ->whereIn('state', ['running', 'waiting'])->whereNull('stop_requested_at')->where('expires_at', '>', now())->exists();
+    }
+
+    private function buyerQuoteUsableForLift(CampaignGrant $grant, Agent $agent, array $candidate): bool
+    {
+        $trades = app(CampaignTrade::class);
+        $maxAge = $grant->revision()->body['trade']['quote_max_age_seconds'];
+
+        return $trades->buyerQuoteFreshAlone($agent, $candidate['buyer'], $candidate['good'], $maxAge)
+            && $this->quoteFailureSide($grant, $agent, $candidate) !== 'buyer';
+    }
+
+    private function quoteFailureSide(CampaignGrant $grant, Agent $agent, array $candidate): ?string
+    {
+        return app(CampaignTrade::class)->quoteLifeFailureSide($agent, $candidate['source'], $candidate['buyer'], $candidate['good'], $candidate['units'],
+            $grant->revision()->body['trade']['quote_max_age_seconds']);
+    }
+
+    private function isBuyerQuoteFailure(CampaignGrant $grant, Agent $agent, array $candidate): bool
+    {
+        return $this->quoteFailureSide($grant, $agent, $candidate) === 'buyer';
+    }
+
+    private function isSellerQuoteFailure(CampaignGrant $grant, Agent $agent, array $candidate): bool
+    {
+        return $this->quoteFailureSide($grant, $agent, $candidate) === 'seller';
+    }
+
+    private function isPairSuppressed(CampaignEpisode $episode, Agent $agent, CampaignGrant $grant, array $candidate): bool
+    {
+        return ($episode->state['suppressed_pairs'][$candidate['key']] ?? 0) > now()->timestamp
+            && ! $this->buyerQuoteUsableForLift($grant, $agent, $candidate);
+    }
+
+    private function shouldSuppressAwaitedBuyer(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $candidate, array &$considered): bool
+    {
+        $key = $candidate['key'];
+        if ($this->hasBuyerObserverOrQueuedScout($agent, $candidate['buyer'])) {
+            $this->clearAwaitedPair($episode, $key);
+
+            return false;
+        }
+        $limit = $this->commitQuoteLimit();
+        $now = now()->timestamp;
+        $suppressed = false;
+        $this->updateEpisodeState($episode, function (array &$state) use ($key, $now, $limit, &$suppressed) {
+            $entry = $state['awaited_pair_since'][$key] ?? null;
+            if (! $entry || $now - $entry['last_blocked_at'] > self::AWAITED_PAIR_INACTIVITY_SECONDS) {
+                $entry = ['since' => $now];
+            }
+            if ($now - $entry['since'] >= $limit) {
+                $state['suppressed_pairs'][$key] = $now + $limit;
+                unset($state['awaited_pair_since'][$key]);
+                $suppressed = true;
+            } else {
+                $entry['last_blocked_at'] = $now;
+                $state['awaited_pair_since'][$key] = $entry;
+            }
+        });
+        if ($suppressed) {
+            $considered[] = $candidate + ['rejected' => "Awaited buyer quote unavailable for {$limit} s with no observer; pair suppressed."];
+        }
+
+        return $suppressed;
+    }
+
     private function trade(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array $activity, array &$considered, array $busyShips = []): ?AutomationRun
     {
         if (app(CampaignSafety::class)->windDown($episode)) {
@@ -2688,22 +2863,56 @@ class CampaignDirector
             return $this->localTrade($grant, $episode, $agent, $ship, $considered);
         }
         $trades = app(CampaignTrade::class);
+        $arm = (bool) FleetClaims::arm($grant);
+        if (! $arm && (! empty($episode->state['suppressed_pairs']) || ! empty($episode->state['awaited_pair_since']))) {
+            $now = now()->timestamp;
+            $this->updateEpisodeState($episode, function (array &$state) use ($now) {
+                if (isset($state['suppressed_pairs'])) {
+                    $state['suppressed_pairs'] = array_filter($state['suppressed_pairs'], fn ($until) => $until > $now);
+                }
+                if (isset($state['awaited_pair_since'])) {
+                    $state['awaited_pair_since'] = array_filter($state['awaited_pair_since'],
+                        fn ($entry) => $now - $entry['last_blocked_at'] <= self::AWAITED_PAIR_INACTIVITY_SECONDS);
+                }
+            });
+        }
         $ranked = $trades->rank($grant, $episode, $agent, $ship, $considered);
         if (! $ranked) {
             $considered[] = ['strategy' => 'trade', 'rejected' => 'No profitable observed pair fits the playbook and verified route bounds.'];
         }
-        $arm = (bool) FleetClaims::arm($grant);
-        if ($arm) {
-            $ranked = $this->preferCommitted($grant, $episode, $ranked);
-        }
         $blockedAtCurrentSource = false;
+        $rejectedIds = [];
+        if ($arm && $commit = ($episode->state['commit'] ?? null)) {
+            $eligible = $this->filterEligibleCandidates($grant, $episode, $agent, $ship, $ranked, $arm, $blockedAtCurrentSource, $rejectedIds, $commit);
+            $preferred = $this->preferCommitted($grant, $episode, $eligible);
+            if ($preferred !== [] && ! empty($episode->refresh()->state['commit'])) {
+                $ranked = [$preferred[0], ...array_values(array_filter($ranked, fn ($row) => $row['key'] !== $commit['key'] || $row['source'] !== $commit['source']))];
+            }
+        }
         foreach ($ranked as $candidate) {
+            $key = $candidate['key'];
+            $id = $key.'|'.$candidate['source'];
+            if (! $arm) {
+                if (($episode->state['suppressed_pairs'][$key] ?? 0) > now()->timestamp) {
+                    if ($this->isPairSuppressed($episode, $agent, $grant, $candidate)) {
+                        $rejectedIds[$id] = true;
+                        $considered[] = $candidate + ['rejected' => 'Awaited buyer pair is temporarily suppressed.'];
+
+                        continue;
+                    }
+                    $this->clearAwaitedPair($episode, $key, lift: true);
+                } elseif (isset($episode->state['awaited_pair_since'][$key]) && ($this->buyerQuoteUsableForLift($grant, $agent, $candidate)
+                    || $this->hasBuyerObserverOrQueuedScout($agent, $candidate['buyer']))) {
+                    $this->clearAwaitedPair($episode, $key);
+                }
+            }
             $this->candidate = $candidate;
             $commit = $arm ? ($episode->state['commit'] ?? null) : null;
             $committed = $commit && $candidate['key'] === $commit['key'] && $candidate['source'] === $commit['source'] && $candidate['source'] === $ship['nav']['waypointSymbol'];
             try {
                 if ($candidate['source'] !== $ship['nav']['waypointSymbol']) {
                     if (! $arm && $blockedAtCurrentSource) {
+                        $rejectedIds[$id] = true;
                         $considered[] = $candidate + ['rejected' => 'Awaiting buyer quote for higher-ranked pair at current source.'];
 
                         continue;
@@ -2713,6 +2922,7 @@ class CampaignDirector
                     if ($arm && ! $this->buyerObservable($agent, $candidate['buyer'])) {
                         $age = $this->buyerQuoteAge($agent, $candidate['buyer'], $candidate['good']);
                         if ($age === null || $age + ($candidate['position_seconds'] ?? 0) > $this->commitQuoteLimit()) {
+                            $rejectedIds[$id] = true;
                             $considered[] = $candidate + ['rejected' => 'Buyer quote at '.$candidate['buyer'].' would be past the '.$this->commitQuoteLimit()
                                 .' s commitment bound on arrival, and no ship of ours can read it.', 'buyer_quote_age' => $age];
 
@@ -2720,10 +2930,25 @@ class CampaignDirector
                         }
                     }
 
-                    return $this->position($grant, $episode, $agent, $ship, $candidate['source']);
+                    $run = $this->position($grant, $episode, $agent, $ship, $candidate['source']);
+                    if (! $arm) {
+                        $this->clearAwaitedPair($episode, $key);
+                    }
+
+                    return $run;
                 }
                 $pool = app(CampaignFleet::class)->poolEnabled($episode);
                 if ($pool && ! $this->parked($agent, $candidate['buyer']) && in_array($candidate['buyer'], $this->probeTargets($episode), true)) {
+                    $rejectedIds[$id] = true;
+                    $this->candidate = null;
+                    if (! $arm && $this->isSellerQuoteFailure($grant, $agent, $candidate)) {
+                        $considered[] = $candidate + ['rejected' => 'Seller quote fails freshness before the buyer wait.'];
+
+                        continue;
+                    }
+                    if (! $arm && ! $this->buyerQuoteUsableForLift($grant, $agent, $candidate) && $this->shouldSuppressAwaitedBuyer($grant, $episode, $agent, $candidate, $considered)) {
+                        continue;
+                    }
                     $this->awaitingQuote = true;
                     $this->awaitedBuyer ??= $candidate['buyer'];
                     $blockedAtCurrentSource = true;
@@ -2737,6 +2962,16 @@ class CampaignDirector
                 if ($mesh && ! $this->parked($agent, $candidate['buyer']) && app(CampaignFleet::class)->probes($episode) !== []) {
                     $age = $this->buyerQuoteAge($agent, $candidate['buyer'], $candidate['good']);
                     if ($age === null || $age >= $grant->revision()->body['trade']['quote_max_age_seconds']) {
+                        $rejectedIds[$id] = true;
+                        $this->candidate = null;
+                        if (! $arm && $this->isSellerQuoteFailure($grant, $agent, $candidate)) {
+                            $considered[] = $candidate + ['rejected' => 'Seller quote fails freshness before the buyer wait.'];
+
+                            continue;
+                        }
+                        if (! $arm && $this->shouldSuppressAwaitedBuyer($grant, $episode, $agent, $candidate, $considered)) {
+                            continue;
+                        }
                         $this->awaitingQuote = true;
                         $this->awaitedBuyer ??= $candidate['buyer'];
                         $blockedAtCurrentSource = true;
@@ -2747,11 +2982,11 @@ class CampaignDirector
                     }
                 }
                 if (! $mesh && (empty($episode->state['probe_position_failed']) || ! is_string($episode->state['probe_position_failed']) || CarbonImmutable::parse($episode->state['probe_position_failed'])->lt(now()->subMinutes(30))) && $probe && $probe['symbol'] !== $ship['symbol'] && ! in_array($probe['symbol'], $busyShips, true) && ! $this->parked($agent, $candidate['buyer']) && $probe['nav']['status'] !== 'IN_TRANSIT') {
-                    $position = null;
+                    $position = $run = null;
                     try {
                         $position = $this->position($grant, $episode, $agent, $probe, $candidate['buyer']);
 
-                        return app(AutomationRunner::class)->startCampaign($agent, $position, $episode);
+                        $run = app(AutomationRunner::class)->startCampaign($agent, $position, $episode);
                     } catch (\Throwable $exception) {
                         if ($exception instanceof GameException && $exception->retryAfter > 0) {
                             throw $exception;
@@ -2764,18 +2999,26 @@ class CampaignDirector
                         }
                         $considered[] = ['strategy' => 'probe', 'rejected' => 'Probe unavailable; refresh buyer directly.'];
                     }
+                    if ($run !== null) {
+                        if (! $arm) {
+                            $this->clearAwaitedPair($episode, $key);
+                        }
+
+                        return $run;
+                    }
                 }
-                $api = app(SpaceTradersApi::class);
-                $sync = app(AgentSynchronizer::class);
-                foreach ([$candidate['source'], $candidate['buyer']] as $market) {
-                    $sync->observe($agent, 'market', $market, $api->market($agent, $market));
+                foreach (array_unique([$candidate['source'], $candidate['buyer']]) as $market) {
+                    if ($this->canRefreshTradeMarket($agent, $market)) {
+                        $this->refreshTradeMarket($agent, $market);
+                    }
                 }
                 $refreshed = $trades->rank($grant, $episode, $agent, $ship, $considered);
+                $eligibleRefreshed = $this->filterEligibleCandidates($grant, $episode, $agent, $ship, $refreshed, $arm, $blockedAtCurrentSource, $rejectedIds, $committed ? $commit : null);
                 if ($committed) {
                     // Refreshed quotes end a commitment only when its pair stops ranking or another clears the switch ratio.
-                    $refreshed = $this->preferCommitted($grant, $episode, $refreshed);
+                    $eligibleRefreshed = $this->preferCommitted($grant, $episode, $eligibleRefreshed);
                 }
-                $fresh = $refreshed[0] ?? null;
+                $fresh = $eligibleRefreshed[0] ?? null;
                 if (! $fresh || $fresh['key'] !== $candidate['key'] || $fresh['source'] !== $candidate['source']) {
                     $considered[] = $candidate + ['rejected' => 'Refreshed quotes changed the preferred pair; replan next tick.'];
 
@@ -2791,6 +3034,7 @@ class CampaignDirector
                     if ($age === null || $age > $limit) {
                         $message = 'Committed pair: buyer quote at '.$fresh['buyer'].' is '.($age === null ? 'missing' : $age.' s old').', past the '.$limit.' s commitment bound.';
                         if (! $this->buyerObservable($agent, $fresh['buyer'])) {
+                            $rejectedIds[$id] = true;
                             $this->endCommit($grant, $episode, 'buyer_quote_unavailable', ['buyer_quote_age' => $age]);
                             $considered[] = $fresh + ['rejected' => $message.' No ship of ours can read it.'];
 
@@ -2818,14 +3062,22 @@ class CampaignDirector
                 $plan['site'] = $candidate['source'];
                 $trades->quoteLife($agent, $plan, []);
 
-                return app(AutomationRunner::class)->preview($agent, $ship['symbol'], $plan);
+                $run = app(AutomationRunner::class)->preview($agent, $ship['symbol'], $plan);
+                if (! $arm) {
+                    $this->clearAwaitedPair($episode, $key);
+                }
+
+                return $run;
             } catch (GameException $exception) {
                 if ($exception->retryAfter > 0) {
                     throw $exception;
                 }
+                $rejectedIds[$id] = true;
                 $considered[] = $candidate + ['rejected' => $exception->getMessage()];
                 if (! $arm && $exception instanceof StaleQuote
-                    && ($this->buyerObservable($agent, $candidate['buyer']) || app(CampaignFleet::class)->probes($episode) !== [])) {
+                    && ($this->buyerObservable($agent, $candidate['buyer']) || app(CampaignFleet::class)->probes($episode) !== [])
+                    && $this->isBuyerQuoteFailure($grant, $agent, $candidate)
+                    && ! $this->shouldSuppressAwaitedBuyer($grant, $episode, $agent, $candidate, $considered)) {
                     $this->awaitingQuote = true;
                     $this->awaitedBuyer ??= $candidate['buyer'];
                     $blockedAtCurrentSource = true;
@@ -2846,6 +3098,35 @@ class CampaignDirector
         $this->candidate = null;
 
         return null;
+    }
+
+    private function canRefreshTradeMarket(Agent $agent, string $market): bool
+    {
+        return ! isset($this->detailedMarketReads[$market])
+            && ! (isset($this->marketReads[$market]) && isset($this->detailedRetryAttempted[$market]))
+            && $this->parked($agent, $market);
+    }
+
+    private function refreshTradeMarket(Agent $agent, string $market, bool $fresh = false): GameObservation
+    {
+        $alreadyRead = isset($this->marketReads[$market]);
+        if ($alreadyRead) {
+            $this->detailedRetryAttempted[$market] = true;
+        }
+        $this->marketReads[$market] = true;
+
+        return $this->observeMarket($agent, $market, $fresh || $alreadyRead);
+    }
+
+    private function observeMarket(Agent $agent, string $market, bool $fresh = false): GameObservation
+    {
+        $data = app(SpaceTradersApi::class)->market($agent, $market, fresh: $fresh);
+        $observation = app(AgentSynchronizer::class)->observe($agent, 'market', $market, $data);
+        if (! empty($data['tradeGoods'])) {
+            $this->detailedMarketReads[$market] = true;
+        }
+
+        return $observation;
     }
 
     private function localTrade(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array &$considered): ?AutomationRun
@@ -2871,11 +3152,10 @@ class CampaignDirector
             try {
                 foreach (array_unique([$candidate['source'], $candidate['buyer']]) as $market) {
                     $local->reserve($this->deadline);
-                    if (! isset($this->marketReads[$market]) && $this->parked($agent, $market)) {
-                        $this->marketReads[$market] = true;
+                    if ($this->canRefreshTradeMarket($agent, $market)) {
                         $attempt['reads']++;
                         $this->localSummary['endpoint_reads'][] = $market;
-                        app(AgentSynchronizer::class)->observe($agent, 'market', $market, app(SpaceTradersApi::class)->market($agent, $market));
+                        $this->refreshTradeMarket($agent, $market);
                     }
                 }
                 $ask = app(OperationPlanner::class)->quote($agent, $candidate['source'], $candidate['good']);
@@ -3102,7 +3382,7 @@ class CampaignDirector
             $episode->refresh();
             try {
                 $this->marketReads[$symbol] = true;
-                app(AgentSynchronizer::class)->observe($agent, 'market', $symbol, app(SpaceTradersApi::class)->market($agent, $symbol));
+                $this->observeMarket($agent, $symbol);
             } catch (LocalEarnBudget $exception) {
                 throw $exception;
             } catch (GameException) {
@@ -3226,14 +3506,14 @@ class CampaignDirector
     }
 
     /** @param list<string> $busyShips */
-    private function refreshRoleMarkets(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, AgentSynchronizer $sync, array $busyShips, bool $includeCommand): void
+    private function refreshRoleMarkets(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $busyShips, bool $includeCommand): void
     {
-        $this->measure('mesh_refresh', function () use ($grant, $episode, $agent, $sync, $busyShips, $includeCommand) {
+        $this->measure('mesh_refresh', function () use ($grant, $episode, $agent, $busyShips, $includeCommand) {
             if (CampaignMesh::policy($episode)) {
                 if (isset(CampaignMesh::policy($episode)['saturation'])) {
                     $this->pollMesh($episode, $agent, 'urgent');
                 } else {
-                    app(CampaignMesh::class)->refresh($episode, $agent, $this->marketReads, $this->deadline, $this->activeBuyer($episode));
+                    app(CampaignMesh::class)->refresh($episode, $agent, $this->marketReads, $this->deadline, $this->activeBuyer($episode), $this->detailedMarketReads);
                 }
 
                 return;
@@ -3268,7 +3548,7 @@ class CampaignDirector
                     }
                 }
                 $this->marketReads[$market] = true;
-                $sync->observe($agent, 'market', $market, app(SpaceTradersApi::class)->market($agent, $market));
+                $this->observeMarket($agent, $market);
             }
         });
     }
@@ -3283,18 +3563,18 @@ class CampaignDirector
             }
             try {
                 $run = app(CampaignProbeBootstrap::class)->plan($grant, $episode, $agent, $busyShips, $considered, $this->deadline,
-                    meshReads: $this->marketReads, purchaseYards: $this->meshPurchaseYards);
+                    meshReads: $this->marketReads, purchaseYards: $this->meshPurchaseYards, detailedRead: $this->detailedMarketReads);
                 if ($run && $saturation) {
                     $this->recordSaturation($grant, $episode, $agent);
                 }
                 if (! $run && $saturation && microtime(true) < $this->deadline) {
-                    $run = app(CampaignHaulerPurchase::class)->plan($grant, $episode, $agent, $busyShips, $considered, $this->deadline, $this->marketReads);
+                    $run = app(CampaignHaulerPurchase::class)->plan($grant, $episode, $agent, $busyShips, $considered, $this->deadline, $this->marketReads, $this->detailedMarketReads);
                 }
                 if (! $run) {
                     return false;
                 }
                 if (! $run->started_at && ! $run->active_agent_id) {
-                    app(AutomationRunner::class)->startCampaign($agent, $run, $episode);
+                    app(AutomationRunner::class)->startCampaign($agent, $run, $episode, $this->deadline);
                 }
                 $busyShips[] = $run->ship_symbol;
                 $this->decision($grant, $episode, $agent, $considered, $run->strategy, $run->id, ['shipyard' => $run->plan['shipyard'] ?? $run->plan['destination'] ?? null]);
@@ -3501,7 +3781,7 @@ class CampaignDirector
                 $limits = array_replace($this->limits($grant, $episode, $agent), ['reserve' => $grant->limits['reserve_credits']]);
                 $runner = app(AutomationRunner::class);
                 $run = $runner->previewMeshScout($agent, $ship, $destination, $limits, $episode);
-                $runner->startCampaign($agent, $run, $episode);
+                $runner->startCampaign($agent, $run, $episode, $this->deadline);
                 $busy[] = $ship['symbol'];
                 $reserved[] = $destination;
                 $this->decision($grant, $episode, $agent, $considered, 'scout', $run->id);
@@ -3534,7 +3814,7 @@ class CampaignDirector
         $passes = $this->meshPassEvidence['eligible'];
         $capacity = $episode->opened_at->lte(now()->subHour()) && $passes > 0 ? $passes * $policy['reads_per_pass'] : null;
         $this->meshPolling[$stage] = app(MeshPoller::class)->refresh($episode, $agent, $this->marketReads, $this->deadline,
-            $buyer ?? $this->activeBuyer($episode), $stage, $this->meshPurchaseYards, $capacity);
+            $buyer ?? $this->activeBuyer($episode), $stage, $this->meshPurchaseYards, $capacity, $this->detailedMarketReads);
     }
 
     private function dispatchSaturationMesh(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array &$busy, array &$reserved, array &$considered): bool
@@ -3580,7 +3860,7 @@ class CampaignDirector
                 $ship = $probes[$move['ship']];
                 try {
                     $mesh->assertDeparture($episode, $agent, $ship, $move['destination']);
-                    $run = $this->launchMeshScout($grant, $episode, $agent, $ship, $move['destination']);
+                    $run = $this->launchMeshScout($grant, $episode, $agent, $ship, $move['destination'], deadline: $this->deadline);
                     $busy[] = $ship['symbol'];
                     $reserved[] = $move['destination'];
                     $started++;
@@ -3591,7 +3871,15 @@ class CampaignDirector
                     }
                     $this->decision($grant, $episode, $agent, $considered, 'scout', $run->id);
                 } catch (GameException $exception) {
-                    $held[] = ['ship' => $ship['symbol'], 'destination' => $move['destination'], 'hold' => $exception->getMessage()];
+                    $hold = ['ship' => $ship['symbol'], 'destination' => $move['destination'], 'hold' => $exception->getMessage()];
+                    if ($exception instanceof RequestDeferred) {
+                        $hold += ['defer_source' => $exception->delaySource, 'deadline_capped' => $exception->deadlineCapped,
+                            'delay_seconds' => $exception->context['delay_seconds'] ?? null, 'retry_after' => $exception->retryAfter,
+                            'remaining_deadline_seconds' => $exception->context['remaining_deadline_seconds'] ?? null];
+                    } elseif ($exception->retryAfter > 0) {
+                        $hold += ['exception_class' => $exception::class, 'retry_after' => $exception->retryAfter];
+                    }
+                    $held[] = $hold;
                     if (str_starts_with($exception->getMessage(), 'Mesh G3 floor')) {
                         $freshPins[$ship['symbol']] = $move['origin'];
                     }
@@ -3616,8 +3904,9 @@ class CampaignDirector
     }
 
     private function launchMeshScout(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, string $destination,
-        ?string $kind = null, string $observe = 'market'): AutomationRun
+        ?string $kind = null, string $observe = 'market', ?float $deadline = null): AutomationRun
     {
+        $deadline ??= $this->deadline;
         $run = null;
         try {
             $runner = app(AutomationRunner::class);
@@ -3633,15 +3922,19 @@ class CampaignDirector
                 $limits['minutes'] = app(CampaignMesh::class)->scoutMinutes($grant, $episode, $agent, $ship, array_diff_key($plan, ['minutes' => true]));
                 $limits['route'] = $plan['route'];
 
-                return $this->startFleetRun($episode, $agent, $ship, $limits, $kind, app(MeshGovernor::class)->estimate($agent, $kind));
+                return $this->startFleetRun($episode, $agent, $ship, $limits, $kind, app(MeshGovernor::class)->estimate($agent, $kind), deadline: $deadline);
             }
-            $preview = fn () => $runner->previewMeshScout($agent, $ship, $destination, $limits, $episode, $observe);
-            $run = $kind === null ? $preview() : app(MeshGovernor::class)->preview($agent, $episode, $kind, $preview);
+            $preview = fn () => $runner->previewMeshScout($agent, $ship, $destination, $limits, $episode, $observe, $deadline);
+            $run = $kind === null ? $preview() : app(MeshGovernor::class)->preview($agent, $episode, $kind, $preview, deadline: $deadline);
 
-            return $runner->startCampaign($agent, $run, $episode, $this->deadline);
+            return $runner->startCampaign($agent, $run, $episode, $deadline);
         } catch (GameException $exception) {
             $mesh = app(CampaignMesh::class);
-            $unsent = ! $exception->uncertain && (! $run || $mesh->invalidatePreview($agent, $run));
+            try {
+                $unsent = ! $exception->uncertain && (! $run || $mesh->invalidatePreview($agent, $run, $deadline));
+            } catch (\Throwable) {
+                $unsent = false;
+            }
             if ($unsent && $exception->retryAfter === 0 && $exception->apiCode === null && CampaignMesh::dispatchFailure($exception->getMessage())) {
                 $mesh->failure($episode, $ship['symbol'], $destination, $run?->id);
             }
@@ -3654,7 +3947,10 @@ class CampaignDirector
         $state = $episode->refresh()->state ?? [];
         $failures = array_filter($state['mesh_dispatch_failed'] ?? [], fn ($failure) => CarbonImmutable::parse($failure['at'])->gt(now()->subMinutes(30)));
         $payload = array_diff_key($plan, ['elapsed_ms' => true]) + ['pins' => $pins, 'holds' => $holds] + $this->saturationDiagnostics;
-        $hash = hash('sha256', json_encode($payload, JSON_THROW_ON_ERROR));
+        $stable = $payload;
+        $stable['holds'] = array_map(fn ($hold) => array_diff_key($hold,
+            array_flip(['delay_seconds', 'remaining_deadline_seconds', 'retry_after'])), $holds);
+        $hash = hash('sha256', json_encode($stable, JSON_THROW_ON_ERROR));
         if (($state['mesh_plan_hash'] ?? null) !== $hash) {
             app(CampaignControl::class)->event($grant, $episode, 'mesh_plan', $payload + ['elapsed_ms' => $plan['elapsed_ms'] ?? null]);
             $state['mesh_plan_hash'] = $hash;
@@ -3681,7 +3977,7 @@ class CampaignDirector
     }
 
     /** @return list<string> Markets any episode ship is flying to or has a preview or active run for. */
-    private function probeTargets(CampaignEpisode $episode): array
+    private function probeTargets(CampaignEpisode $episode, bool $pin = true): array
     {
         if (isset(CampaignMesh::policy($episode)['saturation'])) {
             $agent = Agent::findOrFail($episode->agent_id);
@@ -3689,10 +3985,10 @@ class CampaignDirector
             return app(CampaignMesh::class)->context($episode, $agent)['reserved'];
         }
         $shipSymbols = array_values(array_unique([
-            ...app(CampaignFleet::class)->symbols($episode),
+            ...app(CampaignFleet::class)->symbols($episode, pin: $pin),
             ...AutomationRun::where('campaign_episode_id', $episode->id)->pluck('ship_symbol')->all(),
         ]));
-        $probeSymbols = array_column(app(CampaignFleet::class)->probes($episode), 'symbol');
+        $probeSymbols = array_column(app(CampaignFleet::class)->probes($episode, pin: $pin), 'symbol');
         $targets = AutomationRun::where('agent_id', $episode->agent_id)->where('reset_id', $episode->reset_id)
             ->where(fn ($query) => $query->whereIn('ship_symbol', $probeSymbols)
                 ->orWhere(fn ($scouts) => $scouts->whereIn('ship_symbol', $shipSymbols)->where('strategy', 'scout')))
@@ -3830,7 +4126,7 @@ class CampaignDirector
         $observer = Ship::where('agent_id', $agent->id)->orderBy('symbol')->get()->first(fn (Ship $row) => ($row->snapshot['nav']['waypointSymbol'] ?? null) === $destination && ($row->snapshot['nav']['status'] ?? null) !== 'IN_TRANSIT');
         if ($observer) {
             try {
-                app(MeshPoller::class)->read($episode, $agent, $destination, 'market', $observer->symbol, $settlementOnly ? 'settlement' : 'demand', $this->marketReads);
+                app(MeshPoller::class)->read($episode, $agent, $destination, 'market', $observer->symbol, $settlementOnly ? 'settlement' : 'demand', $this->marketReads, $this->detailedMarketReads, $this->deadline);
             } catch (RequestDeferred $exception) {
                 FleetMetrics::observe($exception);
             }
@@ -3877,7 +4173,7 @@ class CampaignDirector
             }
             try {
                 $mesh->assertDeparture($episode, $agent, $ship, $destination);
-                $run = $this->launchMeshScout($grant, $episode, $agent, $ship, $destination);
+                $run = $this->launchMeshScout($grant, $episode, $agent, $ship, $destination, deadline: $this->deadline);
                 $this->decision($grant, $episode, $agent, [], 'recovery_evidence', $run->id);
 
                 return true;

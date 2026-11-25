@@ -10,7 +10,7 @@ use Carbon\CarbonImmutable;
 
 class CampaignDiscovery
 {
-    public function advance(CampaignEpisode $episode, Agent $agent, array &$reads = [], float $deadline = INF): void
+    public function advance(CampaignEpisode $episode, Agent $agent, array &$reads = [], float $deadline = INF, ?array &$detailedRead = null): void
     {
         $state = $episode->state ?? [];
         $cursor = $state['discovery'] ?? ['systems' => Ship::where('agent_id', $agent->id)->get()->map(fn ($ship) => $ship->snapshot['nav']['systemSymbol'])->unique()->take(3)->values()->all(), 'system' => 0, 'page' => 1];
@@ -27,7 +27,7 @@ class CampaignDiscovery
             try {
                 $work = fn () => $api->cataloguePage($agent, $system, $cursor['page']);
                 $page = isset(CampaignMesh::policy($episode)['saturation'])
-                    ? app(MeshGovernor::class)->immediate($agent, $episode, 'directory', $work) : $work();
+                    ? app(MeshGovernor::class)->immediate($agent, $episode, 'directory', $work, $deadline) : $work();
             } catch (RequestDeferred $exception) {
                 if (! isset(CampaignMesh::policy($episode)['saturation'])) {
                     throw $exception;
@@ -46,7 +46,7 @@ class CampaignDiscovery
                 $cursor['page']++;
             }
         } elseif ($mesh = CampaignMesh::policy($episode)) {
-            $this->readDirectories($episode, $agent, $reads, $mesh['reads_per_pass'], $deadline);
+            $this->readDirectories($episode, $agent, $reads, $mesh['reads_per_pass'], $deadline, $detailedRead);
 
             return;
         } else {
@@ -60,11 +60,16 @@ class CampaignDiscovery
             $cursor['markets'] ??= GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->get()
                 ->filter(fn ($point) => in_array('MARKETPLACE', array_column($point->data['traits'] ?? [], 'symbol'), true))->pluck('symbol')->all();
             $cursor['market'] ??= 0;
-            for ($reads = 0; $reads < 2 && isset($cursor['markets'][$cursor['market']]); $reads++) {
+            for ($count = 0; $count < 2 && isset($cursor['markets'][$cursor['market']]); $count++) {
                 $symbol = $cursor['markets'][$cursor['market']];
                 $present = $episode->phase !== 'earn' || Ship::where('agent_id', $agent->id)->get()->contains(fn ($ship) => $ship->snapshot['nav']['waypointSymbol'] === $symbol && $ship->snapshot['nav']['status'] !== 'IN_TRANSIT');
                 if ($present) {
-                    $sync->observe($agent, 'market', $symbol, $api->market($agent, $symbol));
+                    $reads[$symbol] = true;
+                    $market = $api->market($agent, $symbol);
+                    $sync->observe($agent, 'market', $symbol, $market);
+                    if (! empty($market['tradeGoods'])) {
+                        $detailedRead[$symbol] = true;
+                    }
                 }
                 $cursor['market']++;
                 $state['discovery'] = $cursor;
@@ -107,7 +112,7 @@ class CampaignDiscovery
         return $gaps;
     }
 
-    private function readDirectories(CampaignEpisode $episode, Agent $agent, array &$reads, int $budget, float $deadline): void
+    private function readDirectories(CampaignEpisode $episode, Agent $agent, array &$reads, int $budget, float $deadline, ?array &$detailedRead = null): void
     {
         $state = $episode->state ?? [];
         $failures = $state['directory_failures'] ?? [];
@@ -126,13 +131,16 @@ class CampaignDiscovery
             }
             try {
                 if (isset(CampaignMesh::policy($episode)['saturation'])) {
-                    if (! app(MeshPoller::class)->read($episode, $agent, $symbol, 'market', null, 'directory', $reads)) {
+                    if (! app(MeshPoller::class)->read($episode, $agent, $symbol, 'market', null, 'directory', $reads, $detailedRead, $deadline)) {
                         continue;
                     }
                 } else {
                     $reads[$symbol] = true;
                     $market = app(SpaceTradersApi::class)->market($agent, $symbol);
                     app(AgentSynchronizer::class)->observe($agent, 'market', $symbol, $market);
+                    if (! empty($market['tradeGoods'])) {
+                        $detailedRead[$symbol] = true;
+                    }
                 }
                 unset($failures[$symbol]);
             } catch (RequestDeferred) {

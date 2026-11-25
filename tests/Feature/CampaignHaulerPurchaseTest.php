@@ -74,7 +74,7 @@ class CampaignHaulerPurchaseTest extends TestCase
         {
             public function __construct(private AutomationRun $run, private ShipAction $action, private string $change) {}
 
-            public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = .75): void
+            public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = .75, ?float $baseMaxWait = null, ?float $deadline = null): void
             {
                 if ($priority !== 'write') {
                     return;

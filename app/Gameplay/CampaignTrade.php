@@ -399,6 +399,55 @@ class CampaignTrade
         return app(FuelPlanner::class)->leg($agent, $ship, $buyer, 0)['refuel_ceiling'];
     }
 
+    public static function loadingSecondsForVolume(int $units, int $tradeVolume): int
+    {
+        return (int) ceil($units / max(1, $tradeVolume)) * 10 + 10;
+    }
+
+    public function buyerQuoteFreshAlone(Agent $agent, string $buyer, string $good, int $buyerQuoteMaxAge): bool
+    {
+        $now = now()->toImmutable();
+        $quote = $this->quoteSnapshot($agent, $buyer, $good, $now->subSeconds((int) config('gameplay.snapshot_seconds')));
+
+        return $quote !== null && $quote['observed_at']->addSeconds($buyerQuoteMaxAge)->gt($now);
+    }
+
+    public function quoteLifeFailureSide(Agent $agent, string $source, string $buyer, string $good, int $units, int $quoteMaxAge, ?int $buyerQuoteMaxAge = null): ?string
+    {
+        $now = now()->toImmutable();
+        $snapshotSeconds = (int) config('gameplay.snapshot_seconds');
+        $ask = $this->quoteSnapshot($agent, $source, $good, $now->subSeconds($snapshotSeconds));
+        if ($ask === null) {
+            return 'seller';
+        }
+        $bid = $this->quoteSnapshot($agent, $buyer, $good, $now->subSeconds(max($snapshotSeconds, $buyerQuoteMaxAge ?? 0)));
+        if ($bid === null) {
+            return 'buyer';
+        }
+        $cutoff = $now->addSeconds(self::loadingSecondsForVolume($units, $ask['trade_volume']));
+        if ($ask['observed_at']->addSeconds($quoteMaxAge)->lte($cutoff)) {
+            return 'seller';
+        }
+        if ($bid['observed_at']->addSeconds($buyerQuoteMaxAge ?? $quoteMaxAge)->lte($cutoff)) {
+            return 'buyer';
+        }
+
+        return null;
+    }
+
+    private function quoteSnapshot(Agent $agent, string $market, string $good, CarbonImmutable $oldest): ?array
+    {
+        $row = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')
+            ->where('symbol', $market)->orderByDesc('observed_at')->orderByDesc('id')->first();
+        $quote = collect($row?->data['tradeGoods'] ?? [])->firstWhere('symbol', $good);
+        if (! $row || ! $quote || ! empty($row->data['invalidated_by_action']) || $row->observed_at->lt($oldest)) {
+            return null;
+        }
+
+        // Loading checks use the same ISO-8601 timestamp precision as quoteLife().
+        return ['observed_at' => CarbonImmutable::parse($row->observed_at->toIso8601String()), 'trade_volume' => (int) ($quote['tradeVolume'] ?? 1)];
+    }
+
     public function quoteLife(Agent $agent, array $plan, array $totals): void
     {
         if (empty($plan['campaign_trade'])) {
@@ -411,7 +460,7 @@ class CampaignTrade
         $buyerAge = OperationPlanner::buyerAge($plan);
         $ask = app(OperationPlanner::class)->quote($agent, $plan['site'], $plan['symbol']);
         $bid = app(OperationPlanner::class)->quote($agent, $plan['market'], $plan['symbol'], $buyerAge);
-        $seconds = (int) ceil($remaining / max(1, $ask['tradeVolume'])) * 10 + 10;
+        $seconds = self::loadingSecondsForVolume($remaining, $ask['tradeVolume']);
         // A committed arm trade may load against an older buyer quote, up to its bounded age; the
         // source quote, read where the ship stands, keeps the playbook's age.
         foreach ([[$ask, $plan['campaign_trade']['quote_max_age_seconds']], [$bid, $buyerAge ?? $plan['campaign_trade']['quote_max_age_seconds']]] as [$quote, $age]) {
@@ -484,19 +533,24 @@ class CampaignTrade
             'trailing_loads' => $recent->count(), 'below_floor' => $reasons !== [], 'reasons' => $reasons];
     }
 
-    public function decay(CampaignEpisode $episode, string $good, string $buyer, ?float $default = null): float
+    public function confirmedSales(CampaignEpisode $episode): Collection
     {
         $episodes = [$episode->id];
         if (FleetClaims::arm($episode->grant()) && $reference = app(FleetClaims::class)->reference($episode)) {
             $episodes[] = $reference->id;
         }
-        $sales = ShipAction::whereIn('automation_run_id', AutomationRun::whereIn('campaign_episode_id', $episodes)->select('id'))->where('command', 'sell')->where('state', 'confirmed')->orderBy('id')->get();
+
+        return ShipAction::whereIn('automation_run_id', AutomationRun::whereIn('campaign_episode_id', $episodes)->select('id'))
+            ->where('command', 'sell')->where('state', 'confirmed')->orderBy('id')->get()
+            ->groupBy(fn ($sale) => ($sale->arguments['symbol'] ?? '').'@'.($sale->before_state['ship']['nav']['waypointSymbol'] ?? ''));
+    }
+
+    public function decay(CampaignEpisode $episode, string $good, string $buyer, ?float $default = null, ?Collection $sales = null): float
+    {
+        $sales ??= $this->confirmedSales($episode)->get($good.'@'.$buyer, collect());
         $previous = null;
         $drops = [];
         foreach ($sales as $sale) {
-            if (($sale->arguments['symbol'] ?? null) !== $good || ($sale->before_state['ship']['nav']['waypointSymbol'] ?? null) !== $buyer) {
-                continue;
-            }
             $units = $sale->outcome['units'] ?? 0;
             if ($units < 1 || (isset($sale->before_state['estimate']['quote']['tradeVolume']) && $units !== $sale->before_state['estimate']['quote']['tradeVolume'])) {
                 $previous = null;
@@ -516,102 +570,110 @@ class CampaignTrade
     public function rank(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array &$considered, bool $persist = true,
         int $cycleLossCredits = 0, bool $useCorridorBook = false): array
     {
-        $rules = $grant->revision()->body['trade'];
-        $markets = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->orderBy('observed_at')->orderBy('id')->get()->keyBy('symbol');
-        $pairs = app(OpportunityAssessor::class)->report($agent, 'trade', $ship['symbol'], true)['opportunities'];
-        $state = $episode->state ?? [];
-        $ranked = [];
-        $results = $episode->exists ? $this->learningResults($episode) : [];
-        $learning = [];
-        $claims = app(FleetClaims::class);
-        $arm = FleetClaims::arm($grant);
-        $taken = $episode->exists && ($arm || config('gameplay.campaign_claims', true)) ? $claims->taken($episode, $ship['nav']['systemSymbol'] ?? null) : [];
-        if ($useCorridorBook) {
-            $taken = array_filter($taken, fn (string $holder) => str_contains($holder, ':'));
-        }
-        // A follower works only its leader's current pair, claims aside, and waits without one.
-        if ($arm['follow'] ?? null) {
-            $leader = $claims->leader($episode, $arm['follow']);
-            $lead = $leader ? ($claims->pairs($leader)[0] ?? null) : null;
-            if (! $lead) {
-                $considered[] = ['strategy' => 'trade', 'rejected' => 'Follower waiting for leader claim.'];
-
-                return [];
+        return FuelPlanner::memoize(function () use ($grant, $episode, $agent, $ship, &$considered, $persist, $cycleLossCredits, $useCorridorBook) {
+            $rules = $grant->revision()->body['trade'];
+            $markets = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->orderBy('observed_at')->orderBy('id')->get()->keyBy('symbol');
+            $pairs = app(OpportunityAssessor::class)->report($agent, 'trade', $ship['symbol'], true)['opportunities'];
+            $state = $episode->state ?? [];
+            $newFirstSeen = [];
+            $salesByKey = $episode->exists ? $this->confirmedSales($episode) : collect();
+            $ranked = [];
+            $results = $episode->exists ? $this->learningResults($episode) : [];
+            $learning = [];
+            $claims = app(FleetClaims::class);
+            $arm = FleetClaims::arm($grant);
+            $taken = $episode->exists && ($arm || config('gameplay.campaign_claims', true)) ? $claims->taken($episode, $ship['nav']['systemSymbol'] ?? null) : [];
+            if ($useCorridorBook) {
+                $taken = array_filter($taken, fn (string $holder) => str_contains($holder, ':'));
             }
-            $taken = [];
-            $pairs = array_values(array_filter($pairs, fn ($pair) => [$pair['good'], $pair['source'], $pair['market']] === [$lead['good'], $lead['source'], $lead['buyer']]));
-        }
-        $exposure = $arm ? $this->allowance($grant, $agent, ship: $ship['symbol']) : INF;
-        $available = null;
-        $unclaimed = null;
-        $compare = fn (array $left, array $right) => $right['score'] <=> $left['score'] ?: [$left['key'], $left['source']] <=> [$right['key'], $right['source']];
-        // Docked at a verified fuel seller, the run tops up first, so legs start from a full tank
-        // and the refuel ceiling comes out of the credits available for cargo.
-        $departure = app(FuelPlanner::class)->departureRefuel($agent, $ship);
-        foreach ($pairs as $pair) {
-            $key = $pair['good'].'@'.$pair['market'];
-            $ask = collect($markets->get($pair['source'])?->data['tradeGoods'] ?? [])->firstWhere('symbol', $pair['good']);
-            $bid = collect($markets->get($pair['market'])?->data['tradeGoods'] ?? [])->firstWhere('symbol', $pair['good']);
-            if (! $ask || ! $bid || $ask['purchasePrice'] < 1 || ($cycleLossCredits <= 0 && $bid['sellPrice'] <= $ask['purchasePrice']) || ($cycleLossCredits > 0 && $bid['sellPrice'] < 1) || min($ask['tradeVolume'], $bid['tradeVolume']) < 1) {
-                $considered[] = $pair + ['rejected' => 'No observed positive spread.'];
+            // A follower works only its leader's current pair, claims aside, and waits without one.
+            if ($arm['follow'] ?? null) {
+                $leader = $claims->leader($episode, $arm['follow']);
+                $lead = $leader ? ($claims->pairs($leader)[0] ?? null) : null;
+                if (! $lead) {
+                    $considered[] = ['strategy' => 'trade', 'rejected' => 'Follower waiting for leader claim.'];
 
-                continue;
+                    return [];
+                }
+                $taken = [];
+                $pairs = array_values(array_filter($pairs, fn ($pair) => [$pair['good'], $pair['source'], $pair['market']] === [$lead['good'], $lead['source'], $lead['buyer']]));
             }
-            $state['first_seen'][$key] ??= $bid['sellPrice'];
-            try {
-                $learning[$key] ??= ['mode' => $this->mode($episode, $pair['good'], $pair['market'], $results, $rules['proof']['min_realized_ratio']),
-                    'decay' => $episode->exists ? $this->decay($episode, $pair['good'], $pair['market'], $rules['lot']['default_batch_decay']) : $rules['lot']['default_batch_decay']];
-                $projection = $this->projectPair($agent, $ship, $departure, $pair, $ask, $bid, $rules,
-                    $grant->limits['run_max_minutes'] * 60, $learning[$key]['mode'], $learning[$key]['decay'], $exposure, (bool) $arm, cycleLossCredits: $cycleLossCredits);
-                if (isset($projection['long_run'])) {
-                    $considered[] = $projection['long_run'];
+            $exposure = $arm ? $this->allowance($grant, $agent, ship: $ship['symbol']) : INF;
+            $available = null;
+            $unclaimed = null;
+            $compare = fn (array $left, array $right) => $right['score'] <=> $left['score'] ?: [$left['key'], $left['source']] <=> [$right['key'], $right['source']];
+            // Docked at a verified fuel seller, the run tops up first, so legs start from a full tank
+            // and the refuel ceiling comes out of the credits available for cargo.
+            $departure = app(FuelPlanner::class)->departureRefuel($agent, $ship);
+            foreach ($pairs as $pair) {
+                $key = $pair['good'].'@'.$pair['market'];
+                $ask = collect($markets->get($pair['source'])?->data['tradeGoods'] ?? [])->firstWhere('symbol', $pair['good']);
+                $bid = collect($markets->get($pair['market'])?->data['tradeGoods'] ?? [])->firstWhere('symbol', $pair['good']);
+                if (! $ask || ! $bid || $ask['purchasePrice'] < 1 || ($cycleLossCredits <= 0 && $bid['sellPrice'] <= $ask['purchasePrice']) || ($cycleLossCredits > 0 && $bid['sellPrice'] < 1) || min($ask['tradeVolume'], $bid['tradeVolume']) < 1) {
+                    $considered[] = $pair + ['rejected' => 'No observed positive spread.'];
 
                     continue;
                 }
-                $candidate = $projection['candidate'];
-                if (! $available || $compare($candidate, $available) < 0) {
-                    $available = $candidate;
+                if (! isset($state['first_seen'][$key])) {
+                    $state['first_seen'][$key] = $newFirstSeen[$key] = $bid['sellPrice'];
                 }
-                if (isset($taken[$pair['good'].'@'.$pair['source']]) || isset($taken[$pair['good'].'@'.$pair['market']])) {
-                    $holder = $taken[$pair['good'].'@'.$pair['source']] ?? $taken[$pair['good'].'@'.$pair['market']];
-                    $considered[] = $candidate + ['rejected' => 'Claimed by another ship.', 'claimed_by' => $holder]
-                        + (str_contains($holder, ':') ? ['incoming_cargo' => $claims->inFlight($episode, $pair['good'], $pair['market'])] : []);
+                try {
+                    $learning[$key] ??= ['mode' => $this->mode($episode, $pair['good'], $pair['market'], $results, $rules['proof']['min_realized_ratio']),
+                        'decay' => $episode->exists ? $this->decay($episode, $pair['good'], $pair['market'], $rules['lot']['default_batch_decay'], $salesByKey->get($key, collect())) : $rules['lot']['default_batch_decay']];
+                    $projection = $this->projectPair($agent, $ship, $departure, $pair, $ask, $bid, $rules,
+                        $grant->limits['run_max_minutes'] * 60, $learning[$key]['mode'], $learning[$key]['decay'], $exposure, (bool) $arm, cycleLossCredits: $cycleLossCredits);
+                    if (isset($projection['long_run'])) {
+                        $considered[] = $projection['long_run'];
 
-                    continue;
-                }
-                if (! $unclaimed || $compare($candidate, $unclaimed) < 0) {
-                    $unclaimed = $candidate;
-                }
-                if (($state['current_pair'] ?? null) === $key && $bid['sellPrice'] <= $state['first_seen'][$key] * $rules['switch']['bid_below_first_seen']) {
-                    $considered[] = $candidate + ['rejected' => 'Switch: buyer bid at or below first-seen threshold.'];
+                        continue;
+                    }
+                    $candidate = $projection['candidate'];
+                    if (! $available || $compare($candidate, $available) < 0) {
+                        $available = $candidate;
+                    }
+                    if (isset($taken[$pair['good'].'@'.$pair['source']]) || isset($taken[$pair['good'].'@'.$pair['market']])) {
+                        $holder = $taken[$pair['good'].'@'.$pair['source']] ?? $taken[$pair['good'].'@'.$pair['market']];
+                        $considered[] = $candidate + ['rejected' => 'Claimed by another ship.', 'claimed_by' => $holder]
+                            + (str_contains($holder, ':') ? ['incoming_cargo' => $claims->inFlight($episode, $pair['good'], $pair['market'])] : []);
 
-                    continue;
+                        continue;
+                    }
+                    if (! $unclaimed || $compare($candidate, $unclaimed) < 0) {
+                        $unclaimed = $candidate;
+                    }
+                    if (($state['current_pair'] ?? null) === $key && $bid['sellPrice'] <= $state['first_seen'][$key] * $rules['switch']['bid_below_first_seen']) {
+                        $considered[] = $candidate + ['rejected' => 'Switch: buyer bid at or below first-seen threshold.'];
+
+                        continue;
+                    }
+                    $ranked[] = $candidate;
+                } catch (GameException $exception) {
+                    $considered[] = $pair + ['rejected' => $exception->getMessage()];
                 }
-                $ranked[] = $candidate;
-            } catch (GameException $exception) {
-                $considered[] = $pair + ['rejected' => $exception->getMessage()];
             }
-        }
-        usort($ranked, $compare);
-        if ($ranked) {
-            $current = collect($ranked)->firstWhere('key', $state['current_pair'] ?? null);
-            if ($current && $ranked[0]['key'] !== $current['key'] && $ranked[0]['score'] < $current['score'] * $rules['switch']['better_pair_ratio']) {
-                $ranked = array_values(array_filter($ranked, fn ($row) => $row !== $current));
-                array_unshift($ranked, $current);
+            usort($ranked, $compare);
+            if ($ranked) {
+                $current = collect($ranked)->firstWhere('key', $state['current_pair'] ?? null);
+                if ($current && $ranked[0]['key'] !== $current['key'] && $ranked[0]['score'] < $current['score'] * $rules['switch']['better_pair_ratio']) {
+                    $ranked = array_values(array_filter($ranked, fn ($row) => $row !== $current));
+                    array_unshift($ranked, $current);
+                }
             }
-        }
-        if ($persist) {
-            $episode->update(['state' => $state]);
-        }
-        $best = ['best_margin_basis' => 'forecast', 'selection_basis' => 'conservative_score',
-            'best_available_score' => $available['score'] ?? null, 'best_unclaimed_score' => $unclaimed['score'] ?? null, 'best_available' => $available['predicted_margin'] ?? null, 'best_available_key' => $available['key'] ?? null,
-            'best_unclaimed' => $unclaimed['predicted_margin'] ?? null, 'best_unclaimed_key' => $unclaimed['key'] ?? null];
-        $ranked = array_map(fn ($candidate) => $candidate + $best, $ranked);
-        foreach ($ranked as $candidate) {
-            $considered[] = $candidate;
-        }
+            if ($episode->exists && $persist && $newFirstSeen !== []) {
+                $freshState = $episode->refresh()->state ?? [];
+                $freshState['first_seen'] = ($freshState['first_seen'] ?? []) + $newFirstSeen;
+                $episode->update(['state' => $freshState]);
+            }
+            $best = ['best_margin_basis' => 'forecast', 'selection_basis' => 'conservative_score',
+                'best_available_score' => $available['score'] ?? null, 'best_unclaimed_score' => $unclaimed['score'] ?? null, 'best_available' => $available['predicted_margin'] ?? null, 'best_available_key' => $available['key'] ?? null,
+                'best_unclaimed' => $unclaimed['predicted_margin'] ?? null, 'best_unclaimed_key' => $unclaimed['key'] ?? null];
+            $ranked = array_map(fn ($candidate) => $candidate + $best, $ranked);
+            foreach ($ranked as $candidate) {
+                $considered[] = $candidate;
+            }
 
-        return $ranked;
+            return $ranked;
+        });
     }
 
     public function projectPair(Agent $agent, array $ship, ?array $departure, array $pair, array $ask, array $bid,

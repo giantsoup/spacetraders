@@ -6,6 +6,7 @@ use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\AutomationRunner;
 use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignDirector;
+use App\Gameplay\CampaignDiscovery;
 use App\Gameplay\CampaignFleet;
 use App\Gameplay\CampaignPlaybook;
 use App\Gameplay\CampaignProbeBootstrap;
@@ -16,8 +17,11 @@ use App\Gameplay\CreditAccounting;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\FuelPlanner;
 use App\Gameplay\GameException;
+use App\Gameplay\OperationPlanner;
 use App\Gameplay\RequestDeferred;
 use App\Gameplay\ShipCommandExecutor;
+use App\Gameplay\SpaceTradersApi;
+use App\Gameplay\StaleQuote;
 use App\Models\Agent;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
@@ -29,6 +33,7 @@ use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
+use App\Services\SpaceTradersClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
@@ -1846,8 +1851,11 @@ class CampaignProbePoolTest extends TestCase
         $this->assertSame(['X1-TEST-BUYER', 'X1-TEST-OTHER'], $probeRuns->map(fn ($run) => $run->plan['destination'])->sort()->values()->all());
     }
 
-    public function test_c0_trade_does_not_ping_pong_to_second_source_while_awaiting_buyer_quote_for_top_pair(): void
+    #[DataProvider('awaitedBuyerOutcomes')]
+    public function test_c0_trade_waits_at_the_top_source_then_uses_the_fresh_quote_or_remote_fallback(bool $buyerObserved): void
     {
+        $this->travelTo(now()->startOfSecond());
+        config(['gameplay.campaign_commit_quote_max_age_seconds' => 180]);
         $this->editWorld(function (array &$world) {
             $world['credits'] = 200000;
             $world['ships'][0]['nav']['waypointSymbol'] = 'X1-TEST-S1';
@@ -1939,6 +1947,34 @@ class CampaignProbePoolTest extends TestCase
         $decision = CampaignEvent::where('kind', 'decision')->latest('id')->firstOrFail();
         $this->assertSame('awaiting_buyer_quote', $decision->data['choice']);
 
+        if (! $buyerObserved) {
+            $key = 'MEDICINE@X1-TEST-B1';
+            $this->assertSame(now()->timestamp, $episode->refresh()->state['awaited_pair_since'][$key]['since']);
+            $this->editWorld(function (&$world) {
+                $world['ships'][1]['nav']['route']['arrival'] = now()->addMinutes(10)->toIso8601String();
+                $world['fuel_consumption'] = 2;
+            });
+            $this->travel(180)->seconds();
+            GameObservation::where('kind', 'market')->whereIn('symbol', ['X1-TEST-S2', 'X1-TEST-B2'])->update(['observed_at' => now()]);
+            $this->tickDirector();
+
+            $this->assertSame(now()->timestamp + 180, $episode->refresh()->state['suppressed_pairs'][$key]);
+            $position = AutomationRun::where('ship_symbol', 'LOCAL-1')->whereNotNull('active_agent_id')->sole();
+            $this->assertSame('scout', $position->strategy);
+            $this->assertSame('X1-TEST-S2', $position->plan['destination']);
+            $this->runToCompletion($position);
+            $this->assertSame('completed', $position->fresh()->state->value, $position->fresh()->blocked_reason ?? '');
+
+            $this->tickDirector();
+            $trade = AutomationRun::where('ship_symbol', 'LOCAL-1')->whereNotNull('active_agent_id')->sole();
+            $this->assertSame('trade', $trade->strategy);
+            $this->assertSame('ADVANCED_CIRCUITRY', $trade->plan['symbol']);
+            $this->assertSame('X1-TEST-S2', $trade->plan['site']);
+            $this->assertSame('X1-TEST-B2', $trade->plan['market']);
+
+            return;
+        }
+
         // Case 3: Once LOCAL-2 arrives at X1-TEST-B1, LOCAL-1 immediately starts trading MEDICINE S1 -> B1,
         // and LOCAL-2 stays parked at X1-TEST-B1 (not dispatched away!).
         $this->editWorld(function (array &$world) {
@@ -1951,6 +1987,419 @@ class CampaignProbePoolTest extends TestCase
         $this->assertSame('MEDICINE', $trade->plan['symbol']);
         $this->assertSame('X1-TEST-B1', $trade->plan['market']);
         $this->assertSame(0, AutomationRun::where('ship_symbol', 'LOCAL-2')->whereNotNull('active_agent_id')->count());
+    }
+
+    public static function awaitedBuyerOutcomes(): array
+    {
+        return ['buyer observed' => [true], 'buyer unavailable' => [false]];
+    }
+
+    public function test_quote_failure_respects_snapshot_loading_and_seller_first_boundaries(): void
+    {
+        $this->travelTo(now()->startOfSecond());
+        $this->installTradeQuotes();
+        $trades = app(CampaignTrade::class);
+        $planner = app(OperationPlanner::class);
+        $source = 'X1-TEST-ROCK';
+        $buyer = 'X1-TEST-PORT';
+        $good = 'IRON_ORE';
+        $market = GameObservation::where('kind', 'market');
+        $buyerRow = (clone $market)->where('symbol', $buyer)->sole();
+        $sellerRow = (clone $market)->where('symbol', $source)->sole();
+
+        $buyerRow->update(['observed_at' => now()->subSeconds(180)]);
+        $this->assertSame($good, $planner->quote($this->agent, $buyer, $good)['symbol']);
+        $this->assertFalse($trades->buyerQuoteFreshAlone($this->agent, $buyer, $good, 180));
+        $buyerRow->update(['observed_at' => now()->subSeconds(181)]);
+        try {
+            $planner->quote($this->agent, $buyer, $good);
+            $this->fail('The snapshot must fail just past its age limit.');
+        } catch (StaleQuote) {
+            $this->assertSame('buyer', $trades->quoteLifeFailureSide($this->agent, $source, $buyer, $good, 5, 180));
+        }
+        $buyerRow->update(['observed_at' => now()->subSeconds(120)]);
+        $this->assertSame(60, CampaignTrade::loadingSecondsForVolume(5, 1));
+        $this->assertSame('buyer', $trades->quoteLifeFailureSide($this->agent, $source, $buyer, $good, 5, 180));
+        $buyerRow->update(['observed_at' => now()->subSeconds(119)]);
+        $this->assertNull($trades->quoteLifeFailureSide($this->agent, $source, $buyer, $good, 5, 180));
+
+        $sellerRow->update(['observed_at' => now()->subSeconds(135)]);
+        $buyerRow->update(['observed_at' => now()->subSeconds(130)]);
+        $this->assertSame('seller', $trades->quoteLifeFailureSide($this->agent, $source, $buyer, $good, 5, 180));
+        $buyerRow->update(['observed_at' => now()->subSeconds(181)]);
+        $this->assertSame('buyer', $trades->quoteLifeFailureSide($this->agent, $source, $buyer, $good, 5, 180));
+        $sellerRow->update(['data' => $sellerRow->data + ['invalidated_by_action' => 10]]);
+        $this->assertSame('seller', $trades->quoteLifeFailureSide($this->agent, $source, $buyer, $good, 5, 180));
+        $this->assertFalse($trades->buyerQuoteFreshAlone($this->agent, $buyer, $good, 180));
+    }
+
+    public function test_buyer_wait_suppression_survives_ranking_then_lifts_and_prunes(): void
+    {
+        $this->travelTo(now()->startOfSecond());
+        config(['gameplay.campaign_commit_quote_max_age_seconds' => 180]);
+        $this->installTradeQuotes();
+        $grant = $this->approve($this->bootstrapBody(target: 2, maxPrice: 50000, minWorkingCapital: 75000));
+        $episode = $this->tradeEpisode($grant);
+        $market = GameObservation::where('kind', 'market')->where('symbol', 'X1-TEST-PORT')->sole();
+        $market->update(['observed_at' => now()->subSeconds(181)]);
+        $director = app(CampaignDirector::class);
+        $considered = [];
+        $row = ['key' => 'IRON_ORE@X1-TEST-PORT', 'good' => 'IRON_ORE', 'source' => 'X1-TEST-ROCK', 'buyer' => 'X1-TEST-PORT', 'units' => 1];
+        $key = $row['key'];
+
+        $this->assertFalse($this->invokeDirector($director, 'shouldSuppressAwaitedBuyer', [$grant, $episode, $this->agent, $row, &$considered]));
+        $since = now()->timestamp;
+        $this->travel(179)->seconds();
+        $this->assertFalse($this->invokeDirector($director, 'shouldSuppressAwaitedBuyer', [$grant, $episode, $this->agent, $row, &$considered]));
+        $this->assertSame(['since' => $since, 'last_blocked_at' => now()->timestamp], $episode->state['awaited_pair_since'][$key]);
+        $this->travel(1)->seconds();
+        $this->assertTrue($this->invokeDirector($director, 'shouldSuppressAwaitedBuyer', [$grant, $episode, $this->agent, $row, &$considered]));
+        $this->assertArrayNotHasKey($key, $episode->state['awaited_pair_since']);
+        $this->assertSame(now()->timestamp + 180, $episode->state['suppressed_pairs'][$key]);
+
+        $ship = Ship::where('symbol', 'LOCAL-1')->sole()->snapshot;
+        $staleCopy = $episode->fresh();
+        $episode->update(['state' => ['first_seen' => [$key => 42]] + $episode->state]);
+        $trades = app(CampaignTrade::class);
+        $trades->rank($grant, $staleCopy, $this->agent, $ship, $considered);
+        $this->assertSame(42, $episode->fresh()->state['first_seen'][$key]);
+        $this->assertSame(now()->timestamp + 180, $episode->fresh()->state['suppressed_pairs'][$key]);
+
+        $market->update(['observed_at' => now()]);
+        $this->assertFalse((new \ReflectionMethod($director, 'isPairSuppressed'))->invoke($director, $episode, $this->agent, $grant, $row));
+        $ranker = $this->partialMock(CampaignTrade::class);
+        $ranker->shouldReceive('rank')->andReturn([$row], []);
+        $this->assertNull($this->invokeDirector($director, 'trade', [$grant, $episode, $this->agent, $ship, [], &$considered, ['LOCAL-2']]));
+        $this->assertArrayNotHasKey($key, $episode->refresh()->state['suppressed_pairs']);
+        $this->assertArrayNotHasKey($key, $episode->state['awaited_pair_since']);
+
+        $this->assertFalse($this->invokeDirector($director, 'shouldSuppressAwaitedBuyer', [$grant, $episode, $this->agent, $row, &$considered]));
+        $this->assertSame(now()->timestamp, $episode->state['awaited_pair_since'][$key]['since']);
+        $state = $episode->state;
+        $state['suppressed_pairs']['EXPIRED'] = now()->timestamp + 301;
+        $episode->update(['state' => $state]);
+        $this->travel(301)->seconds();
+        $this->assertNull($this->invokeDirector($director, 'trade', [$grant, $episode, $this->agent, $ship, [], &$considered]));
+        $this->assertSame([], $episode->refresh()->state['suppressed_pairs']);
+        $this->assertSame([], $episode->state['awaited_pair_since']);
+    }
+
+    public function test_only_admitted_active_scouts_clear_an_unobservable_buyers_timer(): void
+    {
+        $grant = $this->approve($this->bootstrapBody(target: 2, maxPrice: 50000, minWorkingCapital: 75000));
+        $episode = $this->tradeEpisode($grant);
+        $buyer = 'X1-TEST-UNOBSERVED';
+        $key = 'IRON_ORE@'.$buyer;
+        $row = ['key' => $key, 'buyer' => $buyer, 'source' => 'X1-TEST-ROCK'];
+        $scout = AutomationRun::create([
+            'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id, 'campaign_episode_id' => $episode->id,
+            'ship_symbol' => 'LOCAL-2', 'strategy' => 'scout', 'state' => 'preview', 'plan_version' => 1,
+            'plan' => ['destination' => $buyer, 'mesh_work' => 'market'], 'totals' => [], 'fingerprint' => 'synthetic',
+            'expires_at' => now()->addHour(),
+        ]);
+        $director = app(CampaignDirector::class);
+        $considered = [];
+        $this->assertFalse($this->invokeDirector($director, 'shouldSuppressAwaitedBuyer', [$grant, $episode, $this->agent, $row, &$considered]));
+        $this->assertArrayHasKey($key, $episode->state['awaited_pair_since']);
+        $scout->update(['state' => 'running', 'active_agent_id' => $this->agent->id, 'started_at' => now()]);
+        $this->assertFalse($this->invokeDirector($director, 'shouldSuppressAwaitedBuyer', [$grant, $episode, $this->agent, $row, &$considered]));
+        $this->assertArrayNotHasKey($key, $episode->state['awaited_pair_since']);
+        $scout->update(['state' => 'waiting', 'stop_requested_at' => now()]);
+        $this->assertFalse($this->invokeDirector($director, 'shouldSuppressAwaitedBuyer', [$grant, $episode, $this->agent, $row, &$considered]));
+        $this->assertArrayHasKey($key, $episode->state['awaited_pair_since']);
+        $scout->update(['stop_requested_at' => null]);
+        $this->assertFalse($this->invokeDirector($director, 'shouldSuppressAwaitedBuyer', [$grant, $episode, $this->agent, $row, &$considered]));
+        $this->assertArrayNotHasKey($key, $episode->state['awaited_pair_since']);
+    }
+
+    #[DataProvider('firstQuoteFailures')]
+    public function test_seller_first_failures_leave_remote_source_fallbacks_eligible(string $site, string $sellerFailure): void
+    {
+        $this->travelTo(now()->startOfSecond());
+        $this->installTradeQuotes();
+        $body = Yaml::parse($this->bootstrapBody(target: 2, maxPrice: 50000, minWorkingCapital: 75000));
+        if ($site === 'mesh') {
+            $body['probes']['mesh'] = Yaml::parseFile(base_path('campaigns/weekly-system-saturation.yaml'))['probes']['mesh'];
+        } elseif ($site === 'no_probe') {
+            Ship::where('symbol', 'LOCAL-2')->delete();
+        }
+        $grant = $this->approve(Yaml::dump($body, 10));
+        $episode = $this->tradeEpisode($grant);
+        $ship = Ship::where('symbol', 'LOCAL-1')->sole()->snapshot;
+        $top = ['key' => 'IRON_ORE@X1-TEST-PORT', 'good' => 'IRON_ORE', 'source' => 'X1-TEST-ROCK', 'buyer' => 'X1-TEST-PORT', 'units' => 5,
+            'max_inventory' => 400, 'fuel_safety_ceiling' => 100, 'departure_refuel' => 0, 'predicted_cost' => 400, 'predicted_margin' => 100,
+            'score' => 20, 'seconds' => 300];
+        $fallback = array_replace($top, ['key' => 'IRON_ORE@X1-TEST-B', 'source' => 'X1-TEST-YARD', 'buyer' => 'X1-TEST-B']);
+        if ($site === 'pool') {
+            AutomationRun::create([
+                'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id, 'campaign_episode_id' => $episode->id,
+                'ship_symbol' => 'LOCAL-2', 'strategy' => 'scout', 'state' => 'preview', 'plan_version' => 1,
+                'plan' => ['destination' => $top['buyer']], 'totals' => [], 'expires_at' => now()->addHour(),
+            ]);
+        }
+        $buyer = GameObservation::where('kind', 'market')->where('symbol', $top['buyer'])->sole();
+        $seller = GameObservation::where('kind', 'market')->where('symbol', $top['source'])->sole();
+        $buyerAge = $sellerFailure === 'loading' ? ($site === 'mesh' ? 180 : 130) : 181;
+        $buyer->update(['observed_at' => now()->subSeconds($buyerAge)]);
+        match ($sellerFailure) {
+            'invalidated' => $seller->update(['data' => $seller->data + ['invalidated_by_action' => 4]]),
+            'snapshot' => $seller->update(['observed_at' => now()->subSeconds(181)]),
+            'loading' => $seller->update(['observed_at' => now()->subSeconds(135)]),
+            'missing' => $seller->delete(),
+            'fresh' => null,
+        };
+        $ranker = $this->partialMock(CampaignTrade::class);
+        $ranker->shouldReceive('rank')->andReturn([$top, $fallback]);
+        $api = $this->partialMock(SpaceTradersApi::class);
+        if (in_array($site, ['catch', 'no_probe'], true)) {
+            $api->shouldReceive('market')->once()->with($this->agent, $top['source'], false)
+                ->andReturn(['symbol' => $top['source'], 'imports' => [], 'exports' => [], 'exchange' => []]);
+        } else {
+            $api->shouldNotReceive('market');
+        }
+        $preview = new AutomationRun(['strategy' => 'scout', 'plan' => ['destination' => $fallback['source']]]);
+        $this->partialMock(AutomationRunner::class)->shouldReceive('preview')->once()
+            ->withArgs(fn ($agent, $symbol, $plan) => $plan['strategy'] === 'scout' && $plan['destination'] === $fallback['source'])->andReturn($preview);
+        $considered = [];
+        $director = app(CampaignDirector::class);
+        $run = $this->invokeDirector($director, 'trade', [$grant, $episode, $this->agent, $ship, [], &$considered, ['LOCAL-2']]);
+        $this->assertSame($preview, $run, json_encode($considered));
+        $this->assertFalse((new \ReflectionProperty($director, 'awaitingQuote'))->getValue($director));
+        $this->assertArrayNotHasKey('awaited_pair_since', $episode->fresh()->state);
+    }
+
+    public static function firstQuoteFailures(): array
+    {
+        $cases = [];
+        foreach (['pool', 'mesh', 'catch'] as $site) {
+            foreach (['missing', 'invalidated', 'snapshot', 'loading'] as $failure) {
+                $cases[$site.' '.$failure] = [$site, $failure];
+            }
+        }
+
+        return $cases + ['buyer stale without probes' => ['no_probe', 'fresh']];
+    }
+
+    #[DataProvider('refreshFallbacks')]
+    public function test_trade_rerank_preserves_eligible_same_source_fallbacks(string $scenario): void
+    {
+        $this->installTradeQuotes();
+        $body = Yaml::parse($this->bootstrapBody(target: 2, maxPrice: 50000, minWorkingCapital: 75000));
+        if ($scenario === 'mesh') {
+            $body['probes']['mesh'] = Yaml::parseFile(base_path('campaigns/weekly-system-saturation.yaml'))['probes']['mesh'];
+        }
+        $grant = $this->approve(Yaml::dump($body, 10));
+        $episode = $this->tradeEpisode($grant);
+        $ship = Ship::where('symbol', 'LOCAL-1')->sole()->snapshot;
+        $source = $ship['nav']['waypointSymbol'];
+        $top = ['key' => 'IRON_ORE@X1-TEST-B1', 'good' => 'IRON_ORE', 'source' => $source, 'buyer' => 'X1-TEST-B1', 'units' => 1,
+            'max_inventory' => 100, 'fuel_safety_ceiling' => 100, 'departure_refuel' => 0, 'predicted_cost' => 100, 'predicted_margin' => 100,
+            'score' => 20, 'seconds' => 300];
+        $fallback = array_replace($top, ['key' => 'IRON_ORE@X1-TEST-PORT', 'buyer' => 'X1-TEST-PORT']);
+        if ($scenario === 'usable_reserved') {
+            [$top, $fallback] = [$fallback, $top];
+            $row = GameObservation::where('kind', 'market')->where('symbol', $top['buyer'])->sole()->replicate(['symbol']);
+            $row->forceFill(['symbol' => $fallback['buyer']])->save();
+        }
+        $newWinner = array_replace($top, ['key' => 'IRON_ORE@X1-TEST-C', 'buyer' => 'X1-TEST-C']);
+        if ($scenario === 'blocked_remote') {
+            $newWinner['source'] = 'X1-TEST-OTHER';
+        }
+        $this->partialMock(SpaceTradersApi::class)->shouldReceive('market')->once()->with($this->agent, $source, false)
+            ->andReturn(GameObservation::where('kind', 'market')->where('symbol', $source)->sole()->data);
+        if (in_array($scenario, ['reserved', 'blocked_remote', 'usable_reserved'], true)) {
+            AutomationRun::create([
+                'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id, 'campaign_episode_id' => $episode->id,
+                'ship_symbol' => 'LOCAL-2', 'strategy' => 'scout', 'state' => 'preview', 'plan_version' => 1,
+                'plan' => ['destination' => $scenario === 'reserved' ? $newWinner['buyer'] : $top['buyer']], 'totals' => [], 'expires_at' => now()->addHour(),
+            ]);
+        }
+        if ($scenario === 'suppressed') {
+            $episode->update(['state' => ['suppressed_pairs' => [$top['key'] => now()->timestamp + 90]]]);
+        }
+        $initial = in_array($scenario, ['blocked_remote', 'suppressed', 'usable_reserved'], true) ? [$top, $fallback] : [$fallback];
+        $after = in_array($scenario, ['suppressed', 'usable_reserved'], true) ? [$top, $fallback] : [$newWinner, $fallback];
+        $this->partialMock(CampaignTrade::class)->shouldReceive('rank')->twice()->andReturn($initial, $after);
+        $preview = new AutomationRun(['strategy' => 'trade']);
+        $runner = $this->partialMock(AutomationRunner::class);
+        if ($scenario === 'eligible') {
+            $runner->shouldNotReceive('preview');
+        } else {
+            $runner->shouldReceive('preview')->once()->withArgs(fn ($agent, $symbol, $plan) => $plan['market'] === $fallback['buyer'])->andReturn($preview);
+        }
+
+        $considered = [];
+        $run = $this->invokeDirector(app(CampaignDirector::class), 'trade', [$grant, $episode, $this->agent, $ship, [], &$considered, ['LOCAL-2']]);
+        $replans = collect($considered)->filter(fn ($row) => str_contains($row['rejected'] ?? '', 'Refreshed quotes changed'))->count();
+        $this->assertSame($scenario === 'eligible' ? null : $preview, $run, json_encode($considered));
+        $this->assertSame($scenario === 'eligible' ? 1 : 0, $replans);
+        if ($scenario === 'usable_reserved') {
+            $this->assertArrayNotHasKey('awaited_pair_since', $episode->fresh()->state);
+        }
+    }
+
+    public static function refreshFallbacks(): array
+    {
+        return [['blocked_remote'], ['suppressed'], ['reserved'], ['usable_reserved'], ['mesh'], ['eligible']];
+    }
+
+    public function test_rerank_excludes_blocked_and_reserved_rows_without_pinning_episode_roles(): void
+    {
+        $grant = $this->approve($this->bootstrapBody(target: 2, maxPrice: 50000, minWorkingCapital: 75000));
+        $episode = $this->tradeEpisode($grant);
+        $ship = Ship::where('symbol', 'LOCAL-1')->sole()->snapshot;
+        $source = $ship['nav']['waypointSymbol'];
+        $reserved = 'X1-TEST-REMOTE';
+        AutomationRun::create([
+            'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id, 'campaign_episode_id' => $episode->id,
+            'ship_symbol' => 'LOCAL-2', 'strategy' => 'scout', 'state' => 'preview', 'plan_version' => 1,
+            'plan' => ['destination' => $reserved], 'totals' => [], 'fingerprint' => 'synthetic', 'expires_at' => now()->addHour(),
+        ]);
+        $rows = [
+            ['key' => 'IRON_ORE@'.$reserved, 'good' => 'IRON_ORE', 'source' => $source, 'buyer' => $reserved],
+            ['key' => 'IRON_ORE@X1-TEST-B', 'good' => 'IRON_ORE', 'source' => 'X1-TEST-S', 'buyer' => 'X1-TEST-B'],
+            ['key' => 'IRON_ORE@X1-TEST-C', 'good' => 'IRON_ORE', 'source' => $source, 'buyer' => 'X1-TEST-C'],
+            ['key' => 'IRON_ORE@X1-TEST-D', 'good' => 'IRON_ORE', 'source' => $source, 'buyer' => 'X1-TEST-D'],
+        ];
+        $rejected = [$rows[2]['key'].'|'.$source => true];
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+        $eligible = $this->invokeDirector(app(CampaignDirector::class), 'filterEligibleCandidates', [$grant, $episode, $this->agent, $ship, $rows, false, true, $rejected]);
+        $writes = array_filter(DB::getQueryLog(), fn ($query) => ! preg_match('/^select /i', $query['query']));
+        DB::disableQueryLog();
+        $this->assertSame([$rows[3]], $eligible);
+        $this->assertSame([], $writes);
+        $this->assertArrayNotHasKey('role_ships', $episode->refresh()->state);
+    }
+
+    #[DataProvider('detailedRetryResults')]
+    public function test_listing_only_market_read_is_retried_once_within_the_transport_cache_scope(bool $detailed): void
+    {
+        $agent = $this->agent;
+        $symbol = Ship::where('symbol', 'LOCAL-1')->sole()->snapshot['nav']['waypointSymbol'];
+        $director = app(CampaignDirector::class);
+        $state = new \ReflectionProperty($director, 'marketReads');
+        $details = new \ReflectionProperty($director, 'detailedMarketReads');
+        $attempts = new \ReflectionProperty($director, 'detailedRetryAttempted');
+
+        $before = count($this->world()['calls']);
+        app(SpaceTradersClient::class)->scope(function () use ($agent, $symbol, $director, $state, $details, $attempts, $detailed) {
+            $ships = $this->world()['ships'];
+            $this->editWorld(fn (&$world) => $world['ships'] = []);
+            $api = app(SpaceTradersApi::class);
+            $initial = $api->market($agent, $symbol);
+            $this->assertEmpty($initial['tradeGoods'] ?? []);
+            $state->setValue($director, [$symbol => true]);
+            if ($detailed) {
+                $this->editWorld(fn (&$world) => $world['ships'] = $ships);
+            }
+
+            $this->assertTrue((new \ReflectionMethod($director, 'canRefreshTradeMarket'))->invoke($director, $agent, $symbol));
+            (new \ReflectionMethod($director, 'refreshTradeMarket'))->invoke($director, $agent, $symbol);
+            $this->assertSame($detailed ? [$symbol => true] : [], $details->getValue($director));
+            $this->assertSame([$symbol => true], $attempts->getValue($director));
+            $this->assertFalse((new \ReflectionMethod($director, 'canRefreshTradeMarket'))->invoke($director, $agent, $symbol));
+        });
+        $paths = array_column(array_slice($this->world()['calls'], $before), 'path');
+        $this->assertSame(2, count(array_keys($paths, '/systems/X1-TEST/waypoints/'.$symbol.'/market', true)));
+    }
+
+    public static function detailedRetryResults(): array
+    {
+        return ['detailed retry' => [true], 'listing retry' => [false]];
+    }
+
+    private function tradeEpisode(CampaignGrant $grant): CampaignEpisode
+    {
+        return CampaignEpisode::create([
+            'campaign_grant_id' => $grant->id, 'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
+            'start_credits' => $this->agent->credits, 'phase' => 'earn', 'opened_at' => now(), 'next_reset_at' => now()->addDays(5), 'state' => [],
+        ]);
+    }
+
+    private function installTradeQuotes(): void
+    {
+        $sync = app(AgentSynchronizer::class);
+        $fuel = ['symbol' => 'FUEL', 'tradeVolume' => 100, 'purchasePrice' => 60, 'sellPrice' => 50];
+        foreach (['X1-TEST-ROCK' => 100, 'X1-TEST-PORT' => 450] as $symbol => $price) {
+            $sync->observe($this->agent, 'market', $symbol, ['symbol' => $symbol, 'exports' => [], 'imports' => [], 'exchange' => [['symbol' => 'IRON_ORE'], ['symbol' => 'FUEL']],
+                'tradeGoods' => [['symbol' => 'IRON_ORE', 'tradeVolume' => 1, 'purchasePrice' => $price, 'sellPrice' => $price - 10], $fuel]]);
+        }
+    }
+
+    #[DataProvider('parkedReadOrigins')]
+    public function test_trade_reuses_detailed_reads_and_retries_failed_parked_reads(string $origin): void
+    {
+        $this->installTradeQuotes();
+        $body = Yaml::parse($this->bootstrapBody(target: 2, maxPrice: 50000, minWorkingCapital: 75000));
+        if ($origin === 'directory') {
+            $body['probes']['mesh'] = Yaml::parseFile(base_path('campaigns/weekly-system-saturation.yaml'))['probes']['mesh'];
+        }
+        $grant = $this->approve(Yaml::dump($body, 10));
+        $episode = $this->tradeEpisode($grant);
+        $buyer = 'X1-TEST-PORT';
+        $source = 'X1-TEST-ROCK';
+        $agent = $this->agent;
+        $sync = app(AgentSynchronizer::class);
+        $observer = $origin === 'role' ? $this->probeShip('LOCAL-2', $buyer) : FakeSpaceTraders::lightHauler('LOCAL-4', $buyer);
+        $this->editWorld(function (&$world) use ($observer, $origin, $buyer) {
+            if ($origin === 'role') {
+                $world['ships'][1] = $observer;
+            } else {
+                $world['ships'][] = $observer;
+            }
+            if ($origin === 'failed') {
+                $world['missing_markets'][] = $buyer;
+            }
+        });
+        $sync->saveShip($agent, $observer);
+        GameObservation::where('kind', 'market')->where('symbol', $buyer)->update(['observed_at' => now()->subMinutes(5)]);
+        $ship = Ship::where('symbol', 'LOCAL-1')->sole()->snapshot;
+        $director = app(CampaignDirector::class);
+        $read = new \ReflectionProperty($director, 'detailedMarketReads');
+        $row = ['key' => 'IRON_ORE@'.$buyer, 'good' => 'IRON_ORE', 'source' => $source, 'buyer' => $buyer, 'units' => 1,
+            'max_inventory' => 100, 'fuel_safety_ceiling' => 100, 'departure_refuel' => 0, 'predicted_cost' => 100,
+            'score' => 10, 'seconds' => 300];
+        $this->partialMock(CampaignTrade::class)->shouldReceive('rank')->andReturn([$row]);
+        $preview = new AutomationRun(['strategy' => 'trade']);
+        $this->partialMock(AutomationRunner::class)->shouldReceive('preview')->once()->andReturn($preview);
+        $before = count($this->world()['calls']);
+
+        app(SpaceTradersClient::class)->scope(function () use ($origin, $buyer, $agent, $episode, $grant, $director, $read, $ship, $preview) {
+            if ($origin === 'role') {
+                $this->invokeDirector($director, 'refreshRoleMarkets', [$grant, $episode, $agent, [], false]);
+            } elseif ($origin === 'directory') {
+                GameObservation::where('kind', 'market_listing')->where('symbol', $buyer)->delete();
+                $reads = $details = [];
+                app(CampaignDiscovery::class)->advance($episode, $agent, $reads, microtime(true) + 5, $details);
+                $this->assertArrayHasKey($buyer, $reads);
+                (new \ReflectionProperty($director, 'marketReads'))->setValue($director, $reads);
+                $read->setValue($director, $details);
+            } else {
+                $this->invokeDirector($director, 'refreshParkedMarket', [$episode, $agent]);
+            }
+            if ($origin === 'failed') {
+                $this->assertArrayNotHasKey($buyer, $read->getValue($director));
+                $this->editWorld(fn (&$world) => $world['missing_markets'] = []);
+            } else {
+                $this->assertArrayHasKey($buyer, $read->getValue($director));
+            }
+            $considered = [];
+            $run = $this->invokeDirector($director, 'trade', [$grant, $episode, $agent, $ship, [], &$considered, ['LOCAL-2']]);
+            $this->assertSame($preview, $run, json_encode($considered));
+        });
+        $paths = array_column(array_slice($this->world()['calls'], $before), 'path');
+        $this->assertSame($origin === 'failed' ? 2 : 1, count(array_keys($paths, '/systems/X1-TEST/waypoints/'.$buyer.'/market', true)));
+    }
+
+    public static function parkedReadOrigins(): array
+    {
+        return [['role'], ['parked'], ['failed'], ['directory']];
+    }
+
+    private function invokeDirector(CampaignDirector $director, string $method, array $arguments): mixed
+    {
+        return (new \ReflectionMethod($director, $method))->invokeArgs($director, $arguments);
     }
 
     public function test_stationed_probe_is_excluded_from_pool_scouting_and_stays_parked(): void

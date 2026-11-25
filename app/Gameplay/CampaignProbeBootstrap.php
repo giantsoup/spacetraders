@@ -592,7 +592,7 @@ class CampaignProbeBootstrap
      *
      * @param  list<string>  $busyShips
      */
-    public function plan(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $busyShips, array &$considered, ?float $deadline = null, string $type = 'SHIP_PROBE', ?array &$meshReads = null, ?array &$purchaseYards = null): ?AutomationRun
+    public function plan(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $busyShips, array &$considered, ?float $deadline = null, string $type = 'SHIP_PROBE', ?array &$meshReads = null, ?array &$purchaseYards = null, ?array &$detailedRead = null): ?AutomationRun
     {
         if (microtime(true) >= ($deadline ?? INF)) {
             return null;
@@ -605,7 +605,7 @@ class CampaignProbeBootstrap
             $meshReads ??= [];
             $purchaseYards = [];
 
-            return $this->planMesh($grant, $episode, $agent, $policy, $busyShips, $considered, $deadline ?? INF, $meshReads, $purchaseYards);
+            return $this->planMesh($grant, $episode, $agent, $policy, $busyShips, $considered, $deadline ?? INF, $meshReads, $purchaseYards, $detailedRead);
         }
         if ($hauler) {
             $evaluation = $saturation->evaluate($grant, $episode, $agent, offerIndependentOnly: true);
@@ -617,6 +617,9 @@ class CampaignProbeBootstrap
                 $considered[] = ['strategy' => $strategy, 'gates' => $evaluation['gates'], 'hold' => $evaluation['hold']];
 
                 return null;
+            }
+            if (($evaluation['idle_pass'] ?? false) && CampaignSaturation::isOfferIndependentHold($episode->state['saturation_hold'] ?? null)) {
+                $saturation->record($grant, $episode, $evaluation);
             }
         } elseif ($policy) {
             [$owned, $target] = $this->probeTarget($episode, $agent, $policy);
@@ -739,7 +742,7 @@ class CampaignProbeBootstrap
     }
 
     private function planMesh(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $policy, array $busy,
-        array &$considered, float $deadline, array &$reads, array &$purchaseYards): ?AutomationRun
+        array &$considered, float $deadline, array &$reads, array &$purchaseYards, ?array &$detailedRead = null): ?AutomationRun
     {
         $selector = app(ProbeYardSelector::class);
         $mesh = app(CampaignMesh::class);
@@ -777,7 +780,7 @@ class CampaignProbeBootstrap
             $ranked = $selector->rank($episode, $agent, $policy, $busy, $reserve, $deadline, $considered, $purchaseYards);
             if ($poll && $purchaseYards !== []) {
                 $poll = false;
-                $refreshed = app(MeshPoller::class)->refresh($episode, $agent, $reads, $deadline, phase: 'purchase', purchaseYards: $purchaseYards);
+                $refreshed = app(MeshPoller::class)->refresh($episode, $agent, $reads, $deadline, phase: 'purchase', purchaseYards: $purchaseYards, detailedRead: $detailedRead);
                 if ($refreshed['successful'] !== []) {
                     continue;
                 }
@@ -814,7 +817,7 @@ class CampaignProbeBootstrap
                 $started = $mesh->holdPurchase($episode, $ship['symbol'], function () use ($runner, $selector, $episode, $agent, $policy, $busy,
                     $reserve, $deadline, $candidate, $ship, $yard, $limits, $tried, $key, &$considered, &$run) {
                     $run = $candidate['position']
-                        ? $runner->previewMeshScout($agent, $ship, $yard, $limits, $episode, 'shipyard')
+                        ? $runner->previewMeshScout($agent, $ship, $yard, $limits, $episode, 'shipyard', $deadline)
                         : $runner->previewProbePurchase($agent, $ship['symbol'], $yard, $limits, $episode, $deadline);
                     if (! $candidate['position']) {
                         $ranked = $selector->rank($episode, $agent, $policy, $busy, $reserve, $deadline, $considered, ignoreRun: $run->id);
@@ -835,7 +838,7 @@ class CampaignProbeBootstrap
             } catch (GameException $exception) {
                 $considered[] = ['strategy' => $candidate['position'] ? 'scout' : 'buy_probe', 'ship' => $ship['symbol'], 'yard' => $yard,
                     'rejected' => $exception->getMessage()];
-                if ($exception->uncertain || ($run && ! $mesh->invalidatePreview($agent, $run))) {
+                if ($exception->uncertain || ($run && ! $mesh->invalidatePreview($agent, $run, $deadline))) {
                     $purchaseYards = [];
 
                     return null;
@@ -948,7 +951,7 @@ class CampaignProbeBootstrap
         $grant = $episode->grant();
         $hauler = $type === 'SHIP_LIGHT_HAULER';
         if (microtime(true) >= ($deadline ?? INF)) {
-            throw new RequestDeferred('Mesh purchase exceeded the pass deadline.', 5);
+            throw (new RequestDeferred('Mesh purchase exceeded the pass deadline.', 5, delaySource: 'pass_deadline', deadlineCapped: true))->withDeadline($deadline);
         }
         $label = $hauler ? 'Hauler' : 'Probe';
         $policy = $this->purchasePolicy($grant, $episode, $agent, $type);
@@ -967,7 +970,8 @@ class CampaignProbeBootstrap
             $this->assertPurchaseBudget($agent);
             $this->assertTarget($agent, $episode, $policy, $type, $ignoreRunId);
         }
-        app(AgentSynchronizer::class)->sync($agent, false, freshFleet: $meshPurchase || RequestBudget::currentMeshAllowance() !== null);
+        app(AgentSynchronizer::class)->sync($agent, false, freshFleet: $meshPurchase || RequestBudget::currentMeshAllowance() !== null,
+            reuseLockedSeconds: $meshPurchase ? (float) config('gameplay.locked_fleet_reuse_seconds', 30) : 0);
         if (! $hauler) {
             $this->assertPurchaseBudget($agent);
         }
@@ -1401,7 +1405,7 @@ class CampaignProbeBootstrap
             $reads++;
             try {
                 if ($mesh) {
-                    app(MeshPoller::class)->read($episode, $agent, $symbol, 'shipyard', null, 'directory', $meshReads);
+                    app(MeshPoller::class)->read($episode, $agent, $symbol, 'shipyard', null, 'directory', $meshReads, deadline: $deadline);
                 } else {
                     $sync->observe($agent, 'shipyard', $symbol, $api->shipyard($agent, $symbol));
                 }

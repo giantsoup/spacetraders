@@ -2839,7 +2839,7 @@ class FleetSaturationTransportTest extends TestCase
 
             public function __construct(private ?Closure $hook) {}
 
-            public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75): void
+            public function reserve(?string $token = null, ?string $account = null, string $priority = 'discovery', float $maxWait = 0.75, ?float $baseMaxWait = null, ?float $deadline = null): void
             {
                 if ($this->hook !== null && in_array($priority, ['write', 'settlement'], true) && ShipAction::where('state', 'sending')->exists()) {
                     // Install an exhausted bucket with a short upstream retry window.
@@ -2847,7 +2847,7 @@ class FleetSaturationTransportTest extends TestCase
                     $this->observe(new Response(new PsrResponse(200, ['Retry-After' => '0.5', 'X-RateLimit-Remaining' => '0'])), $token, $account);
                 }
 
-                parent::reserve($token, $account, $priority, $maxWait);
+                parent::reserve($token, $account, $priority, $maxWait, $baseMaxWait, $deadline);
             }
 
             protected function now(): float

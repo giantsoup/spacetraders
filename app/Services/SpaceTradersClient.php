@@ -31,6 +31,26 @@ class SpaceTradersClient
 
     private ?float $scopeDeadline = null;
 
+    private static int $writes = 0;
+
+    private static int $cacheHits = 0;
+
+    public static function writeCount(): int
+    {
+        return self::$writes;
+    }
+
+    public static function cacheHitCount(): int
+    {
+        return self::$cacheHits;
+    }
+
+    public static function resetCounters(): void
+    {
+        self::$writes = 0;
+        self::$cacheHits = 0;
+    }
+
     public function scope(callable $work, string $priority = 'critical', ?float $deadline = null): mixed
     {
         $previous = $this->priority;
@@ -55,24 +75,29 @@ class SpaceTradersClient
         $read = strtolower($method) === 'get';
         $key = hash('sha256', json_encode([$path, $data, $token]));
         if ($read && ! $fresh && $this->scopeDepth > 0 && isset($this->reads[$key]) && microtime(true) - $this->reads[$key]['at'] < 2) {
+            self::$cacheHits++;
+
             return $this->reads[$key]['response'];
         }
         if (! $read) {
+            self::$writes++;
             // Even rejected or ambiguous writes invalidate every read in this preflight scope.
             $this->reads = [];
         }
-        // A successful preflight can exhaust a one-second window plus our safety margin.
-        // Short waits apply to writes too; actual error backoffs still defer before transport.
-        $maxWait = 2.0;
-        if ($deadline !== null) {
-            $maxWait = min($maxWait, max(0, $deadline - microtime(true) - 0.1));
-        }
+        $remaining = ($deadline ?? INF) - microtime(true);
         $priority = $read ? $this->priority : ($this->priority === 'settlement' ? 'settlement' : 'write');
         $budget = app(RequestBudget::class);
-        RequestBudget::forAgent($agentSymbol, fn () => $budget->reserve($token, $account, $priority, $maxWait));
-        $timeout = $deadline === null ? 30 : min(30, $deadline - microtime(true));
+        if ($remaining > 0) {
+            // A successful preflight can exhaust a one-second window plus our safety margin.
+            // Short waits apply to writes too; actual error backoffs still defer before transport.
+            $baseMaxWait = 2.0;
+            $maxWait = min($baseMaxWait, max(0, $remaining - 0.1));
+            RequestBudget::forAgent($agentSymbol, fn () => $budget->reserve($token, $account, $priority, $maxWait, $baseMaxWait, $deadline));
+            $remaining = ($deadline ?? INF) - microtime(true);
+        }
+        $timeout = min(30, $remaining);
         if ($timeout < 0.1) {
-            throw new RequestDeferred('Investigation elapsed-time limit reached before transport.', 5);
+            throw (new RequestDeferred('Investigation elapsed-time limit reached before transport.', 5, delaySource: 'transport_deadline', deadlineCapped: true))->withDeadline($deadline);
         }
         $request = Http::baseUrl(self::BASE_URL)
             ->acceptJson()

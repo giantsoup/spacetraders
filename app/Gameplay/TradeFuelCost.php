@@ -3,7 +3,6 @@
 namespace App\Gameplay;
 
 use App\Models\Agent;
-use App\Models\GameObservation;
 
 final class TradeFuelCost
 {
@@ -53,8 +52,7 @@ final class TradeFuelCost
         $listings = $this->fuel->listings($agent);
         $prices = [];
         foreach (array_unique($endpoints) as $symbol) {
-            $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')
-                ->where('symbol', $symbol)->orderByDesc('observed_at')->orderByDesc('id')->first();
+            $quote = $this->fuel->marketRow($agent, $symbol);
             $fuel = collect($quote?->data['tradeGoods'] ?? [])->firstWhere('symbol', 'FUEL');
             if (! $quote || ! $fuel || ! empty($quote->data['invalidated_by_action']) || ($fuel['purchasePrice'] ?? 0) < 1 || ($fuel['tradeVolume'] ?? 0) < 1
                 || $quote->observed_at->lt(now()->subSeconds(config('gameplay.fuel_quote_max_seconds', 21600))) || ! $this->fuel->listsFuel($agent, $symbol, $listings)) {

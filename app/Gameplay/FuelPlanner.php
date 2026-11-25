@@ -11,6 +11,54 @@ class FuelPlanner
 {
     public const MODEL = 'Client CRUISE upper allowance: ceil(Euclidean distance) + 2 per distinct waypoint; not a server formula.';
 
+    private static int $depth = 0;
+
+    private static array $cache = [];
+
+    public static function memoize(callable $work): mixed
+    {
+        self::$depth++;
+        try {
+            return $work();
+        } finally {
+            if (--self::$depth === 0) {
+                self::$cache = [];
+            }
+        }
+    }
+
+    private function cached(string $key, callable $load): mixed
+    {
+        if (self::$depth === 0) {
+            return $load();
+        }
+        if (! array_key_exists($key, self::$cache)) {
+            self::$cache[$key] = $load();
+        }
+
+        return self::$cache[$key];
+    }
+
+    private function waypoints(Agent $agent): Collection
+    {
+        return $this->cached("{$agent->id}:{$agent->reset_id}:waypoints", fn () => GameObservation::where('agent_id', $agent->id)
+            ->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->get()->keyBy('symbol'));
+    }
+
+    private function markets(Agent $agent): Collection
+    {
+        return $this->cached("{$agent->id}:{$agent->reset_id}:markets", fn () => GameObservation::where('agent_id', $agent->id)
+            ->where('reset_id', $agent->reset_id)->where('kind', 'market')->get()->keyBy('symbol'));
+    }
+
+    public function marketRow(Agent $agent, string $symbol): ?GameObservation
+    {
+        return $this->cached("{$agent->id}:{$agent->reset_id}:market:{$symbol}", fn () => self::$depth > 0
+            ? $this->markets($agent)->get($symbol)
+            : GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')
+                ->where('symbol', $symbol)->orderByDesc('observed_at')->orderByDesc('id')->first());
+    }
+
     /** @param  Collection<string, GameObservation>|null  $listings  Same-agent/reset listings keyed by symbol for this planning scope. */
     public function leg(Agent $agent, array $ship, string $destination, int $creditReserve = 0, ?int $fuelReserve = null, ?string $policy = null, ?Collection $listings = null, bool $onboardOnly = false): array
     {
@@ -19,7 +67,7 @@ class FuelPlanner
         if ($ship['nav']['flightMode'] !== 'CRUISE' || ($ship['fuel']['capacity'] < 1 && ! $this->fuelFree($ship))) {
             throw new GameException('Fuel behavior for this mode or zero-capacity ship is unvalidated.');
         }
-        $points = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->get()->keyBy('symbol');
+        $points = $this->waypoints($agent);
         $from = $points->get($ship['nav']['waypointSymbol'])?->data;
         $to = $points->get($destination)?->data;
         if (! $from || ! $to || $from['systemSymbol'] !== $to['systemSymbol'] || $to['systemSymbol'] !== $ship['nav']['systemSymbol']) {
@@ -40,7 +88,7 @@ class FuelPlanner
             $candidates[] = ['continuation' => $destination, 'continuation_fuel' => 0, 'required_fuel' => $outbound + $fuelReserve,
                 'refuel_ceiling' => 0, 'fuel_price_at' => null, 'arrival_state' => 'Sell-only recovery; onboard fuel covers delivery plus reserve.'];
         }
-        $quotes = $onboardOnly ? [] : GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->get();
+        $quotes = $onboardOnly ? [] : $this->markets($agent);
         foreach ([false, true] as $stale) {
             if ($candidates !== []) {
                 break;
@@ -124,7 +172,7 @@ class FuelPlanner
         if (! $this->listsFuel($agent, $waypoint, $listings)) {
             return null;
         }
-        $market = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $waypoint)->orderByDesc('observed_at')->orderByDesc('id')->first();
+        $market = $this->marketRow($agent, $waypoint);
         $fuel = collect($market?->data['tradeGoods'] ?? [])->firstWhere('symbol', 'FUEL');
         if (! $market || ! $fuel || ! empty($market->data['invalidated_by_action']) || $fuel['purchasePrice'] < 1 || $fuel['tradeVolume'] < 1
             || $market->observed_at->lt(now()->subSeconds(config('gameplay.snapshot_seconds')))) {
@@ -137,7 +185,7 @@ class FuelPlanner
     /** @param  Collection<string, GameObservation>|null  $listings */
     public function listsFuel(Agent $agent, string $waypoint, ?Collection $listings = null): bool
     {
-        $listing = ($listings ?? $this->listings($agent))->get($waypoint);
+        $listing = $this->listings($agent, $listings)->get($waypoint);
 
         return $listing && in_array('FUEL', array_column(array_merge($listing->data['exports'] ?? [], $listing->data['exchange'] ?? []), 'symbol'), true);
     }
@@ -179,7 +227,7 @@ class FuelPlanner
         if ($ship['nav']['flightMode'] !== 'CRUISE' || $ship['fuel']['capacity'] < 1 || ! in_array($destination, [$plan['site'], $plan['market']], true)) {
             throw new GameException('Mining continuation differs from the approved CRUISE route.');
         }
-        $points = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'waypoint')->get()->keyBy('symbol');
+        $points = $this->waypoints($agent);
         $from = $points->get($ship['nav']['waypointSymbol'])?->data;
         $to = $points->get($destination)?->data;
         $buyer = $points->get($plan['market'])?->data;
@@ -214,7 +262,7 @@ class FuelPlanner
             $options[] = ['stops' => [$destination], 'fuel_units' => $direct['outbound_fuel'], 'seconds' => $direct['estimated_seconds'], 'refuel_ceiling' => $direct['refuel_ceiling'], 'continuation' => $direct['continuation']];
         } catch (GameException) {
         }
-        foreach (GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->get() as $market) {
+        foreach ($this->markets($agent) as $market) {
             if (! empty($market->data['invalidated_by_action']) || $market->observed_at->lt(now()->subSeconds(config('gameplay.snapshot_seconds'))) || ! collect($market->data['tradeGoods'] ?? [])->contains(fn ($good) => $good['symbol'] === 'FUEL' && $good['purchasePrice'] > 0)) {
                 continue;
             }
@@ -244,10 +292,10 @@ class FuelPlanner
     }
 
     /** @return Collection<string, GameObservation> */
-    public function listings(Agent $agent): Collection
+    public function listings(Agent $agent, ?Collection $listings = null): Collection
     {
-        return GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
-            ->where('kind', 'market_listing')->orderBy('observed_at')->orderBy('id')->get()->keyBy('symbol');
+        return $listings ?? $this->cached("{$agent->id}:{$agent->reset_id}:listings", fn () => GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->where('kind', 'market_listing')->orderBy('observed_at')->orderBy('id')->get()->keyBy('symbol'));
     }
 
     public function units(Agent $agent, array $ship, array $from, array $to, ?string $policy = null): int
@@ -258,9 +306,11 @@ class FuelPlanner
         if (($policy ?? config('gameplay.route_evidence')) === 'conservative') {
             return MiningPlanner::fuelEstimate($from, $to);
         }
-        $maximum = ObservationHistory::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'travel')
-            ->where('data->configuration', self::configuration($ship))->where('data->from', $from['symbol'])->where('data->to', $to['symbol'])
-            ->get()->filter(fn ($sample) => self::validSample($sample->data))->max('data.actual_fuel');
+        $configuration = self::configuration($ship);
+        $maximum = $this->cached("{$agent->id}:{$agent->reset_id}:travel:{$configuration}:{$from['symbol']}:{$to['symbol']}",
+            fn () => ObservationHistory::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'travel')
+                ->where('data->configuration', $configuration)->where('data->from', $from['symbol'])->where('data->to', $to['symbol'])
+                ->get()->filter(fn ($sample) => self::validSample($sample->data))->max('data.actual_fuel'));
         if ($maximum === null) {
             throw new GameException('Measured fuel evidence for this configuration and route is missing.');
         }

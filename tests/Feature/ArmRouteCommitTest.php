@@ -7,6 +7,7 @@ use App\Gameplay\AutomationRunner;
 use App\Gameplay\CampaignControl;
 use App\Gameplay\CampaignDirector;
 use App\Gameplay\CampaignPlaybook;
+use App\Gameplay\CampaignTrade;
 use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\GameException;
 use App\Gameplay\OperationPlanner;
@@ -15,12 +16,15 @@ use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
+use App\Models\GameObservation;
 use App\Models\LocalEngine;
+use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\EngineFixture;
 use Tests\Support\FakeEngineHost;
 use Tests\Support\FakeSpaceTraders;
@@ -251,6 +255,89 @@ class ArmRouteCommitTest extends TestCase
         $run = $this->activeRun($episode);
         $this->assertSame(['trade', 'IRON_ORE'], [$run->strategy, $run->plan['symbol']]);
         $this->assertSame('trade_started', $this->events($episode, 'commit_end')->sole()->data['reason']);
+    }
+
+    #[DataProvider('challengerRankings')]
+    public function test_arm_filters_an_unreachable_challenger_before_switching_or_refreshing(string $ranking): void
+    {
+        [$grant, $episode] = $this->positionAtSource();
+        $episode->refresh();
+        $ship = Ship::where('symbol', 'LOCAL-3')->sole()->snapshot;
+        $candidate = ['key' => 'IRON_ORE@X1-TEST-PORT', 'good' => 'IRON_ORE', 'source' => 'X1-TEST-ROCK', 'buyer' => 'X1-TEST-PORT',
+            'units' => 1, 'score' => 20, 'seconds' => 300, 'max_inventory' => 100, 'fuel_safety_ceiling' => 100, 'departure_refuel' => 0, 'predicted_cost' => 100];
+        $challenger = array_replace($candidate, ['source' => 'X1-TEST-MOON', 'score' => 200, 'position_seconds' => 850]);
+        GameObservation::where('kind', 'market')->where('symbol', $candidate['buyer'])->update(['observed_at' => now()->subSeconds(75)]);
+        $state = $episode->state;
+        $state['suppressed_pairs'][$candidate['key']] = now()->timestamp + 300;
+        if ($ranking === 'no commit') {
+            unset($state['commit']);
+        }
+        $episode->update(['state' => $state]);
+
+        $ranker = $this->partialMock(CampaignTrade::class);
+        $initial = $ranking === 'refreshed' ? [$candidate] : [$challenger, $candidate];
+        $refreshed = $ranking === 'initial' ? [$candidate] : [$challenger, $candidate];
+        $ranker->shouldReceive('rank')->twice()->andReturn($initial, $refreshed);
+        $ranker->shouldReceive('valueFloor')->once()->andReturn([]);
+        $preview = new AutomationRun(['strategy' => 'trade']);
+        $this->partialMock(AutomationRunner::class)->shouldReceive('preview')->once()
+            ->withArgs(function ($agent, $symbol, $plan) use ($candidate, $ranking) {
+                $this->assertSame($candidate['source'], $plan['site']);
+                $this->assertSame($candidate['buyer'], $plan['market']);
+                $this->assertSame($ranking === 'no commit' ? null : 900, $plan['campaign_trade']['buyer_quote_max_age_seconds'] ?? null);
+
+                return true;
+            })->andReturn($preview);
+
+        $director = app(CampaignDirector::class);
+        $considered = [];
+        $run = (new \ReflectionMethod($director, 'trade'))->invokeArgs($director, [$grant, $episode, $this->agent, $ship, [], &$considered]);
+        $this->assertSame($preview, $run, json_encode($considered));
+        $this->assertSame($state['commit'] ?? null, $episode->refresh()->state['commit'] ?? null);
+        $this->assertSame($state['suppressed_pairs'], $episode->state['suppressed_pairs']);
+        $this->assertFalse($this->events($episode, 'commit_end')->contains(fn ($event) => $event->data['reason'] === 'better_pair'));
+        if ($ranking === 'no commit') {
+            $this->assertStringContainsString('900 s commitment bound on arrival', json_encode($considered));
+        }
+    }
+
+    public static function challengerRankings(): array
+    {
+        return [['initial'], ['refreshed'], ['no commit']];
+    }
+
+    public function test_arm_decay_merges_its_sales_with_primary_sales_in_id_order(): void
+    {
+        [, $arm] = $this->positionAtSource();
+        $primaryGrant = app(CampaignControl::class)->approve(app(CampaignPlaybook::class)->import($this->body('weekly-default')), $this->user);
+        $primary = CampaignEpisode::create([
+            'agent_id' => $this->agent->id, 'campaign_grant_id' => $primaryGrant->id, 'reset_id' => $this->agent->reset_id,
+            'start_credits' => $this->agent->credits, 'phase' => 'earn', 'opened_at' => now(), 'next_reset_at' => $arm->next_reset_at, 'state' => [],
+        ]);
+        $runs = [];
+        foreach ([$arm, $primary] as $episode) {
+            $runs[] = AutomationRun::create([
+                'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id, 'campaign_episode_id' => $episode->id,
+                'ship_symbol' => 'LOCAL-3', 'strategy' => 'trade', 'state' => 'completed', 'plan_version' => 1,
+                'plan' => [], 'totals' => [], 'expires_at' => now(),
+            ]);
+        }
+        $ids = [];
+        foreach ([[0, 100], [0, 90], [1, 100], [1, 60], [0, 70], [0, 56]] as $index => [$runIndex, $price]) {
+            $ids[] = ShipAction::create([
+                'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id, 'key' => 'sales-fixture-'.$index,
+                'automation_run_id' => $runs[$runIndex]->id, 'ship_symbol' => 'LOCAL-3', 'origin' => 'automation',
+                'command' => 'sell', 'state' => 'confirmed', 'arguments' => ['symbol' => 'IRON_ORE'], 'expires_at' => now(),
+                'before_state' => ['ship' => ['nav' => ['waypointSymbol' => 'X1-TEST-PORT']]],
+                'outcome' => ['units' => 1, 'transaction_total' => $price],
+            ])->id;
+        }
+        $trade = app(CampaignTrade::class);
+        $sales = $trade->confirmedSales($arm)->get('IRON_ORE@X1-TEST-PORT');
+        $this->assertSame($ids, $sales->pluck('id')->all());
+        $decay = $trade->decay($arm, 'IRON_ORE', 'X1-TEST-PORT', 0.01, $sales);
+        $this->assertEqualsWithDelta((0.1 + 0.4 + 0.2) / 3, $decay, 0.0001);
+        $this->assertSame($decay, $trade->decay($arm, 'IRON_ORE', 'X1-TEST-PORT'));
     }
 
     public function test_c0_positioning_never_commits(): void

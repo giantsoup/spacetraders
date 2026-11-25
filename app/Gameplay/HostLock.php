@@ -8,6 +8,13 @@ class HostLock
 
     private array $nested = [];
 
+    private array $tokens = [];
+
+    public function token(string $key): ?string
+    {
+        return $this->tokens[$key] ?? null;
+    }
+
     public function holds(string $key): bool
     {
         return isset($this->held[$key]);
@@ -104,7 +111,8 @@ class HostLock
         if ($mode === LOCK_EX && $this->holdsShared($key)) {
             throw new GameException('A shared command boundary cannot be upgraded to exclusive.');
         }
-        if ($this->holds($key) && ($reuse || ($this->nested[$key] ?? false))) {
+        $held = $this->holds($key);
+        if ($held && ($reuse || ($this->nested[$key] ?? false))) {
             return $work();
         }
         $directory = config('gameplay.lock_path');
@@ -119,11 +127,16 @@ class HostLock
             throw new GameException('Another operation owns this command boundary. Retry shortly.', retryAfter: 2);
         }
         try {
-            $this->held[$key] = $mode;
+            if (! $held) {
+                $this->tokens[$key] = bin2hex(random_bytes(8));
+                $this->held[$key] = $mode;
+            }
 
             return $work();
         } finally {
-            unset($this->held[$key]);
+            if (! $held) {
+                unset($this->held[$key], $this->tokens[$key]);
+            }
             flock($handle, LOCK_UN);
             fclose($handle);
         }

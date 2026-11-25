@@ -44,7 +44,10 @@ class AutomationRunner
         return $this->executor->locked($agent, function () use ($agent, $symbol, $limits, $meshEpisode) {
             $this->executor->clear($agent, defer: true, ship: $symbol);
             $this->executor->assertConfigurationReviewed($agent, $symbol);
-            $this->sync->sync($agent, false, freshFleet: isset($limits['mesh_work']));
+            $meshWork = isset($limits['mesh_work']);
+            $reuseFleet = $meshWork || isset($limits['campaign_trade']);
+            $this->sync->sync($agent, false, freshFleet: $meshWork,
+                reuseLockedSeconds: $reuseFleet ? (float) config('gameplay.locked_fleet_reuse_seconds', 30) : 0);
             $ship = Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->firstOrFail()->snapshot;
             if ($ship['nav']['status'] === 'IN_TRANSIT' || $ship['cargo']['units'] !== 0) {
                 throw new GameException('Begin with a stationary ship and empty cargo. Existing cargo remains protected.');
@@ -244,10 +247,10 @@ class AutomationRunner
             }
             if (isset($run->plan['mesh_work']) && (! RequestBudget::currentMeshAllowance()
                 || RequestBudget::currentMeshAllowance() !== ($run->plan['mesh_allowance'] ?? null))) {
-                throw new RequestDeferred('Mesh preview start requires its current request allowance.', 10);
+                throw (new RequestDeferred('Mesh preview start requires its current request allowance.', 10, delaySource: 'mesh_allowance'))->withDeadline($deadline);
             }
             if (microtime(true) >= ($deadline ?? INF)) {
-                throw new RequestDeferred('Mesh start exceeded the pass deadline.', 5);
+                throw (new RequestDeferred('Mesh start exceeded the pass deadline.', 5, delaySource: 'pass_deadline', deadlineCapped: true))->withDeadline($deadline);
             }
             if (! config('gameplay.enabled')) {
                 throw new GameException('Automation is disabled. Enable it only after local migration, backup and credential checks.');
@@ -308,7 +311,10 @@ class AutomationRunner
                 }
                 $plan = $run->plan;
             } else {
-                $this->sync->sync($agent, false, freshFleet: isset($run->plan['mesh_work']));
+                $meshWork = isset($run->plan['mesh_work']);
+                $reuseFleet = $meshWork || isset($run->plan['campaign_trade']);
+                $this->sync->sync($agent, false, freshFleet: $meshWork,
+                    reuseLockedSeconds: $reuseFleet ? (float) config('gameplay.locked_fleet_reuse_seconds', 30) : 0);
                 $ship = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->firstOrFail()->snapshot;
                 $plan = $run->plan;
                 $episode = isset($plan['mesh_episode']) ? CampaignEpisode::findOrFail($run->campaign_episode_id) : null;
@@ -337,13 +343,19 @@ class AutomationRunner
                     app(CampaignMesh::class)->assertDeparture($episode, $agent, $ship, $destination, $run->id, $plan['mesh_work'] !== 'market');
                 }
                 if (microtime(true) >= ($deadline ?? INF)) {
-                    throw new RequestDeferred('Mesh start exceeded the pass deadline.', 5);
+                    throw (new RequestDeferred('Mesh start exceeded the pass deadline.', 5, delaySource: 'pass_deadline', deadlineCapped: true))->withDeadline($deadline);
                 }
                 $duration = $v8 ? (int) now()->diffInSeconds($plan['settlement_deadline'], false) : $plan['minutes'] * 60;
-                app(RequestBudget::class)->bindMesh($plan['mesh_allowance'], $run->id, max(1, $duration));
+                app(RequestBudget::class)->bindMesh($plan['mesh_allowance'], $run->id, max(1, $duration), $deadline);
             }
-            DB::transaction(function () use ($run, $agent, $plan) {
+            if ($deadline !== null && microtime(true) >= $deadline) {
+                throw (new RequestDeferred('Pass deadline reached before mesh run could start.', 10, delaySource: 'pass_deadline', deadlineCapped: true))->withDeadline($deadline);
+            }
+            DB::transaction(function () use ($run, $agent, $plan, $deadline) {
                 $this->gate->check($run->engine_session_id);
+                if ($deadline !== null && microtime(true) >= $deadline) {
+                    throw (new RequestDeferred('Pass deadline reached before mesh run could start.', 10, delaySource: 'pass_deadline', deadlineCapped: true))->withDeadline($deadline);
+                }
                 $expires = match ($run->plan_version) {
                     5 => CarbonImmutable::parse($plan['return_deadline']),
                     8 => CarbonImmutable::parse($plan['settlement_deadline']),
@@ -682,8 +694,12 @@ class AutomationRunner
                 app(CampaignTrade::class)->recordResults($episode);
                 app(CampaignSafety::class)->check($run, $agent);
             }
-            $alreadyStarted = $run->fresh()->started_at !== null;
-            $started = app(MeshGovernor::class)->run($agent, $run, fn () => $this->start($agent, $run, deadline: $deadline));
+            $current = $run->fresh();
+            if ($current->state === RunState::Preview && $deadline !== null && microtime(true) >= $deadline) {
+                throw (new RequestDeferred('Mesh start exceeded the pass deadline.', 5, delaySource: 'pass_deadline', deadlineCapped: true))->withDeadline($deadline);
+            }
+            $alreadyStarted = $current->started_at !== null;
+            $started = app(MeshGovernor::class)->run($agent, $run, fn () => $this->start($agent, $run, deadline: $deadline), $deadline);
             if (! $alreadyStarted && CampaignLocalEarn::policy($grant, $episode)) {
                 app(CampaignLocalEarn::class)->started($started, $episode);
             }
@@ -696,7 +712,7 @@ class AutomationRunner
     {
         $work = fn () => $this->previewPurchase($agent, $symbol, $shipyard, $limits, $episode, 'buy_probe', $deadline);
         if (isset(CampaignMesh::policy($episode)['saturation']) && ! RequestBudget::currentMeshAllowance()) {
-            return app(MeshGovernor::class)->preview($agent, $episode, 'buy', $work);
+            return app(MeshGovernor::class)->preview($agent, $episode, 'buy', $work, deadline: $deadline);
         }
 
         return $work();
@@ -709,7 +725,7 @@ class AutomationRunner
         };
         $ship = Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->first()?->snapshot;
         if ($ship && app(CampaignProbeBootstrap::class)->requiresHaulerMeshMovement($episode, $ship, $shipyard) && ! RequestBudget::currentMeshAllowance()) {
-            return app(MeshGovernor::class)->preview($agent, $episode, 'hauler_purchase', $work);
+            return app(MeshGovernor::class)->preview($agent, $episode, 'hauler_purchase', $work, deadline: $deadline);
         }
 
         return $work();
@@ -733,17 +749,17 @@ class AutomationRunner
                     'extracted' => [], 'sold' => [], 'sale_proceeds' => 0, 'fuel_cost' => 0, 'fuel_units' => 0, 'travel_fuel' => 0, 'credit_delta' => 0],
             ]);
             if (isset($run->plan['mesh_work'])) {
-                app(RequestBudget::class)->bindMesh($run->plan['mesh_allowance'], $run->id, (int) now()->diffInSeconds($run->expires_at, false));
+                app(RequestBudget::class)->bindMesh($run->plan['mesh_allowance'], $run->id, (int) now()->diffInSeconds($run->expires_at, false), $deadline);
             }
 
             return $run;
         });
     }
 
-    public function previewMeshScout(Agent $agent, array $ship, string $destination, array $limits, CampaignEpisode $episode, string $observe = 'market'): AutomationRun
+    public function previewMeshScout(Agent $agent, array $ship, string $destination, array $limits, CampaignEpisode $episode, string $observe = 'market', ?float $deadline = null): AutomationRun
     {
         $saturation = isset(CampaignMesh::policy($episode)['saturation']);
-        $work = function () use ($agent, $ship, $destination, $limits, $episode, $observe, $saturation) {
+        $work = function () use ($agent, $ship, $destination, $limits, $episode, $observe, $saturation, $deadline) {
             $limits = array_replace($limits, ['strategy' => 'scout', 'destination' => $destination, 'max_fuel' => 0,
                 'max_spend' => 0, 'max_loss' => 0, 'one_way' => true, 'observe_kind' => $observe, 'mesh_episode' => $episode->id]);
             if ($saturation) {
@@ -754,7 +770,15 @@ class AutomationRunner
             app(CampaignMesh::class)->scoutMinutes($episode->grant(), $episode, $agent, $ship, array_diff_key($limits, ['minutes' => true]) + ['route' => $route]);
             $run = $this->preview($agent, $ship['symbol'], $limits, $episode);
             if ($saturation) {
-                app(RequestBudget::class)->bindMesh($run->plan['mesh_allowance'], $run->id, (int) now()->diffInSeconds($run->expires_at, false));
+                try {
+                    app(RequestBudget::class)->bindMesh($run->plan['mesh_allowance'], $run->id, (int) now()->diffInSeconds($run->expires_at, false), $deadline);
+                } catch (\Throwable $exception) {
+                    try {
+                        app(CampaignMesh::class)->invalidatePreview($agent, $run, $deadline);
+                    } catch (\Throwable) {
+                    }
+                    throw $exception;
+                }
             } else {
                 $run->update(['campaign_episode_id' => $episode->id]);
             }
@@ -763,7 +787,7 @@ class AutomationRunner
         };
 
         return $saturation && ! RequestBudget::currentMeshAllowance()
-            ? app(MeshGovernor::class)->preview($agent, $episode, 'scout', $work) : $work();
+            ? app(MeshGovernor::class)->preview($agent, $episode, 'scout', $work, deadline: $deadline) : $work();
     }
 
     public function previewRecovery(Agent $agent, string $symbol, string $buyer, array $limits, CampaignEpisode $episode): AutomationRun
