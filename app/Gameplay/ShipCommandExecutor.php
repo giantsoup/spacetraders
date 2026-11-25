@@ -1386,9 +1386,17 @@ class ShipCommandExecutor
             }
         }
         if (! empty($data['events'])) {
-            $fresh = $this->api->ship($agent, $action->ship_symbol);
-            foreach (['frame', 'engine', 'reactor'] as $component) {
-                $actualShip[$component] = $fresh[$component];
+            try {
+                $fresh = $this->api->ship($agent, $action->ship_symbol);
+                foreach (['frame', 'engine', 'reactor'] as $component) {
+                    $actualShip[$component] = $fresh[$component];
+                }
+            } catch (RequestDeferred $e) {
+                if (! $v8 || $action->command !== 'navigate' || ($action->outcome['response_validated'] ?? null) !== true) {
+                    throw $e;
+                }
+                // Navigation and fuel are proven by the receipt. The damage event invalidates configuration for the next decision.
+                FleetMetrics::as($action->ship_symbol, fn () => FleetMetrics::observe($e));
             }
         }
         $configurationMismatch = $action->command === 'buy_ship' && self::configurationHash($actualShip) !== self::configurationHash($before['estimate']['configuration']);

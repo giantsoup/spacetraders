@@ -295,15 +295,15 @@ class CampaignProbeBootstrap
     private function transactions(Agent $agent, ShipAction $action): array
     {
         $yard = $action->arguments['waypointSymbol'] ?? null;
-        $transactions = $action->outcome['transactions'] ?? [];
+        $batches = [$action->outcome['transactions'] ?? []];
         foreach ([GameObservation::class, ObservationHistory::class] as $model) {
             foreach ($model::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
                 ->where('kind', 'shipyard')->where('symbol', $yard)->cursor() as $observation) {
-                $transactions = array_merge($transactions, $observation->data['transactions'] ?? []);
+                $batches[] = $observation->data['transactions'] ?? [];
             }
         }
 
-        return $transactions;
+        return count($batches) === 1 ? $batches[0] : array_merge(...$batches);
     }
 
     public function linkage(ShipAction $action): ?array
