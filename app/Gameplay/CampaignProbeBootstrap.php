@@ -560,8 +560,14 @@ class CampaignProbeBootstrap
         $closed = ! empty($run->totals['leg_acquisition_closed'][$index]) || ($run->totals['phase'] ?? null) === 'deliver'
             || (isset($leg['latestBuyAt']) && now()->gte($leg['latestBuyAt']))
             || (isset($run->plan['acquisition_cutoff']) && now()->gte($run->plan['acquisition_cutoff']));
+        if ($closed) {
+            return $fuel;
+        }
+        $inventoryCap = $leg['maxInventory'] ?? 0;
+        $acquisition = $leg['acquisition_cash'] ?? (isset($leg['prediction']['predicted_cost'])
+            ? (int) ceil($leg['prediction']['predicted_cost'] * 1.05) : $inventoryCap);
 
-        return $fuel + ($closed ? 0 : max(0, ($leg['maxInventory'] ?? 0) - ($run->totals['leg_purchase_cost'][$index] ?? 0)));
+        return $fuel + max(0, min($inventoryCap, $acquisition) - ($run->totals['leg_purchase_cost'][$index] ?? 0));
     }
 
     public function reviewedPurchaseMismatch(ShipAction $action): bool

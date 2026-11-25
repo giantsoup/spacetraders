@@ -15,6 +15,7 @@ use App\Models\ShipAction;
 use Illuminate\Console\Command;
 use Illuminate\Database\DeadlockException;
 use Illuminate\Support\Facades\Log;
+use PDO;
 use PDOException;
 
 class SuperviseLocalEngine extends Command
@@ -81,6 +82,7 @@ class SuperviseLocalEngine extends Command
                 $lastHeartbeatMonotonic = $lastMonotonic = hrtime(true);
                 $contention = null;
                 $shutdown = null;
+                $shutdownDeadline = null;
                 $allowance = LocalEngineManager::shutdownAllowanceSeconds();
                 while (true) {
                     $wall = $this->wallTime();
@@ -88,10 +90,18 @@ class SuperviseLocalEngine extends Command
                     $gap = max($wall - $last, ($monotonic - $lastMonotonic) / 1e9);
                     $last = $wall;
                     $lastMonotonic = $monotonic;
+                    if ($stopSignal) {
+                        $shutdownDeadline ??= $this->monotonicTime() + $allowance;
+                    }
                     try {
                         $engine->refresh();
                         if (! $engine->stop_requested_at && ($stopSignal || $gap > 15)) {
                             if ($stopSignal) {
+                                $shutdownDeadline ??= $this->monotonicTime() + $allowance;
+                                if ($pdo) {
+                                    $this->limitShutdownWait($pdo, min($busyTimeout, self::SQLITE_BUSY_TIMEOUT_MS), $shutdownDeadline);
+                                    $shortTimeout = true;
+                                }
                                 $gate->close();
                             } else {
                                 $gate->close('faulted', 'Sleep or heartbeat gap detected. Refresh state and start a fresh session.');
@@ -109,12 +119,16 @@ class SuperviseLocalEngine extends Command
                             $engine->refresh();
                         }
                         if ($engine->stop_requested_at) {
+                            $shutdownDeadline ??= $this->monotonicTime() + $allowance;
                             $shutdown ??= $this->requestChildStop($children);
                             if ($shortTimeout) {
                                 $pdo->exec('PRAGMA busy_timeout = '.$busyTimeout);
                                 $shortTimeout = false;
                             }
                             if (! $children['worker']->isRunning() && ! $children['scheduler']->isRunning()) {
+                                if ($pdo) {
+                                    $this->limitShutdownWait($pdo, $busyTimeout, $shutdownDeadline);
+                                }
                                 $this->finishShutdown($engine);
                                 break;
                             }
@@ -140,7 +154,15 @@ class SuperviseLocalEngine extends Command
                         }
                         $contention = $error;
                         if ($stopSignal || $engine->stop_requested_at) {
+                            $shutdownDeadline ??= $this->monotonicTime() + $allowance;
                             $shutdown ??= $this->requestChildStop($children);
+                            $persistingStop = $stopSignal && ! $engine->stop_requested_at;
+                            $childrenExited = ! $children['worker']->isRunning() && ! $children['scheduler']->isRunning();
+                            if (($persistingStop || $childrenExited) && $this->monotonicTime() >= $shutdownDeadline) {
+                                $this->logEngineError('Engine supervisor could not persist shutdown before its deadline.', $error);
+
+                                return self::FAILURE;
+                            }
                         } elseif ($shutdown === null) {
                             $this->checkHeartbeatDeadline($lastHeartbeat, $lastHeartbeatMonotonic, $error);
                         }
@@ -150,10 +172,7 @@ class SuperviseLocalEngine extends Command
 
                 return self::SUCCESS;
             } catch (\Throwable $error) {
-                try {
-                    Log::channel('engine')->error('Engine supervisor failed.', ['exception' => $error::class, 'message' => $error->getMessage()]);
-                } catch (\Throwable) {
-                }
+                $this->logEngineError('Engine supervisor failed.', $error);
                 try {
                     if ($busyTimeout !== null && $busyTimeout > self::SQLITE_BUSY_TIMEOUT_MS) {
                         $pdo->exec('PRAGMA busy_timeout = '.self::SQLITE_BUSY_TIMEOUT_MS);
@@ -203,6 +222,20 @@ class SuperviseLocalEngine extends Command
         $engine->update(['state' => $engine->state === 'faulted' ? 'faulted' : 'off', 'gate_open' => false, 'message' => 'Owned processes exited. Any uncertain action still requires reconciliation.']);
     }
 
+    private function limitShutdownWait(PDO $pdo, int $timeout, float $deadline): void
+    {
+        $remaining = max(0, (int) floor(($deadline - $this->monotonicTime()) * 1000));
+        $pdo->exec('PRAGMA busy_timeout = '.min($remaining, $timeout));
+    }
+
+    private function logEngineError(string $message, \Throwable $error): void
+    {
+        try {
+            Log::channel('engine')->error($message, ['exception' => $error::class, 'message' => $error->getMessage()]);
+        } catch (\Throwable) {
+        }
+    }
+
     private function recordFault(EngineGate $gate, bool $sqlite, array $children): void
     {
         for ($attempt = 1; ; $attempt++) {
@@ -211,8 +244,13 @@ class SuperviseLocalEngine extends Command
 
                 return;
             } catch (\Throwable $error) {
-                if (! $sqlite || ! $this->isSqliteLock($error) || $attempt === 3) {
+                if (! $sqlite || ! $this->isSqliteLock($error)) {
                     throw $error;
+                }
+                if ($attempt === 3) {
+                    $this->logEngineError('Engine supervisor could not persist its fault.', $error);
+
+                    return;
                 }
                 if ($attempt === 1) {
                     // An owned process may be holding the writer lock needed to persist the fault.
@@ -260,6 +298,11 @@ class SuperviseLocalEngine extends Command
     protected function wallTime(): float
     {
         return microtime(true);
+    }
+
+    protected function monotonicTime(): float
+    {
+        return hrtime(true) / 1e9;
     }
 
     protected function waitForNextTick(): void

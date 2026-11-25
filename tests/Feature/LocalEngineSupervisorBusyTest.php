@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\Console\Commands\SuperviseLocalEngine;
+use App\Gameplay\Engine\EngineHost;
 use App\Gameplay\EngineGate;
 use App\Gameplay\HostLock;
+use App\Gameplay\LocalEngineManager;
 use App\Models\LocalEngine;
 use Closure;
 use Illuminate\Database\QueryException;
@@ -148,15 +150,76 @@ class LocalEngineSupervisorBusyTest extends TestCase
             }
 
             try {
+                $originalTimeout = (int) DB::connection()->getPdo()->query('PRAGMA busy_timeout')->fetchColumn();
                 $this->assertSame(0, $this->supervise(function () {
                     ($this->host->stop)();
                 }));
                 $this->assertSame(0, $writer->wait());
                 $this->assertSame('off', LocalEngine::findOrFail(1)->state);
+                $this->assertSame($originalTimeout, (int) DB::connection()->getPdo()->query('PRAGMA busy_timeout')->fetchColumn());
             } finally {
                 $writer->stop(1);
             }
         });
+    }
+
+    #[DataProvider('shutdownPersistenceSteps')]
+    public function test_unwritable_shutdown_releases_ownership_at_its_monotonic_deadline(bool $gateAlreadyClosed): void
+    {
+        config(['gameplay.engine_shutdown_seconds' => 30]);
+        $this->app->instance(EngineHost::class, $this->host);
+        $this->withFileDatabase(function (string $database) use ($gateAlreadyClosed) {
+            $writer = new PDO('sqlite:'.$database);
+            $monotonic = 0.0;
+            $ticks = 0;
+            foreach ($this->host->children as $child) {
+                $child->stopOnRequest = true;
+            }
+            $engineLog = storage_path('logs/shutdown-deadline.log');
+            config(['logging.channels.engine.path' => $engineLog]);
+
+            try {
+                $this->assertSame(1, $this->supervise(function () use ($writer, $gateAlreadyClosed, &$ticks, &$monotonic) {
+                    switch (++$ticks) {
+                        case 1:
+                            if ($gateAlreadyClosed) {
+                                app(EngineGate::class)->close();
+                            } else {
+                                ($this->host->stop)();
+                            }
+                            $writer->exec('BEGIN IMMEDIATE');
+                            DB::connection()->getPdo()->exec('PRAGMA busy_timeout = 1');
+                            break;
+                        case 2:
+                            $monotonic = 30.0;
+                            $this->seconds = -60;
+                            break;
+                        default:
+                            $this->fail('Supervisor kept ownership after its shutdown deadline.');
+                    }
+                }, function () use (&$monotonic) {
+                    return $monotonic;
+                }));
+                $this->assertSame(2, $ticks, is_file($engineLog) ? file_get_contents($engineLog) : '');
+                $this->assertSame($gateAlreadyClosed ? 'stopping' : 'running', LocalEngine::findOrFail(1)->state);
+                $this->assertTrue(app(HostLock::class)->run('engine-instance', fn () => true));
+                $this->assertStringContainsString('Engine supervisor could not persist shutdown before its deadline.', file_get_contents($engineLog));
+                foreach ($this->host->children as $child) {
+                    $this->assertSame([['ready', 10.0], ['requestStop']], $child->calls);
+                }
+            } finally {
+                if ($writer->inTransaction()) {
+                    $writer->rollBack();
+                }
+            }
+            $this->host->alive['supervisor'] = false;
+            $this->assertSame('faulted', app(LocalEngineManager::class)->status()['state']);
+        });
+    }
+
+    public static function shutdownPersistenceSteps(): array
+    {
+        return ['close the gate on a signal' => [false], 'finalize after an external stop' => [true]];
     }
 
     public function test_signal_during_a_heartbeat_retries_a_locked_gate_close(): void
@@ -294,11 +357,11 @@ class LocalEngineSupervisorBusyTest extends TestCase
         }
     }
 
-    private function supervise(Closure $wait): int
+    private function supervise(Closure $wait, ?Closure $monotonic = null): int
     {
-        $command = new class(fn () => $this->seconds, $wait) extends SuperviseLocalEngine
+        $command = new class(fn () => $this->seconds, $wait, $monotonic) extends SuperviseLocalEngine
         {
-            public function __construct(private Closure $clock, private Closure $wait)
+            public function __construct(private Closure $clock, private Closure $wait, private ?Closure $monotonic)
             {
                 parent::__construct();
             }
@@ -306,6 +369,11 @@ class LocalEngineSupervisorBusyTest extends TestCase
             protected function wallTime(): float
             {
                 return ($this->clock)();
+            }
+
+            protected function monotonicTime(): float
+            {
+                return $this->monotonic ? ($this->monotonic)() : parent::monotonicTime();
             }
 
             protected function waitForNextTick(): void
