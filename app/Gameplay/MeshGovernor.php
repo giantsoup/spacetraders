@@ -25,9 +25,15 @@ final class MeshGovernor
 
     private function govern(Agent $agent, CampaignEpisode $episode, ?AutomationRun $run = null, ?array $candidates = null, int $proposed = 0): array
     {
+        $body = $this->revisionBody($episode, $agent);
+        if ($body === null) {
+            $reason = 'saturation_grant_unavailable';
+
+            return ['mode' => 'hold', 'reason' => $reason, 'cause' => $reason, 'room' => 0,
+                'shadow_price' => ['hold_reason' => $reason] + $this->shadowDefaults()];
+        }
         $policy = CampaignMesh::policy($episode)['saturation'] ?? [];
         $hostCap = max(1, (int) config('gameplay.host_tier2_4_per_minute', 96));
-        $body = $this->revisionBody($episode, $agent);
         $fleetPolicy = $body['fleet']['haulers'] ?? [];
         $saturation = CampaignPlaybook::saturationPolicy($body);
         $allowance = $run?->plan['mesh_allowance'] ?? null;
@@ -99,7 +105,7 @@ final class MeshGovernor
                 default => 'agent_hour_or_trader_headroom',
             };
             $cause = $reason === 'agent_hour_or_trader_headroom' && $cause === 'current_traders_exceed_ceiling' ? $cause : $reason;
-        } elseif (in_array($mode, ['normal', 'sampling'], true) && $used / $hour >= $policy['governor_headroom_pct'] / 100) {
+        } elseif (in_array($mode, ['normal', 'sampling'], true) && $used / $hour >= ($policy['governor_headroom_pct'] ?? 90) / 100) {
             $mode = 'degraded';
             $reason = $cause = 'agent_hour_threshold';
         }
@@ -107,14 +113,14 @@ final class MeshGovernor
         return compact('mode', 'reason', 'cause', 'room', 'minuteRoom', 'used', 'sample', 'staged') + ['limits' => compact('hour', 'host', 'arm', 'trader')];
     }
 
-    private function revisionBody(CampaignEpisode $episode, Agent $agent): array
+    private function revisionBody(CampaignEpisode $episode, Agent $agent): ?array
     {
         if ($revision = $episode->getRelationValue('policyRevision')) {
             return $revision->body;
         }
         $grant = CampaignGrant::find($episode->campaign_grant_id);
         if ($grant?->arm()) {
-            $grant = app(CampaignSafety::class)->saturationGrant($episode, $agent) ?? $grant;
+            return app(CampaignSafety::class)->saturationGrant($episode, $agent)?->revision()->body;
         }
 
         return $grant?->revision()->body ?? [];
@@ -244,15 +250,15 @@ final class MeshGovernor
             $requests = null;
         }
         $charge = max($this->estimate($agent, $kind), $requests ?? 0);
-        $saturation = CampaignPlaybook::saturationPolicy($this->revisionBody($episode, $agent));
         $status = $this->govern($agent, $episode, proposed: $charge);
+        $saturation = isset($status['hard_limit']);
         $permitted = match ($status['mode']) {
             'normal' => true,
-            'sampling' => in_array($kind, $saturation === null ? ['demand', 'directory'] : ['demand', 'directory', 'proof', 'proof_scout'], true),
-            'degraded' => in_array($kind, $saturation === null ? ['demand'] : ['demand', 'coverage', 'trade'], true),
+            'sampling' => in_array($kind, $saturation ? ['demand', 'directory', 'proof', 'proof_scout'] : ['demand', 'directory'], true),
+            'degraded' => in_array($kind, $saturation ? ['demand', 'coverage', 'trade'] : ['demand'], true),
             default => false,
         };
-        if ($permitted && $saturation !== null) {
+        if ($permitted && $saturation) {
             $tier = match ($kind) {
                 'demand', 'directory', 'coverage', 'proof_scout', 'proof' => RequestShadowPrice::T2,
                 'trade' => RequestShadowPrice::T3,

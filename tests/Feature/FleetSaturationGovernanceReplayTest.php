@@ -666,6 +666,30 @@ final class FleetSaturationGovernanceReplayTest extends TestCase
         $this->assertSame(['X1-TEST-PORT', 'X1-TEST-H3'], $sellOrders->pluck('market')->all());
     }
 
+    public function test_fleet_arm_director_records_a_hold_when_the_primary_is_paused(): void
+    {
+        $this->setUpSaturation();
+        $primary = $this->primary(revision: $this->fleetRevision());
+        $this->armRevision = $primary->grant()->revision();
+        $ship = FakeSpaceTraders::lightHauler('LOCAL-A', 'X1-TEST-ROCK');
+        $this->editFixture(function (array &$world) use ($ship) {
+            $world['ships'][] = $ship;
+        });
+        app(AgentSynchronizer::class)->saveShip($this->agent, $ship);
+        $arm = $this->arm($ship['symbol'], 'H1');
+        $episode = $this->seedArmEpisode($arm);
+        $primary->grant()->update(['paused_at' => now(), 'pause_reason' => 'operator_pause']);
+
+        $this->assertTrue(app(CampaignDirector::class)->tickArms());
+
+        $decision = CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'decision')->latest('id')->firstOrFail();
+        $this->assertSame('awaiting_run', $decision->data['choice']);
+        $this->assertSame('hold', $decision->data['fleet_saturation']['mode']);
+        $this->assertSame('saturation_grant_unavailable', $decision->data['shadow_price']['hold_reason']);
+        $this->assertFalse(CampaignEvent::where('campaign_grant_id', $arm->id)->where('kind', 'director_error')->exists());
+        $this->assertFalse(AutomationRun::where('campaign_episode_id', $episode->id)->exists());
+    }
+
     public function test_v11_demand_prioritizes_active_trader_buyers_and_limits_standing_extraction(): void
     {
         $this->setUpSaturation();
@@ -1280,6 +1304,20 @@ final class FleetSaturationGovernanceReplayTest extends TestCase
         }
 
         return $peak;
+    }
+
+    public function test_phase2_fleet_playbook_matches_live_revision_and_only_enables_extraction(): void
+    {
+        $playbook = app(CampaignPlaybook::class);
+        $phase1 = $playbook->import($this->playbookSource('weekly-system-saturation-fleet'));
+        $phase2 = $playbook->import($this->playbookSource('weekly-system-saturation-fleet-phase2'));
+        // Production revision 11 (grant 13) was imported from these exact bytes.
+        $this->assertSame('fd9668d983bbe32f0e8a43e4c0dd7824abcd1ff9440b2a41728c26e31f20219c', $phase2->content_hash);
+        $before = Arr::dot($phase1->body);
+        $after = Arr::dot($phase2->body);
+        $this->assertSame(['fleet.saturation.extraction.enabled' => true], array_diff_assoc($after, $before));
+        $this->assertSame(array_keys($before), array_keys($after));
+        $this->assertFalse($after['fleet.saturation.extraction.stationary']);
     }
 
     private function playbookSource(string $name): string

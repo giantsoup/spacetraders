@@ -9,6 +9,7 @@ use App\Gameplay\Bridge\BridgeGuards;
 use App\Gameplay\CampaignHealth;
 use App\Gameplay\CampaignProbeBootstrap;
 use App\Gameplay\CampaignSafety;
+use App\Gameplay\CampaignSaturation;
 use App\Gameplay\CommandRules;
 use App\Gameplay\CorridorBook;
 use App\Gameplay\CreditAccounting;
@@ -111,7 +112,13 @@ class FleetSaturationTransportTest extends TestCase
             if ($request->method() === 'POST' && str_ends_with($path, '/purchase') && ($this->world['lose_purchase_before_apply'] ?? false)) {
                 throw new ConnectionException('Connection closed before the purchase reached the provider.');
             }
+            if ($request->method() === 'GET' && str_ends_with($path, '/my/ships/LOCAL-1') && ($this->world['navigation_refresh_error'] ?? false) && $this->world['writes'] !== []) {
+                throw new GameException('Synthetic damage refresh failed.');
+            }
             $refuel = $request->method() === 'POST' && str_ends_with($path, '/refuel');
+            $damageReceipt = $request->method() === 'POST' && str_ends_with($path, '/navigate')
+                ? ($this->world['navigation_damage_receipt'] ?? null) : null;
+            $shipBeforeTravel = $damageReceipt !== null ? $this->world['ships'][0] : null;
             $this->world['foundation'] = ! $refuel;
             [$body, $status] = FakeSpaceTraders::respond($this->world, $request);
             $this->world['foundation'] = true;
@@ -134,6 +141,24 @@ class FleetSaturationTransportTest extends TestCase
                     unset($body['data']['transaction']);
                 } else {
                     unset($body['data']['transaction'][$this->world['purchase_omitted_field']]);
+                }
+            }
+            if ($damageReceipt !== null) {
+                $body['data']['events'] = [['symbol' => 'SHIP_ENGINE_OVERHEATED']];
+                $nav = &$body['data']['nav'];
+                $nav['route']['origin'] = ['symbol' => $shipBeforeTravel['nav']['waypointSymbol']];
+                match ($damageReceipt) {
+                    'bad destination' => $nav['waypointSymbol'] = self::SOURCE,
+                    'bad route origin' => $nav['route']['origin']['symbol'] = self::BUYER,
+                    'bad route destination' => $nav['route']['destination']['symbol'] = self::SOURCE,
+                    'stale receipt' => $nav['route']['departureTime'] = now()->subHour()->toIso8601String(),
+                    'future departure', 'skewed with fresh read' => $nav['route']['departureTime'] = now()->addSeconds(6)->toIso8601String(),
+                    'within clock skew' => $nav['route']['departureTime'] = now()->subSeconds(4)->toIso8601String(),
+                    'reversed route times' => $nav['route']['arrival'] = $nav['route']['departureTime'],
+                    default => null,
+                };
+                if ($damageReceipt === 'stale receipt') {
+                    $this->world['ships'][0] = $shipBeforeTravel;
                 }
             }
 
@@ -252,6 +277,177 @@ class FleetSaturationTransportTest extends TestCase
             'writer invalidation' => ['invalidated', 1],
             'no market at origin' => ['non-market', 0],
         ];
+    }
+
+    #[DataProvider('navigationDamageRefreshes')]
+    public function test_v8_navigation_settles_a_validated_receipt_when_only_the_damage_refresh_is_deferred(string $case, string $expected): void
+    {
+        $this->campaign(true);
+        $this->world['ships'][0]['nav']['status'] = 'IN_ORBIT';
+        $this->world['travel_seconds'] = 60;
+        $this->seedWorld();
+        $this->world['navigation_damage_receipt'] = $case;
+        $this->world['defer_followup_after_write'] = ! in_array($case, ['failed refresh', 'skewed with fresh read'], true);
+        $this->world['navigation_refresh_error'] = $case === 'failed refresh';
+        if ($case === 'fuel mismatch') {
+            $this->world['fuel_consumption'] = 90;
+        }
+
+        $hop = $this->hop(self::SOURCE, self::BUYER);
+        $run = $this->campaignRun('position', ['route' => ['hops' => [$hop], 'fuel_ceiling' => 50]]);
+        $action = $this->action('navigate', ['waypointSymbol' => self::BUYER, 'hop_index' => 0], $run);
+        $this->execute($action, $expected);
+
+        $this->assertTrue($action->outcome['response_validated']);
+        if ($expected === 'confirmed') {
+            $fuelMismatch = $case === 'fuel mismatch';
+            $this->assertSame($fuelMismatch, $action->review_required);
+            $this->assertSame($fuelMismatch, $action->outcome['fuel_discrepancy']);
+            $this->assertSame(self::BUYER, $this->fields()['nav']['value']['waypointSymbol']);
+            $this->assertSame(['config', 'mounts', 'modules'], $this->staleness()['stale_fields']);
+            $this->assertSame($fuelMismatch ? 'blocked' : 'running', $run->refresh()->state->value);
+            if (! $fuelMismatch) {
+                $this->assertGreaterThan(now(), $run->next_action_at);
+            }
+            $this->assertNull($this->episode->grant()->paused_at);
+        }
+
+        $this->execute($action, $expected);
+        $this->assertSame($case === 'skewed with fresh read' ? ['POST /my/ships/LOCAL-1/navigate', 'GET /my/ships/LOCAL-1'] : ['POST /my/ships/LOCAL-1/navigate'], $this->shipTrace());
+        if ($case === 'stale receipt') {
+            $this->assertSame(self::SOURCE, $this->world['ships'][0]['nav']['waypointSymbol']);
+            $this->world['defer_followup_after_write'] = false;
+            $this->assertSame('uncertain', app(ShipCommandExecutor::class)->reconcile($this->agent, $action)->state->value);
+            $this->assertCount(1, $this->world['writes']);
+        }
+    }
+
+    public static function navigationDamageRefreshes(): array
+    {
+        return [
+            'deferred damage refresh' => ['deferred refresh', 'confirmed'],
+            'failed damage refresh' => ['failed refresh', 'uncertain'],
+            'invalid destination' => ['bad destination', 'uncertain'],
+            'wrong route origin' => ['bad route origin', 'uncertain'],
+            'wrong route destination' => ['bad route destination', 'uncertain'],
+            'stale receipt' => ['stale receipt', 'uncertain'],
+            'future departure' => ['future departure', 'uncertain'],
+            'clock skew with fresh corroboration' => ['skewed with fresh read', 'confirmed'],
+            'clock skew within tolerance' => ['within clock skew', 'confirmed'],
+            'reversed route times' => ['reversed route times', 'uncertain'],
+            'fuel mismatch preserves review' => ['fuel mismatch', 'confirmed'],
+        ];
+    }
+
+    public function test_reconciling_a_deferred_navigation_receipt_preserves_the_newer_ship_observation(): void
+    {
+        $this->campaign(true);
+        $this->world['ships'][0]['nav']['status'] = 'IN_ORBIT';
+        $this->world['travel_seconds'] = 60;
+        $this->seedWorld();
+        $this->world['navigation_damage_receipt'] = 'failed refresh';
+        $this->world['navigation_refresh_error'] = true;
+
+        $run = $this->campaignRun('position', ['route' => ['hops' => [$this->hop(self::SOURCE, self::BUYER)], 'fuel_ceiling' => 50]]);
+        $action = $this->action('navigate', ['waypointSymbol' => self::BUYER, 'hop_index' => 0], $run);
+        $this->execute($action, 'uncertain');
+        $this->assertTrue($action->outcome['response_validated']);
+
+        $this->at(120);
+        $this->world['ships'][0]['nav']['status'] = 'DOCKED';
+        $this->world['ships'][0]['engine']['condition'] = 0.7;
+        $newer = app(AgentSynchronizer::class)->saveShip($this->agent, $this->world['ships'][0]);
+        $this->world['navigation_refresh_error'] = false;
+        $this->world['defer_followup_after_write'] = true;
+
+        $settled = app(ShipCommandExecutor::class)->reconcile($this->agent, $action);
+
+        $this->assertSame('confirmed', $settled->state->value);
+        $this->assertSame($newer->snapshot, $newer->fresh()->snapshot);
+        $this->assertEquals($newer->observed_at, $newer->fresh()->observed_at);
+        $this->assertSame('DOCKED', $this->fields()['nav']['value']['status']);
+        $this->assertSame(0.7, $this->fields()['config']['value']['engine']['condition']);
+        $this->assertCount(1, $this->world['writes']);
+    }
+
+    public function test_fleet_purchase_liquidity_uses_the_command_ships_remaining_trade_lot_exposure(): void
+    {
+        $this->campaign(true);
+        $this->world['credits'] = 7291023;
+        $this->seedWorld();
+        $run = $this->campaignRun('trade', ['max_spend' => 7291599, 'legs' => [[
+            'source' => self::SOURCE, 'buyer' => self::BUYER, 'good' => 'SHIP_PLATING',
+            'approvedUnits' => 18, 'maxInventory' => 7291023, 'acquisition_cash' => 79098,
+            'remainingFuelCeiling' => 576,
+        ]]], ['phase' => 'buy', 'leg_purchase_cost' => [2000], 'leg_fuel_cost' => [20]]);
+        app(StateChain::class)->reserveCredit($this->agent, 'run:'.$run->id, 'trade_lot', 'buy', 77098, runId: $run->id, shipSymbol: self::SHIP);
+
+        $grant = $this->episode->grant();
+        $policy = $grant->revision()->body['fleet']['haulers'];
+        $expected = 77654;
+        $bootstrap = app(CampaignProbeBootstrap::class);
+        foreach (['SHIP_LIGHT_HAULER', 'SHIP_MINING_DRONE'] as $type) {
+            $parts = $bootstrap->reserveParts($this->agent, $grant, $policy, incomingType: $type, episode: $this->episode);
+            $this->assertSame($expected, $parts['commitments']);
+        }
+        $gate = app(CampaignSaturation::class)->evaluate($grant, $this->episode, $this->agent, offerIndependentOnly: true)['gates']['G5'];
+        $this->assertTrue($gate['pass'], json_encode($gate));
+        $this->assertSame($expected, $gate['reserve_components']['commitments']);
+        $this->assertSame(7291023, $run->fresh()->plan['legs'][0]['maxInventory']);
+    }
+
+    public function test_mesh_arm_without_its_primary_grant_holds_before_reserving_budget(): void
+    {
+        $this->campaign(true);
+        $this->seedWorld();
+        $body = Yaml::parseFile(base_path('campaigns/arm-trade-fleet.yaml'));
+        $revision = CampaignRevision::create([
+            'name' => $body['name'], 'source' => Yaml::dump($body, 12), 'body' => $body,
+            'content_hash' => hash('sha256', json_encode($body, JSON_THROW_ON_ERROR)),
+        ]);
+        $arm = $this->armEpisode('LOCAL-2', $revision);
+        $this->episode->grant()->update(['paused_at' => now()]);
+        $run = $this->campaignRun('trade', ['mesh_work' => 'trade'], shipSymbol: 'LOCAL-2');
+        $run->update(['campaign_episode_id' => $arm->id]);
+        $budget = $this->partialMock(RequestBudget::class);
+        $budget->shouldReceive('usage')->never();
+        $budget->shouldReceive('refreshMesh')->never();
+        $governor = app(MeshGovernor::class);
+        $status = $governor->evaluate($this->agent, $arm, $run);
+        $this->assertSame('hold', $status['mode']);
+        $this->assertSame('saturation_grant_unavailable', $status['reason']);
+        $this->assertSame(0, $status['room']);
+
+        try {
+            $governor->run($this->agent, $run, fn () => $this->fail('Mesh arm proceeded without its primary grant.'));
+            $this->fail('Mesh arm did not defer.');
+        } catch (RequestDeferred $exception) {
+            $this->assertSame('saturation_grant_unavailable', $exception->delaySource);
+        }
+    }
+
+    public function test_legacy_mesh_without_a_headroom_setting_degrades_at_ninety_percent(): void
+    {
+        $this->campaign(true);
+        config(['gameplay.host_tier2_4_per_minute' => 100]);
+        $this->episode->setRelation('policyRevision', new CampaignRevision(['body' => ['probes' => [
+            'target' => 1, 'max_price' => 0, 'min_working_capital' => 0,
+        ]]]));
+        $usage = [
+            'agent' => ['tier2_4_last_hour' => 4099],
+            'mesh' => ['used' => 0, 'outstanding' => 0],
+            'host' => ['tier2_4_last_60_seconds' => 0, 'rate_limits_last_15_minutes' => 0],
+        ];
+        $this->partialMock(RequestBudget::class)->shouldReceive('usage')->twice()->andReturn(
+            $usage,
+            ['agent' => ['tier2_4_last_hour' => 4100]] + $usage,
+        );
+
+        $governor = app(MeshGovernor::class);
+        $this->assertSame('normal', $governor->evaluate($this->agent, $this->episode)['mode']);
+        $status = $governor->evaluate($this->agent, $this->episode);
+        $this->assertSame('degraded', $status['mode']);
+        $this->assertSame('agent_hour_threshold', $status['reason']);
     }
 
     #[DataProvider('pricedBoundaries')]
@@ -2591,12 +2787,12 @@ class FleetSaturationTransportTest extends TestCase
         $this->world['calls'] = [];
     }
 
-    private function armEpisode(string $ship): CampaignEpisode
+    private function armEpisode(string $ship, ?CampaignRevision $revision = null): CampaignEpisode
     {
         $primary = $this->episode->grant();
         $arm = CampaignGrant::create([
             'user_id' => $primary->user_id, 'agent_symbol' => $this->agent->name,
-            'campaign_revision_id' => $primary->campaign_revision_id, 'revision_hash' => $primary->revision_hash,
+            'campaign_revision_id' => $revision?->id ?? $primary->campaign_revision_id, 'revision_hash' => $revision?->content_hash ?? $primary->revision_hash,
             'expires_at' => $primary->expires_at,
             'limits' => $primary->limits + ['arm' => [
                 'ship' => $ship, 'label' => 'second-ship', 'reset_id' => $this->agent->reset_id,

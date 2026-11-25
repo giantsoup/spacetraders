@@ -9,6 +9,7 @@ use App\Models\ObservationHistory;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use App\Services\SpaceTradersClient;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -257,10 +258,10 @@ class AgentSynchronizer
         return $fleet;
     }
 
-    private function saveFullShip(Agent $agent, array $snapshot, string $source): Ship
+    private function saveFullShip(Agent $agent, array $snapshot, string $source, ?CarbonImmutable $observedAt = null): Ship
     {
-        return DB::transaction(function () use ($agent, $snapshot, $source) {
-            $ship = $this->saveShip($agent, $snapshot, full: false);
+        return DB::transaction(function () use ($agent, $snapshot, $source, $observedAt) {
+            $ship = $this->saveShip($agent, $snapshot, full: false, observedAt: $observedAt);
             $chain = app(StateChain::class);
             $chain->recordFullShip($agent, $snapshot, $ship->observed_at->toImmutable(), $source);
             $chain->releaseRecoveryFuelHoldIfEmpty($agent, $ship->symbol, $snapshot);
@@ -269,13 +270,13 @@ class AgentSynchronizer
         });
     }
 
-    public function saveShip(Agent $agent, array $data, bool $full = true): Ship
+    public function saveShip(Agent $agent, array $data, bool $full = true, ?CarbonImmutable $observedAt = null): Ship
     {
         if ($full && $agent->reset_id) {
-            return $this->saveFullShip($agent, $data, 'ship_get');
+            return $this->saveFullShip($agent, $data, 'ship_get', $observedAt);
         }
 
-        return Ship::updateOrCreate(['agent_id' => $agent->id, 'symbol' => $data['symbol']], ['snapshot' => $data, 'observed_at' => now()]);
+        return Ship::updateOrCreate(['agent_id' => $agent->id, 'symbol' => $data['symbol']], ['snapshot' => $data, 'observed_at' => $observedAt ?? now()]);
     }
 
     public function invalidateMarket(Agent $agent, string $symbol, int $action): void

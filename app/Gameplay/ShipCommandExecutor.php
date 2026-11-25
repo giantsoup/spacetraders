@@ -27,6 +27,8 @@ class ShipCommandExecutor
 
     private const TRADE_SYMBOL_PATTERN = '/\A[A-Z0-9_]+\z/';
 
+    private const NAVIGATION_RECEIPT_CLOCK_SKEW_SECONDS = 5;
+
     public function __construct(private HostLock $lock, private CommandRules $rules, private SpaceTradersApi $api, private AgentSynchronizer $sync, private EngineGate $gate) {}
 
     public function locked(Agent $agent, callable $work, string $priority = 'critical'): mixed
@@ -1386,9 +1388,29 @@ class ShipCommandExecutor
             }
         }
         if (! empty($data['events'])) {
-            $fresh = $this->api->ship($agent, $action->ship_symbol);
-            foreach (['frame', 'engine', 'reactor'] as $component) {
-                $actualShip[$component] = $fresh[$component];
+            $navigate = $v8 && $action->command === 'navigate';
+            if ($navigate) {
+                $route = $data['nav']['route'];
+                if (($route['origin']['symbol'] ?? null) !== $before['ship']['nav']['waypointSymbol']
+                    || ($route['destination']['symbol'] ?? null) !== $action->arguments['waypointSymbol']) {
+                    throw new GameException('Navigation receipt does not match the approved hop.', uncertain: true);
+                }
+            }
+            try {
+                $fresh = $this->api->ship($agent, $action->ship_symbol, fresh: $navigate);
+                if ($navigate && $fresh['nav']['waypointSymbol'] !== $action->arguments['waypointSymbol']) {
+                    throw new GameException('Fresh ship navigation does not corroborate the approved hop.', uncertain: true);
+                }
+                foreach (['frame', 'engine', 'reactor'] as $component) {
+                    $actualShip[$component] = $fresh[$component];
+                }
+            } catch (RequestDeferred $e) {
+                if (! $navigate || ($action->outcome['response_validated'] ?? null) !== true) {
+                    throw $e;
+                }
+                $this->assertNavigationReceiptTime($action, $data['nav']['route']);
+                // The damage event invalidates configuration even when its refresh must wait.
+                FleetMetrics::as($action->ship_symbol, fn () => FleetMetrics::observe($e));
             }
         }
         $configurationMismatch = $action->command === 'buy_ship' && self::configurationHash($actualShip) !== self::configurationHash($before['estimate']['configuration']);
@@ -1439,8 +1461,16 @@ class ShipCommandExecutor
                 throw new GameException('Credit settlement requires the action reservation.', uncertain: true);
             }
             $receiptAt = isset($action->outcome['response_received_at']) ? CarbonImmutable::parse($action->outcome['response_received_at']) : now()->toImmutable();
+            $newerShip = null;
             if ($actualShip) {
-                $this->sync->saveShip($agent, $actualShip, full: false);
+                $navigationReceipt = $v8 && $action->command === 'navigate';
+                if ($navigationReceipt) {
+                    $newerShip = Ship::where('agent_id', $agent->id)->where('symbol', $actualShip['symbol'])
+                        ->where('observed_at', '>', $receiptAt)->lockForUpdate()->first();
+                }
+                if (! $newerShip) {
+                    $this->sync->saveShip($agent, $actualShip, full: false, observedAt: $navigationReceipt ? $receiptAt : null);
+                }
                 if ($sourceTransferSample) {
                     $chain->recordFullShip($agent, $actualShip, now()->toImmutable(), 'transfer_source_get');
                 } elseif (in_array($action->command, ['buy_ship', 'repair', 'install_mount', 'remove_mount', 'install_module', 'remove_module'], true)) {
@@ -1569,7 +1599,7 @@ class ShipCommandExecutor
             $reviewRequired = ($discrepancy && ! $positionReview) || ($configurationMismatch && in_array($run?->strategy, [...CampaignProbeBootstrap::STRATEGIES, 'buy_fleet'], true));
             $action->update(['state' => ActionState::Confirmed, 'review_required' => $reviewRequired, 'outcome' => array_merge($action->fresh()->outcome ?? [], $outcome), 'settled_at' => now(), 'message' => $fuelDiscrepancy ? 'Actual fuel differed from the approved prediction. Reconcile and replan before further commands.' : ($discrepancy ? (ExplorationPolicy::command($action->command) ? 'Exploration exceeded the cooldown review threshold or changed credits unexpectedly. Review before further work.' : 'Execution differed from approved quote or reserve. Further work is paused.') : 'Confirmed by SpaceTraders.')]);
             if ($actualShip) {
-                $chain->releaseRecoveryFuelHoldIfEmpty($agent, $actualShip['symbol'], $actualShip);
+                $chain->releaseRecoveryFuelHoldIfEmpty($agent, $actualShip['symbol'], $newerShip?->snapshot ?? $actualShip);
             }
             app(CreditAccounting::class)->record($agent, $action, $delta);
             if (isset($data['contract'])) {
@@ -1609,6 +1639,19 @@ class ShipCommandExecutor
         });
         if ($action->command === 'buy_ship' && ($configurationMismatch || (isset($action->arguments['site']) && app(MiningPlanner::class)->capability($actualShip) !== null))) {
             $action->update(['message' => 'Delivered configuration differs from the approved offer or is not operational for the selected setup. Inspect the delivered ship.']);
+        }
+    }
+
+    private function assertNavigationReceiptTime(ShipAction $action, array $route): void
+    {
+        $departure = $this->parseStrictTimestamp($route['departureTime'] ?? null);
+        $arrival = $this->parseStrictTimestamp($route['arrival'] ?? null);
+        $receivedAt = $this->parseStrictTimestamp($action->outcome['response_received_at'] ?? null);
+        $skew = self::NAVIGATION_RECEIPT_CLOCK_SKEW_SECONDS;
+        if (! $departure || ! $arrival || ! $receivedAt || ! $action->sent_at
+            || $departure->lt($action->sent_at->subSeconds($skew)) || $departure->gt($receivedAt->addSeconds($skew))
+            || $arrival->lte($departure)) {
+            throw new GameException('Navigation receipt does not match the transport time.', uncertain: true);
         }
     }
 

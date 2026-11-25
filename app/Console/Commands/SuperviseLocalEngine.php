@@ -13,10 +13,17 @@ use App\Models\AutomationRun;
 use App\Models\LocalEngine;
 use App\Models\ShipAction;
 use Illuminate\Console\Command;
+use Illuminate\Database\DeadlockException;
 use Illuminate\Support\Facades\Log;
+use PDO;
+use PDOException;
 
 class SuperviseLocalEngine extends Command
 {
+    private const HEARTBEAT_TIMEOUT_SECONDS = 10;
+
+    private const SQLITE_BUSY_TIMEOUT_MS = 1000;
+
     protected $signature = 'spacetraders:engine-supervise';
 
     protected $description = 'Own exactly one worker and scheduler until the local session ends';
@@ -30,13 +37,23 @@ class SuperviseLocalEngine extends Command
         return $lock->run('engine-instance', function () use ($gate, $host) {
             $engine = $gate->begin();
             $children = [];
+            $pdo = null;
+            $busyTimeout = null;
             try {
+                $connection = $engine->getConnection();
+                if ($connection->getDriverName() === 'sqlite') {
+                    $pdo = $connection->getPdo();
+                    $busyTimeout = (int) $pdo->query('PRAGMA busy_timeout')->fetchColumn();
+                }
                 $host->claim($engine->session_id, 'supervisor');
                 $processes = ['supervisor' => getmypid()];
                 $processes['identity'] = $host->identify($processes);
                 $engine->update(['processes' => $processes, 'heartbeat_at' => now()]);
                 EngineLease::cleanup($engine->session_id);
-                $host->onStopSignal(fn () => $gate->close());
+                $stopSignal = false;
+                $host->onStopSignal(function () use (&$stopSignal) {
+                    $stopSignal = true;
+                });
                 foreach ([
                     'worker' => ['queue:work', 'database', '--queue=spacetraders', '--sleep=1', '--tries=1', '--timeout=120'],
                     'scheduler' => ['spacetraders:engine-schedule'],
@@ -54,55 +71,100 @@ class SuperviseLocalEngine extends Command
                 $processes['identity'] = $host->identify($processes);
                 $this->heartbeat($engine->session_id);
                 $engine->update(['processes' => $processes]);
-                LocalEngine::whereKey(1)->where('session_id', $engine->session_id)->whereNull('stop_requested_at')->update(['state' => 'running', 'gate_open' => true, 'heartbeat_at' => now(), 'processes' => json_encode($processes), 'message' => 'Worker and scheduler alive. Awaiting new approvals.']);
-                $last = $this->wallTime();
-                $lastMonotonic = hrtime(true);
+                if (! $stopSignal) {
+                    LocalEngine::whereKey(1)->where('session_id', $engine->session_id)->whereNull('stop_requested_at')->update(['state' => 'running', 'gate_open' => true, 'heartbeat_at' => now(), 'processes' => json_encode($processes), 'message' => 'Worker and scheduler alive. Awaiting new approvals.']);
+                }
+                $shortTimeout = $busyTimeout !== null && $busyTimeout > self::SQLITE_BUSY_TIMEOUT_MS;
+                if ($shortTimeout) {
+                    $pdo->exec('PRAGMA busy_timeout = '.self::SQLITE_BUSY_TIMEOUT_MS);
+                }
+                $lastHeartbeat = $last = $this->wallTime();
+                $lastHeartbeatMonotonic = $lastMonotonic = hrtime(true);
+                $contention = null;
                 $shutdown = null;
+                $shutdownDeadline = null;
                 $allowance = LocalEngineManager::shutdownAllowanceSeconds();
-                $signalled = false;
                 while (true) {
                     $wall = $this->wallTime();
                     $monotonic = hrtime(true);
                     $gap = max($wall - $last, ($monotonic - $lastMonotonic) / 1e9);
                     $last = $wall;
                     $lastMonotonic = $monotonic;
-                    $engine->refresh();
-                    if ($gap > 15) {
-                        $gate->close('faulted', 'Sleep or heartbeat gap detected. Refresh state and start a fresh session.');
+                    if ($stopSignal) {
+                        $shutdownDeadline ??= $this->monotonicTime() + $allowance;
+                    }
+                    try {
                         $engine->refresh();
-                    }
-                    $jobStartedAt = $this->jobStartedAt($engine->session_id);
-                    $jobTimedOut = $children['worker']->isRunning() && $jobStartedAt !== null && $this->wallTime() - $jobStartedAt > 150;
-                    if ($jobTimedOut) {
-                        Log::error('Owned worker job exceeded 150 seconds. Terminating worker.', ['session' => $engine->session_id]);
-                        $children['worker']->kill();
-                    }
-                    if ($jobTimedOut || (! $engine->stop_requested_at && (! $children['worker']->isRunning() || ! $children['scheduler']->isRunning()))) {
-                        $gate->close('faulted', 'An owned child exited. New approvals are closed.');
-                        $engine->refresh();
-                    }
-                    $this->heartbeat($engine->session_id);
-                    if ($engine->stop_requested_at) {
-                        $shutdown ??= $this->wallTime();
-                        if (! $signalled) {
-                            foreach ($children as $child) {
-                                if ($child->isRunning()) {
-                                    $child->requestStop();
+                        if (! $engine->stop_requested_at && ($stopSignal || $gap > 15)) {
+                            if ($stopSignal) {
+                                $shutdownDeadline ??= $this->monotonicTime() + $allowance;
+                                if ($pdo) {
+                                    $this->limitShutdownWait($pdo, min($busyTimeout, self::SQLITE_BUSY_TIMEOUT_MS), $shutdownDeadline);
+                                    $shortTimeout = true;
                                 }
+                                $gate->close();
+                            } else {
+                                $gate->close('faulted', 'Sleep or heartbeat gap detected. Refresh state and start a fresh session.');
                             }
-                            $signalled = true;
+                            $engine->refresh();
                         }
-                        if (! $children['worker']->isRunning() && ! $children['scheduler']->isRunning()) {
-                            foreach (AutomationRun::whereNotNull('active_agent_id')->whereNotNull('stop_requested_at')->get() as $run) {
-                                if (! ShipAction::where('agent_id', $run->agent_id)->where(fn ($q) => $q->whereIn('state', ['sending', 'uncertain'])->orWhere('review_required', true))->exists()) {
-                                    app(AutomationRunner::class)->finishStop($run, 'Session ended. Reserved work settled; new preview required.');
+                        $jobStartedAt = $this->jobStartedAt($engine->session_id);
+                        $jobTimedOut = $children['worker']->isRunning() && $jobStartedAt !== null && $this->wallTime() - $jobStartedAt > 150;
+                        if ($jobTimedOut) {
+                            Log::error('Owned worker job exceeded 150 seconds. Terminating worker.', ['session' => $engine->session_id]);
+                            $children['worker']->kill();
+                        }
+                        if ($jobTimedOut || (! $engine->stop_requested_at && (! $children['worker']->isRunning() || ! $children['scheduler']->isRunning()))) {
+                            $gate->close('faulted', 'An owned child exited. New approvals are closed.');
+                            $engine->refresh();
+                        }
+                        if ($engine->stop_requested_at) {
+                            $shutdownDeadline ??= $this->monotonicTime() + $allowance;
+                            $shutdown ??= $this->requestChildStop($children);
+                            if ($shortTimeout) {
+                                $pdo->exec('PRAGMA busy_timeout = '.$busyTimeout);
+                                $shortTimeout = false;
+                            }
+                            if (! $children['worker']->isRunning() && ! $children['scheduler']->isRunning()) {
+                                if ($pdo) {
+                                    $this->limitShutdownWait($pdo, $busyTimeout, $shutdownDeadline);
                                 }
+                                $this->finishShutdown($engine);
+                                break;
                             }
-                            $engine->update(['state' => $engine->state === 'faulted' ? 'faulted' : 'off', 'gate_open' => false, 'message' => 'Owned processes exited. Any uncertain action still requires reconciliation.']);
-                            break;
+                            if ($this->wallTime() - $shutdown > $allowance) {
+                                $engine->update(['state' => 'faulted', 'gate_open' => false, 'message' => "Graceful shutdown exceeded {$allowance} seconds. Force stop may interrupt an upstream request."]);
+                            }
+                        } elseif ($contention && ! $stopSignal) {
+                            $this->checkHeartbeatDeadline($lastHeartbeat, $lastHeartbeatMonotonic, $contention);
                         }
-                        if ($this->wallTime() - $shutdown > $allowance) {
-                            $engine->update(['state' => 'faulted', 'gate_open' => false, 'message' => "Graceful shutdown exceeded {$allowance} seconds. Force stop may interrupt an upstream request."]);
+
+                        $heartbeat = $this->wallTime();
+                        $heartbeatMonotonic = hrtime(true);
+                        $this->heartbeat($engine->session_id);
+                        $lastHeartbeat = $heartbeat;
+                        $lastHeartbeatMonotonic = $heartbeatMonotonic;
+                        $contention = null;
+                    } catch (\Throwable $error) {
+                        if (! $pdo || ! $this->isSqliteLock($error)) {
+                            throw $error;
+                        }
+                        if ($contention === null) {
+                            Log::warning('Engine supervisor tick deferred by SQLite contention.', ['session' => $engine->session_id]);
+                        }
+                        $contention = $error;
+                        if ($stopSignal || $engine->stop_requested_at) {
+                            $shutdownDeadline ??= $this->monotonicTime() + $allowance;
+                            $shutdown ??= $this->requestChildStop($children);
+                            $persistingStop = $stopSignal && ! $engine->stop_requested_at;
+                            $childrenExited = ! $children['worker']->isRunning() && ! $children['scheduler']->isRunning();
+                            if (($persistingStop || $childrenExited) && $this->monotonicTime() >= $shutdownDeadline) {
+                                $this->logEngineError('Engine supervisor could not persist shutdown before its deadline.', $error);
+
+                                return self::FAILURE;
+                            }
+                        } elseif ($shutdown === null) {
+                            $this->checkHeartbeatDeadline($lastHeartbeat, $lastHeartbeatMonotonic, $error);
                         }
                     }
                     $this->waitForNextTick();
@@ -110,20 +172,117 @@ class SuperviseLocalEngine extends Command
 
                 return self::SUCCESS;
             } catch (\Throwable $error) {
+                $this->logEngineError('Engine supervisor failed.', $error);
                 try {
-                    Log::channel('engine')->error('Engine supervisor failed.', ['exception' => $error::class, 'message' => $error->getMessage()]);
-                } catch (\Throwable) {
-                }
-                $gate->close('faulted', 'Supervisor failed. Reconcile any reserved action before a fresh preview.');
-                foreach ($children as $child) {
-                    if ($child->isRunning()) {
-                        $child->kill();
+                    if ($busyTimeout !== null && $busyTimeout > self::SQLITE_BUSY_TIMEOUT_MS) {
+                        $pdo->exec('PRAGMA busy_timeout = '.self::SQLITE_BUSY_TIMEOUT_MS);
                     }
+                    $this->recordFault($gate, $pdo !== null, $children);
+                } finally {
+                    $this->killChildren($children);
                 }
 
                 return self::FAILURE;
+            } finally {
+                if ($busyTimeout !== null) {
+                    $pdo->exec('PRAGMA busy_timeout = '.$busyTimeout);
+                }
             }
         });
+    }
+
+    private function checkHeartbeatDeadline(float $lastHeartbeat, int $lastHeartbeatMonotonic, \Throwable $error): void
+    {
+        $elapsed = max($this->wallTime() - $lastHeartbeat, (hrtime(true) - $lastHeartbeatMonotonic) / 1e9);
+        // EngineGate rejects admissions once the stored heartbeat is 15 seconds old.
+        if ($elapsed >= self::HEARTBEAT_TIMEOUT_SECONDS) {
+            throw new \RuntimeException('SQLite contention prevented the supervisor heartbeat for '.self::HEARTBEAT_TIMEOUT_SECONDS.' seconds.', previous: $error);
+        }
+    }
+
+    private function requestChildStop(array $children): float
+    {
+        $requestedAt = $this->wallTime();
+        foreach ($children as $child) {
+            if ($child->isRunning()) {
+                $child->requestStop();
+            }
+        }
+
+        return $requestedAt;
+    }
+
+    private function finishShutdown(LocalEngine $engine): void
+    {
+        foreach (AutomationRun::whereNotNull('active_agent_id')->whereNotNull('stop_requested_at')->get() as $run) {
+            if (! ShipAction::where('agent_id', $run->agent_id)->where(fn ($q) => $q->whereIn('state', ['sending', 'uncertain'])->orWhere('review_required', true))->exists()) {
+                app(AutomationRunner::class)->finishStop($run, 'Session ended. Reserved work settled; new preview required.');
+            }
+        }
+        $engine->update(['state' => $engine->state === 'faulted' ? 'faulted' : 'off', 'gate_open' => false, 'message' => 'Owned processes exited. Any uncertain action still requires reconciliation.']);
+    }
+
+    private function limitShutdownWait(PDO $pdo, int $timeout, float $deadline): void
+    {
+        $remaining = max(0, (int) floor(($deadline - $this->monotonicTime()) * 1000));
+        $pdo->exec('PRAGMA busy_timeout = '.min($remaining, $timeout));
+    }
+
+    private function logEngineError(string $message, \Throwable $error): void
+    {
+        try {
+            Log::channel('engine')->error($message, ['exception' => $error::class, 'message' => $error->getMessage()]);
+        } catch (\Throwable) {
+        }
+    }
+
+    private function recordFault(EngineGate $gate, bool $sqlite, array $children): void
+    {
+        for ($attempt = 1; ; $attempt++) {
+            try {
+                $gate->close('faulted', 'Supervisor failed. Reconcile any reserved action before a fresh preview.');
+
+                return;
+            } catch (\Throwable $error) {
+                if (! $sqlite || ! $this->isSqliteLock($error)) {
+                    throw $error;
+                }
+                if ($attempt === 3) {
+                    $this->logEngineError('Engine supervisor could not persist its fault.', $error);
+
+                    return;
+                }
+                if ($attempt === 1) {
+                    // An owned process may be holding the writer lock needed to persist the fault.
+                    $this->killChildren($children);
+                }
+                usleep(200000);
+            }
+        }
+    }
+
+    private function killChildren(array $children): void
+    {
+        foreach ($children as $child) {
+            if ($child->isRunning()) {
+                $child->kill();
+            }
+        }
+    }
+
+    private function isSqliteLock(\Throwable $error): bool
+    {
+        if ($error instanceof DeadlockException) {
+            $error = $error->getPrevious();
+        }
+
+        if (! $error instanceof PDOException) {
+            return false;
+        }
+
+        return in_array((int) ($error->errorInfo[1] ?? $error->getCode()) & 0xFF, [5, 6], true)
+            || preg_match('/\b(?:database(?: table| schema)? is locked|SQLITE_(?:BUSY|LOCKED)(?:_[A-Z]+)*)\b/i',
+                $error->getMessage()."\n".($error->getPrevious()?->getMessage() ?? '')) === 1;
     }
 
     protected function jobStartedAt(string $session): ?float
@@ -139,6 +298,11 @@ class SuperviseLocalEngine extends Command
     protected function wallTime(): float
     {
         return microtime(true);
+    }
+
+    protected function monotonicTime(): float
+    {
+        return hrtime(true) / 1e9;
     }
 
     protected function waitForNextTick(): void

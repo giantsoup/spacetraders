@@ -295,15 +295,15 @@ class CampaignProbeBootstrap
     private function transactions(Agent $agent, ShipAction $action): array
     {
         $yard = $action->arguments['waypointSymbol'] ?? null;
-        $transactions = $action->outcome['transactions'] ?? [];
+        $batches = [$action->outcome['transactions'] ?? []];
         foreach ([GameObservation::class, ObservationHistory::class] as $model) {
             foreach ($model::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
                 ->where('kind', 'shipyard')->where('symbol', $yard)->cursor() as $observation) {
-                $transactions = array_merge($transactions, $observation->data['transactions'] ?? []);
+                $batches[] = $observation->data['transactions'] ?? [];
             }
         }
 
-        return $transactions;
+        return count($batches) === 1 ? $batches[0] : array_merge(...$batches);
     }
 
     public function linkage(ShipAction $action): ?array
@@ -560,8 +560,14 @@ class CampaignProbeBootstrap
         $closed = ! empty($run->totals['leg_acquisition_closed'][$index]) || ($run->totals['phase'] ?? null) === 'deliver'
             || (isset($leg['latestBuyAt']) && now()->gte($leg['latestBuyAt']))
             || (isset($run->plan['acquisition_cutoff']) && now()->gte($run->plan['acquisition_cutoff']));
+        if ($closed) {
+            return $fuel;
+        }
+        $inventoryCap = $leg['maxInventory'] ?? 0;
+        $acquisition = $leg['acquisition_cash'] ?? (isset($leg['prediction']['predicted_cost'])
+            ? (int) ceil($leg['prediction']['predicted_cost'] * 1.05) : $inventoryCap);
 
-        return $fuel + ($closed ? 0 : max(0, ($leg['maxInventory'] ?? 0) - ($run->totals['leg_purchase_cost'][$index] ?? 0)));
+        return $fuel + max(0, min($inventoryCap, $acquisition) - ($run->totals['leg_purchase_cost'][$index] ?? 0));
     }
 
     public function reviewedPurchaseMismatch(ShipAction $action): bool
