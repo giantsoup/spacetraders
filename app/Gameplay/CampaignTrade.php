@@ -261,25 +261,32 @@ class CampaignTrade
 
     public function recordResults(CampaignEpisode $episode): void
     {
-        app(HostLock::class)->retry('campaign-results-'.$episode->id, fn () => DB::transaction(function () use ($episode) {
-            $known = CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])
-                ->pluck('data')->mapWithKeys(fn (array $result) => [$this->resultKey($result) => true]);
+        // The per-episode host lock serializes recorders. Derive results before taking the SQLite
+        // writer lock so the scan never starves the engine heartbeat; keys are rechecked inside.
+        app(HostLock::class)->retry('campaign-results-'.$episode->id, function () use ($episode) {
             $results = $this->results($episode);
-            foreach ($results as $result) {
-                $key = $this->resultKey($result);
-                if (! $known->has($key)) {
-                    $kind = ! empty($result['standalone_recovery']) ? 'recovery_result' : 'load_result';
-                    app(CampaignControl::class)->event($episode->grant(), $episode, $kind, $result);
-                    $known->put($key, true);
-                }
+            DB::transaction(fn () => $this->saveResults($episode, $results));
+        });
+    }
+
+    private function saveResults(CampaignEpisode $episode, array $results): void
+    {
+        $known = CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])
+            ->pluck('data')->mapWithKeys(fn (array $result) => [$this->resultKey($result) => true]);
+        foreach ($results as $result) {
+            $key = $this->resultKey($result);
+            if (! $known->has($key)) {
+                $kind = ! empty($result['standalone_recovery']) ? 'recovery_result' : 'load_result';
+                app(CampaignControl::class)->event($episode->grant(), $episode, $kind, $result);
+                $known->put($key, true);
             }
-            $canaries = AutomationRun::where('campaign_episode_id', $episode->id)->where('strategy', 'trade')
-                ->whereNotNull('started_at')->whereNull('active_agent_id')->whereIn('state', ['completed', 'stopped', 'blocked'])
-                ->where(fn ($query) => $query->whereNotNull('plan->canary_family')->orWhere('plan->j59_canary', true))->get();
-            foreach ($canaries as $run) {
-                $this->settleCanary($episode, $run, array_values(array_filter($results, fn (array $result) => $result['run_id'] === $run->id)));
-            }
-        }));
+        }
+        $canaries = AutomationRun::where('campaign_episode_id', $episode->id)->where('strategy', 'trade')
+            ->whereNotNull('started_at')->whereNull('active_agent_id')->whereIn('state', ['completed', 'stopped', 'blocked'])
+            ->where(fn ($query) => $query->whereNotNull('plan->canary_family')->orWhere('plan->j59_canary', true))->get();
+        foreach ($canaries as $run) {
+            $this->settleCanary($episode, $run, array_values(array_filter($results, fn (array $result) => $result['run_id'] === $run->id)));
+        }
     }
 
     public function harvestArms(?string $reset = null): void
