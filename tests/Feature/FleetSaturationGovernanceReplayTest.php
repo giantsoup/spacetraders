@@ -666,6 +666,30 @@ final class FleetSaturationGovernanceReplayTest extends TestCase
         $this->assertSame(['X1-TEST-PORT', 'X1-TEST-H3'], $sellOrders->pluck('market')->all());
     }
 
+    public function test_fleet_arm_director_records_a_hold_when_the_primary_is_paused(): void
+    {
+        $this->setUpSaturation();
+        $primary = $this->primary(revision: $this->fleetRevision());
+        $this->armRevision = $primary->grant()->revision();
+        $ship = FakeSpaceTraders::lightHauler('LOCAL-A', 'X1-TEST-ROCK');
+        $this->editFixture(function (array &$world) use ($ship) {
+            $world['ships'][] = $ship;
+        });
+        app(AgentSynchronizer::class)->saveShip($this->agent, $ship);
+        $arm = $this->arm($ship['symbol'], 'H1');
+        $episode = $this->seedArmEpisode($arm);
+        $primary->grant()->update(['paused_at' => now(), 'pause_reason' => 'operator_pause']);
+
+        $this->assertTrue(app(CampaignDirector::class)->tickArms());
+
+        $decision = CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'decision')->latest('id')->firstOrFail();
+        $this->assertSame('awaiting_run', $decision->data['choice']);
+        $this->assertSame('hold', $decision->data['fleet_saturation']['mode']);
+        $this->assertSame('saturation_grant_unavailable', $decision->data['shadow_price']['hold_reason']);
+        $this->assertFalse(CampaignEvent::where('campaign_grant_id', $arm->id)->where('kind', 'director_error')->exists());
+        $this->assertFalse(AutomationRun::where('campaign_episode_id', $episode->id)->exists());
+    }
+
     public function test_v11_demand_prioritizes_active_trader_buyers_and_limits_standing_extraction(): void
     {
         $this->setUpSaturation();

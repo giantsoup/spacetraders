@@ -27,6 +27,8 @@ class ShipCommandExecutor
 
     private const TRADE_SYMBOL_PATTERN = '/\A[A-Z0-9_]+\z/';
 
+    private const NAVIGATION_RECEIPT_CLOCK_SKEW_SECONDS = 5;
+
     public function __construct(private HostLock $lock, private CommandRules $rules, private SpaceTradersApi $api, private AgentSynchronizer $sync, private EngineGate $gate) {}
 
     public function locked(Agent $agent, callable $work, string $priority = 'critical'): mixed
@@ -1386,6 +1388,9 @@ class ShipCommandExecutor
             }
         }
         if (! empty($data['events'])) {
+            if ($v8 && $action->command === 'navigate') {
+                $this->assertNavigationReceipt($action, $data, $before);
+            }
             try {
                 $fresh = $this->api->ship($agent, $action->ship_symbol);
                 foreach (['frame', 'engine', 'reactor'] as $component) {
@@ -1395,7 +1400,7 @@ class ShipCommandExecutor
                 if (! $v8 || $action->command !== 'navigate' || ($action->outcome['response_validated'] ?? null) !== true) {
                     throw $e;
                 }
-                // Navigation and fuel are proven by the receipt. The damage event invalidates configuration for the next decision.
+                // The damage event invalidates configuration even when its refresh must wait.
                 FleetMetrics::as($action->ship_symbol, fn () => FleetMetrics::observe($e));
             }
         }
@@ -1617,6 +1622,23 @@ class ShipCommandExecutor
         });
         if ($action->command === 'buy_ship' && ($configurationMismatch || (isset($action->arguments['site']) && app(MiningPlanner::class)->capability($actualShip) !== null))) {
             $action->update(['message' => 'Delivered configuration differs from the approved offer or is not operational for the selected setup. Inspect the delivered ship.']);
+        }
+    }
+
+    private function assertNavigationReceipt(ShipAction $action, array $data, array $before): void
+    {
+        $route = $data['nav']['route'];
+        $origin = $before['ship']['nav']['waypointSymbol'];
+        $departure = $this->parseStrictTimestamp($route['departureTime'] ?? null);
+        $arrival = $this->parseStrictTimestamp($route['arrival'] ?? null);
+        $receivedAt = $this->parseStrictTimestamp($action->outcome['response_received_at'] ?? null);
+        $skew = self::NAVIGATION_RECEIPT_CLOCK_SKEW_SECONDS;
+        if (($route['origin']['symbol'] ?? null) !== $origin
+            || ($route['destination']['symbol'] ?? null) !== $action->arguments['waypointSymbol']
+            || ! $departure || ! $arrival || ! $receivedAt || ! $action->sent_at
+            || $departure->lt($action->sent_at->subSeconds($skew)) || $departure->gt($receivedAt->addSeconds($skew))
+            || $arrival->lte($departure)) {
+            throw new GameException('Navigation receipt does not match the approved hop and transport time.', uncertain: true);
         }
     }
 

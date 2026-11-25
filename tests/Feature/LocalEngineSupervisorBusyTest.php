@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Log;
 use PDO;
 use PDOException;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\Process\Process;
 use Tests\Support\FakeEngineHost;
 use Tests\Support\FakeOwnedChild;
 use Tests\TestCase;
@@ -81,7 +82,7 @@ class LocalEngineSupervisorBusyTest extends TestCase
     public function test_persistent_heartbeat_lock_faults_below_the_stale_threshold(): void
     {
         $failures = 0;
-        Log::partialMock()->shouldReceive('warning')->times(10);
+        Log::partialMock()->shouldReceive('warning')->once();
         DB::connection()->beforeExecuting(function (string $query, array $bindings) use (&$failures) {
             if ($this->seconds > 0 && str_starts_with($query, 'update "local_engines" set "heartbeat_at"')) {
                 $failures++;
@@ -94,21 +95,15 @@ class LocalEngineSupervisorBusyTest extends TestCase
             $this->assertLessThan(15, $this->seconds);
         }));
 
-        $this->assertSame(10, $failures);
+        $this->assertSame(9, $failures);
         $this->assertSame(10.0, $this->seconds);
         $this->assertFaultedAndChildrenKilled();
     }
 
     public function test_fault_close_retries_one_lock_and_persists_the_stop(): void
     {
-        $database = storage_path('engine-contention.sqlite');
-        touch($database);
-        config(['database.connections.engine_contention' => ['database' => $database] + config('database.connections.sqlite')]);
-        DB::setDefaultConnection('engine_contention');
-
         $attempts = 0;
-        try {
-            $this->artisan('migrate')->assertSuccessful();
+        $this->withFileDatabase(function (string $database) use (&$attempts) {
             $writer = new PDO('sqlite:'.$database);
             $this->host->children['worker']->isReady = false;
             $this->host->children['worker']->onReady = function () use (&$attempts, $writer) {
@@ -130,9 +125,119 @@ class LocalEngineSupervisorBusyTest extends TestCase
             $this->assertSame(1, $this->supervise(fn () => null));
             $this->assertSame(2, $attempts);
             $this->assertFaultedAndChildrenKilled();
-        } finally {
-            DB::setDefaultConnection('sqlite');
-            DB::purge('engine_contention');
+        });
+    }
+
+    public function test_startup_heartbeat_waits_for_a_real_lock_to_clear(): void
+    {
+        $this->withFileDatabase(function (string $database) {
+            $writer = new Process([PHP_BINARY, '-r', '
+                $pdo = new PDO("sqlite:".$argv[1]);
+                $pdo->exec("BEGIN IMMEDIATE");
+                fwrite(STDOUT, "locked\n");
+                fflush(STDOUT);
+                usleep(1750000);
+                $pdo->rollBack();
+            ', $database]);
+            $this->host->children['worker']->onReady = function () use ($writer) {
+                $writer->start();
+                $this->assertTrue($writer->waitUntil(fn (string $type, string $output) => str_contains($output, 'locked')));
+            };
+            foreach ($this->host->children as $child) {
+                $child->stopOnRequest = true;
+            }
+
+            try {
+                $this->assertSame(0, $this->supervise(function () {
+                    ($this->host->stop)();
+                }));
+                $this->assertSame(0, $writer->wait());
+                $this->assertSame('off', LocalEngine::findOrFail(1)->state);
+            } finally {
+                $writer->stop(1);
+            }
+        });
+    }
+
+    public function test_signal_during_a_heartbeat_retries_a_locked_gate_close(): void
+    {
+        $closeAttempts = 0;
+        foreach ($this->host->children as $child) {
+            $child->stopOnRequest = true;
+        }
+        DB::connection()->beforeStartingTransaction(function () use (&$closeAttempts) {
+            if ($this->seconds > 0 && ++$closeAttempts === 1) {
+                throw new PDOException('SQLITE_BUSY');
+            }
+        });
+        DB::connection()->beforeExecuting(function (string $query) {
+            if ($this->seconds === 1.0 && str_starts_with($query, 'update "local_engines" set "heartbeat_at"')) {
+                ($this->host->stop)();
+            }
+        });
+
+        $this->assertSame(0, $this->supervise(function () {
+            $this->assertLessThan(6, ++$this->seconds);
+        }));
+        $this->assertSame(2, $closeAttempts);
+        $this->assertSame('off', LocalEngine::findOrFail(1)->state);
+        $this->assertNotNull(LocalEngine::findOrFail(1)->stop_requested_at);
+    }
+
+    public function test_expired_heartbeat_during_contention_cannot_revive_after_a_scheduling_delay(): void
+    {
+        $recoveredWrites = 0;
+        DB::connection()->beforeExecuting(function (string $query, array $bindings) use (&$recoveredWrites) {
+            if ($this->seconds > 0 && str_starts_with($query, 'update "local_engines" set "heartbeat_at"')) {
+                if ($this->seconds < 10) {
+                    throw $this->lockError($query, $bindings);
+                }
+                $recoveredWrites++;
+            }
+        });
+
+        $this->assertSame(1, $this->supervise(function () {
+            if ($this->seconds === 9.0) {
+                $this->seconds += 7;
+            } elseif ($this->seconds >= 16) {
+                app(EngineGate::class)->close();
+                foreach ($this->host->children as $child) {
+                    $child->running = false;
+                }
+            } else {
+                $this->seconds++;
+            }
+        }));
+        $this->assertSame(0, $recoveredWrites);
+        $this->assertFaultedAndChildrenKilled();
+    }
+
+    public function test_observed_stop_signals_children_even_when_heartbeats_remain_locked(): void
+    {
+        DB::connection()->beforeExecuting(function (string $query, array $bindings) {
+            if ($this->seconds > 0 && str_starts_with($query, 'update "local_engines" set "heartbeat_at"')) {
+                throw $this->lockError($query, $bindings);
+            }
+        });
+
+        $this->assertSame(0, $this->supervise(function () {
+            if ($this->seconds === 0.0) {
+                app(EngineGate::class)->close();
+            } else {
+                foreach ($this->host->children as $child) {
+                    $this->assertContains(['requestStop'], $child->calls);
+                    $this->assertTrue($child->isRunning());
+                    if ($this->seconds === 12.0) {
+                        $child->running = false;
+                    }
+                }
+            }
+            $this->seconds++;
+        }));
+        $this->assertSame(13.0, $this->seconds);
+        $this->assertSame('off', LocalEngine::findOrFail(1)->state);
+        foreach ($this->host->children as $child) {
+            $this->assertSame([['ready', 10.0], ['requestStop']], $child->calls);
         }
     }
 
@@ -171,6 +276,21 @@ class LocalEngineSupervisorBusyTest extends TestCase
         foreach ($this->host->children as $child) {
             $this->assertContains(['kill'], $child->calls);
             $this->assertFalse($child->isRunning());
+        }
+    }
+
+    private function withFileDatabase(Closure $work): void
+    {
+        $database = storage_path('engine-contention.sqlite');
+        touch($database);
+        config(['database.connections.engine_contention' => ['database' => $database] + config('database.connections.sqlite')]);
+        DB::setDefaultConnection('engine_contention');
+        try {
+            $this->artisan('migrate')->assertSuccessful();
+            $work($database);
+        } finally {
+            DB::setDefaultConnection('sqlite');
+            DB::purge('engine_contention');
         }
     }
 

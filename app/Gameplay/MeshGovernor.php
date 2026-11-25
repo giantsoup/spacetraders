@@ -27,7 +27,10 @@ final class MeshGovernor
     {
         $body = $this->revisionBody($episode, $agent);
         if ($body === null) {
-            return ['mode' => 'hold', 'reason' => 'saturation_grant_unavailable', 'cause' => 'saturation_grant_unavailable', 'room' => 0];
+            $reason = 'saturation_grant_unavailable';
+
+            return ['mode' => 'hold', 'reason' => $reason, 'cause' => $reason, 'room' => 0,
+                'shadow_price' => ['hold_reason' => $reason] + $this->shadowDefaults()];
         }
         $policy = CampaignMesh::policy($episode)['saturation'] ?? [];
         $hostCap = max(1, (int) config('gameplay.host_tier2_4_per_minute', 96));
@@ -248,7 +251,7 @@ final class MeshGovernor
         }
         $charge = max($this->estimate($agent, $kind), $requests ?? 0);
         $status = $this->govern($agent, $episode, proposed: $charge);
-        $saturation = isset($status['shadow_price']);
+        $saturation = isset($status['hard_limit']);
         $permitted = match ($status['mode']) {
             'normal' => true,
             'sampling' => in_array($kind, $saturation ? ['demand', 'directory', 'proof', 'proof_scout'] : ['demand', 'directory'], true),

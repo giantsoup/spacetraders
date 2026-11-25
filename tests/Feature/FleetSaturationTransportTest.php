@@ -115,6 +115,9 @@ class FleetSaturationTransportTest extends TestCase
                 throw new GameException('Synthetic damage refresh failed.');
             }
             $refuel = $request->method() === 'POST' && str_ends_with($path, '/refuel');
+            $damageReceipt = $request->method() === 'POST' && str_ends_with($path, '/navigate')
+                ? ($this->world['navigation_damage_receipt'] ?? null) : null;
+            $shipBeforeTravel = $damageReceipt !== null ? $this->world['ships'][0] : null;
             $this->world['foundation'] = ! $refuel;
             [$body, $status] = FakeSpaceTraders::respond($this->world, $request);
             $this->world['foundation'] = true;
@@ -139,10 +142,21 @@ class FleetSaturationTransportTest extends TestCase
                     unset($body['data']['transaction'][$this->world['purchase_omitted_field']]);
                 }
             }
-            if ($request->method() === 'POST' && str_ends_with($path, '/navigate') && ($this->world['navigation_damage'] ?? false)) {
+            if ($damageReceipt !== null) {
                 $body['data']['events'] = [['symbol' => 'SHIP_ENGINE_OVERHEATED']];
-                if ($this->world['navigation_bad_destination'] ?? false) {
-                    $body['data']['nav']['waypointSymbol'] = self::SOURCE;
+                $nav = &$body['data']['nav'];
+                $nav['route']['origin'] = ['symbol' => $shipBeforeTravel['nav']['waypointSymbol']];
+                match ($damageReceipt) {
+                    'bad destination' => $nav['waypointSymbol'] = self::SOURCE,
+                    'bad route origin' => $nav['route']['origin']['symbol'] = self::BUYER,
+                    'bad route destination' => $nav['route']['destination']['symbol'] = self::SOURCE,
+                    'stale receipt' => $nav['route']['departureTime'] = now()->subHour()->toIso8601String(),
+                    'future departure' => $nav['route']['departureTime'] = now()->addSeconds(6)->toIso8601String(),
+                    'reversed route times' => $nav['route']['arrival'] = $nav['route']['departureTime'],
+                    default => null,
+                };
+                if ($damageReceipt === 'stale receipt') {
+                    $this->world['ships'][0] = $shipBeforeTravel;
                 }
             }
 
@@ -268,11 +282,14 @@ class FleetSaturationTransportTest extends TestCase
     {
         $this->campaign(true);
         $this->world['ships'][0]['nav']['status'] = 'IN_ORBIT';
+        $this->world['travel_seconds'] = 60;
         $this->seedWorld();
-        $this->world['navigation_damage'] = true;
+        $this->world['navigation_damage_receipt'] = $case;
         $this->world['defer_followup_after_write'] = $case !== 'failed refresh';
         $this->world['navigation_refresh_error'] = $case === 'failed refresh';
-        $this->world['navigation_bad_destination'] = $case === 'bad destination';
+        if ($case === 'fuel mismatch') {
+            $this->world['fuel_consumption'] = 90;
+        }
 
         $hop = $this->hop(self::SOURCE, self::BUYER);
         $run = $this->campaignRun('position', ['route' => ['hops' => [$hop], 'fuel_ceiling' => 50]]);
@@ -281,16 +298,26 @@ class FleetSaturationTransportTest extends TestCase
 
         $this->assertTrue($action->outcome['response_validated']);
         if ($expected === 'confirmed') {
-            $this->assertFalse($action->review_required);
+            $fuelMismatch = $case === 'fuel mismatch';
+            $this->assertSame($fuelMismatch, $action->review_required);
+            $this->assertSame($fuelMismatch, $action->outcome['fuel_discrepancy']);
             $this->assertSame(self::BUYER, $this->fields()['nav']['value']['waypointSymbol']);
             $this->assertSame(['config', 'mounts', 'modules'], $this->staleness()['stale_fields']);
-            $this->assertSame('running', $run->fresh()->state->value);
-            $this->assertGreaterThan(now(), $run->fresh()->next_action_at);
+            $this->assertSame($fuelMismatch ? 'blocked' : 'running', $run->refresh()->state->value);
+            if (! $fuelMismatch) {
+                $this->assertGreaterThan(now(), $run->next_action_at);
+            }
             $this->assertNull($this->episode->grant()->paused_at);
         }
 
         $this->execute($action, $expected);
         $this->assertSame(['POST /my/ships/LOCAL-1/navigate'], $this->shipTrace());
+        if ($case === 'stale receipt') {
+            $this->assertSame(self::SOURCE, $this->world['ships'][0]['nav']['waypointSymbol']);
+            $this->world['defer_followup_after_write'] = false;
+            $this->assertSame('uncertain', app(ShipCommandExecutor::class)->reconcile($this->agent, $action)->state->value);
+            $this->assertCount(1, $this->world['writes']);
+        }
     }
 
     public static function navigationDamageRefreshes(): array
@@ -299,6 +326,12 @@ class FleetSaturationTransportTest extends TestCase
             'deferred damage refresh' => ['deferred refresh', 'confirmed'],
             'failed damage refresh' => ['failed refresh', 'uncertain'],
             'invalid destination' => ['bad destination', 'uncertain'],
+            'wrong route origin' => ['bad route origin', 'uncertain'],
+            'wrong route destination' => ['bad route destination', 'uncertain'],
+            'stale receipt' => ['stale receipt', 'uncertain'],
+            'future departure' => ['future departure', 'uncertain'],
+            'reversed route times' => ['reversed route times', 'uncertain'],
+            'fuel mismatch preserves review' => ['fuel mismatch', 'confirmed'],
         ];
     }
 
