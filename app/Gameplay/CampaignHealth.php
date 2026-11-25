@@ -139,9 +139,15 @@ class CampaignHealth
                         $grant->refresh();
                         $episode->refresh();
                         $reason = $safety->reason($grant, $episode, $agent);
-                        if ($reason === 'uncertain_action' && ! $safety->uncertain($agent) && ! $safety->purchaseConfigurationMismatch($grant, $agent)
-                            && $safety->priceReview($grant, $episode, $agent)) {
-                            $reason = $safety->unexplainedBalance($agent) ? 'unexplained_change' : null;
+                        if ($reason === 'uncertain_action') {
+                            $perShip = (bool) (CampaignPlaybook::saturationPolicy($grant->revision()->body)['per_ship_noncredit_locks'] ?? false);
+                            $agentUncertain = $perShip
+                                ? $safety->uncertainCredit($agent) || $safety->creditReview($agent)
+                                : $safety->uncertain($agent);
+                            if (! $agentUncertain && ! $safety->purchaseConfigurationMismatch($grant, $agent)
+                                && $safety->priceReview($grant, $episode, $agent)) {
+                                $reason = $safety->unexplainedBalance($agent) ? 'unexplained_change' : null;
+                            }
                         }
                         if (in_array($reason, ['uncertain_action', 'unexplained_change'], true)) {
                             foreach (collect([$grant])->merge($agent->reset_id === $episode->reset_id ? app(CampaignFleet::class)->currentArms($agent) : collect()) as $affected) {

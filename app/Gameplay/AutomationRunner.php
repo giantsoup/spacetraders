@@ -2,6 +2,7 @@
 
 namespace App\Gameplay;
 
+use App\Enums\ActionState;
 use App\Enums\RunState;
 use App\Jobs\AdvanceAutomationRun;
 use App\Jobs\ExecuteShipCommand;
@@ -26,6 +27,13 @@ class AutomationRunner
 
     public function preview(Agent $agent, string $symbol, array $limits, ?CampaignEpisode $meshEpisode = null): AutomationRun
     {
+        if (($limits['plan_version'] ?? null) === 8) {
+            if (! $meshEpisode) {
+                throw new GameException('Saturation preview requires campaign authority.');
+            }
+
+            return $this->previewSaturation($agent, $symbol, $limits, $meshEpisode);
+        }
         if ($meshEpisode === null && (isset($limits['mesh_episode']) || isset($limits['mesh_work']))) {
             throw new GameException('Mesh authority requires an internal campaign scout.');
         }
@@ -36,8 +44,10 @@ class AutomationRunner
         return $this->executor->locked($agent, function () use ($agent, $symbol, $limits, $meshEpisode) {
             $this->executor->clear($agent, defer: true, ship: $symbol);
             $this->executor->assertConfigurationReviewed($agent, $symbol);
-            $this->sync->sync($agent, false, freshFleet: isset($limits['mesh_work']),
-                reuseLockedSeconds: isset($limits['mesh_work']) ? (float) config('gameplay.locked_fleet_reuse_seconds', 30) : 0);
+            $meshWork = isset($limits['mesh_work']);
+            $reuseFleet = $meshWork || isset($limits['campaign_trade']);
+            $this->sync->sync($agent, false, freshFleet: $meshWork,
+                reuseLockedSeconds: $reuseFleet ? (float) config('gameplay.locked_fleet_reuse_seconds', 30) : 0);
             $ship = Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->firstOrFail()->snapshot;
             if ($ship['nav']['status'] === 'IN_TRANSIT' || $ship['cargo']['units'] !== 0) {
                 throw new GameException('Begin with a stationary ship and empty cargo. Existing cargo remains protected.');
@@ -70,6 +80,159 @@ class AutomationRunner
         });
     }
 
+    private function previewSaturation(Agent $agent, string $symbol, array $limits, CampaignEpisode $episode): AutomationRun
+    {
+        return app(HostLock::class)->lockedAgentAndShips($agent->id, [$symbol], writer: true, work: function () use ($agent, $symbol, $limits, $episode) {
+            $agent->refresh();
+            $grant = $episode->grant();
+            $safety = app(CampaignSafety::class);
+            $authority = $safety->saturationGrant($episode, $agent);
+            $policy = CampaignPlaybook::saturationPolicy($authority?->revision()->body ?? []);
+            if (! $policy || ! $grant->available() || $episode->closed_at || $episode->agent_id !== $agent->id || $episode->reset_id !== $agent->reset_id) {
+                throw new GameException('Saturation preview exceeds campaign authority.');
+            }
+            $this->executor->assertConfigurationReviewed($agent, $symbol);
+            $ship = Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->firstOrFail()->snapshot;
+            $route = $limits['route'] ?? [];
+            if ($limits['strategy'] === 'position' && ($limits['mode'] ?? $limits['flight_mode'] ?? null) === 'DRIFT' && $route === []) {
+                $hard = $episode->next_reset_at->subHour();
+                $hard = $grant->expires_at ? $hard->min($grant->expires_at) : $hard;
+                $route = app(RoutePlanner::class)->planDrift($agent, $ship, $limits['destination'] ?? $limits['market'],
+                    $hard, $policy['extraction']['drift_margin_seconds'] ?? 1800);
+            }
+            $limits = $this->pinSaturationTiming($agent, $limits);
+            $bounds = $this->saturationBounds($limits, $episode, $policy, $route);
+            $limits = array_replace($limits, $bounds);
+            $fingerprint = null;
+            if ($limits['strategy'] === 'buy_fleet') {
+                $purchase = app(CampaignHaulerPurchase::class)->composeFleetPurchase($agent, $symbol, $limits['shipyard'], $limits['ship_type'], $limits, $episode);
+                $plan = array_replace($limits, $purchase['plan']);
+                $fingerprint = $purchase['fingerprint'];
+            } elseif ($limits['strategy'] === 'sell_aboard') {
+                $recovery = app(CampaignRecovery::class);
+                $age = $recovery->verifiedBuyerAge($episode, $limits);
+                $plan = array_replace($limits, $recovery->compose($agent, $symbol, $limits['market'], $limits, $age)['plan']);
+            } elseif ($limits['strategy'] === 'scout') {
+                $plan = app(OperationPlanner::class)->preview($agent, $ship, $limits, $episode);
+            } else {
+                $plan = app(OperationPlanner::class)->projectV8($agent, $ship, $limits, $episode);
+            }
+            $plan = array_replace($plan, [
+                'plan_version' => 8, 'grant_id' => $grant->id, 'revision_hash' => $grant->revision_hash, 'campaign_episode_id' => $episode->id,
+                'saturation_grant_id' => $authority->id, 'saturation_revision_hash' => $authority->revision_hash,
+                'initial_credits' => $agent->credits, 'initial_inventory' => MiningPlanner::inventory($ship),
+                'initial_fuel' => $ship['fuel']['current'], 'initial_waypoint' => $ship['nav']['waypointSymbol'],
+                'initial_status' => $ship['nav']['status'], 'initial_configuration' => FuelPlanner::configuration($ship),
+                'equipment' => OpportunityEvaluator::equipment($ship),
+                'participating_ships' => [$symbol], 'capital' => app(CycleAccounting::class)->capital($agent, [$symbol]),
+            ]);
+            if (($plan['route']['mode'] ?? null) === 'DRIFT') {
+                $hard = $grant->expires_at ? $episode->next_reset_at->min($grant->expires_at) : $episode->next_reset_at;
+                $plan['route']['cleanup']['expires_at'] = $hard->toIso8601String();
+                $plan['cleanup'] = $plan['route']['cleanup'];
+            }
+            $strategy = $plan['strategy'];
+            $totals = [
+                'phase' => match ($strategy) {
+                    'trade' => 'buy', 'mining' => 'mine', 'siphon' => 'siphon', 'sell_aboard' => 'sell',
+                    'scout' => 'observe', default => 'position',
+                },
+                'leg_index' => 0, 'hop_index' => 0, 'credit_delta' => 0, 'purchase_cost' => 0, 'sale_proceeds' => 0, 'fuel_cost' => 0,
+                'spending' => 0, 'fuel_units' => 0, 'travel_fuel' => 0, 'cycles' => 0, 'visits' => 0, 'attempts' => 0,
+                'no_progress' => 0, 'unsold' => $plan['initial_inventory'], 'purchased' => [], 'sold' => [], 'extracted' => [],
+            ];
+            $run = AutomationRun::create([
+                'engine_session_id' => $this->gate->enabled() ? LocalEngine::find(1)?->session_id : null,
+                'agent_id' => $agent->id, 'reset_id' => $agent->reset_id, 'ship_symbol' => $symbol, 'campaign_episode_id' => $episode->id,
+                'plan_version' => 8, 'strategy' => $strategy, 'state' => RunState::Preview,
+                'plan' => $plan, 'totals' => $totals, 'expires_at' => now()->addSeconds(config('gameplay.preview_seconds')),
+                'fingerprint' => $fingerprint,
+            ]);
+            app(CampaignSafety::class)->check($run, $agent);
+
+            return $run;
+        }, seconds: 0);
+    }
+
+    private function saturationBounds(array $plan, CampaignEpisode $episode, array $policy, array $route): array
+    {
+        $safety = app(CampaignSafety::class);
+        $grant = $episode->grant();
+        $now = now()->toImmutable();
+        $hard = ($plan['strategy'] ?? null) === 'sell_aboard' ? $episode->next_reset_at : $episode->next_reset_at->subHour();
+        if ($grant->expires_at) {
+            $hard = $hard->min($grant->expires_at);
+        }
+        $seconds = $grant->limits['run_max_minutes'] * 60;
+        if (($plan['strategy'] ?? null) === 'position' && ($route['mode'] ?? null) === 'DRIFT') {
+            $seconds = max($seconds, ($route['run_seconds'] ?? 0) + ($policy['stop_overhead_seconds'] ?? 30));
+        }
+        $settlement = $hard->min($now->addSeconds($seconds));
+        if ($approved = $safety->planTime($plan['settlement_deadline'] ?? null)) {
+            $settlement = $settlement->min($approved);
+        }
+        $planned = $route['estimated_seconds'] ?? $route['seconds'] ?? ($plan['minutes'] ?? 1) * 60;
+        $acquisitionSeconds = isset($plan['elapsed_p90_seconds'])
+            ? (int) ceil(1.25 * $plan['elapsed_p90_seconds'])
+            : max($policy['acquisition_default_floor_seconds'] ?? 300, (int) ceil(1.25 * $planned));
+        if (($plan['strategy'] ?? null) === 'trade') {
+            $acquisitionSeconds = min(5400, $policy['run_hard_cap_seconds'] ?? 5400, $acquisitionSeconds);
+        }
+        $acquisitionSeconds = ($route['mode'] ?? null) === 'DRIFT' ? max($acquisitionSeconds, ($route['run_seconds'] ?? 0) + ($policy['stop_overhead_seconds'] ?? 30)) : $acquisitionSeconds;
+        $cutoff = $settlement->min($now->addSeconds($acquisitionSeconds));
+        if ($approved = $safety->planTime($plan['acquisition_cutoff'] ?? null)) {
+            $cutoff = $cutoff->min($approved);
+        }
+        if ($settlement->lte($now) || $cutoff->lte($now)) {
+            throw new GameException('Campaign settlement or acquisition authority has expired.');
+        }
+
+        return ['acquisition_cutoff' => $cutoff->toIso8601String(), 'settlement_deadline' => $settlement->toIso8601String(), 'cycles' => 1];
+    }
+
+    private function pinSaturationTiming(Agent $agent, array $plan): array
+    {
+        if (! empty($plan['pipeline_preselected'])) {
+            $plan['pipeline_selected_at'] ??= now()->toIso8601String();
+        }
+        if (isset($plan['elapsed_p90_seconds']) || ! in_array($plan['strategy'], ['trade', 'mining', 'siphon'], true)) {
+            return $plan;
+        }
+
+        $samples = AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->where('strategy', $plan['strategy'])->where('plan_version', 8)->where('state', RunState::Completed)
+            ->whereNotNull('totals->elapsed_seconds')->get(['plan', 'totals'])
+            ->filter(function (AutomationRun $other) use ($plan) {
+                $totals = $other->totals;
+                if (($totals['cycles'] ?? 0) < 1 || ! empty($totals['empty_cutoff_exit']) || ! empty($totals['acquisition_closed_at'])
+                    || ! empty($totals['leg_acquisition_closed']) || isset($other->plan['original_units'])) {
+                    return false;
+                }
+                if ($plan['strategy'] !== 'trade') {
+                    return true;
+                }
+                $legs = $other->plan['legs'] ?? null;
+                if (count($legs ?? [1]) !== count($plan['legs'] ?? [1])) {
+                    return false;
+                }
+                foreach ($legs ?? [] as $index => $leg) {
+                    if (($totals['leg_sold'][$index] ?? 0) < ($leg['approvedUnits'] ?? PHP_INT_MAX)) {
+                        return false;
+                    }
+                }
+
+                return true;
+            })
+            ->pluck('totals')
+            ->map(fn (array $totals) => $totals['elapsed_seconds'] ?? null)
+            ->filter(fn ($seconds) => is_int($seconds) && $seconds > 0)->sort()->values();
+        if ($samples->count() >= 5) {
+            $plan['elapsed_p90_seconds'] = $samples[(int) ceil(0.9 * $samples->count()) - 1];
+        }
+
+        return $plan;
+    }
+
     public function start(Agent $agent, AutomationRun $run, bool $acceptContract = false, ?float $deadline = null): AutomationRun
     {
         return $this->executor->locked($agent, function () use ($agent, $run, $acceptContract, $deadline) {
@@ -98,10 +261,13 @@ class AutomationRunner
             if ($run->expires_at->isPast() || $run->reset_id !== $agent->reset_id || AutomationRun::where('active_agent_id', $agent->id)->where('ship_symbol', $run->ship_symbol)->exists()) {
                 $this->rejectPreview($run, 'Preview expired, reset or another run already owns this ship.');
             }
-            if (! in_array($run->plan_version, [1, 2, 3, 4, 5, 6, 7], true) || ($this->gate->enabled() && ! in_array($run->plan_version, [2, 3, 4, 5, 6, 7], true)) || ($run->plan_version === 3 && ! in_array($run->strategy, ['scout', 'trade'], true)) || ($run->plan_version === 4 && (! $run->campaign_episode_id || $run->strategy !== 'sell_aboard')) || ($run->plan_version === 6 && (! $run->campaign_episode_id || $run->strategy !== 'buy_probe')) || ($run->plan_version === 7 && (! $run->campaign_episode_id || $run->strategy !== 'buy_hauler'))) {
+            if (! in_array($run->plan_version, [1, 2, 3, 4, 5, 6, 7, 8], true) || ($this->gate->enabled() && ! in_array($run->plan_version, [2, 3, 4, 5, 6, 7, 8], true)) || ($run->plan_version === 3 && ! in_array($run->strategy, ['scout', 'trade'], true)) || ($run->plan_version === 4 && (! $run->campaign_episode_id || $run->strategy !== 'sell_aboard')) || ($run->plan_version === 6 && (! $run->campaign_episode_id || $run->strategy !== 'buy_probe')) || ($run->plan_version === 7 && (! $run->campaign_episode_id || $run->strategy !== 'buy_hauler'))) {
                 throw new GameException('Unsupported or historical plan version. Create a fresh staged preview.');
             }
-            if (in_array($run->plan_version, [6, 7], true)) {
+            $v8 = $run->plan_version === 8;
+            if ($v8) {
+                $plan = $this->startSaturation($agent, $run, $deadline);
+            } elseif (in_array($run->plan_version, [6, 7], true)) {
                 $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
                 $purchase = $run->strategy === 'buy_hauler' ? app(CampaignHaulerPurchase::class) : app(CampaignProbeBootstrap::class);
                 $fresh = $purchase->compose($agent, $run->ship_symbol, $run->plan['shipyard'], $run->plan, $episode, $run->id, deadline: $deadline);
@@ -145,8 +311,10 @@ class AutomationRunner
                 }
                 $plan = $run->plan;
             } else {
-                $this->sync->sync($agent, false, freshFleet: isset($run->plan['mesh_work']),
-                    reuseLockedSeconds: isset($run->plan['mesh_work']) ? (float) config('gameplay.locked_fleet_reuse_seconds', 30) : 0);
+                $meshWork = isset($run->plan['mesh_work']);
+                $reuseFleet = $meshWork || isset($run->plan['campaign_trade']);
+                $this->sync->sync($agent, false, freshFleet: $meshWork,
+                    reuseLockedSeconds: $reuseFleet ? (float) config('gameplay.locked_fleet_reuse_seconds', 30) : 0);
                 $ship = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->firstOrFail()->snapshot;
                 $plan = $run->plan;
                 $episode = isset($plan['mesh_episode']) ? CampaignEpisode::findOrFail($run->campaign_episode_id) : null;
@@ -169,15 +337,16 @@ class AutomationRunner
             app(CampaignSafety::class)->check($run, $agent);
             if (isset($plan['mesh_work'])) {
                 $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
-                $destination = $plan['destination'] ?? $plan['shipyard'];
+                $destination = $plan['destination'] ?? $plan['shipyard'] ?? $plan['market'] ?? null;
                 $ship = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->firstOrFail()->snapshot;
-                if ($ship['nav']['waypointSymbol'] !== $destination || $plan['mesh_work'] !== 'purchase') {
+                if ((! $v8 || $run->strategy === 'scout') && ($ship['nav']['waypointSymbol'] !== $destination || $plan['mesh_work'] !== 'purchase')) {
                     app(CampaignMesh::class)->assertDeparture($episode, $agent, $ship, $destination, $run->id, $plan['mesh_work'] !== 'market');
                 }
                 if (microtime(true) >= ($deadline ?? INF)) {
                     throw (new RequestDeferred('Mesh start exceeded the pass deadline.', 5, delaySource: 'pass_deadline', deadlineCapped: true))->withDeadline($deadline);
                 }
-                app(RequestBudget::class)->bindMesh($plan['mesh_allowance'], $run->id, $plan['minutes'] * 60, $deadline);
+                $duration = $v8 ? (int) now()->diffInSeconds($plan['settlement_deadline'], false) : $plan['minutes'] * 60;
+                app(RequestBudget::class)->bindMesh($plan['mesh_allowance'], $run->id, max(1, $duration), $deadline);
             }
             if ($deadline !== null && microtime(true) >= $deadline) {
                 throw (new RequestDeferred('Pass deadline reached before mesh run could start.', 10, delaySource: 'pass_deadline', deadlineCapped: true))->withDeadline($deadline);
@@ -187,12 +356,296 @@ class AutomationRunner
                 if ($deadline !== null && microtime(true) >= $deadline) {
                     throw (new RequestDeferred('Pass deadline reached before mesh run could start.', 10, delaySource: 'pass_deadline', deadlineCapped: true))->withDeadline($deadline);
                 }
-                $run->update(['plan' => $plan, 'active_agent_id' => $agent->id, 'state' => RunState::Running, 'started_at' => now(), 'expires_at' => $run->plan_version === 5 ? CarbonImmutable::parse($plan['return_deadline']) : now()->addMinutes($plan['minutes']), 'next_action_at' => now(), 'last_dispatched_at' => now()]);
+                $expires = match ($run->plan_version) {
+                    5 => CarbonImmutable::parse($plan['return_deadline']),
+                    8 => CarbonImmutable::parse($plan['settlement_deadline']),
+                    default => now()->addMinutes($plan['minutes']),
+                };
+                if ($run->strategy !== 'sell_aboard') {
+                    $snapshot = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->first()?->snapshot ?? [];
+                    app(StateChain::class)->releaseRecoveryFuelHoldIfEmpty($agent, $run->ship_symbol, $snapshot);
+                }
+                if ($run->plan_version === 8) {
+                    $this->commitSaturationStart($agent, $run, $plan);
+                } elseif ($run->strategy === 'sell_aboard') {
+                    $this->claimRecoveryFuel($agent, $run);
+                }
+                $run->update(['plan' => $plan, 'active_agent_id' => $agent->id, 'state' => RunState::Running, 'started_at' => now(), 'expires_at' => $expires, 'next_action_at' => now(), 'last_dispatched_at' => now()]);
                 AdvanceAutomationRun::dispatch($run->id)->afterCommit();
             });
 
             return $run;
         }, priority: $run->strategy === 'sell_aboard' && $this->usesRecoveryReserve($run) ? 'settlement' : 'critical');
+    }
+
+    private function startSaturation(Agent $agent, AutomationRun $run, ?float $deadline): array
+    {
+        $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
+        $grant = $episode->grant();
+        $safety = app(CampaignSafety::class);
+        $policy = $safety->saturationPolicy($run);
+        $plan = $this->pinSaturationTiming($agent, $run->plan);
+        $safety->check($run, $agent);
+        $this->sync->guardReset($agent);
+        $rules = app(CommandRules::class);
+        $rules->refreshCredits($agent, $run, true, reconcile: true);
+        $ship = $rules->shipForRun($agent, $run, force: true);
+        $initial = $plan['initial_inventory'];
+        $inventory = MiningPlanner::inventory($ship);
+        ksort($initial);
+        ksort($inventory);
+        if ($ship['nav']['waypointSymbol'] !== $plan['initial_waypoint'] || $ship['nav']['status'] !== $plan['initial_status']
+            || FuelPlanner::configuration($ship) !== $plan['initial_configuration'] || OpportunityEvaluator::equipment($ship) !== $plan['equipment']
+            || $inventory !== $initial || $ship['fuel']['current'] < $this->minimumStartFuel($plan)
+            || $safety->unexplainedBalance($agent)) {
+            $this->rejectPreview($run, 'Ship location, cargo, fuel, equipment or credit attribution changed. Create a fresh preview.');
+        }
+        $plan = array_replace($plan, $this->saturationBounds($plan, $episode, $policy, $plan['route'] ?? []));
+        if (in_array($run->strategy, ['mining', 'siphon'], true)) {
+            $plan['delivery_seconds'] ??= $plan['route']['delivery_seconds'] ?? 0;
+            $cutoff = CarbonImmutable::parse($plan['acquisition_cutoff'])
+                ->min(CarbonImmutable::parse($plan['settlement_deadline'])->subSeconds($plan['delivery_seconds']));
+            if ($approved = $safety->planTime($plan['effective_acquisition_cutoff'] ?? null)) {
+                $cutoff = $cutoff->min($approved);
+            }
+            if (! $cutoff->isFuture()) {
+                $this->rejectPreview($run, 'Extraction acquisition authority has expired.');
+            }
+            $plan['effective_acquisition_cutoff'] = $cutoff->toIso8601String();
+        }
+        if ($run->strategy === 'buy_fleet') {
+            $safety->assertFleetPurchaseSlot($agent, $run->id);
+            $purchase = app(CampaignHaulerPurchase::class)->composeFleetPurchase($agent, $run->ship_symbol, $plan['shipyard'], $plan['ship_type'], $plan + ['ignore_run_id' => $run->id], $episode, $deadline);
+            if ($purchase['fingerprint'] !== $run->fingerprint) {
+                $this->rejectPreview($run, 'Fleet purchase authority, configuration or offer changed.');
+            }
+        }
+        if ($run->strategy === 'trade') {
+            $plan = $this->startTradeV8($agent, $run, $ship, $plan, $episode, $grant, $policy);
+        }
+        $exposure = app(StateChain::class)->outstandingExposure($agent,
+            $run->strategy === 'sell_aboard' ? 'recovery:'.$run->ship_symbol : 'run:'.$run->id);
+        $floor = $plan['reserve'] + max(0, $exposure - ($plan['reserve_parts']['commitments'] ?? 0));
+        if ($agent->credits < $floor + ($plan['route']['fuel_ceiling'] ?? 0)) {
+            $this->rejectPreview($run, 'Available balance no longer covers protected delivery and fuel commitments.');
+        }
+        $plan['initial_credits'] = $agent->credits;
+        $plan['initial_reviewed_adjustment'] = app(CreditAccounting::class)->summary($agent)['reviewed_adjustments'];
+        $plan['initial_fuel'] = $ship['fuel']['current'];
+
+        return $plan;
+    }
+
+    private function minimumStartFuel(array $plan): int
+    {
+        $route = $plan['route'] ?? [];
+        if (($route['mode'] ?? null) === 'DRIFT') {
+            return 1 + max(2, $route['uncertainty_reserve'] ?? 2);
+        }
+        $hop = $route['hops'][0] ?? null;
+        if ($hop && empty($hop['topped_up'])) {
+            return $hop['burn'] + ($hop['continuation_fuel'] ?? 0) + ($hop['uncertainty_reserve'] ?? 0);
+        }
+
+        return $hop ? 0 : ($plan['initial_fuel'] ?? 0);
+    }
+
+    private function startTradeV8(Agent $agent, AutomationRun $run, array $ship, array $plan, CampaignEpisode $episode, CampaignGrant $grant, array $policy): array
+    {
+        $planner = app(OperationPlanner::class);
+        $pct = $policy['start_band_price_pct'] ?? 5;
+        $profitPct = $policy['start_band_profit_pct'] ?? 10;
+        $profitFloor = $policy['start_band_profit_min_credits'] ?? 2000;
+        $age = $policy['corridor']['stale_seconds'] ?? 900;
+        $softMiss = false;
+        $projectedMargin = 0;
+        $cost = 0;
+        foreach ($plan['legs'] as $index => $leg) {
+            $ask = $planner->quote($agent, $leg['source'], $leg['good'], $age);
+            $bid = $planner->quote($agent, $leg['buyer'], $leg['good'], $age);
+            if (now()->subSeconds($age)->gt($ask['observed_at']) || now()->subSeconds($age)->gt($bid['observed_at']) || $ask['purchasePrice'] < 1 || $bid['sellPrice'] < 1) {
+                $this->rejectPreview($run, 'A planned trade endpoint lacks current ranked quote evidence.');
+            }
+            $margin = app(CampaignTrade::class)->prediction($leg['approvedUnits'], $ask, $bid,
+                $leg['decay'] ?? $plan['campaign_trade']['decay'] ?? 0, $leg['expectedFuelCost'] ?? 0);
+            $projectedMargin += $margin['predicted_margin'];
+            $cost += $margin['predicted_cost'];
+            $plan['legs'][$index]['acquisition_cash'] = $margin['predicted_cost'];
+            $prior = $leg['prediction']['predicted_margin'];
+            $softMiss = $softMiss || $ask['purchasePrice'] > ceil($leg['quoteEvidence']['ask']['purchasePrice'] * (100 + $pct) / 100)
+                || $bid['sellPrice'] < floor($leg['quoteEvidence']['bid']['sellPrice'] * (100 - $pct) / 100)
+                || $margin['predicted_margin'] < $prior - max((int) ceil($prior * $profitPct / 100), $profitFloor);
+        }
+        $fuel = $plan['route']['fuel_ceiling'] ?? 0;
+        $reserved = app(StateChain::class)->outstandingExposure($agent, 'run:'.$run->id);
+        $arm = $grant->arm() ? app(CampaignTrade::class)->allowance($grant, $agent, $run) : PHP_INT_MAX;
+        $budget = min($plan['max_spend'], $agent->credits - $reserved - $plan['reserve'], $arm);
+        $stimulus = count($plan['legs']) === 1 ? ($plan['stimulus'] ?? null) : null;
+        if ($projectedMargin + (int) ($stimulus['bonus'] ?? 0) <= ($plan['request_shadow_cost'] ?? 0)
+            || ($stimulus !== null && $projectedMargin < -(int) ($stimulus['loss_auth'] ?? 0))) {
+            $this->rejectPreview($run, 'Trade no longer has a positive charged value.');
+        }
+        if (! $softMiss && $cost + $fuel <= $budget) {
+            return $plan;
+        }
+        if ($agent->credits - $reserved - $plan['reserve'] < $plan['legs'][0]['acquisition_cash'] + $fuel) {
+            $this->rejectPreview($run, 'Insufficient unreserved cash for the approved trade lot and delivery fuel.');
+        }
+        if ($stimulus !== null) {
+            $this->rejectPreview($run, 'Stimulated trade changed outside the pinned start bands or spending authority.');
+        }
+
+        $considered = [];
+        $ranked = app(CampaignTrade::class)->rank($grant, $episode, $agent, $ship, $considered, persist: false);
+        $attempts = [$plan];
+        $same = $plan['legs'][0];
+        $unitRoom = $cost > 0 ? min(1, max(0, ($budget - $fuel) / $cost)) : 1;
+        foreach ($attempts[0]['legs'] as $index => &$leg) {
+            $leg['approvedUnits'] = min($leg['approvedUnits'], (int) floor($leg['approvedUnits'] * $unitRoom));
+            $candidate = collect($ranked)->first(fn ($row) => [$row['source'], $row['buyer'], $row['good']] === [$leg['source'], $leg['buyer'], $leg['good']]);
+            if ($candidate) {
+                $leg['approvedUnits'] = min($leg['approvedUnits'], $candidate['units']);
+            }
+        }
+        unset($leg);
+        if (count($plan['legs']) === 1 && empty($plan['canary_family']) && empty($plan['stimulus_entry_id'])) {
+            $alternate = collect($ranked)->first(fn ($row) => [$row['source'], $row['buyer'], $row['good']] !== [$same['source'], $same['buyer'], $same['good']]);
+            if ($alternate) {
+                $attempts[] = array_replace($plan, ['legs' => [[
+                    'source' => $alternate['source'], 'buyer' => $alternate['buyer'], 'good' => $alternate['good'],
+                    'approvedUnits' => min($same['approvedUnits'], $alternate['units']),
+                    'proofMode' => $alternate['mode'], 'decay' => $alternate['decay'],
+                    'maxInventory' => min($same['maxInventory'], $alternate['max_inventory']),
+                ]]]);
+            }
+        }
+        foreach ($attempts as $attempt) {
+            try {
+                $replacement = $planner->projectV8($agent, $ship, $attempt, $episode);
+            } catch (GameException) {
+                continue;
+            }
+            if ($this->tradeRequestShape($replacement) > $this->tradeRequestShape($plan) || $replacement['route']['fuel_estimate'] > $plan['max_fuel']
+                || array_sum(array_map(fn ($leg) => $leg['prediction']['predicted_cost'], $replacement['legs'])) + $replacement['route']['fuel_ceiling'] > $budget) {
+                continue;
+            }
+            $orders = $this->recomposeCorridorOrders($agent, $run, $replacement, $policy);
+            if ($orders === null) {
+                continue;
+            }
+            foreach ($replacement['legs'] as &$leg) {
+                $leg['acquisition_cash'] = $leg['prediction']['predicted_cost'];
+            }
+            unset($leg);
+            $replacement['recomposed_orders'] = $orders;
+            $replacement['start_recomposed_at'] = now()->toIso8601String();
+            $replacement['plan_revision'] = ($plan['plan_revision'] ?? 0) + 1;
+
+            return $replacement;
+        }
+        $this->rejectPreview($run, 'Trade changed outside the start bands and no bounded local recomposition qualified.');
+    }
+
+    private function tradeRequestShape(array $plan): int
+    {
+        return array_sum(array_map(fn ($leg) => 3 * count($leg['hops']) + 2 * (count($leg['buyBatches']) + count($leg['sellBatches'])
+            + count(array_filter($leg['hops'], fn ($hop) => ! empty($hop['topped_up'])))), $plan['legs']));
+    }
+
+    private function recomposeCorridorOrders(Agent $agent, AutomationRun $run, array $plan, array $policy): ?array
+    {
+        $book = app(CorridorBook::class);
+        $active = $book->activeEvents($agent);
+        $ours = fn (array $event) => $event['owner_type'] === 'run' && $event['owner_id'] === (string) $run->id;
+        if (! array_filter($active, $ours)) {
+            return [];
+        }
+        $retained = array_values(array_filter($active, fn ($event) => ! $ours($event)));
+        $orders = $quotes = [];
+        $landed = now()->timestamp;
+        foreach ($plan['legs'] as $index => $leg) {
+            $delivery = $leg['deliverySeconds'];
+            $forBuy = $landed + $leg['estimatedSeconds'] - $delivery;
+            $landed += $leg['estimatedSeconds'];
+            foreach (['buy' => [$leg['source'], $leg['buyBatches'], $leg['quoteEvidence']['ask'], $forBuy],
+                'sell' => [$leg['buyer'], $leg['sellBatches'], $leg['quoteEvidence']['bid'], $landed]] as $side => [$market, $batches, $quote, $at]) {
+                $quotes[$market.'|'.$leg['good'].'|'.$side] = $quote;
+                foreach ($batches as $batchIndex => $batch) {
+                    $orders[] = ['owner_type' => 'run', 'owner_id' => (string) $run->id,
+                        'side' => $side, 'market' => $market, 'good' => $leg['good'], 'units' => $batch['units'],
+                        'leg_index' => $index, 'batch_index' => $batchIndex, 'landing_at' => $at + 10 * $batchIndex,
+                        'tie_key' => implode('|', [$run->ship_symbol, $run->id, $index, $batchIndex, $side])];
+                }
+            }
+        }
+        $corridor = $policy['corridor'] ?? [];
+        $prices = $book->priceAndValidate($retained, $orders, $quotes, depthBatches: $corridor['side_depth_batches'] ?? 7,
+            recoverySeconds: $corridor['recovery_seconds_prior'] ?? 1800);
+        if ($prices === null) {
+            return null;
+        }
+        $cost = $income = 0;
+        foreach ($orders as $index => &$order) {
+            $order['guard_price'] = $prices[$index];
+            if ($order['side'] === 'buy') {
+                $cost += $order['units'] * $prices[$index];
+            } else {
+                $income += $order['units'] * $prices[$index];
+            }
+        }
+        unset($order);
+        if ($income - $cost <= ($plan['route']['expected_fuel_cost'] ?? 0) + ($plan['request_shadow_cost'] ?? 0)
+            || $cost + ($plan['route']['fuel_ceiling'] ?? 0) > $plan['max_spend']) {
+            return null;
+        }
+
+        return $orders;
+    }
+
+    private function commitSaturationStart(Agent $agent, AutomationRun $run, array &$plan): void
+    {
+        if ($run->strategy === 'sell_aboard') {
+            $this->claimRecoveryFuel($agent, $run);
+        }
+        $fuel = (int) ($plan['route']['fuel_ceiling'] ?? 0);
+        if ($fuel > 0) {
+            app(StateChain::class)->reserveCredit($agent, 'run:'.$run->id, 'delivery_fuel', 'refuel', $fuel, runId: $run->id, shipSymbol: $run->ship_symbol);
+        }
+        if ($run->strategy === 'trade' && ! $this->reserveTradeLot($agent, $run, $plan, 0)) {
+            throw new GameException('Insufficient unreserved cash for the approved trade lot.');
+        }
+        if (! empty($plan['recomposed_orders'])) {
+            $book = app(CorridorBook::class);
+            $book->releaseOwner($agent, 'run', (string) $run->id);
+            $book->reserveOrders($agent, $plan['recomposed_orders']);
+        }
+        unset($plan['recomposed_orders']);
+    }
+
+    public function reserveTradeLot(Agent $agent, AutomationRun $run, array $plan, int $index): bool
+    {
+        $leg = $plan['legs'][$index] ?? [];
+        $cash = (int) ($leg['acquisition_cash'] ?? $leg['prediction']['predicted_cost'] ?? 0);
+        if ($cash <= 0) {
+            return true;
+        }
+        $chain = app(StateChain::class);
+        $owner = 'run:'.$run->id;
+        $outstanding = $chain->outstandingExposure($agent, $owner, 'trade_lot');
+        if ($agent->credits - $plan['reserve'] - $outstanding < $cash || $chain->hasUnresolvedCreditAction($agent)) {
+            return false;
+        }
+        $chain->reserveCredit($agent, $owner, 'trade_lot', 'buy', $cash, runId: $run->id, shipSymbol: $run->ship_symbol);
+
+        return true;
+    }
+
+    private function claimRecoveryFuel(Agent $agent, AutomationRun $run): void
+    {
+        DB::table('credit_reservations')->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->where('owner_key', 'recovery:'.$run->ship_symbol)->where('purpose', 'delivery_fuel')
+            ->whereNull('ship_action_id')->where('state', 'reserved')
+            ->update(['owner_key' => 'run:'.$run->id, 'automation_run_id' => $run->id, 'updated_at' => now()]);
     }
 
     public function stop(AutomationRun $run): void
@@ -206,7 +659,9 @@ class AutomationRunner
             $grant = $episode->grant();
             $agent->refresh();
             $episode->refresh();
-            $extended = isset($run->plan['mesh_episode']);
+            $v8 = $run->plan_version === 8;
+            $drift = $v8 && $run->strategy === 'position' && ($run->plan['route']['mode'] ?? null) === 'DRIFT';
+            $extended = isset($run->plan['mesh_episode']) && (! $v8 || $run->strategy === 'scout');
             if ($extended) {
                 $ship = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->firstOrFail()->snapshot;
                 if ($run->plan['mesh_episode'] !== $episode->id) {
@@ -218,17 +673,20 @@ class AutomationRunner
                 || ($grant->arm() && CampaignDirector::armReset($grant, $agent->reset_id, CampaignDirector::cachedSchedule()) !== $agent->reset_id)
                 || ($grant->isDraining() && $run->strategy !== 'sell_aboard')
                 || ! hash_equals($grant->revision_hash, $grant->revision()->content_hash)
-                || ! in_array($run->strategy, ['scout', 'trade', 'mining', 'sell_aboard', 'buy_probe', 'buy_hauler'], true)
+                || ! in_array($run->strategy, ['scout', 'trade', 'mining', 'sell_aboard', 'buy_probe', 'buy_hauler', ...($v8 ? ['siphon', 'survey', 'position', 'tender', 'buy_fleet'] : [])], true)
                 || ($run->strategy === 'buy_probe' && ! CampaignProbeBootstrap::policy($grant, $episode))
                 || ($run->strategy === 'buy_hauler' && ! app(CampaignHaulerPurchase::class)->policy($grant, $episode, $agent))
                 || (empty($run->plan['sell_only']) && $grant->slot === 1 && CampaignGrant::pendingFor($grant->user_id, $grant->resolvedAgentSymbol())->exists())
-                || $run->plan['reserve'] < $grant->limits['reserve_credits'] || (! $extended && $run->plan['minutes'] > $grant->limits['run_max_minutes'])
+                || $run->plan['reserve'] < $grant->limits['reserve_credits'] || (! $extended && ! $drift && ($run->plan['minutes'] ?? 0) > $grant->limits['run_max_minutes'])
                 || $run->plan['cycles'] !== 1
                 || (in_array($run->strategy, ['trade', 'mining', 'buy_probe', 'buy_hauler'], true) && app(CampaignSafety::class)->windDown($episode))) {
                 throw new GameException('Preview exceeds campaign authority.');
             }
+            if ($v8 && ($run->campaign_episode_id !== $episode->id || ($run->plan['campaign_episode_id'] ?? null) !== $episode->id)) {
+                throw new GameException('Saturation preview belongs to a different campaign episode.');
+            }
             $run->update(['campaign_episode_id' => $episode->id]);
-            if ($run->strategy === 'trade') {
+            if ($run->strategy === 'trade' && ! $v8) {
                 app(CampaignTrade::class)->authorize($agent, $run, $episode);
             }
 
@@ -254,7 +712,7 @@ class AutomationRunner
     {
         $work = fn () => $this->previewPurchase($agent, $symbol, $shipyard, $limits, $episode, 'buy_probe', $deadline);
         if (isset(CampaignMesh::policy($episode)['saturation']) && ! RequestBudget::currentMeshAllowance()) {
-            return app(MeshGovernor::class)->preview($agent, $episode, 'buy', $work, $deadline);
+            return app(MeshGovernor::class)->preview($agent, $episode, 'buy', $work, deadline: $deadline);
         }
 
         return $work();
@@ -267,7 +725,7 @@ class AutomationRunner
         };
         $ship = Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->first()?->snapshot;
         if ($ship && app(CampaignProbeBootstrap::class)->requiresHaulerMeshMovement($episode, $ship, $shipyard) && ! RequestBudget::currentMeshAllowance()) {
-            return app(MeshGovernor::class)->preview($agent, $episode, 'hauler_purchase', $work, $deadline);
+            return app(MeshGovernor::class)->preview($agent, $episode, 'hauler_purchase', $work, deadline: $deadline);
         }
 
         return $work();
@@ -329,7 +787,7 @@ class AutomationRunner
         };
 
         return $saturation && ! RequestBudget::currentMeshAllowance()
-            ? app(MeshGovernor::class)->preview($agent, $episode, 'scout', $work, $deadline) : $work();
+            ? app(MeshGovernor::class)->preview($agent, $episode, 'scout', $work, deadline: $deadline) : $work();
     }
 
     public function previewRecovery(Agent $agent, string $symbol, string $buyer, array $limits, CampaignEpisode $episode): AutomationRun
@@ -337,6 +795,13 @@ class AutomationRunner
         $recovery = app(CampaignRecovery::class);
         $age = $recovery->verifiedBuyerAge($episode, $limits);
         $limits = $this->recoveryLimits($episode, $limits, $age);
+
+        $safety = app(CampaignSafety::class);
+        $policy = CampaignPlaybook::saturationPolicy($safety->saturationGrant($episode, $agent)?->revision()->body ?? []);
+        $origin = isset($limits['recovery_of']) ? AutomationRun::find($limits['recovery_of']) : null;
+        if ($policy && (($limits['plan_version'] ?? null) === 8 || $origin?->plan_version === 8)) {
+            return $this->previewSaturation($agent, $symbol, array_replace($limits, ['strategy' => 'sell_aboard', 'plan_version' => 8, 'market' => $buyer]), $episode);
+        }
 
         return $this->executor->locked($agent, function () use ($agent, $symbol, $buyer, $limits, $episode, $recovery, $age) {
             $this->executor->clear($agent, defer: true, ship: $symbol);
@@ -368,7 +833,15 @@ class AutomationRunner
 
     public static function hasTradeCargo(AutomationRun $run): bool
     {
-        return $run->strategy === 'trade' && array_sum($run->totals['unsold'] ?? []) > 0;
+        if (! in_array($run->strategy, ['trade', 'mining', 'siphon', 'tender', 'sell_aboard'], true)) {
+            return false;
+        }
+        $totals = $run->totals;
+        if (isset($totals['attributable_inventory'])) {
+            return array_sum($totals['attributable_inventory']) > 0;
+        }
+
+        return array_sum($totals['unsold'] ?? []) > array_sum($run->strategy === 'sell_aboard' ? [] : ($run->plan['initial_inventory'] ?? []));
     }
 
     public function advance(int $id): void
@@ -378,13 +851,22 @@ class AutomationRunner
             return;
         }
         $agent = Agent::find($run->agent_id);
+        FleetMetrics::withWorkload($run->strategy, fn () => $run->plan_version === 8
+            ? $this->advanceSaturation($agent, $run)
+            : $this->advanceLegacy($agent, $run));
+    }
+
+    private function advanceLegacy(Agent $agent, AutomationRun $run): void
+    {
         // Outcome mapping (recorded once per advance that took the agent lock, with the requests it used):
         // wrote = a write was enqueued; waited = planner wait, trip/depart bookkeeping or an action still settling;
         // held = freshness/price/follower/exposure hold; deferred = RequestDeferred or another retryAfter re-queue;
         // blocked = uncertain action, planner block or fatal error; idle = nothing due (inactive, stopping, blocked, not yet due).
         $outcome = null;
         $requestsBefore = FleetMetrics::requestTotal();
-        $this->executor->locked($agent, function () use ($run, $agent, &$outcome) {
+        $send = null;
+        $split = app(CampaignSafety::class)->perShipLocksEnabled($agent);
+        $this->executor->locked($agent, function () use ($run, $agent, $split, &$outcome, &$send) {
             $outcome = 'idle';
             $run->refresh();
             if (! $run->active_agent_id) {
@@ -398,7 +880,7 @@ class AutomationRunner
                 }
             }
             $run->update(['heartbeat_at' => now()]);
-            if (ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where(fn ($q) => $q->where('state', 'uncertain')->orWhere(fn ($q) => ShipCommandExecutor::reviewFor($q, $run->ship_symbol)))->exists()) {
+            if (! $split && ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where(fn ($q) => $q->where('state', 'uncertain')->orWhere(fn ($q) => ShipCommandExecutor::reviewFor($q, $run->ship_symbol)))->exists()) {
                 if ($run->campaign_episode_id && ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('state', 'uncertain')->exists()) {
                     $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
                     app(CampaignControl::class)->pause($episode->grant(), 'uncertain_action', $episode);
@@ -408,7 +890,8 @@ class AutomationRunner
 
                 return;
             }
-            if (ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereIn('state', ['pending', 'sending'])->exists()) {
+            if (ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+                ->when($split, fn ($q) => $q->where('automation_run_id', $run->id))->whereIn('state', ['pending', 'sending'])->exists()) {
                 $run->update(['next_action_at' => now()->addSeconds(5)]);
                 $outcome = 'waited';
 
@@ -424,20 +907,30 @@ class AutomationRunner
             }
             $budget = app(RequestBudget::class);
             $paced = RequestBudget::agentCaps() !== [];
-            $loaded = $paced && self::hasTradeCargo($run);
+            $loaded = $paced && $run->strategy === 'trade' && self::hasTradeCargo($run);
             $buyPhase = ($run->totals['phase'] ?? null) === 'buy';
             $finishLoading = $loaded && $buyPhase && $budget->ordinaryCapReached($agent->name);
             $recovery = ! empty($run->plan['sell_only']) && (! empty($run->plan['mesh_settlement_only']) || $paced || $budget->isDraining($agent->name));
             $priority = $recovery || ($loaded && (! $buyPhase || $finishLoading)) ? 'settlement' : ($paced ? 'run' : 'critical');
-            $work = function () use ($run, $agent, $finishLoading, &$outcome, &$ship) {
+            $work = function () use ($run, $agent, $finishLoading, $split, &$outcome, &$ship, &$send) {
                 $this->gate->check($run->engine_session_id);
                 $lastActionId = (int) (ShipAction::where('agent_id', $agent->id)->whereIn('state', ['confirmed', 'uncertain'])->max('id') ?? 0);
                 $observedAt = now();
                 $this->sync->guardReset($agent);
                 $ship = $this->sync->refreshShip($agent, $run->ship_symbol, fresh: isset($run->plan['mesh_work']))->snapshot;
-                $credits = $this->api->agent($agent, fresh: isset($run->plan['mesh_work']))['credits'];
-                $agent->update(['credits' => $credits, 'synced_at' => now()]);
-                app(CampaignSafety::class)->check($run, $agent);
+                $safety = app(CampaignSafety::class);
+                $agent->refresh();
+                $unresolved = $split && (app(StateChain::class)->hasUnresolvedCreditAction($agent) || $safety->uncertainCredit($agent)
+                    || ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('state', 'sending')
+                        ->whereNotIn('command', [...CampaignSafety::SHIP_COMMANDS, 'transfer'])->exists());
+                if (! $unresolved) {
+                    $agent->update(['credits' => $this->api->agent($agent, fresh: isset($run->plan['mesh_work']))['credits'], 'synced_at' => now()]);
+                }
+                $safety->check($run, $agent);
+                if ($unresolved) {
+                    throw new GameException('A credit action is unresolved. Retry after reconciliation.', retryAfter: 5);
+                }
+                $credits = $agent->credits;
                 $otherDelta = app(CreditAccounting::class)->outsideRunDelta($agent, $run);
                 if ($credits !== $run->plan['initial_credits'] + $run->totals['credit_delta'] + $otherDelta) {
                     throw new GameException('Agent credits changed outside this run. Create a new preview after reconciliation.');
@@ -557,9 +1050,13 @@ class AutomationRunner
                         'market' => $prefetchedMarket,
                         'market_symbol' => $prefetchedMarketSymbol,
                     ];
-                    $this->executor->executeLocked($agent->fresh(), $enqueuedAction, $prefetched);
-                    $run->refresh();
-                    $ship = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->first()?->snapshot ?? $ship;
+                    if ($split) {
+                        $send = [$enqueuedAction, $prefetched];
+                    } else {
+                        $this->executor->executeLocked($agent->fresh(), $enqueuedAction, $prefetched);
+                        $run->refresh();
+                        $ship = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->first()?->snapshot ?? $ship;
+                    }
                 }
                 $outcome = match ($step->kind) {
                     'blocked' => self::isHold($step->reason) ? 'held' : 'blocked',
@@ -589,9 +1086,384 @@ class AutomationRunner
             }
             app(CycleAccounting::class)->record($run->fresh() ?? $run, $ship ?? null);
         });
+        if ($send) {
+            $this->executor->dispatchLocked($agent, ...$send);
+        }
         if ($outcome !== null) {
             FleetMetrics::forAgent($agent->name, fn () => FleetMetrics::advance($run->ship_symbol, $outcome, FleetMetrics::requestTotal() - $requestsBefore));
         }
+    }
+
+    private function advanceSaturation(Agent $agent, AutomationRun $run): void
+    {
+        FleetMetrics::forAgent($agent->name, function () use ($agent, $run) {
+            $before = FleetMetrics::requestTotal();
+            $outcome = 'idle';
+            try {
+                [$outcome, $action] = $this->planSaturationStep($agent, $run);
+                if ($action && config('gameplay.inline_execute', true)) {
+                    $this->executor->dispatchLocked($agent, $action);
+                }
+            } catch (GameException $e) {
+                FleetMetrics::as($run->ship_symbol, fn () => FleetMetrics::observe($e));
+                if (str_starts_with($e->getMessage(), 'Another operation owns this command boundary')) {
+                    throw $e;
+                }
+                $outcome = $e->retryAfter > 0 ? 'deferred' : 'blocked';
+                if ($run->fresh()?->active_agent_id === $agent->id) {
+                    if ($e->retryAfter > 0) {
+                        $run->update(['state' => RunState::Waiting, 'next_action_at' => now()->addSeconds(min(180, $e->retryAfter)), 'blocked_reason' => $e->getMessage()]);
+                    } else {
+                        $this->executor->block($run, $e->getMessage());
+                    }
+                }
+            }
+            FleetMetrics::advance($run->ship_symbol, $outcome, FleetMetrics::requestTotal() - $before);
+        }, $agent->reset_id);
+    }
+
+    private function planSaturationStep(Agent $agent, AutomationRun $run): array
+    {
+        $partner = $this->tenderFor($run);
+        $ships = $partner ? [$run->ship_symbol, $partner->ship_symbol] : [$run->ship_symbol];
+
+        return app(HostLock::class)->lockedAgentAndShips($agent->id, $ships, writer: true, work: function () use ($agent, $run, $partner) {
+            $agent->refresh();
+            $run->refresh();
+            if ($run->active_agent_id !== $agent->id) {
+                return ['idle', null];
+            }
+            $safety = app(CampaignSafety::class);
+            $run->update(['heartbeat_at' => now()]);
+            $owned = ShipAction::where('agent_id', $agent->id)->where('reset_id', $run->reset_id)->where('automation_run_id', $run->id);
+            if ((clone $owned)->whereIn('state', ['sending', 'uncertain'])->exists()) {
+                return ['held', null];
+            }
+            $cleanup = $this->positionCleanupDeadline($run, $agent);
+            $stopping = $run->stop_requested_at || ! config('gameplay.enabled')
+                || ((! $run->expires_at->isFuture() || ! $safety->settlementDeadline($run)?->isFuture()) && ! $cleanup);
+            if ($stopping) {
+                if (! $safety->hasShipUncertaintyHold($agent, $run->ship_symbol)) {
+                    $this->retireSaturationIntents($agent, $run);
+                    $episode = CampaignEpisode::find($run->campaign_episode_id);
+                    if (self::hasTradeCargo($run) && ! $run->stop_requested_at && (! $episode || $episode->closed_at
+                        || $episode->reset_id !== $agent->reset_id || $episode->next_reset_at->isPast() || ! $episode->grant()->available())) {
+                        $this->executor->block($run, 'Settlement authority ended. Cargo is held for review.');
+
+                        return ['held', null];
+                    }
+                    $this->finishStop($run, $run->stop_requested_at ? 'Stop acknowledged. Retain attributable cargo for authorized recovery.' : 'Settlement authority ended. Retain attributable cargo for authorized recovery.');
+                }
+
+                return ['held', null];
+            }
+            $phase = $run->totals['phase'] ?? null;
+            if (! in_array($phase, ['deliver', 'sell'], true) && $this->executor->closeAcquisitionUnsent($agent, $run)) {
+                $run->refresh();
+                if (! $run->active_agent_id) {
+                    $this->releaseSaturationHolds($agent, $run);
+                    app(MeshGovernor::class)->release($run->plan['mesh_allowance'] ?? null);
+
+                    return ['waited', null];
+                }
+            }
+            if ((clone $owned)->where('state', 'pending')->exists()) {
+                return ['waited', null];
+            }
+            if ($safety->uncertainCredit($agent) || $safety->creditReview($agent) || $safety->unexplainedBalance($agent)) {
+                $safety->check($run, $agent);
+            }
+            $this->executor->promoteCreditIntent($agent);
+            if ((clone $owned)->whereIn('state', ['preview', 'pending'])->exists()) {
+                return ['waited', null];
+            }
+            if ($run->state === RunState::Blocked || $run->next_action_at?->isFuture()) {
+                return ['idle', null];
+            }
+            if ($safety->hasShipUncertaintyHold($agent, $run->ship_symbol)) {
+                return ['held', null];
+            }
+            $this->gate->check($run->engine_session_id);
+            $loaded = self::hasTradeCargo($run);
+            $delivery = in_array($run->totals['phase'] ?? null, ['sell', 'deliver'], true);
+            $priority = ($loaded && $delivery) || $cleanup ? 'settlement' : 'run';
+
+            $work = fn () => app(SpaceTradersClient::class)->scope(function () use ($agent, $run, $safety, $partner) {
+                $this->sync->guardReset($agent);
+                $safety->check($run, $agent);
+                $ship = app(CommandRules::class)->shipForRun($agent, $run);
+                if ($ship['nav']['status'] === 'IN_TRANSIT') {
+                    $wake = CarbonImmutable::parse($ship['nav']['route']['arrival'])->addSecond()->max(now()->toImmutable()->addSecond());
+                    $run->update(['state' => RunState::Waiting, 'next_action_at' => $wake]);
+
+                    return ['waited', null];
+                }
+                if ($partner) {
+                    if ($transfer = $this->stageTransfer($agent, $run, $partner, $ship)) {
+                        return ['wrote', $transfer];
+                    }
+                    if (($ship['nav']['waypointSymbol'] ?? null) === ($run->plan['site'] ?? null) && $ship['nav']['status'] === 'IN_ORBIT'
+                        && $ship['cargo']['units'] > 0 && empty($run->totals['acquisition_closed_at'])
+                        && ($ready = $safety->planTime($ship['cooldown']['readyAt']))?->isFuture()
+                        && ($rendezvous = $this->tenderCutoff($partner)) && $ready->lt($rendezvous)) {
+                        $run->update(['state' => RunState::Waiting, 'next_action_at' => $ready]);
+
+                        return ['waited', null];
+                    }
+                }
+                $kind = $run->strategy === 'buy_fleet' ? 'shipyard' : 'market';
+                $priceRow = GameObservation::where('agent_id', $agent->id)->where('reset_id', $run->reset_id)
+                    ->where('symbol', $ship['nav']['waypointSymbol'])->where('kind', $kind);
+                $previousQuote = (clone $priceRow)->first();
+                $index = (int) ($run->totals['leg_index'] ?? 0);
+                if ($run->strategy === 'trade' && empty($run->totals['leg_purchased'][$index])
+                    && ! $this->reserveTradeLot($agent, $run, $run->plan, $index)) {
+                    throw new GameException('Insufficient unreserved cash for the next approved trade lot.', retryAfter: 5);
+                }
+                $step = $this->nextSaturationStep($agent, $run, $ship);
+                $freshQuote = null;
+                if (in_array($step->command, ['buy', 'sell', 'refuel', 'buy_ship'], true)) {
+                    $read = $priceRow->first();
+                    if ($read && ($read->data['observation_version'] ?? null) !== ($previousQuote?->data['observation_version'] ?? null)) {
+                        $freshQuote = $read;
+                    }
+                }
+                $action = match ($step->kind) {
+                    'blocked' => $this->executor->block($run, $step->reason),
+                    'wait' => $run->update(['state' => RunState::Waiting, 'next_action_at' => $step->until]),
+                    'trip' => $this->completeSaturation($agent, $run, $ship),
+                    'depart' => $run->update(['totals' => array_replace($run->totals, ['phase' => 'deliver']), 'state' => RunState::Running, 'next_action_at' => now()]),
+                    'act' => $this->enqueue($run, $step, $freshQuote),
+                };
+                app(CycleAccounting::class)->record($run->fresh(), $ship);
+
+                return [$step->kind === 'act' ? 'wrote' : ($step->kind === 'blocked' ? 'blocked' : 'waited'), $action instanceof ShipAction ? $action : null];
+            }, priority: $priority);
+
+            return $cleanup ? $work() : app(MeshGovernor::class)->run($agent, $run, $work);
+        }, seconds: 0);
+    }
+
+    private function positionCleanupDeadline(AutomationRun $run, Agent $agent): ?CarbonImmutable
+    {
+        if ($run->strategy !== 'position' || ($run->plan['route']['mode'] ?? null) !== 'DRIFT') {
+            return null;
+        }
+        $safety = app(CampaignSafety::class);
+        $deadline = $safety->planTime($run->plan['route']['cleanup']['expires_at'] ?? null);
+        $ship = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->first()?->snapshot;
+
+        return $deadline?->isFuture() && ($ship['nav']['flightMode'] ?? null) === 'DRIFT' ? $deadline : null;
+    }
+
+    private function tenderFor(AutomationRun $run): ?AutomationRun
+    {
+        if (! in_array($run->strategy, ['mining', 'siphon'], true) || empty($run->plan['stationary']) || empty($run->plan['cluster_id'])) {
+            return null;
+        }
+
+        return AutomationRun::where('active_agent_id', $run->agent_id)->where('reset_id', $run->reset_id)
+            ->where('campaign_episode_id', $run->campaign_episode_id)->where('plan_version', 8)->where('strategy', 'tender')
+            ->where('plan->cluster_id', $run->plan['cluster_id'])->where('plan->canary_pair_id', $run->plan['canary_pair_id'] ?? null)
+            ->where('plan->site', $run->plan['site'])->whereNull('stop_requested_at')->whereIn('state', ['running', 'waiting'])->first();
+    }
+
+    private function tenderCutoff(AutomationRun $receiver): ?CarbonImmutable
+    {
+        $safety = app(CampaignSafety::class);
+        $cutoff = $safety->planTime($receiver->plan['rendezvous_cutoff'] ?? null);
+        $opened = $safety->planTime($receiver->totals['rendezvous_ready_at'] ?? null);
+        if (! $opened) {
+            return $cutoff;
+        }
+        $dwell = $opened->addSeconds($receiver->plan['tender_wait_seconds'] ?? 120);
+
+        return $cutoff ? $cutoff->min($dwell) : $dwell;
+    }
+
+    private function stageTransfer(Agent $agent, AutomationRun $run, AutomationRun $receiver, array $source): ?ShipAction
+    {
+        $receiver->refresh();
+        $plan = $run->plan;
+        $receiverPlan = $receiver->plan;
+        $site = $plan['site'];
+        $episode = CampaignEpisode::findOrFail($run->campaign_episode_id);
+        $safety = app(CampaignSafety::class);
+        $policy = $safety->saturationPolicy($run);
+        if (empty($policy['extraction']['stationary']) || $safety->windDown($episode) || ($source['nav']['waypointSymbol'] ?? null) !== $site
+            || $source['nav']['status'] !== 'IN_ORBIT' || now()->lt($source['cooldown']['readyAt']) || $source['cargo']['units'] < 1
+            || ! $safety->acquisitionDeadline($run)?->isFuture()
+            || $receiver->active_agent_id !== $agent->id || ($plan['buyer'] ?? null) !== ($receiverPlan['buyer'] ?? null)
+            || ! empty($run->totals['acquisition_closed_at'])
+            || in_array($receiver->totals['phase'] ?? null, ['sell', 'deliver'], true)) {
+            return null;
+        }
+        $cluster = app(MiningCluster::class);
+        $pair = $plan['canary_pair_id'] ?? null;
+        if (! $pair) {
+            $calibration = app(ExtractionCalibrator::class)->summary($agent, 'transfer', $site, FuelPlanner::configuration($source));
+            if (! $cluster->canAdmitOrdinary($calibration['transfer_cooldown_measured'], $calibration['transfer_dwell_seconds'] !== null, true)) {
+                return null;
+            }
+        }
+        if ($cluster->hasBlockingLease($agent, $run->ship_symbol) || $cluster->hasBlockingLease($agent, $receiver->ship_symbol)
+            || ($pair && DB::table('transfer_leases')->where('agent_id', $agent->id)->where('reset_id', $run->reset_id)->where('canary_pair_id', $pair)->where('state', 'confirmed')->exists())) {
+            return null;
+        }
+        $saved = Ship::where('agent_id', $agent->id)->where('symbol', $receiver->ship_symbol)->first()?->snapshot;
+        if (($saved['nav']['waypointSymbol'] ?? null) !== $site || ($saved['nav']['status'] ?? null) !== 'IN_ORBIT' || now()->lt($saved['cooldown']['readyAt'])) {
+            return null;
+        }
+        $cutoff = $this->tenderCutoff($receiver);
+        if (! $cutoff?->isFuture()) {
+            return null;
+        }
+        $target = app(CommandRules::class)->shipForRun($agent, $receiver);
+        if ($target['nav']['waypointSymbol'] !== $site || $target['nav']['status'] !== 'IN_ORBIT' || now()->lt($target['cooldown']['readyAt'])) {
+            return null;
+        }
+        $ready = $receiver->totals['rendezvous_ready_at'] ?? now()->toIso8601String();
+        $cutoff = $cutoff->min(CarbonImmutable::parse($ready)->addSeconds($receiverPlan['tender_wait_seconds'] ?? 120));
+        $free = min($target['cargo']['capacity'], $receiverPlan['unit_cap'] ?? PHP_INT_MAX) - $target['cargo']['units'];
+        $goods = array_intersect($plan['allowed_goods'] ?? [], $receiverPlan['allowed_goods'] ?? []);
+        $totals = $run->totals;
+        foreach ($goods as $good) {
+            $attributable = $totals['attributable_inventory'][$good] ?? (($totals['extracted'][$good] ?? 0)
+                - ($totals['transferred_out'][$good] ?? 0) - ($totals['sold'][$good] ?? 0) - ($totals['jettisoned'][$good] ?? 0));
+            $units = min($free, $attributable, MiningPlanner::inventory($source)[$good] ?? 0, $plan['unit_cap'] ?? PHP_INT_MAX);
+            if ($units > 0) {
+                break;
+            }
+        }
+        if (empty($units) || $units < 1 || $safety->hasShipUncertaintyHold($agent, $receiver->ship_symbol)) {
+            return null;
+        }
+        $this->executor->clear($agent, defer: true, ship: $run->ship_symbol, command: 'transfer', targetShip: $receiver->ship_symbol);
+        $exposure = max($plan['combined_exposure'] ?? 0, $receiverPlan['combined_exposure'] ?? 0, $plan['max_spend'] + $receiverPlan['max_spend']);
+        if ($pair && $exposure > 5000) {
+            throw new GameException('Combined transfer canary exposure exceeds the approved cap.');
+        }
+        $basis = (app(CampaignTrade::class)->averageCosts($agent, $run->ship_symbol)[$good] ?? 0) * $units;
+
+        return DB::transaction(function () use ($agent, $run, $receiver, $site, $cutoff, $plan, $pair, $source, $target, $units, $good, $basis, $exposure, $cluster, $safety, $ready) {
+            $this->gate->check($run->engine_session_id);
+            $action = ShipAction::create([
+                'agent_id' => $agent->id, 'reset_id' => $run->reset_id, 'automation_run_id' => $run->id, 'ship_symbol' => $run->ship_symbol,
+                'engine_session_id' => $run->engine_session_id, 'key' => (string) Str::uuid(), 'origin' => 'automation', 'target_type' => 'ship',
+                'target_id' => $receiver->ship_symbol, 'command' => 'transfer', 'state' => ActionState::Pending,
+                'arguments' => ['targetShip' => $receiver->ship_symbol, 'symbol' => $good, 'units' => $units, 'rendezvous_ready_at' => $ready],
+                'expires_at' => $cutoff->min(now()->toImmutable()->addMinute()), 'last_dispatched_at' => now(),
+            ]);
+            $lease = $cluster->issueLease($agent, [
+                'cluster_id' => $plan['cluster_id'], 'canary_pair_id' => $pair, 'source_ship' => $run->ship_symbol,
+                'receiver_ship' => $receiver->ship_symbol, 'source_run_id' => $run->id, 'receiver_run_id' => $receiver->id,
+                'waypoint' => $site, 'good' => $good, 'units' => $units, 'cost_basis' => (int) round($basis), 'ship_action_id' => $action->id,
+                'buyer' => $plan['buyer'], 'combined_exposure' => $exposure, 'rendezvous_cutoff' => $cutoff,
+                'source_snapshot' => $source, 'receiver_snapshot' => $target,
+            ]);
+            if (! $lease) {
+                $action->delete();
+
+                return null;
+            }
+            $action->refresh();
+            $action->update(['arguments' => $action->arguments + ['transfer_lease_id' => (int) $lease['id']]]);
+            $safety->check($run, $agent, 'transfer', $action->arguments, boundaryOnly: true);
+            $receiver->update(['totals' => array_replace($receiver->totals, ['rendezvous_ready_at' => $ready])]);
+            $run->update(['next_action_at' => now()->addSeconds(5)]);
+            ExecuteShipCommand::dispatch($action->id)->afterCommit();
+
+            return $action;
+        });
+    }
+
+    private function nextSaturationStep(Agent $agent, AutomationRun $run, array $ship): AutomationStep
+    {
+        if ($run->strategy === 'buy_fleet') {
+            return app(CampaignHaulerPurchase::class)->next($agent, $ship, $run);
+        }
+        if ($run->strategy === 'sell_aboard') {
+            return app(CampaignRecovery::class)->next($agent, $ship, $run);
+        }
+        if ($run->strategy === 'scout') {
+            $destination = $run->plan['destination'] ?? $run->plan['market'];
+            if ($ship['nav']['waypointSymbol'] === $destination) {
+                $kind = ($run->plan['observe_kind'] ?? 'market') === 'shipyard' ? 'shipyard' : 'market';
+                $this->sync->observe($agent, $kind, $destination, $this->api->$kind($agent, $destination, fresh: true), observer: $run->ship_symbol);
+
+                return AutomationStep::trip();
+            }
+            $plan = $run->plan;
+            unset($plan['plan_version']);
+
+            return app(OperationPlanner::class)->next($agent, $ship, $plan, $run->totals, now()->toImmutable());
+        }
+        $planner = app(OperationPlanner::class);
+        $plan = $run->plan;
+        $totals = $run->totals;
+        if ($run->strategy === 'tender' && ! empty($plan['cluster_id'])) {
+            unset($plan['rendezvous_started_at']);
+            $totals['rendezvous_started_at'] = $totals['rendezvous_ready_at'] ?? null;
+        }
+        try {
+            return $planner->next($agent, $ship, $plan, $totals, now()->toImmutable());
+        } catch (StaleQuote $e) {
+            $here = $ship['nav']['waypointSymbol'];
+            $row = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $here)->first();
+            if (! $row || ! str_contains($e->getMessage(), 'at '.$here.' for ')) {
+                throw $e;
+            }
+            $quote = $this->api->market($agent, $here, fresh: true);
+            $this->sync->observe($agent, 'market', $here, $quote, observer: $run->ship_symbol);
+
+            return $planner->next($agent, $ship, $plan, $totals, now()->toImmutable());
+        }
+    }
+
+    private function retireSaturationIntents(Agent $agent, AutomationRun $run): void
+    {
+        DB::transaction(function () use ($agent, $run) {
+            $pending = ShipAction::where('agent_id', $agent->id)->where('reset_id', $run->reset_id)->where('automation_run_id', $run->id)
+                ->whereIn('state', ['preview', 'pending'])->get();
+            foreach ($pending as $action) {
+                if (isset($action->outcome['response_received_at']) || isset($action->outcome['body_sha256'])) {
+                    throw new GameException('A retained write receipt needs reconciliation before stop.');
+                }
+                app(StateChain::class)->releaseReservation($action->id);
+                $action->update(['state' => ActionState::Rejected, 'message' => 'Run stopped before transport.', 'settled_at' => now(),
+                    'outcome' => array_replace($action->outcome ?? [], ['confirmed_not_sent' => true])]);
+            }
+        });
+    }
+
+    private function completeSaturation(Agent $agent, AutomationRun $run, array $ship): void
+    {
+        app(CommandRules::class)->refreshCredits($agent, $run, true, reconcile: true);
+        if (app(CampaignSafety::class)->unexplainedBalance($agent)) {
+            throw new GameException('Unexplained balance change after settlement.');
+        }
+        DB::transaction(function () use ($agent, $run, $ship) {
+            $totals = array_replace($run->totals, ['cycles' => 1, 'ending_fuel' => $ship['fuel']['current'],
+                'unsold' => MiningPlanner::inventory($ship), 'finished_at' => now()->toIso8601String(),
+                'elapsed_seconds' => max(1, (int) $run->started_at->diffInSeconds(now()))]);
+            $run->update(['totals' => $totals, 'active_agent_id' => null, 'state' => RunState::Completed, 'next_action_at' => null]);
+            $this->releaseSaturationHolds($agent, $run);
+        });
+        app(MeshGovernor::class)->release($run->plan['mesh_allowance'] ?? null);
+    }
+
+    private function releaseSaturationHolds(Agent $agent, AutomationRun $run): void
+    {
+        app(CorridorBook::class)->releaseOwner($agent, 'run', (string) $run->id, keepUnresolved: true);
+        app(StateChain::class)->releaseRunHolds($agent, $run->id);
+    }
+
+    public function settleStoppedRunHolds(Agent $agent, AutomationRun $run, bool $hasCargo): void
+    {
+        if ($hasCargo) {
+            app(StateChain::class)->retainRunDeliveryFuel($agent, $run);
+        }
+        $this->releaseSaturationHolds($agent, $run);
     }
 
     /** Freshness or price holds, follower waits and exposure shortening: planned pauses, not failures. */
@@ -685,11 +1557,12 @@ class AutomationRunner
         return null;
     }
 
-    private function enqueue(AutomationRun $run, AutomationStep $step): ?ShipAction
+    private function enqueue(AutomationRun $run, AutomationStep $step, ?GameObservation $freshQuote = null): ?ShipAction
     {
         $agent = Agent::findOrFail($run->agent_id);
         $shortened = null;
-        if ($step->command === 'buy' && $run->campaign_episode_id) {
+        $v8 = $run->plan_version === 8;
+        if (! $v8 && $step->command === 'buy' && $run->campaign_episode_id) {
             $grant = CampaignEpisode::findOrFail($run->campaign_episode_id)->grant();
             if ($grant->arm()) {
                 $price = (int) ceil($step->arguments['maxTotal'] / $step->arguments['units']);
@@ -704,7 +1577,7 @@ class AutomationRunner
                 $step = AutomationStep::act('buy', array_replace($step->arguments, ['units' => $units, 'maxTotal' => $units * $price]));
             }
         }
-        if ($step->command === 'navigate' && isset($run->plan['mesh_work'])) {
+        if (! $v8 && $step->command === 'navigate' && isset($run->plan['mesh_work'])) {
             $arguments = $step->arguments + [
                 'maxFuel' => 0,
                 'maxSeconds' => min((int) now()->diffInSeconds($run->expires_at, false) - 5,
@@ -712,11 +1585,20 @@ class AutomationRunner
             ];
             $step = AutomationStep::act('navigate', $arguments);
         }
-        app(CampaignSafety::class)->check($run, $agent, $step->command, $step->arguments);
+        $safety = app(CampaignSafety::class);
+        $v8Credit = $v8 && CampaignSafety::isCreditCommand($step->command);
+        if ($safety->perShipLocksEnabled($agent)) {
+            $this->executor->clear($agent, defer: true, ship: $run->ship_symbol, command: $step->command,
+                targetShip: $step->arguments['targetShip'] ?? null, reservationOnly: $v8Credit);
+        } elseif ($v8) {
+            $this->executor->clear($agent, defer: true, ship: $run->ship_symbol);
+        }
+        $safety->check($run, $agent, $step->command, $step->arguments);
+        $cleanup = $v8 && $step->command === 'flight_mode' && ($step->arguments['flightMode'] ?? null) === 'CRUISE' ? $this->positionCleanupDeadline($run, $agent) : null;
         $created = null;
-        DB::transaction(function () use ($run, $step, $shortened, &$created) {
+        DB::transaction(function () use ($agent, $run, $step, $shortened, $v8, $v8Credit, $cleanup, $freshQuote, &$created) {
             $this->gate->check($run->engine_session_id);
-            if (! AutomationRun::whereKey($run->id)->whereNull('stop_requested_at')->whereNotNull('active_agent_id')->where('expires_at', '>', now())->update(['state' => 'running', 'next_action_at' => now()->addSeconds(5)])) {
+            if (! AutomationRun::whereKey($run->id)->whereNull('stop_requested_at')->whereNotNull('active_agent_id')->when(! $cleanup, fn ($query) => $query->where('expires_at', '>', now()))->update(['state' => 'running', 'next_action_at' => now()->addSeconds(5)])) {
                 return;
             }
             if ($shortened) {
@@ -736,19 +1618,48 @@ class AutomationRunner
                 'reset_id' => $run->reset_id, 'ship_symbol' => $run->ship_symbol, 'origin' => 'automation',
                 'target_type' => str_starts_with($step->command, 'contract_') ? 'contract' : ($step->command === 'buy_ship' ? 'fleet' : 'ship'),
                 'target_id' => str_starts_with($step->command, 'contract_') ? $run->plan['contract_plan']['contract']['id'] : ($step->command === 'buy_ship' ? $step->arguments['waypointSymbol'] : $run->ship_symbol),
-                'command' => $step->command, 'arguments' => array_merge($step->arguments, ['reserve' => in_array($run->plan_version, [5, 6, 7], true) && in_array($run->strategy, ['gate_recon', 'buy_probe', 'buy_hauler'], true) ? max($run->plan['reserve'], $step->arguments['reserve'] ?? 0) : $run->plan['reserve']]),
+                'command' => $step->command, 'arguments' => array_merge($step->arguments, ['reserve' => ($v8 || (in_array($run->plan_version, [5, 6, 7], true) && in_array($run->strategy, ['gate_recon', 'buy_probe', 'buy_hauler'], true))) ? max($run->plan['reserve'], $step->arguments['reserve'] ?? 0) : $run->plan['reserve']]),
                 'before_state' => $step->command === 'navigate' && isset($run->plan['mesh_work'])
-                    ? ['ship' => ['nav' => ['waypointSymbol' => $run->plan['initial_waypoint'] ?? $run->plan['site']]]] : null,
-                'state' => 'pending', 'last_dispatched_at' => now(), 'expires_at' => min($run->expires_at, now()->addMinutes(3)),
+                    ? ['ship' => ['nav' => ['waypointSymbol' => $run->plan['initial_waypoint'] ?? $run->plan['site']]]]
+                    : ($freshQuote ? ['price_preflight' => ['id' => $freshQuote->id, 'version' => $freshQuote->data['observation_version']]] : null),
+                'state' => $v8Credit ? 'preview' : 'pending', 'last_dispatched_at' => $v8Credit ? null : now(), 'expires_at' => min($cleanup ?? $run->expires_at, now()->addMinutes(3)),
             ]);
             if ($run->strategy === 'gate_recon' && $step->command === 'jump') {
                 app(GateRecon::class)->bindIntent($run, $action);
             }
-            ExecuteShipCommand::dispatch($action->id)->afterCommit();
-            $created = $action;
+            if ($v8Credit) {
+                $this->executor->reserveCreditIntent($agent, $run, $action);
+                $this->bindCorridorOrder($agent, $run, $action);
+                $this->executor->promoteCreditIntent($agent);
+                $action->refresh();
+            } else {
+                ExecuteShipCommand::dispatch($action->id)->afterCommit();
+            }
+            $created = $action->state === ActionState::Pending ? $action : null;
         });
 
         return $created;
+    }
+
+    private function bindCorridorOrder(Agent $agent, AutomationRun $run, ShipAction $action): void
+    {
+        if ($run->strategy !== 'trade' || ! in_array($action->command, ['buy', 'sell'], true)) {
+            return;
+        }
+        $index = $action->arguments['leg_index'] ?? 0;
+        $leg = $run->plan['legs'][$index];
+        $market = $leg[$action->command === 'buy' ? 'source' : 'buyer'];
+        $query = DB::table('corridor_book_events')->where('agent_id', $agent->id)->where('reset_id', $run->reset_id)
+            ->where('owner_type', 'run')->where('owner_id', (string) $run->id)->where('leg_index', $index)
+            ->where('market', $market)->where('good', $leg['good'])->where('side', $action->command)->where('state', 'reserved')->whereNull('ship_action_id');
+        $event = (clone $query)->orderBy('batch_index')->orderBy('id')->first();
+        if (! $event) {
+            return;
+        }
+        if ($event->units < $action->arguments['units']) {
+            throw new GameException('Trade batch exceeds its reserved corridor depth.');
+        }
+        (clone $query)->where('id', $event->id)->update(['ship_action_id' => $action->id, 'updated_at' => now()]);
     }
 
     private function completeTrip(AutomationRun $run, array $ship, array $market): void
@@ -765,15 +1676,20 @@ class AutomationRunner
         $totals['ending_fuel'] = $ship['fuel']['current'];
         $totals['unsold'] = MiningPlanner::inventory($ship);
         $totals['cash_contribution'] = $totals['sale_proceeds'] - $totals['fuel_cost'] - ($totals['purchase_cost'] ?? 0);
-        $totals['elapsed_seconds'] = (int) $run->started_at->diffInSeconds(now());
+        $totals['elapsed_seconds'] = max(1, (int) $run->started_at->diffInSeconds(now()));
         $lastContribution = $totals['cash_contribution'] - ($totals['previous_cash_contribution'] ?? 0);
         $totals['last_cycle_cash_contribution'] = $lastContribution;
         $totals['last_cycle_contribution'] = $lastContribution;
         $totals['previous_cash_contribution'] = $totals['cash_contribution'];
         if ($totals['cycles'] >= $run->plan['cycles'] || $lastContribution <= 0) {
             $totals['finished_at'] = now()->toIso8601String();
-            $run->update(['totals' => $totals, 'state' => RunState::Completed, 'active_agent_id' => null, 'next_action_at' => null,
-                'blocked_reason' => ($run->plan['strategy'] ?? 'mining') === 'scout' ? 'Observation complete. No earnings were assumed.' : ($lastContribution <= 0 ? 'Trip finished without positive cash contribution. A new preview is required.' : null)]);
+            DB::transaction(function () use ($run, $totals, $lastContribution) {
+                $run->update(['totals' => $totals, 'state' => RunState::Completed, 'active_agent_id' => null, 'next_action_at' => null,
+                    'blocked_reason' => ($run->plan['strategy'] ?? 'mining') === 'scout' ? 'Observation complete. No earnings were assumed.' : ($lastContribution <= 0 ? 'Trip finished without positive cash contribution. A new preview is required.' : null)]);
+                if ($run->strategy === 'sell_aboard') {
+                    app(StateChain::class)->releaseRunHolds(Agent::findOrFail($run->agent_id), $run->id, 'delivery_fuel');
+                }
+            });
             app(MeshGovernor::class)->release($run->plan['mesh_allowance'] ?? null);
 
             return;
@@ -958,7 +1874,12 @@ class AutomationRunner
             $totals['unsold'] = MiningPlanner::inventory($ship);
         }
         $totals['stopped_at'] = now()->toIso8601String();
-        $run->update(['state' => RunState::Stopped, 'active_agent_id' => null, 'next_action_at' => null, 'totals' => $totals, 'blocked_reason' => $reason]);
+        DB::transaction(function () use ($run, $totals, $reason) {
+            $run->update(['state' => RunState::Stopped, 'active_agent_id' => null, 'next_action_at' => null, 'totals' => $totals, 'blocked_reason' => $reason]);
+            if (($run->plan_version === 8 || $run->strategy === 'sell_aboard') && $agent = Agent::find($run->agent_id)) {
+                $this->settleStoppedRunHolds($agent, $run, self::hasTradeCargo($run) || array_sum($totals['unsold'] ?? []) > 0);
+            }
+        });
         app(CycleAccounting::class)->record($run, $ship);
         app(MeshGovernor::class)->release($run->plan['mesh_allowance'] ?? null);
     }

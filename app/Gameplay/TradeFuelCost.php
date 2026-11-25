@@ -26,6 +26,26 @@ final class TradeFuelCost
         return self::bounded($burn, $this->price($agent, $endpoints), $ceiling);
     }
 
+    /** Aggregate planned stops and the last continuation hold, without charging a shared top-up twice. */
+    public function chainEstimate(array $legs): array
+    {
+        $expected = $total = $remaining = 0;
+        $delivery = null;
+        foreach ($legs as $leg) {
+            $ceiling = $leg['total_refuel_ceiling'] ?? $leg['totalFuelCeiling'] ?? $leg['remainingFuelCeiling'] ?? $leg['total_ceiling'] ?? $leg['refuel_ceiling'] ?? 0;
+            $held = $leg['remainingFuelCeiling'] ?? $leg['remaining_refuel_ceiling'] ?? $ceiling;
+            $expected += $leg['expectedFuelCost'] ?? $leg['expected_fuel_cost'] ?? $leg['fuel_cost'] ?? 0;
+            $total += $ceiling;
+            $remaining += $held;
+            if ($delivery === null) {
+                $delivery = $leg['deliveryFuelCeiling'] ?? $held;
+            }
+        }
+
+        return ['expected_fuel_cost' => $expected, 'total_refuel_ceiling' => $total,
+            'remaining_refuel_ceiling' => $remaining, 'current_leg_delivery_hold' => $delivery ?? 0];
+    }
+
     /** The higher usable endpoint ask; an endpoint without fuel sales adds no requirement. */
     public function price(Agent $agent, array $endpoints): ?int
     {

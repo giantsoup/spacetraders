@@ -30,11 +30,20 @@ class CampaignTrade
         $saved = CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])->orderBy('id')->pluck('data')->all();
         $known = CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])->select('data->run_id');
         $runs = AutomationRun::where('campaign_episode_id', $episode->id)->whereIn('strategy', ['trade', 'sell_aboard'])
-            ->whereNotNull('started_at')->whereNotIn('id', $known)->where(fn ($query) => $query->whereNull('plan->recovery_of')->orWhereNotIn('plan->recovery_of', $known))->orderBy('id')->get();
+            ->whereNotNull('started_at')->where(fn ($query) => $query->whereNotIn('id', $known)->orWhereNotNull('plan->legs'))
+            ->where(fn ($query) => $query->whereNull('plan->recovery_of')->orWhereNotNull('plan->recovery_leg_index')->orWhereNotIn('plan->recovery_of', $known))
+            ->orderBy('id')->get();
         $results = $saved;
         $label = $runs->isEmpty() ? 'C0' : FleetClaims::label($episode);
         foreach ($runs as $run) {
             if ($run->active_agent_id || ! $run->started_at || ! in_array($run->state->value, ['completed', 'stopped', 'blocked'], true)) {
+                continue;
+            }
+            if ($run->strategy === 'trade' && isset($run->plan['legs'])) {
+                $legs = $this->legResults($episode, $run, $runs, $label);
+                $recorded = array_column(array_filter($saved, fn (array $result) => $result['run_id'] === $run->id), 'leg_index');
+                array_push($results, ...array_filter($legs, fn (array $result) => ! in_array($result['leg_index'], $recorded, true)));
+
                 continue;
             }
             $recovery = ! empty($run->plan['sell_only']);
@@ -60,7 +69,8 @@ class CampaignTrade
             $fuelAllowance = $unrefilled > 0 ? ($fuelPrice ? TradeFuelCost::consumption($unrefilled, $fuelPrice) : ($run->plan['route']['fuel_ceiling'] ?? 0)) : 0;
             $net = $cashNet - $fuelAllowance;
             $sales = ShipAction::whereIn('automation_run_id', $parts->pluck('id'))->where('command', 'sell')->where('state', 'confirmed')->get();
-            $proofEligible = ! $sales->contains(fn ($sale) => ($sale->before_state['ship']['nav']['waypointSymbol'] ?? null) !== $run->plan['market']);
+            $proofEligible = ! $parts->contains(fn ($part) => ($part->plan['proof_eligible'] ?? true) === false)
+                && ! $sales->contains(fn ($sale) => ($sale->before_state['ship']['nav']['waypointSymbol'] ?? null) !== $run->plan['market']);
             $prediction = $run->plan['campaign_trade'] ?? [];
             $forced = $parts->contains(fn ($part) => ! empty($part->plan['forced_sale']));
             $elapsed = $parts->sum(fn ($part) => $part->totals['elapsed_seconds'] ?? (int) $part->started_at->diffInSeconds($part->updated_at));
@@ -82,11 +92,119 @@ class CampaignTrade
                 'best_available_score' => $prediction['best_available_score'] ?? null, 'best_unclaimed_score' => $prediction['best_unclaimed_score'] ?? null,
                 'best_available' => $prediction['best_available'] ?? null, 'best_unclaimed' => $prediction['best_unclaimed'] ?? null,
                 'limiting_factor' => $prediction['limiting_factor'] ?? null, 'shortened' => isset($run->plan['original_units']),
-                'shortened_reason' => $run->plan['shortened_reason'] ?? null, 'ask_over_prediction' => $run->plan['ask_over_prediction'] ?? null];
+                'shortened_reason' => $run->plan['shortened_reason'] ?? null, 'ask_over_prediction' => $run->plan['ask_over_prediction'] ?? null]
+                + $this->buyerEvidence($sales->filter(fn (ShipAction $sale) => ($sale->arguments['symbol'] ?? null) === $good), $run->plan['market']);
         }
-        usort($results, fn ($left, $right) => [$left['finished_at'], $left['run_id']] <=> [$right['finished_at'], $right['run_id']]);
+        usort($results, fn ($left, $right) => [$left['finished_at'], $left['run_id'], $left['leg_index'] ?? 0] <=> [$right['finished_at'], $right['run_id'], $right['leg_index'] ?? 0]);
 
         return $results;
+    }
+
+    private function resultKey(array $result): string
+    {
+        return $result['run_id'].':'.($result['leg_index'] ?? 'legacy');
+    }
+
+    private function legResults(CampaignEpisode $episode, AutomationRun $run, $runs, string $label): array
+    {
+        $results = [];
+        foreach ($run->plan['legs'] as $index => $leg) {
+            $good = $leg['good'];
+            $units = $run->totals['leg_purchased'][$index] ?? 0;
+            if ($units < 1) {
+                continue;
+            }
+            $recovery = $runs->filter(fn ($part) => ($part->plan['recovery_of'] ?? null) === $run->id
+                && ($part->plan['recovery_leg_index'] ?? null) === $index);
+            $sold = ($run->totals['leg_sold'][$index] ?? 0) + $recovery->sum(fn ($part) => $part->totals['sold'][$good] ?? 0);
+            if ($sold !== $units || $recovery->contains(fn ($part) => $part->active_agent_id)) {
+                continue;
+            }
+            $cost = $run->totals['leg_purchase_cost'][$index] ?? $leg['confirmedPurchaseCost'] ?? 0;
+            $proceeds = ($run->totals['leg_sale_proceeds'][$index] ?? 0) + $recovery->sum(fn ($part) => $part->totals['sale_proceeds_by_good'][$good] ?? $part->totals['sale_proceeds'] ?? 0);
+            $fuel = ($run->totals['leg_fuel_cost'][$index] ?? 0) + $recovery->sum(fn ($part) => $part->totals['fuel_cost'] ?? 0);
+            $cashNet = $proceeds - $cost - $fuel;
+            $travel = ($run->totals['leg_travel_fuel'][$index] ?? 0) + $recovery->sum(fn (AutomationRun $part) => $part->totals['travel_fuel'] ?? 0);
+            $added = ($run->totals['leg_fuel_units'][$index] ?? 0) + $recovery->sum(fn (AutomationRun $part) => $part->totals['fuel_units'] ?? 0);
+            $unrefilled = max(0, $travel - $added);
+            $allowance = $unrefilled === 0 ? 0 : (isset($leg['fuelUnitPrice'])
+                ? TradeFuelCost::consumption($unrefilled, $leg['fuelUnitPrice']) : ($leg['continuationFuelCeiling'] ?? 0));
+            $net = $cashNet - $allowance;
+            $prediction = $leg['prediction']['predicted_margin'] ?? $leg['predicted_margin'] ?? null;
+            $started = CarbonImmutable::parse($run->totals['leg_started_at'][$index] ?? $run->started_at);
+            $finished = CarbonImmutable::parse($recovery->max('updated_at') ?? $run->totals['leg_finished_at'][$index] ?? $run->updated_at);
+            $seconds = (int) $started->diffInSeconds($finished, true);
+            $shortened = $units < ($leg['originalApprovedUnits'] ?? $leg['approvedUnits']);
+            $deviated = ! empty($run->totals['leg_wrong_buyer'][$index]) || ! empty($run->totals['leg_short_sale'][$index]);
+            $results[] = ['run_id' => $run->id, 'leg_index' => $index, 'good' => $good, 'buyer' => $leg['buyer'],
+                'net' => $net, 'cash_net' => $cashNet, 'unrefilled_fuel_allowance' => $allowance, 'fuel_cost' => $fuel,
+                'departure_fuel_cost' => 0, 'proof' => ($leg['proofMode'] ?? null) === 'proof',
+                'proof_eligible' => $recovery->isEmpty() && ! $deviated && ! $shortened && ($leg['proof_eligible'] ?? true),
+                'predicted_margin' => $prediction, 'realized_ratio' => $prediction > 0 ? $net / $prediction : null,
+                'standalone_recovery' => false, 'used_recovery' => $recovery->isNotEmpty(),
+                'forced_sale' => $recovery->contains(fn ($part) => ! empty($part->plan['forced_sale'])),
+                'losing' => $net < 0, 'elapsed_seconds' => $seconds, 'seconds' => $seconds,
+                'realized_cr_per_minute' => $seconds ? round($net * 60 / $seconds, 2) : null,
+                'units' => $units, 'approved_units' => $leg['originalApprovedUnits'] ?? $leg['approvedUnits'],
+                'fully_settled' => $recovery->isEmpty() && ! $deviated && ! $shortened,
+                'shortened' => $shortened, 'shortened_reason' => $run->totals['leg_acquisition_closed'][$index]['reason'] ?? null,
+                'started_at' => $started->toIso8601String(), 'finished_at' => $finished->toIso8601String(),
+                'ship' => $run->ship_symbol, 'arm' => $label, 'campaign_grant_id' => $episode->campaign_grant_id,
+                'purchase_action_id' => $episode->grant()->arm()['purchase_action_id'] ?? null, 'source' => $leg['source'],
+                'purchase_cost' => $cost, 'sale_proceeds' => $proceeds]
+                + $this->legDeliveryEvidence($run, $index, $recovery->pluck('id')->all());
+        }
+
+        return $results;
+    }
+
+    public function legDeliveryEvidence(AutomationRun $run, int $index, ?array $recoveryIds = null): array
+    {
+        $leg = $run->plan['legs'][$index];
+        $recoveryIds ??= AutomationRun::where('campaign_episode_id', $run->campaign_episode_id)
+            ->where('plan->recovery_of', $run->id)->where('plan->recovery_leg_index', $index)->pluck('id')->all();
+        $sales = ShipAction::whereIn('automation_run_id', [$run->id, ...$recoveryIds])->where('command', 'sell')->where('state', 'confirmed')
+            ->where('arguments->symbol', $leg['good'])->orderBy('id')->get()
+            ->filter(fn (ShipAction $sale) => $sale->automation_run_id !== $run->id || (int) ($sale->arguments['leg_index'] ?? 0) === $index);
+
+        return $this->buyerEvidence($sales, $leg['buyer']);
+    }
+
+    private function buyerEvidence(Collection $sales, string $buyer): array
+    {
+        $waypoints = $sales->map(fn (ShipAction $sale) => $sale->outcome['response']['transaction']['waypointSymbol']
+            ?? $sale->before_state['ship']['nav']['waypointSymbol'] ?? null);
+
+        return [
+            'delivered_to_pinned_buyer' => $waypoints->isNotEmpty() && $waypoints->every(fn ($waypoint) => $waypoint === $buyer),
+            'actual_buyers' => $waypoints->filter(fn ($waypoint) => is_string($waypoint) && $waypoint !== '')->unique()->values()->all(),
+        ];
+    }
+
+    private function settleCanary(CampaignEpisode $episode, AutomationRun $run, array $results): void
+    {
+        $family = $run->plan['canary_family'] ?? (! empty($run->plan['j59_canary']) ? 'J59' : null);
+        if (! $family) {
+            return;
+        }
+        $agent = Agent::find($run->agent_id);
+        if (! $agent || $agent->reset_id !== $run->reset_id) {
+            return;
+        }
+        $assigner = app(TraderAssigner::class);
+        $state = $assigner->canaryState($agent, $family);
+        if ($state['state'] !== 'canary_in_flight' || (int) $state['automation_run_id'] !== $run->id) {
+            return;
+        }
+        $ratio = $episode->grant()->revision()->body['trade']['proof']['min_realized_ratio'] ?? 0.8;
+        $review = ShipAction::where('automation_run_id', $run->id)
+            ->where(fn ($query) => $query->where('review_required', true)->orWhereIn('state', ['pending', 'sending', 'uncertain']))->exists();
+        $positive = array_sum(array_column($results, 'net')) > 0;
+        $passed = $run->state->value === 'completed' && count($results) === count($run->plan['legs'])
+            && $positive && ! $review && empty(array_filter($run->totals['unsold'] ?? []))
+            && collect($results)->every(fn (array $leg) => $leg['proof_eligible'] && (! $leg['proof'] || $leg['realized_ratio'] >= $ratio));
+        $assigner->transitionCanary($agent, $family, $passed ? 'passed' : 'held', $run->id,
+            ['settled_legs' => count($results), 'cycle_net' => array_sum(array_column($results, 'net')), 'review_required' => $review]);
     }
 
     /**
@@ -144,12 +262,22 @@ class CampaignTrade
     public function recordResults(CampaignEpisode $episode): void
     {
         app(HostLock::class)->retry('campaign-results-'.$episode->id, fn () => DB::transaction(function () use ($episode) {
-            $known = array_fill_keys(CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])->pluck('data')->map(fn ($data) => $data['run_id'])->all(), true);
-            foreach ($this->results($episode) as $result) {
-                $kind = ! empty($result['standalone_recovery']) ? 'recovery_result' : 'load_result';
-                if (! isset($known[$result['run_id']])) {
+            $known = CampaignEvent::where('campaign_episode_id', $episode->id)->whereIn('kind', ['load_result', 'recovery_result'])
+                ->pluck('data')->mapWithKeys(fn (array $result) => [$this->resultKey($result) => true]);
+            $results = $this->results($episode);
+            foreach ($results as $result) {
+                $key = $this->resultKey($result);
+                if (! $known->has($key)) {
+                    $kind = ! empty($result['standalone_recovery']) ? 'recovery_result' : 'load_result';
                     app(CampaignControl::class)->event($episode->grant(), $episode, $kind, $result);
+                    $known->put($key, true);
                 }
+            }
+            $canaries = AutomationRun::where('campaign_episode_id', $episode->id)->where('strategy', 'trade')
+                ->whereNotNull('started_at')->whereNull('active_agent_id')->whereIn('state', ['completed', 'stopped', 'blocked'])
+                ->where(fn ($query) => $query->whereNotNull('plan->canary_family')->orWhere('plan->j59_canary', true))->get();
+            foreach ($canaries as $run) {
+                $this->settleCanary($episode, $run, array_values(array_filter($results, fn (array $result) => $result['run_id'] === $run->id)));
             }
         }));
     }
@@ -200,7 +328,7 @@ class CampaignTrade
             return $results;
         }
         $results = array_merge($this->results($reference), $results);
-        usort($results, fn ($left, $right) => [$left['finished_at'], $left['run_id']] <=> [$right['finished_at'], $right['run_id']]);
+        usort($results, fn ($left, $right) => [$left['finished_at'], $left['run_id'], $left['leg_index'] ?? 0] <=> [$right['finished_at'], $right['run_id'], $right['leg_index'] ?? 0]);
 
         return $results;
     }
@@ -215,32 +343,57 @@ class CampaignTrade
         return ($result['net'] ?? 0) < 0;
     }
 
-    public function averageCosts(Agent $agent, string $ship): array
+    public function averageCosts(Agent $agent, string $ship, ?int $beforeActionId = null): array
     {
         $lots = [];
-        $actions = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('ship_symbol', $ship)->where('state', 'confirmed')->orderBy('id')->get();
+        $actions = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('state', 'confirmed')
+            ->where(fn ($query) => $query->where('ship_symbol', $ship)->orWhere('command', 'transfer'))
+            ->when($beforeActionId !== null, fn ($query) => $query->where('id', '<', $beforeActionId))->orderBy('id')->get();
+        // Only replay other ships' histories when a transfer can bring their cost basis aboard.
+        if ($actions->contains(fn (ShipAction $action) => $action->command === 'transfer')) {
+            $actions = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('state', 'confirmed')
+                ->whereIn('command', ['buy', 'mine', 'mine_survey', 'siphon', 'sell', 'transfer', 'jettison'])
+                ->when($beforeActionId !== null, fn ($query) => $query->where('id', '<', $beforeActionId))->orderBy('id')->get();
+        }
         foreach ($actions as $action) {
             $good = $action->arguments['symbol'] ?? $action->outcome['yield']['symbol'] ?? null;
             if (! $good) {
                 continue;
             }
             $units = $action->outcome['units'] ?? $action->outcome['yield']['units'] ?? $action->arguments['units'] ?? 0;
-            $lot = $lots[$good] ?? ['units' => 0, 'cost' => 0];
-            if (in_array($action->command, ['buy', 'mine', 'mine_survey'], true)) {
+            $source = $action->ship_symbol;
+            $lot = $lots[$source][$good] ?? ['units' => 0, 'cost' => 0];
+            if (in_array($action->command, ['buy', 'mine', 'mine_survey', 'siphon'], true)) {
                 $lot['units'] += $units;
                 $lot['cost'] += $action->command === 'buy' ? ($action->outcome['transaction_total'] ?? 0) : 0;
-            } elseif ($action->command === 'sell' && $lot['units'] > 0) {
-                $lot['cost'] *= max(0, $lot['units'] - $units) / $lot['units'];
+            } elseif (in_array($action->command, ['sell', 'transfer', 'jettison'], true)) {
+                $removed = $lot['units'] > 0 ? $lot['cost'] * min($units, $lot['units']) / $lot['units'] : 0;
+                $lot['cost'] -= $removed;
                 $lot['units'] = max(0, $lot['units'] - $units);
+                if ($action->command === 'transfer' && ($receiver = $action->arguments['targetShip'] ?? null)) {
+                    $received = $lots[$receiver][$good] ?? ['units' => 0, 'cost' => 0];
+                    $received['units'] += $units;
+                    $received['cost'] += $action->outcome['transferred_cost_basis'] ?? $removed;
+                    $lots[$receiver][$good] = $received;
+                }
             }
-            $lots[$good] = $lot;
+            $lots[$source][$good] = $lot;
         }
 
-        return array_map(fn ($lot) => $lot['units'] > 0 ? $lot['cost'] / $lot['units'] : 0, $lots);
+        return array_map(fn ($lot) => $lot['units'] > 0 ? $lot['cost'] / $lot['units'] : 0, $lots[$ship] ?? []);
     }
 
-    public function fuelReserve(Agent $agent, string $symbol, string $buyer): int
+    public function fuelReserve(Agent $agent, string $symbol, string $buyer, ?AutomationRun $run = null): int
     {
+        if (isset($run->plan['legs'])) {
+            $index = $run->totals['leg_index'] ?? $run->plan['leg_index'] ?? 0;
+            $leg = $run->plan['legs'][$index] ?? [];
+
+            return max(0, ($leg['remainingFuelCeiling'] ?? 0) - ($run->totals['leg_fuel_cost'][$index] ?? 0));
+        }
+        if (isset($run->plan['route']['hops'])) {
+            return max(0, ($run->plan['route']['fuel_ceiling'] ?? 0) - ($run->totals['fuel_cost'] ?? 0));
+        }
         $ship = Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->firstOrFail()->snapshot;
 
         return app(FuelPlanner::class)->leg($agent, $ship, $buyer, 0)['refuel_ceiling'];
@@ -414,9 +567,10 @@ class CampaignTrade
         return $drops ? array_sum($drops) / count($drops) : ($default ?? $episode->grant()->revision()->body['trade']['lot']['default_batch_decay']);
     }
 
-    public function rank(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array &$considered, bool $persist = true): array
+    public function rank(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, array &$considered, bool $persist = true,
+        int $cycleLossCredits = 0, bool $useCorridorBook = false): array
     {
-        return FuelPlanner::memoize(function () use ($grant, $episode, $agent, $ship, &$considered, $persist) {
+        return FuelPlanner::memoize(function () use ($grant, $episode, $agent, $ship, &$considered, $persist, $cycleLossCredits, $useCorridorBook) {
             $rules = $grant->revision()->body['trade'];
             $markets = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->orderBy('observed_at')->orderBy('id')->get()->keyBy('symbol');
             $pairs = app(OpportunityAssessor::class)->report($agent, 'trade', $ship['symbol'], true)['opportunities'];
@@ -429,6 +583,9 @@ class CampaignTrade
             $claims = app(FleetClaims::class);
             $arm = FleetClaims::arm($grant);
             $taken = $episode->exists && ($arm || config('gameplay.campaign_claims', true)) ? $claims->taken($episode, $ship['nav']['systemSymbol'] ?? null) : [];
+            if ($useCorridorBook) {
+                $taken = array_filter($taken, fn (string $holder) => str_contains($holder, ':'));
+            }
             // A follower works only its leader's current pair, claims aside, and waits without one.
             if ($arm['follow'] ?? null) {
                 $leader = $claims->leader($episode, $arm['follow']);
@@ -452,7 +609,7 @@ class CampaignTrade
                 $key = $pair['good'].'@'.$pair['market'];
                 $ask = collect($markets->get($pair['source'])?->data['tradeGoods'] ?? [])->firstWhere('symbol', $pair['good']);
                 $bid = collect($markets->get($pair['market'])?->data['tradeGoods'] ?? [])->firstWhere('symbol', $pair['good']);
-                if (! $ask || ! $bid || $ask['purchasePrice'] < 1 || $bid['sellPrice'] <= $ask['purchasePrice'] || min($ask['tradeVolume'], $bid['tradeVolume']) < 1) {
+                if (! $ask || ! $bid || $ask['purchasePrice'] < 1 || ($cycleLossCredits <= 0 && $bid['sellPrice'] <= $ask['purchasePrice']) || ($cycleLossCredits > 0 && $bid['sellPrice'] < 1) || min($ask['tradeVolume'], $bid['tradeVolume']) < 1) {
                     $considered[] = $pair + ['rejected' => 'No observed positive spread.'];
 
                     continue;
@@ -464,7 +621,7 @@ class CampaignTrade
                     $learning[$key] ??= ['mode' => $this->mode($episode, $pair['good'], $pair['market'], $results, $rules['proof']['min_realized_ratio']),
                         'decay' => $episode->exists ? $this->decay($episode, $pair['good'], $pair['market'], $rules['lot']['default_batch_decay'], $salesByKey->get($key, collect())) : $rules['lot']['default_batch_decay']];
                     $projection = $this->projectPair($agent, $ship, $departure, $pair, $ask, $bid, $rules,
-                        $grant->limits['run_max_minutes'] * 60, $learning[$key]['mode'], $learning[$key]['decay'], $exposure, (bool) $arm);
+                        $grant->limits['run_max_minutes'] * 60, $learning[$key]['mode'], $learning[$key]['decay'], $exposure, (bool) $arm, cycleLossCredits: $cycleLossCredits);
                     if (isset($projection['long_run'])) {
                         $considered[] = $projection['long_run'];
 
@@ -520,7 +677,7 @@ class CampaignTrade
     }
 
     public function projectPair(Agent $agent, array $ship, ?array $departure, array $pair, array $ask, array $bid,
-        array $rules, int $runMaxSeconds, string $mode, float $decay, float $exposure = INF, bool $arm = false, bool $localEarn = false, ?int $cashAfterRecon = null): array
+        array $rules, int $runMaxSeconds, string $mode, float $decay, float $exposure = INF, bool $arm = false, bool $localEarn = false, ?int $cashAfterRecon = null, int $cycleLossCredits = 0): array
     {
         $key = $pair['good'].'@'.$pair['market'];
         $planned = $departure['ship'] ?? $ship;
@@ -576,7 +733,8 @@ class CampaignTrade
         $travel = ($position['estimated_seconds'] ?? 0) + ($outbound['estimated_seconds'] ?? 0) + ($return['estimated_seconds'] ?? 0);
         $duration = fn (int $count) => $travel + (ceil($count / $ask['tradeVolume']) + ceil($count / $bid['tradeVolume'])) * 10 + 120;
         $seconds = $duration($units);
-        if ($units < 1 || $acceptanceMargin <= 0) {
+        $minAcceptableMargin = $cycleLossCredits > 0 ? -$cycleLossCredits : 1;
+        if ($units < 1 || $acceptanceMargin < $minAcceptableMargin) {
             throw new GameException('No profitable lot fits cargo, fuel, proof and duration bounds.');
         }
         if ($seconds > $runMaxSeconds) {
@@ -675,7 +833,7 @@ class CampaignTrade
     public function finishLoading(Agent $agent, AutomationRun $run, ?array $buy = null): bool
     {
         $bought = $run->totals['purchased'][$run->plan['symbol'] ?? ''] ?? 0;
-        if ($run->strategy !== 'trade' || ! $run->campaign_episode_id || ($run->totals['phase'] ?? null) !== 'buy'
+        if ($run->strategy !== 'trade' || isset($run->plan['legs']) || ! $run->campaign_episode_id || ($run->totals['phase'] ?? null) !== 'buy'
             || $bought < 1 || $bought >= $run->plan['units']) {
             return false;
         }
@@ -708,11 +866,59 @@ class CampaignTrade
         return true;
     }
 
-    public function shortenLoad(AutomationRun $run, int $units, int $inventory, string $reason): void
+    public function shortenLoad(AutomationRun $run, int $units, int $inventory, string $reason, ?int $legIndex = null): void
     {
+        if (($run->plan['plan_version'] ?? $run->plan_version) === 8 || isset($run->plan['legs'])) {
+            $this->shortenLeg($run, $units, $inventory, $reason, $legIndex);
+
+            return;
+        }
         $run->update(['plan' => array_replace($run->plan, ['units' => $units, 'max_inventory' => $inventory,
             'original_units' => $run->plan['original_units'] ?? $run->plan['units'],
             'original_predicted_margin' => $run->plan['original_predicted_margin'] ?? $run->plan['campaign_trade']['predicted_margin'] ?? null,
             'shortened_reason' => $reason])]);
+    }
+
+    private function shortenLeg(AutomationRun $run, int $units, int $cost, string $reason, ?int $index): void
+    {
+        DB::transaction(function () use ($run, $units, $cost, $reason, $index) {
+            $locked = AutomationRun::whereKey($run->id)->lockForUpdate()->firstOrFail();
+            $plan = $locked->plan;
+            $totals = $locked->totals;
+            $index ??= $totals['leg_index'] ?? $plan['leg_index'] ?? 0;
+            $leg = $plan['legs'][$index] ?? null;
+            if (! $leg || isset($totals['leg_acquisition_closed'][$index])) {
+                return;
+            }
+            $units = $totals['leg_purchased'][$index] ?? $units;
+            $cost = $totals['leg_purchase_cost'][$index] ?? $cost;
+            $leg['originalApprovedUnits'] = $leg['approvedUnits'];
+            $leg['approvedUnits'] = $units;
+            $leg['maxInventory'] = $cost;
+            $leg['confirmedPurchaseCost'] = $cost;
+            $plan['legs'][$index] = $leg;
+            $totals['leg_acquisition_closed'][$index] = ['reason' => $reason, 'units' => $units, 'purchase_cost' => $cost];
+            $remaining = max(0, $units - ($totals['leg_sold'][$index] ?? 0));
+            $agent = Agent::findOrFail($locked->agent_id);
+            $reservations = DB::table('corridor_book_events')->where('agent_id', $agent->id)->where('reset_id', $locked->reset_id)
+                ->where('owner_type', 'run')->where('owner_id', (string) $locked->id)->where('leg_index', $index)->where('side', 'sell');
+            $remaining -= (clone $reservations)->whereIn('state', ['sending', 'uncertain'])->sum('units');
+            $booked = (clone $reservations)->where('state', 'reserved')->orderBy('batch_index')->get();
+            app(CorridorBook::class)->releaseOwner($agent, 'run', (string) $locked->id, $index);
+            foreach ($booked as $batch) {
+                if ($remaining < 1) {
+                    break;
+                }
+                $kept = min($remaining, $batch->units);
+                (clone $reservations)->where('id', $batch->id)->where('state', 'released')
+                    ->update(['state' => 'reserved', 'units' => $kept, 'updated_at' => now()]);
+                $remaining -= $kept;
+            }
+            if (($totals['leg_index'] ?? 0) === $index) {
+                $totals['phase'] = 'deliver';
+            }
+            $locked->update(['plan' => $plan, 'totals' => $totals]);
+        });
+        $run->refresh();
     }
 }
