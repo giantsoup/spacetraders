@@ -8,6 +8,7 @@ use App\Gameplay\CampaignProbeBootstrap;
 use App\Gameplay\CampaignReport;
 use App\Gameplay\CampaignStatus;
 use App\Gameplay\CampaignWatchdog;
+use App\Gameplay\Engine\EngineAutoRecovery;
 use App\Gameplay\GameException;
 use App\Gameplay\GateRecon;
 use App\Gameplay\HostLock;
@@ -24,6 +25,7 @@ use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 
 Artisan::command('campaign:import {file}', function (CampaignPlaybook $playbooks) {
     if (! is_file($this->argument('file')) || ! is_readable($this->argument('file'))) {
@@ -151,6 +153,13 @@ Artisan::command('campaign:status {--agent=} {--user=}', function (CampaignStatu
 })->purpose('Show campaign authority and latest decision without contacting SpaceTraders');
 
 Artisan::command('campaign:watchdog', function (CampaignWatchdog $watchdog) {
+    try {
+        if ($recovery = app(EngineAutoRecovery::class)->attempt()) {
+            $this->line('Engine contention recovery: '.$recovery.'.');
+        }
+    } catch (Throwable $exception) {
+        Log::channel('engine')->error('Engine contention recovery failed.', ['exception' => $exception::class, 'message' => $exception->getMessage()]);
+    }
     $problems = $watchdog->check();
     $this->line($problems ? 'Campaign watchdog: unhealthy (alerts recorded).' : 'Campaign watchdog: healthy.');
 
