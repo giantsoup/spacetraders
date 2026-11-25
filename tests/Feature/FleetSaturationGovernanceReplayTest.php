@@ -1282,6 +1282,20 @@ final class FleetSaturationGovernanceReplayTest extends TestCase
         return $peak;
     }
 
+    public function test_phase2_fleet_playbook_matches_live_revision_and_only_enables_extraction(): void
+    {
+        $playbook = app(CampaignPlaybook::class);
+        $phase1 = $playbook->import($this->playbookSource('weekly-system-saturation-fleet'));
+        $phase2 = $playbook->import($this->playbookSource('weekly-system-saturation-fleet-phase2'));
+        // Production revision 11 (grant 13) was imported from these exact bytes.
+        $this->assertSame('fd9668d983bbe32f0e8a43e4c0dd7824abcd1ff9440b2a41728c26e31f20219c', $phase2->content_hash);
+        $before = Arr::dot($phase1->body);
+        $after = Arr::dot($phase2->body);
+        $this->assertSame(['fleet.saturation.extraction.enabled' => true], array_diff_assoc($after, $before));
+        $this->assertSame(array_keys($before), array_keys($after));
+        $this->assertFalse($after['fleet.saturation.extraction.stationary']);
+    }
+
     private function playbookSource(string $name): string
     {
         return file_get_contents(base_path("campaigns/{$name}.yaml"));
