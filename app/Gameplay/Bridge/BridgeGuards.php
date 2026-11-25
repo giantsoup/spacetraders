@@ -95,7 +95,9 @@ class BridgeGuards
     public function agentBlockers(Agent $agent): array
     {
         $safety = app(CampaignSafety::class);
-        if ($safety->uncertain($agent)) {
+        $hasFlaggedAction = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->where(fn ($query) => $query->where('state', 'uncertain')->orWhere('review_required', true))->exists();
+        if ($hasFlaggedAction && ($safety->perShipLocksEnabled($agent) ? ($safety->uncertainCredit($agent) || $safety->creditReview($agent)) : $safety->uncertain($agent))) {
             return [$this->blocker('uncertain_action', 'Reconcile the uncertain command on the flight deck.', $agent)];
         }
         if ($safety->unexplainedBalance($agent)) {

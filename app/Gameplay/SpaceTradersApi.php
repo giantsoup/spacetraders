@@ -606,7 +606,8 @@ class SpaceTradersApi
             'engine.speed' => 'sometimes|integer|min:1',
             'reactor.powerOutput' => 'required|integer|min:0', 'cooldown.remainingSeconds' => 'required|integer|min:0', 'cooldown.expiration' => 'sometimes|nullable|date',
         ]);
-        if (array_sum(array_column($data['cargo']['inventory'], 'units')) !== $data['cargo']['units'] || $data['cargo']['units'] > $data['cargo']['capacity'] || $data['fuel']['current'] > $data['fuel']['capacity']) {
+        if (! array_is_list($data['cargo']['inventory']) || array_sum(array_column($data['cargo']['inventory'], 'units')) !== $data['cargo']['units']
+            || $data['cargo']['units'] > $data['cargo']['capacity'] || $data['fuel']['current'] > $data['fuel']['capacity']) {
             throw new ReadStateUnavailable('Inconsistent ship cargo or fuel response.');
         }
         $data = Arr::only($data, ['symbol', 'nav', 'fuel', 'cargo', 'cooldown', 'mounts', 'modules', 'crew', 'frame', 'reactor', 'engine', 'registration']);
@@ -708,6 +709,25 @@ class SpaceTradersApi
         }
         if (! is_array($data)) {
             throw $method === 'get' ? new ReadStateUnavailable('SpaceTraders returned an incompatible response.') : new GameException('SpaceTraders returned an incompatible response.', uncertain: true);
+        }
+        // Associative decoding loses the distinction between JSON lists and numeric-keyed objects.
+        if ($method === 'get' && str_ends_with($path, '/market') && is_array($data['data']['transactions'] ?? null)) {
+            $transactions = $response->object()->data->transactions ?? null;
+            if (is_object($transactions)) {
+                $data['data']['transactions'] = $transactions;
+            }
+        }
+        if ($method === 'get' && ($path === '/my/ships' || preg_match('#\A/my/ships/[^/]+\z#', $path))) {
+            $ships = $response->object()->data ?? null;
+            $ships = $path === '/my/ships' ? $ships : [$ships];
+            if (! is_array($ships)) {
+                throw new ReadStateUnavailable('SpaceTraders returned an incompatible fleet list.');
+            }
+            foreach ($ships as $ship) {
+                if (! is_array($ship->cargo->inventory ?? null)) {
+                    throw new ReadStateUnavailable('SpaceTraders returned an incompatible cargo inventory.');
+                }
+            }
         }
 
         return $data;

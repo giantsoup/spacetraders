@@ -2,13 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\ActionState;
-use App\Gameplay\CampaignProbeBootstrap;
-use App\Gameplay\GameException;
 use App\Gameplay\ShipCommandExecutor;
 use App\Http\Requests\GameplayRequest;
 use App\Models\Agent;
-use App\Models\AutomationRun;
 use App\Models\ShipAction;
 
 class AgentCommandController extends Controller
@@ -56,22 +52,6 @@ class AgentCommandController extends Controller
     {
         $intent = ShipAction::where('agent_id', $agent->id)->findOrFail($action);
 
-        return $responses->result(fn () => $executor->locked($agent, function () use ($request, $intent) {
-            $intent->refresh();
-            if ((! $intent->review_required && $intent->state !== ActionState::Uncertain) || empty($intent->outcome['reconciled_at']) || now()->subMinutes(3)->greaterThan($intent->outcome['reconciled_at'])) {
-                throw new GameException('Reconcile fresh upstream evidence first.');
-            }
-            $confirmed = $intent->state === ActionState::Confirmed;
-            $intent->update(['state' => $confirmed ? ActionState::Confirmed : ActionState::Acknowledged, 'review_required' => false, 'message' => $confirmed ? 'Operator reviewed the confirmed transaction discrepancy.' : 'Operator acknowledged unresolved outcome; never replay this intent.',
-                'outcome' => array_merge($intent->outcome, ['operator_note' => $request->validated('note'), 'unresolved_adjustment' => ! $confirmed, 'reviewed_at' => now()->toIso8601String(),
-                    'reviewed_reconciled_at' => $intent->outcome['reconciled_at']])]);
-            $reviewedHauler = ! empty($intent->outcome['configuration_mismatch']) && ShipCommandExecutor::reviewedHaulerMismatch($intent);
-            AutomationRun::where('agent_id', $intent->agent_id)->where('reset_id', $intent->reset_id)->whereNotNull('active_agent_id')
-                ->when($reviewedHauler, fn ($query) => $query->where(fn ($runs) => $runs->whereKey($intent->automation_run_id)
-                    ->orWhere('ship_symbol', CampaignProbeBootstrap::deliveredShip($intent))))
-                ->update(['state' => 'stopped', 'stop_requested_at' => now(), 'active_agent_id' => null, 'blocked_reason' => 'Unresolved adjustment acknowledged. New preview required.']);
-
-            return $intent;
-        }));
+        return $responses->result(fn () => $executor->acknowledgeUncertain($agent, $intent, $request->validated('note')));
     }
 }

@@ -7,6 +7,7 @@ use App\Models\AutomationRun;
 use App\Models\GameObservation;
 use App\Models\ObservationHistory;
 use App\Models\Ship;
+use App\Models\ShipAction;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -26,6 +27,9 @@ class AgentSynchronizer
             throw new GameException('World reset. This agent is archived. Register or import an agent for the current world.');
         }
         $reset = $this->api->status($fresh || ! $agent->reset_id);
+        if (($agent->reset_id === null || $agent->reset_id !== $reset) && $this->lock->holdsShared('agent-'.$agent->id)) {
+            throw new GameException('World reset requires exclusive synchronization before another command.', retryAfter: 5);
+        }
         if ($this->archiveForReset($agent, $reset)) {
             throw new GameException('World reset detected. Import current credentials; old intentions cannot run.');
         }
@@ -109,22 +113,29 @@ class AgentSynchronizer
     }
 
     // Caller holds the agent lock for synchronization, previews and gameplay writes.
-    public function sync(Agent $agent, bool $discover = true, bool $freshReset = false, bool $freshFleet = false): void
+    public function sync(Agent $agent, bool $discover = true, bool $freshReset = false, bool $freshFleet = false): int
     {
         $this->guardReset($agent, $freshReset);
         $balance = $this->api->agent($agent, fresh: $freshFleet);
         $fleet = $this->api->ships($agent, fresh: $freshFleet);
         DB::transaction(function () use ($agent, $balance, $fleet) {
             foreach ($fleet as $ship) {
-                $this->saveShip($agent, $ship);
+                $this->saveFullShip($agent, $ship, 'fleet_get');
             }
             Ship::where('agent_id', $agent->id)->whereNotIn('symbol', array_column($fleet, 'symbol'))->delete();
-            $agent->update(['credits' => $balance['credits'], 'connection_state' => 'connected', 'synced_at' => now()]);
+            $sending = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+                ->where('state', 'sending')->whereNotIn('command', [...CampaignSafety::SHIP_COMMANDS, 'transfer'])->exists();
+            if ($sending || app(CampaignSafety::class)->uncertainCredit($agent) || app(StateChain::class)->hasUnresolvedCreditAction($agent)) {
+                DB::table('game_runtime')->upsert([['key' => 'unresolved_credit_observation:'.$agent->id.':'.$agent->reset_id,
+                    'value' => json_encode(['credits' => $balance['credits'], 'observed_at' => now()->toIso8601String()], JSON_THROW_ON_ERROR)]], ['key'], ['value']);
+            } else {
+                $agent->update(['credits' => $balance['credits'], 'connection_state' => 'connected', 'synced_at' => now()]);
+                app(CreditAccounting::class)->baseline($agent);
+            }
         });
         DB::table('game_runtime')->upsert([['key' => 'fleet_sync_at:'.$agent->id, 'value' => now()->toIso8601String()]], ['key'], ['value']);
-        app(CreditAccounting::class)->baseline($agent);
         if (! $discover) {
-            return;
+            return $balance['credits'];
         }
         $systems = array_unique(array_column(array_column($fleet, 'nav'), 'systemSymbol'));
         if (count($systems) > 3) {
@@ -165,24 +176,69 @@ class AgentSynchronizer
         }
         $coverage['complete'] = $coverage['observations'] === $coverage['candidates'];
         $this->observe($agent, 'discovery', 'local', $coverage, 'listing');
+
+        return $balance['credits'];
     }
 
     public function refreshShip(Agent $agent, string $symbol, bool $fresh = false): Ship
     {
-        return $this->saveShip($agent, $this->api->ship($agent, $symbol, fresh: $fresh));
+        return $this->saveFullShip($agent, $this->api->ship($agent, $symbol, fresh: $fresh), 'ship_get');
     }
 
-    public function saveShip(Agent $agent, array $data): Ship
+    public function ships(Agent $agent, bool $fresh = false): array
     {
+        $fleet = $this->api->ships($agent, fresh: $fresh);
+        foreach ($fleet as $ship) {
+            $this->saveFullShip($agent, $ship, 'fleet_get');
+        }
+
+        return $fleet;
+    }
+
+    private function saveFullShip(Agent $agent, array $snapshot, string $source): Ship
+    {
+        return DB::transaction(function () use ($agent, $snapshot, $source) {
+            $ship = $this->saveShip($agent, $snapshot, full: false);
+            $chain = app(StateChain::class);
+            $chain->recordFullShip($agent, $snapshot, $ship->observed_at->toImmutable(), $source);
+            $chain->releaseRecoveryFuelHoldIfEmpty($agent, $ship->symbol, $snapshot);
+
+            return $ship;
+        });
+    }
+
+    public function saveShip(Agent $agent, array $data, bool $full = true): Ship
+    {
+        if ($full && $agent->reset_id) {
+            return $this->saveFullShip($agent, $data, 'ship_get');
+        }
+
         return Ship::updateOrCreate(['agent_id' => $agent->id, 'symbol' => $data['symbol']], ['snapshot' => $data, 'observed_at' => now()]);
     }
 
     public function invalidateMarket(Agent $agent, string $symbol, int $action): void
     {
-        $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', 'market')->where('symbol', $symbol)->first();
-        if ($quote) {
-            $quote->update(['data' => array_merge($quote->data, ['invalidated_by_action' => $action])]);
-        }
+        $this->invalidateQuote($agent, 'market', $symbol, $action);
+    }
+
+    public function invalidateShipyard(Agent $agent, string $symbol, int $action): void
+    {
+        $this->invalidateQuote($agent, 'shipyard', $symbol, $action);
+    }
+
+    private function invalidateQuote(Agent $agent, string $kind, string $symbol, int $action): void
+    {
+        DB::transaction(function () use ($agent, $kind, $symbol, $action) {
+            $last = DB::table('observation_generations')->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+                ->where('kind', $kind)->where('symbol', $symbol)->value('last_action_id');
+            if ($last !== $action) {
+                app(StateChain::class)->bumpGeneration($agent, $kind, $symbol, $action);
+            }
+            $quote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('kind', $kind)->where('symbol', $symbol)->first();
+            if ($quote) {
+                $quote->update(['data' => array_merge($quote->data, ['invalidated_by_action' => $action])]);
+            }
+        });
     }
 
     public function observe(Agent $agent, string $kind, string $symbol, array $data, string $source = 'read', ?string $observer = null): GameObservation
@@ -218,9 +274,20 @@ class AgentSynchronizer
                     $observer ??= Ship::where('agent_id', $agent->id)->get()->first(fn ($ship) => $ship->snapshot['nav']['waypointSymbol'] === $symbol && $ship->snapshot['nav']['status'] !== 'IN_TRANSIT')?->symbol;
                 }
             }
+            if (in_array($kind, ['market', 'shipyard'], true)) {
+                $data['observation_generation'] = app(StateChain::class)->generation($agent, $kind, $symbol);
+            }
             $values = ['reset_id' => $agent->reset_id, 'data' => $data, 'observed_at' => now(), 'source' => $source, 'observer_ship' => $observer];
             $key = ['agent_id' => $agent->id, 'kind' => $kind, 'symbol' => $symbol];
-            ObservationHistory::create(array_merge($key, $values));
+            $history = ObservationHistory::create(array_merge($key, $values));
+            if (in_array($kind, ['market', 'shipyard'], true)) {
+                $values['data']['observation_version'] = $history->id;
+            }
+            if ($kind === 'market') {
+                foreach (array_unique(array_column($data['tradeGoods'] ?? [], 'symbol')) as $good) {
+                    app(CorridorBook::class)->recordObservation($agent, $symbol, $good, $history->id);
+                }
+            }
 
             return GameObservation::updateOrCreate($key, $values);
         });

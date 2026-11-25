@@ -15,6 +15,7 @@ use App\Models\LocalEngine;
 use App\Models\Ship;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class CampaignStatus
@@ -106,17 +107,18 @@ class CampaignStatus
         $operator = $user ?? $grant?->user_id;
         $control = app(CampaignControl::class);
         $agent = $operator ? $control->agent($operator, $symbol) : null;
+        $revision = $candidate ?? $grant?->revision();
         if (! $agent) {
-            return ['enabled' => (bool) $candidate, 'active_purchase_authority' => false, 'agent' => $symbol, 'reason' => 'no_current_agent'];
+            return ['enabled' => (bool) $candidate, 'active_purchase_authority' => false, 'agent' => $symbol, 'reason' => 'no_current_agent']
+                + $this->fleetSaturation($revision);
         }
         if ($grant?->slot !== 1 && $candidate) {
             $grant = new CampaignGrant(['user_id' => $agent->user_id, 'agent_symbol' => $agent->name, 'slot' => 1,
                 'campaign_revision_id' => $candidate->id, 'revision_hash' => $candidate->content_hash, 'limits' => $candidate->body['limits']]);
         }
         $episode = $grant->exists ? $control->currentEpisode($grant, $agent) : null;
-        $revision = $candidate ?? $grant->revision();
         if (! isset($revision->body['fleet']['haulers'])) {
-            return ['enabled' => false, 'active_purchase_authority' => false, 'reason' => 'no_saturation_policy'];
+            return ['enabled' => false, 'active_purchase_authority' => false, 'reason' => 'no_saturation_policy'] + $this->fleetSaturation($revision, $grant, $episode, $agent);
         }
         if (! $episode) {
             $known = CampaignEpisode::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->latest('id')->first();
@@ -124,10 +126,12 @@ class CampaignStatus
             $next = $known?->next_reset_at ?? (($schedule['reset_id'] ?? null) === $agent->reset_id ? CarbonImmutable::parse($schedule['next_reset']) : null);
             if (! $next) {
                 return ['enabled' => true, 'active_purchase_authority' => false, 'agent' => $agent->name, 'reset_id' => $agent->reset_id,
-                    'revision' => $revision->content_hash, 'reason' => 'reset_schedule_unknown'];
+                    'revision' => $revision->content_hash, 'reason' => 'reset_schedule_unknown'] + $this->fleetSaturation($revision, $grant, agent: $agent);
             }
             $episode = new CampaignEpisode(['agent_id' => $agent->id, 'campaign_grant_id' => $grant->id, 'reset_id' => $agent->reset_id, 'next_reset_at' => $next,
-                'opened_at' => $known?->opened_at ?? now(), 'phase' => $revision->body['phases'][0]['id'], 'state' => $known?->state ?? []]);
+                'opened_at' => $known?->opened_at ?? now(), 'phase' => $revision->body['phases'][0]['id'],
+                'state' => $known?->campaign_grant_id === $grant->id ? ($known?->state ?? []) : []]);
+            $episode->setRelation('policyRevision', $revision);
         }
         if ($candidate) {
             $episode = clone $episode;
@@ -135,7 +139,9 @@ class CampaignStatus
             $episode->phase = $this->candidatePhase($episode, $agent, $candidate);
         }
 
-        return app(CampaignSaturation::class)->evaluate($grant, $episode, $agent, revision: $candidate);
+        $result = app(CampaignSaturation::class)->evaluate($grant, $episode, $agent, revision: $candidate);
+
+        return $result + $this->fleetSaturation($revision, $grant, $episode, $agent);
     }
 
     private function candidatePhase(CampaignEpisode $episode, Agent $agent, CampaignRevision $revision): string
@@ -176,14 +182,67 @@ class CampaignStatus
 
     public function saturationSummary(?CampaignGrant $grant, ?CampaignEpisode $episode, ?Agent $agent): ?array
     {
-        if (! $grant || ! $episode || ! $agent || ! isset($grant->revision()->body['fleet']['haulers'])) {
-            return null;
+        $revision = $grant?->revision();
+        $fleet = $this->fleetSaturation($revision, $grant, $episode, $agent);
+        if (! $grant || ! $episode || ! $agent || ! isset($revision->body['fleet']['haulers'])) {
+            return $fleet ?: null;
         }
         $result = app(CampaignSaturation::class)->evaluate($grant, $episode, $agent);
 
         return ['active_purchase_authority' => $result['active_purchase_authority'], 'hold' => $result['hold'],
             'coverage' => $result['gates']['G3'], 'pacing' => $result['gates']['G9'], 'owned_haulers' => $result['owned_haulers'],
-            'directory_gaps' => $result['mesh']['directory_gaps']];
+            'directory_gaps' => $result['mesh']['directory_gaps']] + $fleet;
+    }
+
+    public function fleetSaturation(?CampaignRevision $revision, ?CampaignGrant $grant = null, ?CampaignEpisode $episode = null, ?Agent $agent = null): array
+    {
+        $body = $revision?->body ?? [];
+        $policy = CampaignPlaybook::rawSaturationPolicy($body);
+        if ($policy === null) {
+            return [];
+        }
+        if ($episode && ! $episode->exists && ! $episode->relationLoaded('policyRevision')) {
+            $episode = clone $episode;
+            $episode->setRelation('policyRevision', $revision);
+        }
+        $idle = $reserve = $canary = null;
+        $shadow = [];
+        if ($agent) {
+            $shadow = app(RequestShadowPrice::class)->loadState($agent);
+            $arms = app(CampaignFleet::class)->currentArms($agent)->filter(fn (CampaignGrant $arm) => $arm->available());
+            $idle = app(IdleLedger::class)->evaluateAgent($agent, $arms, pipelineGraceSeconds: $policy['pipeline_grace_seconds'] ?? 60);
+            if (Schema::hasTable('corridor_canary_states')) {
+                $canary = app(TraderAssigner::class)->canaryState($agent, 'J59');
+            }
+            if ($grant && isset($body['fleet']['haulers'])) {
+                $haulers = $body['fleet']['haulers'];
+                try {
+                    $bootstrap = app(CampaignProbeBootstrap::class);
+                    $frames = $episode ? $bootstrap->traderFrames($agent, $episode) : [];
+                    $parts = $bootstrap->reserveParts($agent, $grant, $haulers, episode: $episode);
+                    $reserve = app(HullCatalog::class)->reserveParts($frames, grantReserve: $parts['grant'], commitments: $parts['commitments'],
+                        reconReturn: $parts['recon_return'], minWorkingCapital: $haulers['min_working_capital'], workingCapitalPerTrader: $haulers['working_capital_per_trader']);
+                } catch (GameException $exception) {
+                    $reserve = ['reason' => $exception->getMessage()];
+                }
+            }
+        }
+
+        return ['fleet_saturation' => [
+            'enabled' => $policy['enabled'] ?? false,
+            'compression' => $policy['compression'] ?? false,
+            'per_ship_noncredit_locks' => $policy['per_ship_noncredit_locks'] ?? false,
+            'chains_enabled' => $policy['corridor']['chains_enabled'] ?? false,
+            'extraction_enabled' => $policy['extraction']['enabled'] ?? false,
+            'stationary' => $policy['extraction']['stationary'] ?? false,
+            'stimulation_enabled' => $policy['stimulation']['enabled'] ?? false,
+            'shadow_price' => $shadow + ['lambda_req' => 0, 'lambda_target' => 0, 'lambda_clear' => 0, 'residual_excess' => 0,
+                'utilization_permille' => null, 'paused_tiers' => [], 'hold_reason' => null],
+            'g4_idle_ledger' => $idle,
+            'g5_reserve_parts' => $reserve,
+            'j59_canary_state' => $canary,
+            'auto_arm_frames' => $policy['auto_arm_frames'] ?? [],
+        ]];
     }
 
     public function read(?int $userId = null, ?string $agentSymbol = null): array

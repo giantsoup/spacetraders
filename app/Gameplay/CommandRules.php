@@ -9,6 +9,7 @@ use App\Models\ReconMission;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use Carbon\CarbonInterface;
+use Illuminate\Support\Facades\DB;
 
 class CommandRules
 {
@@ -31,17 +32,22 @@ class CommandRules
         if (! $agentCommand && ! Ship::where('agent_id', $agent->id)->where('symbol', $symbol)->exists()) {
             throw new GameException('Ship is not in the saved owned fleet. Synchronize first.');
         }
+        $v8 = $run?->plan_version === 8;
         $usablePrefetch = $this->usablePrefetch($agent, $prefetched);
         if (! ($usablePrefetch && ($prefetched['reset_verified'] ?? false))) {
             $this->sync->guardReset($agent);
         }
-        if ($usablePrefetch && isset($prefetched['agent_credits']) && is_int($prefetched['agent_credits'])) {
+        if ($v8) {
+            $this->refreshCredits($agent, $run, CampaignSafety::isCreditCommand($command));
+        } elseif ($usablePrefetch && isset($prefetched['agent_credits']) && is_int($prefetched['agent_credits'])) {
             $agent->credits = $prefetched['agent_credits'];
         } else {
             $agent->update(['credits' => $this->api->agent($agent)['credits'], 'synced_at' => now()]);
         }
         if ($agentCommand) {
             $ship = null;
+        } elseif ($v8) {
+            $ship = $this->shipForRun($agent, $run);
         } elseif ($usablePrefetch && is_array($prefetched['ship'] ?? null) && ($prefetched['ship']['symbol'] ?? null) === $symbol) {
             $ship = $prefetched['ship'];
         } else {
@@ -69,7 +75,9 @@ class CommandRules
             $cruiseRecovery = $command === 'flight_mode' && ($arguments['flightMode'] ?? null) === 'CRUISE'
                 && $run->strategy === 'sell_aboard' && ! empty($run->plan['sell_only']) && ! empty($run->plan['restore_cruise'])
                 && $ship['nav']['flightMode'] === 'BURN' && FuelPlanner::configuration($ship) === $run->plan['initial_configuration'];
-            if ($ship['crew']['current'] < $ship['crew']['required'] || ($ship['nav']['flightMode'] !== 'CRUISE' && ! $cruiseRecovery)) {
+            if ($ship['crew']['current'] < $ship['crew']['required'] || ($ship['nav']['flightMode'] !== 'CRUISE' && ! $cruiseRecovery
+                && ! ($v8 && $run->strategy === 'position' && $ship['nav']['flightMode'] === 'DRIFT'
+                    && FuelPlanner::configuration($ship) === ($run->plan['route']['configurations']['DRIFT'] ?? null)))) {
                 throw new GameException('Crew or flight mode changed outside the approved run.');
             }
             $expected = $run->totals['expected_state'] ?? ['waypoint' => $run->plan['initial_waypoint'], 'status' => $run->plan['initial_status'], 'fuel' => $run->plan['initial_fuel']];
@@ -85,12 +93,20 @@ class CommandRules
                 throw new GameException('Cargo changed outside this run. Reconcile protected inventory before continuing.');
             }
             $otherDelta = app(CreditAccounting::class)->outsideRunDelta($agent, $run);
-            if ($agent->credits !== $run->plan['initial_credits'] + $run->totals['credit_delta'] + $otherDelta) {
+            if (! $v8 && $agent->credits !== $run->plan['initial_credits'] + $run->totals['credit_delta'] + $otherDelta
+                || $v8 && $agent->credits !== $run->plan['initial_credits'] + $run->totals['credit_delta'] + $otherDelta
+                    + (app(CreditAccounting::class)->summary($agent)['reviewed_adjustments'] - ($run->plan['initial_reviewed_adjustment'] ?? 0))) {
                 throw new GameException('Unexplained balance change before reservation. Review before a fresh approval.');
             }
         }
         $market = null;
-        if ($run?->strategy === 'trade' && $command === 'buy') {
+        if ($v8 && $run->strategy === 'siphon' && $command === 'siphon' && empty($run->totals['load_attempts'])) {
+            $buyer = $run->plan['buyer'] ?? $run->plan['market'];
+            $quote = $this->api->market($agent, $buyer, fresh: true);
+            $this->sync->observe($agent, 'market', $buyer, $quote);
+            $this->planner->assertDepartureBids($quote, $buyer, $run->plan['allowed_goods'] ?? ExtractionSites::GAS_GIANT_YIELDS);
+        }
+        if (! $v8 && $run?->strategy === 'trade' && $command === 'buy') {
             $waypoint = $ship['nav']['waypointSymbol'];
             if ($usablePrefetch && ($prefetched['market_symbol'] ?? null) === $waypoint && is_array($prefetched['market'] ?? null)) {
                 $savedQuote = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
@@ -106,18 +122,64 @@ class CommandRules
             }
         }
 
-        if ($run?->strategy === 'mining' && MiningPlanner::startsLoad($ship, $run->plan, $run->totals, $command)) {
+        if ($run?->strategy === 'mining' && (MiningPlanner::startsLoad($ship, $run->plan, $run->totals, $command)
+            || ($v8 && in_array($command, ['mine', 'mine_survey'], true) && empty($run->totals['load_attempts'])))) {
             $buyer = $run->plan['market'];
-            if ($usablePrefetch && ($prefetched['market_symbol'] ?? null) === $buyer && is_array($prefetched['market'] ?? null)) {
+            if (! $v8 && $usablePrefetch && ($prefetched['market_symbol'] ?? null) === $buyer && is_array($prefetched['market'] ?? null)) {
                 $quote = $prefetched['market'];
             } else {
                 $quote = $this->api->market($agent, $buyer, fresh: true);
                 $this->sync->observe($agent, 'market', $buyer, $quote);
             }
-            $this->planner->assertDepartureBids($quote, $buyer, $this->planner->requiredDepartureYields($agent, $run->plan));
+            $required = $this->planner->requiredDepartureYields($agent, $run->plan);
+            if ($v8 && $command === 'mine_survey' && isset($arguments['surveySignature'])) {
+                $signed = app(SurveyPool::class)->usable($agent, $arguments['surveySignature'], $run->plan['site']);
+                $required = array_values(array_unique(array_column($signed['deposits'], 'symbol')));
+            }
+            $this->planner->assertDepartureBids($quote, $buyer, $required);
         }
 
-        return ['ship' => $ship, 'active' => $active, 'market' => $market];
+        $quote = $v8 && $ship && isset($prefetched['price_preflight'])
+            ? $this->prefetchedPrice($agent, $command, $ship['nav']['waypointSymbol'], $prefetched['price_preflight'], app(CampaignSafety::class)->saturationPolicy($run))
+            : null;
+
+        return ['ship' => $ship, 'active' => $active, 'market' => $market] + ($quote ? ['price_observation' => $quote] : []);
+    }
+
+    public function shipForRun(Agent $agent, AutomationRun $run, bool $force = false): array
+    {
+        $policy = app(CampaignSafety::class)->saturationPolicy($run);
+        $local = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->first()?->snapshot;
+        if (! $force && $local && ! empty($policy['compression'])) {
+            $nav = $local['nav'];
+            $arrivalDue = $nav['status'] === 'IN_TRANSIT' && now()->gte($nav['route']['arrival']);
+            if ($nav['status'] === 'IN_TRANSIT' && ! $arrivalDue) {
+                return $local;
+            }
+            $state = app(StateChain::class)->staleFields($agent, $run->ship_symbol, now()->toImmutable(), $policy['chain_max_age_seconds'] ?? 120, $arrivalDue);
+            if (! $state['needs_refresh']) {
+                return $local;
+            }
+        }
+
+        return $this->sync->refreshShip($agent, $run->ship_symbol, fresh: true)->snapshot;
+    }
+
+    public function refreshCredits(Agent $agent, AutomationRun $run, bool $creditWrite, bool $reconcile = false, ?int $except = null): void
+    {
+        $safety = app(CampaignSafety::class);
+        $policy = $safety->saturationPolicy($run);
+        $fresh = $agent->synced_at && $agent->synced_at->gt(now()->subSeconds($policy['credit_refresh_seconds'] ?? 300));
+        $unresolved = $safety->uncertainCredit($agent) || app(StateChain::class)->hasUnresolvedCreditAction($agent, $except);
+        $mismatch = $safety->unexplainedBalance($agent);
+        if ($unresolved || (! $reconcile && ! $mismatch && ((! empty($policy['compression']) && (! $creditWrite || $fresh)) || ($except !== null && $fresh)))) {
+            return;
+        }
+        if (app(HostLock::class)->holdsShared('agent-'.$agent->id)) {
+            return;
+        }
+        $agent->update(['credits' => $this->api->agent($agent, fresh: true)['credits'], 'synced_at' => now()]);
+        app(CreditAccounting::class)->baseline($agent);
     }
 
     /**
@@ -148,6 +210,11 @@ class CommandRules
     {
         $ship = $fresh['ship'];
         $active = $fresh['active'];
+        $v8 = $run?->plan_version === 8;
+        $policy = $v8 ? app(CampaignSafety::class)->saturationPolicy($run) : [];
+        if ($v8) {
+            app(CampaignSafety::class)->assertDeliveryOpen($run, $command, $arguments);
+        }
         $fleetPurchase = $command === 'buy_ship' && ! isset($arguments['site'], $arguments['market']);
         $spending = in_array($command, ['buy', 'buy_ship', 'repair', 'install_mount', 'remove_mount', 'install_module', 'remove_module', 'jump', 'refuel'], true);
         $floor = max($arguments['reserve'] ?? 0, $run?->plan['reserve'] ?? 0, ! $run && $spending && ! $fleetPurchase ? max(1, (int) config('gameplay.manual_reserve_floor')) : 0);
@@ -155,14 +222,29 @@ class CommandRules
         if ($run && $run->strategy !== 'gate_recon' && $spending) {
             $floor = max($floor, $returnExposure);
         }
+        if ($run && ! $v8 && $spending) {
+            $floor += app(StateChain::class)->outstandingExposure($agent, 'run:'.$run->id);
+        }
         $protected = 0;
         // Only spending commands can consume another run's commitment.
         if (! $run && $spending) {
-            $protected += $returnExposure;
+            $chain = app(StateChain::class);
+            $booked = $chain->outstandingExposure($agent);
+            $legacyCommitments = 0;
             $reserves = 0;
             $remaining = 0;
+            $purchaseRuns = [];
             foreach (AutomationRun::where('active_agent_id', $agent->id)->get() as $protectedRun) {
                 if ($protectedRun->strategy === 'gate_recon') {
+                    continue;
+                }
+                if ($protectedRun->plan_version === 8) {
+                    if (CampaignProbeBootstrap::isPurchaseStrategy($protectedRun->strategy)) {
+                        $purchaseRuns[] = $protectedRun;
+                    } else {
+                        $reserves = max($reserves, $protectedRun->plan['reserve'] ?? 0);
+                    }
+
                     continue;
                 }
                 if ($protectedRun->campaign_episode_id) {
@@ -181,16 +263,29 @@ class CommandRules
                             }
                             $commitment = (int) max($planned['fuel_reserve'] ?? 0, $planned['fuel_safety_ceiling'] ?? $protectedRun->plan['route']['fuel_ceiling'] ?? 0);
                         }
+                        if ($protectedRun->strategy === 'sell_aboard') {
+                            $otherBooked = $chain->outstandingExposure($agent, 'run:'.$protectedRun->id, 'delivery_fuel');
+                            $commitment = max(0, $commitment - ($booked - $otherBooked));
+                        }
                     }
-                    $protected += $commitment;
+                    $legacyCommitments += $commitment;
                 } else {
                     // A reserve is a floor, not spending: protect the largest floor plus every run's remaining spend.
                     $reserves = max($reserves, $protectedRun->plan['reserve']);
                     $remaining += max(0, $protectedRun->plan['max_spend'] - ($protectedRun->totals['spending'] ?? $protectedRun->totals['fuel_cost'] ?? 0));
                 }
             }
-            $protected += $reserves + $remaining;
-            $floor = max($floor, $protected);
+            foreach ($purchaseRuns as $purchaseRun) {
+                // The pinned purchase reserve already includes these portions of the live floor.
+                $parts = $purchaseRun->plan['reserve_parts'] ?? [];
+                $otherBooked = $chain->outstandingExposure($agent, 'run:'.$purchaseRun->id);
+                $commitmentsOverlap = min((int) ($parts['commitments'] ?? 0), $otherBooked + $legacyCommitments);
+                $reconOverlap = min((int) ($parts['recon_return'] ?? 0), $returnExposure);
+                $reserves = max($reserves, ($purchaseRun->plan['reserve'] ?? 0) - $commitmentsOverlap - $reconOverlap);
+            }
+            $protected = $returnExposure + $legacyCommitments + $reserves + $remaining;
+            $floor = max($floor, $protected) + $booked;
+            $protected += $booked;
         }
         $contract = null;
         if ($run?->strategy === 'contracts') {
@@ -303,6 +398,12 @@ class CommandRules
                 if (now()->lt($ship['cooldown']['readyAt']) || $ship['cargo']['units'] >= $ship['cargo']['capacity']) {
                     throw new GameException('Wait for cooldown and free cargo before siphoning.');
                 }
+                if ($v8) {
+                    if ($estimate['cargo_free'] < ($run->plan['extraction_headroom'] ?? 1)) {
+                        throw new GameException('Approved siphon headroom is unavailable.');
+                    }
+                    $estimate += $this->extractionSite($agent, $run, $ship, $point, $policy);
+                }
                 $estimate['effects'] = 'Consumes a cooldown and adds the actual returned gas yield. Amount, condition events and duration are unknown before execution.';
                 break;
             case 'refine':
@@ -355,6 +456,9 @@ class CommandRules
                 if (empty($arguments['acknowledgeLoss']) || $arguments['units'] > app(CargoAuthority::class)->available($agent, $ship, $arguments['symbol'])) {
                     throw new GameException('Acknowledge permanent loss and choose unprotected owned cargo.');
                 }
+                if ($v8) {
+                    $estimate['jettison'] = $this->jettison($agent, $run, $ship, $arguments, $policy);
+                }
                 $estimate['effects'] = 'Permanently discards the exact approved cargo without payment. No reversal is available.';
                 break;
             case 'negotiate':
@@ -367,6 +471,16 @@ class CommandRules
             case 'flight_mode':
                 if (isset($arguments['flightMode']) && ! in_array($arguments['flightMode'], ['DRIFT', 'STEALTH', 'CRUISE', 'BURN'], true)) {
                     throw new GameException('Unsupported flight mode.');
+                }
+                if ($v8 && $run->strategy === 'position') {
+                    $safety = app(CampaignSafety::class);
+                    if (! $safety->positionModeAllowed($run, $agent, $arguments['flightMode'] ?? null)) {
+                        throw new GameException('Flight mode is outside the pinned positioning phase.');
+                    }
+                    if ($arguments['flightMode'] === 'DRIFT') {
+                        $route = $run->plan['route'];
+                        $estimate['route'] = $this->driftRoute($run, $ship, $this->waypoint($agent, $route['origin']), $this->waypoint($agent, $route['destination']));
+                    }
                 }
                 $estimate['effects'] = 'Changes flight mode; returned fuel and condition events are authoritative. Travel needs separate approval.';
                 break;
@@ -429,8 +543,29 @@ class CommandRules
                     $estimate['effects'] = 'Fuel and elapsed-time values are operator review thresholds, not formulas or server caps. Actual server route and fuel settle this action. Uncalibrated travel can strand a ship.';
                     break;
                 }
+                if ($v8 && $run->strategy === 'position' && $ship['nav']['flightMode'] === 'DRIFT') {
+                    $estimate['route'] = $this->driftRoute($run, $ship, $from, $target);
+                    $estimate['fuel_estimate'] = 1;
+                    break;
+                }
+                if ($v8 && in_array($run->strategy, ['mining', 'siphon', 'tender'], true)
+                    && $target['symbol'] === ($run->plan['market'] ?? null) && $ship['cargo']['units'] > 0) {
+                    $quote = $this->api->market($agent, $target['symbol'], fresh: true);
+                    $this->sync->observe($agent, 'market', $target['symbol'], $quote);
+                    $this->planner->assertDepartureBids($quote, $target['symbol'], array_keys(MiningPlanner::inventory($ship)));
+                }
                 if ($run?->strategy !== 'gate_recon' && in_array('MARKETPLACE', array_column($from['traits'], 'symbol'), true)) {
-                    $this->sync->observe($agent, 'market', $from['symbol'], $this->api->market($agent, $from['symbol']));
+                    if ($v8) {
+                        $estimate['origin_fuel_evidence'] = $this->originFuel($agent, $from['symbol']);
+                    } else {
+                        $this->sync->observe($agent, 'market', $from['symbol'], $this->api->market($agent, $from['symbol']));
+                    }
+                }
+                if ($v8 && isset($arguments['hop_index'])) {
+                    $estimate['route'] = $this->pinnedCruiseHop($agent, $run, $ship, $arguments, $floor);
+                    $estimate['fuel_estimate'] = $estimate['route']['outbound_fuel'];
+
+                    break;
                 }
                 try {
                     $estimate['route'] = $run?->strategy === 'mining'
@@ -460,11 +595,15 @@ class CommandRules
                 $point = $this->waypoint($agent, $ship['nav']['waypointSymbol']);
                 $point = $this->api->waypoint($agent, $point['symbol']);
                 $this->sync->observe($agent, 'waypoint', $point['symbol'], $point, 'read', $symbol);
-                if ($reason = MiningPlanner::hazard($point)) {
+                if ($v8) {
+                    $estimate += $this->extractionSite($agent, $run, $ship, $point, $policy);
+                } elseif ($reason = MiningPlanner::hazard($point)) {
                     throw new GameException('Mining client policy: '.$reason);
                 }
                 if ($run) {
-                    app(FuelPlanner::class)->miningLeg($agent, $ship, $run->plan['market'], $run->plan);
+                    if (! ($v8 && ! empty($run->plan['stationary']))) {
+                        app(FuelPlanner::class)->miningLeg($agent, $ship, $run->plan['market'], $run->plan);
+                    }
                     if ($ship['cargo']['capacity'] - $ship['cargo']['units'] < ($run->plan['extraction_headroom'] ?? $ship['cargo']['capacity'])) {
                         throw new GameException('Approved extraction headroom is unavailable. Cargo retained.');
                     }
@@ -494,10 +633,14 @@ class CommandRules
                 break;
             case 'transfer':
                 $target = Ship::where('agent_id', $agent->id)->where('symbol', $arguments['targetShip'])->first();
-                if (! $target || $target->symbol === $symbol || AutomationRun::where('active_agent_id', $agent->id)->where('ship_symbol', $target->symbol)->when($run, fn ($query) => $query->whereKeyNot($run->id))->exists()) {
+                $leaseId = $v8 ? ($arguments['transfer_lease_id'] ?? $arguments['transferLeaseId'] ?? null) : null;
+                if (! $target || $target->symbol === $symbol || (! $leaseId && AutomationRun::where('active_agent_id', $agent->id)->where('ship_symbol', $target->symbol)->when($run, fn ($query) => $query->whereKeyNot($run->id))->exists())) {
                     throw new GameException('Transfer target must be another owned ship available for manual control.');
                 }
-                $target = $this->sync->refreshShip($agent, $target->symbol)->snapshot;
+                $target = $this->sync->refreshShip($agent, $target->symbol, fresh: $v8)->snapshot;
+                if ($leaseId) {
+                    $estimate += $this->transferLease($agent, $run, $ship, $target, $arguments, $leaseId);
+                }
                 if ($target['nav']['waypointSymbol'] !== $ship['nav']['waypointSymbol'] || $target['nav']['status'] !== $ship['nav']['status'] || $target['nav']['status'] === 'IN_TRANSIT') {
                     throw new GameException('Transfers require the same waypoint and matching docked or orbiting states.');
                 }
@@ -523,8 +666,9 @@ class CommandRules
                     }
                 }
                 $estimate['fleet_symbols'] = array_column($this->api->ships($agent, fresh: isset($run?->plan['mesh_purchase'])), 'symbol');
-                $yard = $this->api->shipyard($agent, $arguments['waypointSymbol'], fresh: true);
-                $this->sync->observe($agent, 'shipyard', $arguments['waypointSymbol'], $yard);
+                $yardObservation = $fresh['price_observation'] ?? null;
+                $yard = $yardObservation?->data ?? $this->api->shipyard($agent, $arguments['waypointSymbol'], fresh: true);
+                $yardObservation ??= $this->sync->observe($agent, 'shipyard', $arguments['waypointSymbol'], $yard);
                 $offer = collect($yard['ships'] ?? [])->firstWhere('type', $arguments['shipType']);
                 if ($run?->strategy === 'buy_hauler') {
                     $profile = CampaignHaulerPurchase::offerProfile($offer);
@@ -539,6 +683,12 @@ class CommandRules
                     throw new GameException('The complete ship configuration is not verified as mining capable.');
                 }
                 $cost = $offer['purchasePrice'];
+                if ($v8) {
+                    if ($cost < 1 || ShipCommandExecutor::configurationHash($offer) !== ($arguments['offer_configuration_hash'] ?? null)) {
+                        throw new GameException('Fleet offer price or configuration changed.');
+                    }
+                    $estimate['price_evidence'] = $this->priceEvidence($agent, $yardObservation, $cost);
+                }
                 if (isset($run?->plan['mesh_purchase']) && (! is_int($cost) || $cost < 1)) {
                     throw new GameException('A positive detailed probe price is required before mesh spending.');
                 }
@@ -584,8 +734,9 @@ class CommandRules
                 if ($ship['nav']['status'] !== 'DOCKED') {
                     throw new GameException('Dock before trading or refueling.');
                 }
-                $market = $fresh['market'] ?? $this->api->market($agent, $ship['nav']['waypointSymbol']);
-                $this->sync->observe($agent, 'market', $ship['nav']['waypointSymbol'], $market);
+                $observation = $fresh['price_observation'] ?? null;
+                $market = $observation?->data ?? $fresh['market'] ?? $this->api->market($agent, $ship['nav']['waypointSymbol'], fresh: $v8);
+                $observation ??= $this->sync->observe($agent, 'market', $ship['nav']['waypointSymbol'], $market);
                 $good = collect($market['tradeGoods'] ?? [])->firstWhere('symbol', $command === 'refuel' ? 'FUEL' : $arguments['symbol']);
                 if (! $good) {
                     throw new GameException('Price is unknown or this market does not trade the good.');
@@ -616,7 +767,17 @@ class CommandRules
                 } else {
                     $cost = ($command === 'refuel' ? (int) ceil($units / 100) : $units) * $good['purchasePrice'];
                 }
-                if ($run?->strategy === 'trade' && $command === 'buy') {
+                if ($v8) {
+                    $estimate['price_evidence'] = $this->priceEvidence($agent, $observation, $command === 'sell' ? $estimate['sale_estimate'] : $cost);
+                    if ($run->strategy === 'trade' && in_array($command, ['buy', 'sell'], true)) {
+                        $this->assertTradeBatch($run, $ship, $command, $arguments, $good, $units);
+                    }
+                    if (($run->strategy === 'sell_aboard' || in_array($run->strategy, ['mining', 'siphon', 'tender'], true)) && $command === 'sell'
+                        && ($ship['nav']['waypointSymbol'] !== ($run->plan['market'] ?? null) || $good['sellPrice'] < 1)) {
+                        throw new GameException('Settlement requires a positive bid at the approved buyer.');
+                    }
+                }
+                if (! $v8 && $run?->strategy === 'trade' && $command === 'buy') {
                     $observer = Ship::where('agent_id', $agent->id)->get()->contains(fn ($owned) => $owned->snapshot['nav']['waypointSymbol'] === $run->plan['market'] && $owned->snapshot['nav']['status'] !== 'IN_TRANSIT');
                     if ($observer) {
                         $this->sync->observe($agent, 'market', $run->plan['market'], $this->api->market($agent, $run->plan['market']));
@@ -649,6 +810,258 @@ class CommandRules
         }
 
         return ['contract' => $contract, 'ship' => $ship, 'credits' => $agent->credits, 'estimate' => $estimate];
+    }
+
+    private function prefetchedPrice(Agent $agent, string $command, string $endpoint, array $pin, array $policy): ?GameObservation
+    {
+        $kind = $command === 'buy_ship' ? 'shipyard' : 'market';
+        $row = GameObservation::whereKey($pin['id'])->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->where('symbol', $endpoint)->where('kind', $kind)->first();
+        if (! $row || ($row->data['observation_version'] ?? null) !== $pin['version']
+            || ($row->data['observation_generation'] ?? null) !== app(StateChain::class)->generation($agent, $kind, $endpoint)
+            || ! empty($row->data['invalidated_by_action']) || $row->observed_at->isFuture()
+            || $row->observed_at->lt(now()->subSeconds(min(10, $policy['price_preflight_max_seconds'] ?? 10)))) {
+            return null;
+        }
+
+        return $row;
+    }
+
+    private function priceEvidence(Agent $agent, GameObservation $observation, int $price): array
+    {
+        return [
+            'agent_id' => $agent->id, 'reset_id' => $agent->reset_id, 'kind' => $observation->kind,
+            'endpoint' => $observation->symbol, 'observation_id' => $observation->data['observation_version'] ?? $observation->id,
+            'observed_at' => $observation->observed_at->toISOString(),
+            'generation' => $observation->data['observation_generation'], 'price' => $price,
+        ];
+    }
+
+    private function originFuel(Agent $agent, string $origin): array
+    {
+        $chain = app(StateChain::class);
+        $observation = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->where('kind', 'market')->where('symbol', $origin)->first();
+        $evidence = fn (?GameObservation $row) => $row ? [
+            'agent_id' => $agent->id, 'reset_id' => $agent->reset_id, 'origin' => $origin,
+            'observed_at' => $row->observed_at->toISOString(), 'generation' => $row->data['observation_generation'] ?? 0,
+            'data' => $row->data,
+        ] : null;
+        $current = $evidence($observation);
+        if (! $chain->needsOriginFuelRead($agent, $origin, $current, now()->toImmutable())) {
+            return $current;
+        }
+
+        $data = $this->api->market($agent, $origin, fresh: true);
+        $row = $this->sync->observe($agent, 'market', $origin, $data);
+        $current = $evidence($row);
+        if (empty($data['tradeGoods']) || $chain->needsOriginFuelRead($agent, $origin, $current, now()->toImmutable())) {
+            if (! in_array('FUEL', array_column(array_merge($data['exports'] ?? [], $data['exchange'] ?? []), 'symbol'), true)) {
+                return [];
+            }
+            throw new GameException('A verified current origin FUEL quote is required.');
+        }
+
+        return $current;
+    }
+
+    private function pinnedCruiseHop(Agent $agent, AutomationRun $run, array $ship, array $arguments, int $reserve): array
+    {
+        $legIndex = (int) ($run->totals['leg_index'] ?? 0);
+        $leg = $run->plan['legs'][$legIndex] ?? null;
+        $index = (int) ($run->totals['hop_index'] ?? 0);
+        if (($arguments['phase'] ?? null) === 'deliver') {
+            $index = max($index, $leg['approachHopCount'] ?? $run->plan['route']['approach_hop_count'] ?? 0);
+        }
+        $hop = ($leg['hops'] ?? $run->plan['route']['hops'])[$index] ?? null;
+        if (! $hop || ($arguments['hop_index'] ?? null) !== $index || ($leg && ($arguments['leg_index'] ?? 0) !== $legIndex)
+            || ($hop['origin'] ?? null) !== $ship['nav']['waypointSymbol'] || ($hop['destination'] ?? null) !== $arguments['waypointSymbol']
+            || ($hop['mode'] ?? 'CRUISE') !== $ship['nav']['flightMode'] || ($hop['configuration'] ?? null) !== FuelPlanner::configuration($ship)
+            || $ship['fuel']['current'] < $hop['burn'] + ($hop['continuation_fuel'] ?? 0) + ($hop['uncertainty_reserve'] ?? 0)
+            || ($run->totals['travel_fuel'] ?? 0) + $hop['burn'] > ($run->plan['max_fuel'] ?? PHP_INT_MAX)) {
+            throw new GameException('Cruise hop does not match the pinned path and funded fuel continuation.');
+        }
+        $generation = $this->assertCruiseContinuation($agent, $run, $ship, $hop, $reserve);
+
+        return array_replace($hop, ['outbound_fuel' => $hop['burn'], 'continuation_generation' => $generation]);
+    }
+
+    public function assertCruiseContinuation(Agent $agent, AutomationRun $run, array $ship, array $hop, int $reserve, ?int $expectedGeneration = null): ?int
+    {
+        $pinnedCeiling = $hop['continuation_ceiling'] ?? 0;
+        if ($pinnedCeiling === 0 && empty($hop['continuation_fuel'])) {
+            return null;
+        }
+        $seller = $hop['continuation'] ?? null;
+        if (! $seller || $pinnedCeiling < 1) {
+            throw new GameException('Cruise hop has no funded continuation seller.');
+        }
+        $chain = app(StateChain::class);
+        $generation = $chain->generation($agent, 'market', $seller);
+        if ($expectedGeneration !== null && $expectedGeneration !== $generation) {
+            throw new GameException('Cruise continuation observation was invalidated.');
+        }
+        $observations = GameObservation::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->where('symbol', $seller)->whereIn('kind', ['market_listing', 'market'])->get()->keyBy('kind');
+        $listing = $observations->get('market_listing')?->data ?? [];
+        $listed = in_array('FUEL', array_column([...($listing['exports'] ?? []), ...($listing['exchange'] ?? [])], 'symbol'), true);
+        if (! $listed) {
+            throw new GameException('Cruise continuation market no longer lists FUEL for purchase.');
+        }
+        $saved = $observations->get('market');
+        $age = $saved?->observed_at->diffInSeconds(now());
+        if ($age === null || $age < 0 || $age > (int) config('gameplay.fuel_quote_max_seconds', 21600)
+            || ! empty($saved->data['invalidated_by_action']) || ($saved->data['observation_generation'] ?? null) !== $generation) {
+            throw new GameException('Cruise continuation requires current FUEL price evidence.');
+        }
+        $quote = collect($saved->data['tradeGoods'] ?? [])->firstWhere('symbol', 'FUEL');
+        $stale = $age > (int) config('gameplay.snapshot_seconds', 180);
+        if (($quote['purchasePrice'] ?? 0) < 1 || ($quote['tradeVolume'] ?? 0) < 1
+            || ! in_array($quote['type'] ?? 'EXCHANGE', ['EXPORT', 'EXCHANGE'], true)) {
+            throw new GameException('Cruise continuation market has no executable FUEL quote.');
+        }
+        $required = ($stale ? 4 : 2) * intdiv($ship['fuel']['capacity'] + 99, 100) * $quote['purchasePrice'];
+        $outstanding = $chain->outstandingExposure($agent, 'run:'.$run->id, 'delivery_fuel');
+        if ($required > $pinnedCeiling || $agent->credits - max($reserve, ReconMission::returnExposure($agent))
+            - max(0, $outstanding - ($run->plan['reserve_parts']['commitments'] ?? 0)) < $pinnedCeiling) {
+            throw new GameException('Cruise continuation exceeds its funded FUEL ceiling.');
+        }
+
+        return $generation;
+    }
+
+    private function assertTradeBatch(AutomationRun $run, array $ship, string $command, array $arguments, array $good, int $units): void
+    {
+        $index = (int) ($run->totals['leg_index'] ?? 0);
+        $leg = $run->plan['legs'][$index] ?? null;
+        $bought = $run->totals['leg_purchased'][$index] ?? 0;
+        $sold = $run->totals['leg_sold'][$index] ?? 0;
+        $cost = $run->totals['leg_purchase_cost'][$index] ?? 0;
+        if (! $leg || ($arguments['leg_index'] ?? 0) !== $index || $arguments['symbol'] !== $leg['good']
+            || $ship['nav']['waypointSymbol'] !== $leg[$command === 'buy' ? 'source' : 'buyer']) {
+            throw new GameException('Trade command differs from the current lot and approved endpoint.');
+        }
+        if ($command === 'buy') {
+            if ($units > $leg['approvedUnits'] - $bought || $units * $good['purchasePrice'] + $cost > $leg['maxInventory']
+                || $good['purchasePrice'] < 1 || ($run->totals['phase'] ?? null) === 'deliver') {
+                throw new GameException('Buy batch exceeds the current approved lot or exposure.');
+            }
+
+            return;
+        }
+        $lossAuthority = count($run->plan['legs']) === 1 ? max(0, (int) ($run->plan['stimulus']['loss_auth'] ?? 0)) : 0;
+        $costFloor = (int) ceil(max(0, $cost - $lossAuthority) / max(1, $bought));
+        if ($units > $bought - $sold || $good['sellPrice'] < max($leg['minSellPrice'], $costFloor)) {
+            throw new GameException('Sale batch exceeds the attributable lot or falls below its approved floor.');
+        }
+    }
+
+    public function refreshLeasedReceiver(Agent $agent, AutomationRun $run, ShipAction $action, array $before): array
+    {
+        $target = $before['estimate']['target_ship'];
+        $updated = $this->sync->refreshShip($agent, $target['symbol'], fresh: true)->snapshot;
+        $this->transferLease($agent, $run, $before['ship'], $updated, $action->arguments, $before['estimate']['transfer_lease_id']);
+        if ($target['cargo'] !== $updated['cargo'] || now()->lt($updated['cooldown']['readyAt'])) {
+            throw new GameException('Receiving cargo or cooldown changed before transfer.');
+        }
+
+        return $updated;
+    }
+
+    private function driftRoute(AutomationRun $run, array $ship, array $from, array $to): array
+    {
+        $route = $run->plan['route'];
+        $safety = app(CampaignSafety::class);
+        $window = $safety->planTime($route['hard_deadline'] ?? null);
+        $upper = $route['estimated_seconds'] ?? $route['seconds'] ?? 0;
+        $seconds = app(RoutePlanner::class)->driftEstimate($from, $to, $ship['engine']['speed'], $upper);
+        $reserve = max(2, $route['uncertainty_reserve'] ?? 2);
+        $mode = $ship['nav']['flightMode'];
+        if (($route['mode'] ?? null) !== 'DRIFT' || ($route['origin'] ?? null) !== $from['symbol']
+            || ($route['destination'] ?? null) !== $to['symbol'] || ($route['configurations'][$mode] ?? null) !== FuelPlanner::configuration($ship)
+            || $ship['cargo']['units'] !== 0 || $ship['fuel']['current'] - 1 < $reserve || $seconds > $upper || ! $window
+            || now()->addSeconds($seconds)->gt($window->subSeconds($route['margin_seconds'] ?? 1800))) {
+            throw new GameException('The live DRIFT edge exceeds its pinned configuration, fuel or time limits.');
+        }
+
+        return $route + ['outbound_fuel' => 1, 'estimated_seconds' => $seconds];
+    }
+
+    public function refreshExtractionSite(Agent $agent, AutomationRun $run, array $ship, array $policy): array
+    {
+        return $this->extractionSite($agent, $run, $ship, $this->api->waypoint($agent, $ship['nav']['waypointSymbol']), $policy);
+    }
+
+    private function extractionSite(Agent $agent, AutomationRun $run, array $ship, array $point, array $policy): array
+    {
+        $sites = app(ExtractionSites::class);
+        if (($run->plan['site'] ?? null) !== $point['symbol']) {
+            throw new GameException('Extraction site differs from the approved site.');
+        }
+        $sites->recordModifiers($agent, $point['symbol'], $point['modifiers'] ?? [], now()->toImmutable(), modifiersPresent: array_key_exists('modifiers', $point));
+        $status = $sites->siteStatus($agent, $point['symbol'], $policy['extraction']['allow_debris'] ?? false);
+        if (! $status['allowed'] || ($status['explosive'] && ! $sites->explosiveConditionCheck($ship, max(1, ($run->plan['max_extractions'] ?? 1) - ($run->totals['load_attempts'] ?? 0))))) {
+            throw new GameException('Extraction site is unsafe: '.($status['reason'] ?? 'condition allowance'));
+        }
+
+        return ['site_version' => $status['version'], 'site_observed_at' => now()->toISOString()];
+    }
+
+    private function jettison(Agent $agent, AutomationRun $run, array $ship, array $arguments, array $policy): array
+    {
+        $good = $arguments['symbol'];
+        $totals = $run->totals;
+        $attributable = ($totals['extracted'][$good] ?? 0) - ($totals['sold'][$good] ?? 0)
+            - ($totals['transferred_out'][$good] ?? 0) - ($totals['jettisoned'][$good] ?? 0);
+        if ($attributable < $arguments['units']) {
+            throw new GameException('Jettison requires cargo attributable to this extraction run.');
+        }
+        $inventory = MiningPlanner::inventory($ship);
+        $protected = array_keys(array_filter($inventory, fn ($units, $good) => app(CargoAuthority::class)->available($agent, $ship, $good) < $units, ARRAY_FILTER_USE_BOTH));
+        $removed = $this->jettisonValueThisHour($agent, $run);
+        $plan = $run->plan['jettison'] ?? [];
+        $decision = app(MiningCluster::class)->evaluateJettison($inventory, $plan['net_bids'] ?? [], $policy['extraction']['jettison_allowlist'] ?? [],
+            $ship['cargo']['capacity'] - $ship['cargo']['units'], $run->plan['extraction_headroom'] ?? 0, $plan['tender_due'] ?? true,
+            $plan['yield_units'] ?? 0, $plan['ev_active'] ?? 0, $plan['shadow_price'] ?? 0, $removed,
+            $policy['extraction']['jettison_cap_credits_per_hour'] ?? 0, protectedGoods: $protected);
+        if (! $decision || $decision['good'] !== $arguments['symbol'] || $decision['units'] !== $arguments['units']) {
+            throw new GameException('Jettison does not fit the current protected-cargo and value limits.');
+        }
+
+        return $decision;
+    }
+
+    public function jettisonValueThisHour(Agent $agent, AutomationRun $run, ?int $except = null): int
+    {
+        $runs = AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->where('plan->cluster_id', $run->plan['cluster_id'] ?? null)->select('id');
+
+        return ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->where('command', 'jettison')
+            ->whereIn('automation_run_id', $runs)->when($except !== null, fn ($actions) => $actions->whereKeyNot($except))
+            ->whereIn('state', ['sending', 'uncertain', 'confirmed'])->where('sent_at', '>=', now()->subHour())
+            ->get()->sum(fn (ShipAction $action) => $action->before_state['estimate']['jettison']['opportunity_cost_credits'] ?? 0);
+    }
+
+    private function transferLease(Agent $agent, AutomationRun $run, array $ship, array $target, array $arguments, int $leaseId): array
+    {
+        $lease = DB::table('transfer_leases')->where('id', $leaseId)->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->first();
+        $receiver = $lease ? AutomationRun::find($lease->receiver_run_id) : null;
+        $other = app(MiningCluster::class)->activeLeasesForShip($agent, $target['symbol'])->where('id', '!=', $leaseId)
+            ->where('receiver_ship', $target['symbol'])->sum('units');
+        if (! $lease || $lease->state !== 'granted' || now()->gte($lease->expires_at) || $lease->source_run_id !== $run->id
+            || $lease->source_ship !== $ship['symbol'] || $lease->receiver_ship !== $target['symbol']
+            || $lease->cluster_id !== ($run->plan['cluster_id'] ?? null) || $lease->canary_pair_id !== ($run->plan['canary_pair_id'] ?? null)
+            || ! $receiver || $receiver->active_agent_id !== $agent->id || $receiver->reset_id !== $agent->reset_id
+            || $receiver->ship_symbol !== $target['symbol'] || $receiver->strategy !== 'tender' || $receiver->plan_version !== 8
+            || $lease->cluster_id !== ($receiver->plan['cluster_id'] ?? null) || $lease->canary_pair_id !== ($receiver->plan['canary_pair_id'] ?? null)
+            || $lease->waypoint !== $ship['nav']['waypointSymbol'] || $ship['nav']['status'] !== 'IN_ORBIT'
+            || $lease->waypoint !== $target['nav']['waypointSymbol'] || $target['nav']['status'] !== 'IN_ORBIT'
+            || $lease->good !== $arguments['symbol'] || $lease->units !== $arguments['units']
+            || $lease->units > $target['cargo']['capacity'] - $target['cargo']['units'] - $other) {
+            throw new GameException('Transfer does not match a ready, current lease and both assigned runs.');
+        }
+
+        return ['transfer_lease_id' => $leaseId, 'receiver_reserved_units' => (int) $other];
     }
 
     private function waypoint(Agent $agent, string $symbol): array

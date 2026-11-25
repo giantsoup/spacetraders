@@ -389,6 +389,12 @@ class CampaignMesh
             if ($run->state === RunState::Preview) {
                 $run->update(['state' => RunState::Stopped, 'blocked_reason' => 'Mesh preview requires fresh ranked admission.']);
             }
+            if ($run->plan_version === 8 && $run->strategy === 'trade') {
+                app(CorridorBook::class)->releaseOwner($agent, 'run', (string) $run->id);
+                if (isset($run->plan['stimulus_entry_id'])) {
+                    app(SupplyChainStimulus::class)->release($run->plan['stimulus_entry_id']);
+                }
+            }
             if (isset($run->plan['mesh_allowance']) && app(MeshGovernor::class)->release($run->plan['mesh_allowance'])) {
                 $plan = $run->plan;
                 unset($plan['mesh_allowance']);
@@ -500,12 +506,14 @@ class CampaignMesh
     public function demand(CampaignEpisode $episode, Agent $agent): array
     {
         $active = [];
+        $buyers = [];
         $ranked = [];
         $claims = app(FleetClaims::class);
         foreach (CampaignEpisode::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereNull('closed_at')->get() as $other) {
             foreach ($claims->pairs($other) as $pair) {
                 $active[] = $pair['source'] ?? null;
                 $active[] = $pair['buyer'] ?? null;
+                $buyers[] = $pair['buyer'] ?? null;
             }
             $decision = CampaignEvent::where('campaign_episode_id', $other->id)->where('kind', 'decision')
                 ->whereNotNull('data->candidates')->latest('id')->first();
@@ -515,8 +523,82 @@ class CampaignMesh
             }
         }
         $active[] = $episode->state['active_buyer'] ?? null;
+        $revision = $episode->getRelationValue('policyRevision') ?? CampaignGrant::find($episode->campaign_grant_id)?->revision();
+        $extraction = CampaignPlaybook::saturationPolicy($revision?->body ?? [])['extraction'] ?? [];
+        if ($extraction['enabled'] ?? false) {
+            $demandMax = min(8, self::policy($episode)['saturation']['demand_max'] ?? 8);
+            $chainBuyers = AutomationRun::where('active_agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+                ->where('strategy', 'trade')->where('plan_version', 8)->orderBy('id')->get()
+                ->map(fn (AutomationRun $run) => $run->plan['legs'][$run->totals['leg_index'] ?? 0]['buyer'] ?? null)->all();
+            $buyers = array_values(array_unique(array_filter([$episode->state['active_buyer'] ?? null, ...$chainBuyers, ...$buyers])));
+            $slots = min(2, $extraction['demand_slots'] ?? 2, max(0, $demandMax - count($buyers)));
+            $standing = $slots > 0 ? $this->extractionDemand($agent, $buyers, $slots) : [];
+
+            return array_slice(array_values(array_unique(array_filter([...$buyers, ...$standing, ...$active, ...$ranked]))), 0, $demandMax);
+        }
 
         return array_values(array_unique(array_filter([...$active, ...$ranked])));
+    }
+
+    private function extractionDemand(Agent $agent, array $buyers, int $slots): array
+    {
+        $arrivals = [];
+        $runs = AutomationRun::where('active_agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+            ->whereNotNull('campaign_episode_id')->whereIn('strategy', ['mining', 'siphon', 'tender'])->orderBy('id')->get();
+        $ships = Ship::where('agent_id', $agent->id)->whereIn('symbol', $runs->pluck('ship_symbol'))->get()->keyBy('symbol');
+        foreach ($runs as $run) {
+            $buyer = $run->plan['buyer'] ?? $run->plan['market'] ?? null;
+            if (! is_string($buyer) || $buyer === '' || in_array($buyer, $buyers, true)) {
+                continue;
+            }
+            $route = $ships->get($run->ship_symbol)?->snapshot['nav']['route'] ?? [];
+            $eta = $run->plan['next_committed_eta'] ?? $run->plan['buyer_eta'] ?? $run->plan['eta']
+                ?? (($route['destination']['symbol'] ?? null) === $buyer ? ($route['arrival'] ?? null) : null);
+            if (is_string($eta)) {
+                $eta = ctype_digit($eta) ? (int) $eta : strtotime($eta);
+            }
+            $eta = is_int($eta) && $eta > 0 ? $eta : PHP_INT_MAX;
+            $arrivals[$buyer] = min($arrivals[$buyer] ?? PHP_INT_MAX, $eta);
+        }
+        uksort($arrivals, fn (string $left, string $right) => [$arrivals[$left], $left] <=> [$arrivals[$right], $right]);
+
+        return array_slice(array_keys($arrivals), 0, $slots);
+    }
+
+    public function coverageDependencies(CampaignEpisode $episode, Agent $agent, ?string $buyer = null, bool $requireMove = false): array
+    {
+        if (! isset(self::policy($episode)['saturation'])) {
+            return [];
+        }
+        $model = $this->model($episode, $agent);
+        $decision = CampaignEvent::where('campaign_episode_id', $episode->id)->where('kind', 'decision')
+            ->whereNotNull('data->candidates')->latest('id')->first();
+        $best = collect($decision?->data['candidates'] ?? [])->first(fn ($candidate) => ($candidate['score'] ?? 0) > 0);
+        $targets = array_filter([$buyer, $episode->state['active_buyer'] ?? null, $best['buyer'] ?? null, $best['source'] ?? null]);
+        $j59 = $model->system ? $model->system.'-J59' : null;
+        if ($j59 && isset($model->targets[$j59])
+            && (CampaignPlaybook::saturationPolicy($episode->grant()->revision()->body)['corridor']['chains_enabled'] ?? false)) {
+            $targets[] = $j59;
+        }
+        $served = $this->context($episode, $agent)['reserved'];
+        foreach (Ship::where('agent_id', $agent->id)->get() as $ship) {
+            if (in_array($ship->snapshot['nav']['status'] ?? null, ['DOCKED', 'IN_ORBIT'], true)) {
+                $served[] = $ship->snapshot['nav']['waypointSymbol'] ?? null;
+            }
+        }
+
+        $uncovered = array_values(array_filter(array_diff(array_unique($targets), $served), fn (string $symbol) => ($model->targets[$symbol]['tier'] ?? null) === 1));
+        if (! $requireMove || $uncovered === []) {
+            return $uncovered;
+        }
+        $floor = $this->departureEvidence($episode, $agent);
+        $probes = collect($this->probes($episode, $agent))->keyBy('symbol');
+
+        return array_values(array_filter($uncovered, function (string $symbol) use ($episode, $agent, $floor, $probes) {
+            $move = collect($this->dispatchPlan($episode, $agent, [], [], $symbol, [])['moves'])->firstWhere('destination', $symbol);
+
+            return $move && $probes->has($move['ship']) && $this->floorAfter($floor, $probes[$move['ship']])['pass'];
+        }));
     }
 
     public function refresh(CampaignEpisode $episode, Agent $agent, array &$read, float $deadline, ?string $buyer = null): void

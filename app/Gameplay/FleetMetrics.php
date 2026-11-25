@@ -10,6 +10,7 @@ use App\Models\CampaignGrant;
 use App\Models\Ship;
 use App\Models\ShipAction;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Random\Engine\Mt19937;
 use Random\Randomizer;
@@ -24,9 +25,18 @@ class FleetMetrics
 
     private static ?string $agent = null;
 
+    private static ?string $resetId = null;
+
     private static bool $directing = false;
 
-    /** @var array<string, array<string, array{reads: int, writes: int, categories?: array<string, int>, agent_symbol?: ?string}>> kind => key => counts */
+    private static ?string $workload = null;
+
+    private static bool $borrowed = false;
+
+    private const WORKLOADS = ['trade', 'mining', 'siphon', 'survey', 'tender', 'position', 'sell_aboard', 'buy_fleet', 'buy_hauler',
+        'buy_probe', 'scout', 'coverage', 'discovery', 'recon', 'manual', 'director', 'settlement'];
+
+    /** @var array<string, array<string, array>> kind => key => counts */
     private static array $pending = [];
 
     /** @var list<array{kind: string, ship: string, agent_symbol: ?string, scope: string, value: float, data: string, created_at: string}> advance and director-pass outcome rows */
@@ -52,7 +62,10 @@ class FleetMetrics
     {
         self::$ship = null;
         self::$agent = null;
+        self::$resetId = null;
         self::$directing = false;
+        self::$workload = null;
+        self::$borrowed = false;
         self::$pending = [];
         self::$events = [];
         self::$total = 0;
@@ -165,14 +178,17 @@ class FleetMetrics
         }
     }
 
-    public static function forAgent(?string $agentSymbol, callable $fn): mixed
+    public static function forAgent(?string $agentSymbol, callable $fn, ?string $resetId = null): mixed
     {
         $previous = self::$agent;
+        $previousReset = self::$resetId;
         self::$agent = $agentSymbol !== null && $agentSymbol !== '' ? strtoupper($agentSymbol) : null;
+        self::$resetId = $resetId ?? (self::$agent === $previous ? $previousReset : null);
         try {
             return $fn();
         } finally {
             self::$agent = $previous;
+            self::$resetId = $previousReset;
         }
     }
 
@@ -190,6 +206,35 @@ class FleetMetrics
     public static function current(): ?string
     {
         return self::$ship;
+    }
+
+    public static function withWorkload(?string $workload, callable $fn, bool $borrowed = false): mixed
+    {
+        $previous = self::$workload;
+        $previousBorrowed = self::$borrowed;
+        $workload = match ($workload) {
+            'contracts' => 'manual',
+            'probe' => 'scout',
+            default => $workload,
+        };
+        self::$workload = in_array($workload, self::WORKLOADS, true) ? $workload : null;
+        self::$borrowed = $borrowed;
+        try {
+            return $fn();
+        } finally {
+            self::$workload = $previous;
+            self::$borrowed = $previousBorrowed;
+        }
+    }
+
+    public static function currentWorkload(): ?string
+    {
+        return self::$workload ?? (self::$directing ? 'director' : null);
+    }
+
+    public static function isBorrowed(): bool
+    {
+        return self::$borrowed;
     }
 
     public static function currentAgent(): ?string
@@ -244,9 +289,12 @@ class FleetMetrics
             $ship = self::$ship ?? 'shared';
             $resolvedAgent = $host ? null : self::resolveAgentSymbol($ship, $agentSymbol ?? self::$agent);
             $scope = $host ? 'host' : 'agent';
-            $workload = self::$directing ? 'director' : null;
-            $bucketKey = implode('|', [$ship, $resolvedAgent, $scope, $workload]);
-            self::$pending[$kind][$bucketKey] ??= ['ship' => $ship, 'agent_symbol' => $resolvedAgent, 'scope' => $scope, 'workload' => $workload, 'reads' => 0, 'writes' => 0];
+            $workload = self::currentWorkload();
+            $borrowed = self::isBorrowed() && $ordinary === true;
+            $resetId = $resolvedAgent !== null && $resolvedAgent === self::$agent ? self::$resetId : null;
+            $bucketKey = implode('|', [$ship, $resolvedAgent, $scope, $workload, (int) $borrowed, $resetId]);
+            self::$pending[$kind][$bucketKey] ??= ['ship' => $ship, 'agent_symbol' => $resolvedAgent, 'scope' => $scope,
+                'workload' => $workload, 'borrowed' => $borrowed, 'reset_id' => $resetId, 'reads' => 0, 'writes' => 0];
             self::$pending[$kind][$bucketKey][$field]++;
             if ($ordinary !== null) {
                 self::$pending[$kind][$bucketKey]['ordinary'] = (self::$pending[$kind][$bucketKey]['ordinary'] ?? 0) + (int) $ordinary;
@@ -298,6 +346,12 @@ class FleetMetrics
                     if ($counts['workload']) {
                         $payload['workload'] = $counts['workload'];
                     }
+                    if ($counts['borrowed']) {
+                        $payload['borrowed'] = true;
+                    }
+                    if ($counts['reset_id'] !== null) {
+                        $payload['reset_id'] = $counts['reset_id'];
+                    }
                     $rows[] = ['kind' => $kind, 'ship' => $ship, 'agent_symbol' => $agentSymbol, 'scope' => $counts['scope'],
                         'value' => $counts['reads'] + $counts['writes'],
                         'data' => $kind === 'requests' ? json_encode($payload) : null, 'created_at' => $now];
@@ -307,6 +361,57 @@ class FleetMetrics
         } catch (\Throwable) {
             // Metrics are diagnostic; losing a batch is acceptable.
         }
+    }
+
+    public function untaggedRequestCount(string $agentSymbol, int $windowSeconds = 21600): int
+    {
+        $pending = 0;
+        foreach (self::$pending['requests'] ?? [] as $counts) {
+            if ($counts['agent_symbol'] === strtoupper($agentSymbol) && $counts['workload'] === null) {
+                $pending += $counts['reads'] + $counts['writes'];
+            }
+        }
+
+        return $pending + (int) $this->workloadRows($agentSymbol, $windowSeconds)
+            ->where(fn ($query) => $query->whereNull('data->workload')->orWhereNotIn('data->workload', self::WORKLOADS))->sum('value');
+    }
+
+    public function workloadRates(string $agentSymbol, int $windowSeconds = 3600): array
+    {
+        $seconds = max(1, $windowSeconds);
+        $workloads = [];
+        $overhead = ['requests' => 0, 'ordinary' => 0, 'borrowed' => 0];
+        $untagged = 0;
+        foreach ($this->workloadRows($agentSymbol, $seconds)->get(['value', 'data']) as $row) {
+            $data = json_decode($row->data ?? '{}', true);
+            $tag = $data['workload'] ?? null;
+            if (! in_array($tag, self::WORKLOADS, true)) {
+                $untagged += (int) $row->value;
+
+                continue;
+            }
+            $increment = ['requests' => (int) $row->value, 'ordinary' => (int) ($data['ordinary'] ?? 0),
+                'borrowed' => empty($data['borrowed']) ? 0 : (int) $row->value];
+            $shared = in_array($tag, ['director', 'coverage', 'discovery', 'scout', 'recon', 'manual', 'settlement'], true);
+            $workloads[$tag] ??= array_fill_keys(array_keys($increment), 0);
+            foreach ($increment as $key => $count) {
+                $workloads[$tag][$key] += $count;
+                if ($shared) {
+                    $overhead[$key] += $count;
+                }
+            }
+        }
+        ksort($workloads);
+        $rates = fn (array $counts) => $counts + ['requests_per_hour' => $counts['requests'] * 3600 / $seconds,
+            'ordinary_per_hour' => $counts['ordinary'] * 3600 / $seconds];
+
+        return ['window_seconds' => $seconds, 'workloads' => array_map($rates, $workloads), 'overhead' => $rates($overhead), 'untagged_requests' => $untagged];
+    }
+
+    private function workloadRows(string $agentSymbol, int $windowSeconds): Builder
+    {
+        return DB::table('fleet_metrics')->where('kind', 'requests')->where('scope', '!=', 'host')
+            ->where('agent_symbol', strtoupper($agentSymbol))->whereBetween('created_at', [now()->subSeconds(max(1, $windowSeconds)), now()]);
     }
 
     /** One scheduler pass: keys director, arms, dispatch (seconds) and lags (seconds), any subset. */
@@ -426,7 +531,7 @@ class FleetMetrics
             $agentRequests = $requestRows->where('agent_symbol', $symbol);
             $allInRequests = (int) $agentRequests->sum('value');
             $traderOnlyRequests = (int) $agentRequests->sum(function ($row) use ($trading) {
-                if (! isset($trading[$row->ship]) || (json_decode($row->data ?? '{}', true)['workload'] ?? null) === 'director') {
+                if (! isset($trading[$row->ship]) || ! in_array(json_decode($row->data ?? '{}', true)['workload'] ?? null, [null, 'trade'], true)) {
                     return 0;
                 }
                 $at = CarbonImmutable::parse($row->created_at)->timestamp;
