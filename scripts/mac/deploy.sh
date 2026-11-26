@@ -347,6 +347,7 @@ pnpm_bin="$(find_pnpm)"
 resolved_composer="$(find_composer)"
 export COMPOSER_BIN="$resolved_composer"
 
+set -E
 quiesce_leaderboard
 
 apply_deploy() {
@@ -402,7 +403,6 @@ apply_deploy() {
     fi
 }
 
-set -E
 apply_deploy 8>&-
 release_leaderboard_lock
 "$leaderboard_installer" --install

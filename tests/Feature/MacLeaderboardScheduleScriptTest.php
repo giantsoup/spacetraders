@@ -111,6 +111,18 @@ class MacLeaderboardScheduleScriptTest extends TestCase
         $this->assertQuiesceFailed($deploy);
     }
 
+    public function test_fifo_setup_failure_after_bootout_reports_how_to_restore_capture(): void
+    {
+        touch($this->fixture.'/loaded');
+        $this->stub('/bin/mkfifo', 'exit 42');
+
+        $deploy = $this->script('deploy.sh', '--yes');
+        $this->assertSame(42, $deploy->run(env: ['ENGINE_STATE' => 'running']));
+        $this->assertStringContainsString('launchctl bootout', $this->trace());
+        $this->assertFileDoesNotExist($this->fixture.'/loaded');
+        $this->assertQuiesceFailed($deploy);
+    }
+
     public function test_deploy_preview_preserves_an_unloaded_job_and_exits_successfully(): void
     {
         $deploy = $this->script('deploy.sh')->mustRun(env: ['ENGINE_STATE' => 'running']);
