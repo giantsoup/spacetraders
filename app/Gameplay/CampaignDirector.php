@@ -194,6 +194,15 @@ class CampaignDirector
                 return;
             }
         }
+        if ($hasMesh && ! isset($this->meshPolling['routine'])) {
+            $skip = match (true) {
+                $status['mode'] !== 'normal' => 'governor_mode',
+                microtime(true) >= $this->deadline => 'pass_deadline',
+                in_array(RequestShadowPrice::T6, $shadow['paused_tiers'], true) => 'shadow_t6_paused',
+                default => 'residual_excess',
+            };
+            $this->meshPolling['routine'] = ['exit' => $this->meshStageExit($episode, 'routine', 'stage_skipped') + ['skip_reason' => $skip]];
+        }
         $this->recordMeshPlan($grant, $episode, [], [], []);
         if ($started === []) {
             $this->decision($grant, $episode, $agent, $considered, $this->awaitingQuote ? 'awaiting_buyer_quote' : ($busy !== [] ? 'awaiting_run' : 'idle'));
@@ -3805,7 +3814,8 @@ class CampaignDirector
     private function pollMesh(CampaignEpisode $episode, Agent $agent, string $stage, ?string $buyer = null): void
     {
         if (microtime(true) >= $this->deadline) {
-            $this->meshPolling[$stage] = ['hold' => 'pass_deadline'];
+            $this->meshPolling[$stage] = ['hold' => 'pass_deadline',
+                'exit' => $this->meshStageExit($episode, $stage, 'pass_deadline_before_stage')];
 
             return;
         }
@@ -3813,8 +3823,24 @@ class CampaignDirector
         $this->meshPassEvidence ??= app(FleetMetrics::class)->meshPassEvidence($agent->name);
         $passes = $this->meshPassEvidence['eligible'];
         $capacity = $episode->opened_at->lte(now()->subHour()) && $passes > 0 ? $passes * $policy['reads_per_pass'] : null;
-        $this->meshPolling[$stage] = app(MeshPoller::class)->refresh($episode, $agent, $this->marketReads, $this->deadline,
-            $buyer ?? $this->activeBuyer($episode), $stage, $this->meshPurchaseYards, $capacity, $this->detailedMarketReads);
+        $exceptionReport = null;
+        try {
+            $this->meshPolling[$stage] = app(MeshPoller::class)->refresh($episode, $agent, $this->marketReads, $this->deadline,
+                $buyer ?? $this->activeBuyer($episode), $stage, $this->meshPurchaseYards, $capacity, $this->detailedMarketReads, $exceptionReport);
+        } catch (GameException $exception) {
+            $this->meshPolling[$stage] = ['exit' => $exceptionReport ?? $this->meshStageExit($episode, $stage, 'exception') + [
+                'exception_class' => $exception::class, 'retry_after' => $exception->retryAfter,
+                'api_code' => $exception->apiCode, 'http_status' => $exception->httpStatus, 'message' => $exception->getMessage(),
+            ]];
+            throw $exception;
+        }
+    }
+
+    private function meshStageExit(CampaignEpisode $episode, string $stage, string $reason): array
+    {
+        return ['reason' => $reason, 'stage' => $stage, 'remaining_ms' => max(0, (int) round(($this->deadline - microtime(true)) * 1000)),
+            'reads_before' => count($this->marketReads), 'reads_after' => count($this->marketReads),
+            'reads_cap' => CampaignMesh::policy($episode)['reads_per_pass'] ?? null];
     }
 
     private function dispatchSaturationMesh(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array &$busy, array &$reserved, array &$considered): bool

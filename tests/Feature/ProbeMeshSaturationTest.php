@@ -1828,6 +1828,76 @@ final class ProbeMeshSaturationTest extends TestCase
         return [['age' => 301], ['age' => 901]];
     }
 
+    public function test_routine_poll_records_read_cap_and_deadline_in_guard_order(): void
+    {
+        $this->setUpSaturation(hubs: 2);
+        $episode = $this->primary(revision: $this->meshRevision());
+        $poller = app(MeshPoller::class);
+        $cap = CampaignMesh::policy($episode)['reads_per_pass'];
+        $read = array_fill_keys(range(1, $cap), true);
+        $deadline = microtime(true) - 1;
+
+        $capped = $poller->refresh($episode, $this->agent, $read, $deadline, phase: 'routine');
+
+        $this->assertSame('read_cap', $capped['exit']['reason']);
+        $this->assertNotNull($capped['exit']['stopped_at']);
+        $this->assertSame('normal', $capped['mode']);
+        $this->assertSame([], $capped['successful']);
+        $this->assertSame($cap, $capped['exit']['reads_before']);
+        $this->assertSame($cap, $capped['exit']['reads_after']);
+        $this->assertSame(0, $capped['exit']['attempted']);
+
+        $read = [];
+        $late = $poller->refresh($episode, $this->agent, $read, $deadline, phase: 'routine');
+
+        $this->assertSame('deadline', $late['exit']['reason']);
+        $this->assertSame('normal', $late['mode']);
+        $this->assertSame([], $late['successful']);
+        $this->assertSame($capped['exit']['stopped_at'], $late['exit']['stopped_at']);
+    }
+
+    public function test_routine_poll_records_request_deferred_exit_while_governor_reports_normal(): void
+    {
+        $this->setUpSaturation(hubs: 2);
+        $episode = $this->primary(revision: $this->meshRevision());
+        $this->partialMock(SpaceTradersApi::class)->shouldReceive('shipyard')->once()
+            ->andThrow(new RequestDeferred('budget temporarily unavailable', 4, 'budget_storage'));
+        $read = [];
+        $result = app(MeshPoller::class)->refresh($episode, $this->agent, $read, microtime(true) + 10, phase: 'routine');
+
+        $this->assertSame('normal', $result['mode']);
+        $this->assertSame([], $result['successful']);
+        $this->assertSame('request_deferred', $result['exit']['reason']);
+        $this->assertSame('budget_storage', $result['exit']['defer_source']);
+        $this->assertSame(4, $result['exit']['retry_after']);
+        $this->assertSame('shipyard:'.self::YARD, $result['exit']['stopped_at']['key']);
+        $this->assertSame('deferred', $result['exit']['outcomes']['shipyard:'.self::YARD]);
+    }
+
+    public function test_escaping_routine_429_has_exit_only_diagnostics(): void
+    {
+        $this->setUpSaturation(hubs: 2);
+        $episode = $this->primary(revision: $this->meshRevision());
+        $exception = new GameException('rate limited', retryAfter: 3, httpStatus: 429);
+        $this->partialMock(SpaceTradersApi::class)->shouldReceive('shipyard')->once()->andThrow($exception);
+        $director = app(CampaignDirector::class);
+        (new \ReflectionProperty($director, 'deadline'))->setValue($director, microtime(true) + 10);
+
+        try {
+            (new \ReflectionMethod($director, 'pollMesh'))->invoke($director, $episode, $this->agent, 'routine');
+            $this->fail('The 429 must escape unchanged.');
+        } catch (GameException $thrown) {
+            $this->assertSame($exception, $thrown);
+        }
+
+        $stage = (new \ReflectionProperty($director, 'meshPolling'))->getValue($director)['routine'];
+        $this->assertSame(['exit'], array_keys($stage));
+        $this->assertSame('exception', $stage['exit']['reason']);
+        $this->assertSame(429, $stage['exit']['http_status']);
+        $this->assertSame('normal', $stage['exit']['governor']['mode']);
+        $this->assertSame('shipyard:'.self::YARD, $stage['exit']['stopped_at']['key']);
+    }
+
     public function test_over_ceiling_tier_two_yard_uses_routine_cadence_until_its_quote_is_stale(): void
     {
         $this->setUpSaturation(hubs: 4);

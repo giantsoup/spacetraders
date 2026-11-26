@@ -7,6 +7,7 @@ use App\Models\CampaignEpisode;
 use App\Models\GameObservation;
 use App\Models\Ship;
 use App\Services\SpaceTradersClient;
+use Illuminate\Support\Collection;
 
 final class MeshPoller
 {
@@ -71,8 +72,10 @@ final class MeshPoller
     }
 
     public function refresh(CampaignEpisode $episode, Agent $agent, array &$read, float $deadline, ?string $buyer = null,
-        ?string $phase = null, array $purchaseYards = [], ?int $capacity = null, ?array &$detailedRead = null): array
+        ?string $phase = null, array $purchaseYards = [], ?int $capacity = null, ?array &$detailedRead = null, ?array &$exceptionReport = null): array
     {
+        $started = microtime(true);
+        $readsBefore = count($read);
         $mesh = app(CampaignMesh::class);
         $policy = CampaignMesh::policy($episode);
         $settings = $policy['saturation'];
@@ -115,32 +118,119 @@ final class MeshPoller
         $due = $this->order($items, $demand, $buyer, $read, $capacity);
         $successful = [];
         $demandReads = count(array_intersect(array_keys($read), $demand));
-        foreach ($due as $item) {
-            if (count($read) >= $policy['reads_per_pass'] || microtime(true) >= $deadline || $status['mode'] === 'hold') {
+        $exit = ['reason' => 'completed'];
+        $stopIndex = null;
+        $stoppedAt = null;
+        $attempted = 0;
+        $filtered = ['mode' => 0, 'phase' => 0];
+        $readFalse = $outcomes = [];
+        $error = null;
+        foreach ($due as $index => $item) {
+            $key = $item['key'];
+            $reason = match (true) {
+                count($read) >= $policy['reads_per_pass'] => 'read_cap',
+                microtime(true) >= $deadline => 'deadline',
+                $status['mode'] === 'hold' => 'governor_hold',
+                $status['mode'] === 'degraded' && count($read) >= 2 => 'degraded_cap',
+                default => null,
+            };
+            if ($reason !== null) {
+                $exit = ['reason' => $reason];
+                $stopIndex = $index;
+                $stoppedAt = $this->targetSummary($item);
+                $outcomes[$key] = 'stopped';
                 break;
             }
-            if ($status['mode'] === 'degraded' && count($read) >= 2) {
-                break;
-            }
-            if ($status['mode'] !== 'normal' && (! $item['needed'] || $demandReads >= 2)) {
+            if (! $this->allowedByMode($item, $status, $demandReads)) {
+                $filtered['mode']++;
+                $outcomes[$key] = 'mode';
+
                 continue;
             }
-            if ($phase === 'demand' && ! $item['needed'] || $phase === 'urgent' && $item['class'] !== 2
-                || $phase === 'purchase' && ! $item['purchase']
-                || $phase === 'routine' && $item['needed']) {
+            if (! $this->matchesPhase($item, $phase)) {
+                $filtered['phase']++;
+                $outcomes[$key] = 'phase';
+
                 continue;
             }
+            $attempted++;
             try {
                 $ok = $this->read($episode, $agent, $item['symbol'], $item['kind'], $item['observer'], $item['needed'] ? 'demand' : 'read', $read, $detailedRead, $deadline);
+                $outcomes[$key] = $ok ? 'ok' : 'read_false';
                 if ($ok) {
-                    $successful[] = $item['key'];
+                    $successful[] = $key;
+                } elseif (count($readFalse) < 5) {
+                    $readFalse[] = $this->targetSummary($item);
                 }
                 $demandReads += (int) $item['needed'];
                 $status = $governor->evaluate($agent, $episode);
-            } catch (RequestDeferred) {
+            } catch (RequestDeferred $exception) {
+                $stopIndex = $index;
+                $stoppedAt = $this->targetSummary($item);
+                $outcomes[$key] = 'deferred';
+                $exit = ['reason' => 'request_deferred', 'defer_source' => $exception->delaySource, 'retry_after' => $exception->retryAfter,
+                    'deadline_capped' => $exception->deadlineCapped, 'defer_context' => $exception->context];
+                break;
+            } catch (GameException $exception) {
+                $stopIndex = $index;
+                $stoppedAt = $this->targetSummary($item);
+                $outcomes[$key] = 'exception';
+                $exit = ['reason' => 'exception', 'exception_class' => $exception::class, 'retry_after' => $exception->retryAfter,
+                    'api_code' => $exception->apiCode, 'http_status' => $exception->httpStatus, 'message' => $exception->getMessage(),
+                    'partial_successful' => $successful];
+                $error = $exception;
                 break;
             }
         }
+
+        $result = $this->buildResult($status, $demand, $ships, $successful, $due, $items, $exit, $phase, $stopIndex, $stoppedAt,
+            $started, $deadline, $readsBefore, count($read), $policy['reads_per_pass'], $attempted, $filtered, $readFalse, $outcomes);
+        if ($error !== null) {
+            $exceptionReport = $result['exit'];
+            throw $error;
+        }
+
+        return $result;
+    }
+
+    private function targetSummary(array $item): array
+    {
+        return array_intersect_key($item, array_flip(['key', 'kind', 'class', 'age', 'interval', 'needed']));
+    }
+
+    private function matchesPhase(array $item, ?string $phase): bool
+    {
+        return match ($phase) {
+            'demand' => $item['needed'],
+            'urgent' => $item['class'] === 2,
+            'purchase' => $item['purchase'],
+            'routine' => ! $item['needed'],
+            default => true,
+        };
+    }
+
+    private function allowedByMode(array $item, array $status, int $demandReads): bool
+    {
+        return $status['mode'] === 'normal' || ($item['needed'] && $demandReads < 2);
+    }
+
+    private function buildResult(array $status, array $demand, Collection $ships, array $successful, array $due, array $items,
+        array $exit, ?string $phase, ?int $stopIndex, ?array $stoppedAt, float $started, float $deadline, int $readsBefore,
+        int $readsAfter, int $readsCap, int $attempted, array $filtered, array $readFalse, array $outcomes): array
+    {
+        foreach (array_slice($due, 0, 16) as $item) {
+            $outcomes[$item['key']] ??= 'not_reached';
+        }
+        $next = null;
+        if ($stopIndex !== null) {
+            foreach (array_slice($due, $stopIndex) as $item) {
+                if ($this->matchesPhase($item, $phase)) {
+                    $next = $this->targetSummary($item);
+                    break;
+                }
+            }
+        }
+        $finished = microtime(true);
 
         return [
             'mode' => $status['mode'], 'hold' => $status['reason'], 'demand' => $demand,
@@ -148,6 +238,14 @@ final class MeshPoller
             'due' => array_column($due, 'key'), 'ages' => array_column(array_map(fn ($item) => $item + [
                 'key' => $item['kind'] === 'shipyard' ? 'shipyard:'.$item['symbol'] : $item['symbol'],
             ], $items), 'age', 'key'),
+            'exit' => $exit + [
+                'stage' => $phase, 'stopped_at' => $stoppedAt, 'next' => $next,
+                'elapsed_ms' => (int) round(($finished - $started) * 1000),
+                'remaining_ms' => is_finite($deadline) ? max(0, (int) round(($deadline - $finished) * 1000)) : null,
+                'reads_before' => $readsBefore, 'reads_after' => $readsAfter, 'reads_cap' => $readsCap,
+                'attempted' => $attempted, 'due_count' => count($due), 'filtered' => $filtered, 'read_false' => $readFalse,
+                'outcomes' => $outcomes, 'governor' => array_intersect_key($status, array_flip(['mode', 'reason', 'cause', 'room', 'minuteRoom'])),
+            ],
         ];
     }
 
