@@ -123,6 +123,48 @@ class MacLeaderboardScheduleScriptTest extends TestCase
         $this->assertQuiesceFailed($deploy);
     }
 
+    public function test_lock_directory_failure_reports_the_reinstall_reminder_once(): void
+    {
+        touch($this->fixture.'/loaded');
+        $bashEnv = $this->fixture.'/mktemp-failure.sh';
+        file_put_contents($bashEnv, "mktemp() { return 42; }\n");
+
+        $deploy = $this->script('deploy.sh', '--yes');
+        $this->assertSame(42, $deploy->run(env: ['BASH_ENV' => $bashEnv, 'ENGINE_STATE' => 'running']));
+        $this->assertQuiesceFailed($deploy);
+        $this->assertSame(1, substr_count($deploy->getErrorOutput(), 'leaderboard-capture.sh --install'));
+        $this->assertStringContainsString('Could not create the leaderboard capture lock directory', $deploy->getErrorOutput());
+    }
+
+    public function test_signal_at_bootout_reports_how_to_restore_capture(): void
+    {
+        touch($this->fixture.'/loaded');
+        $deploy = $this->script('deploy.sh', '--yes');
+
+        $this->assertSame(143, $deploy->run(env: ['SIGNAL_AFTER_BOOTOUT' => '1', 'ENGINE_STATE' => 'running']));
+        $this->assertFileDoesNotExist($this->fixture.'/loaded');
+        $this->assertQuiesceFailed($deploy);
+        $this->assertStringNotContainsString('engine was ended', $deploy->getErrorOutput());
+    }
+
+    #[DataProvider('deploySignals')]
+    public function test_signal_after_engine_stop_reports_both_recovery_commands(string $signal, int $status): void
+    {
+        touch($this->fixture.'/loaded');
+        $deploy = $this->script('deploy.sh', '--yes');
+
+        $this->assertSame($status, $deploy->run(env: ['SIGNAL_DURING_BACKUP' => $signal, 'ENGINE_STATE' => 'running']));
+        $this->assertStringContainsString('leaderboard-capture.sh --install', $deploy->getErrorOutput());
+        $this->assertStringContainsString('engine was ended', $deploy->getErrorOutput());
+        $this->assertStringNotContainsString('launchctl bootstrap', $this->trace());
+        $this->assertLockReleased();
+    }
+
+    public static function deploySignals(): array
+    {
+        return [['HUP', 129], ['INT', 130], ['TERM', 143]];
+    }
+
     public function test_deploy_preview_preserves_an_unloaded_job_and_exits_successfully(): void
     {
         $deploy = $this->script('deploy.sh')->mustRun(env: ['ENGINE_STATE' => 'running']);
@@ -249,7 +291,12 @@ class MacLeaderboardScheduleScriptTest extends TestCase
             echo "launchctl $*" >>"$FIXTURE/trace"
             case "$1" in
                 print) [[ "$2" == */local.spacetraders.leaderboard-capture && -f "$FIXTURE/loaded" ]] ;;
-                bootout) [[ "${BOOTOUT_STUCK:-0}" == 1 ]] || rm -f "$FIXTURE/loaded" ;;
+                bootout)
+                    [[ "${BOOTOUT_STUCK:-0}" == 1 ]] || rm -f "$FIXTURE/loaded"
+                    if [[ "${SIGNAL_AFTER_BOOTOUT:-0}" == 1 ]]; then
+                        kill -TERM "$PPID"
+                    fi
+                    ;;
                 bootstrap) touch "$FIXTURE/loaded" ;;
                 *) exit 2 ;;
             esac
@@ -275,6 +322,9 @@ class MacLeaderboardScheduleScriptTest extends TestCase
             echo "backup fd 8 closed" >>"$FIXTURE/trace"
             if [[ "${BACKUP_FAILS:-0}" == 1 ]]; then
                 exit 42
+            fi
+            if [[ -n "${SIGNAL_DURING_BACKUP:-}" ]]; then
+                kill -s "$SIGNAL_DURING_BACKUP" "$PPID" "$$"
             fi
             BASH);
         foreach (['/bin/pnpm', '/bin/composer', '/checkout/scripts/composer'] as $script) {

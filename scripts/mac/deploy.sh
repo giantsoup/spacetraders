@@ -75,10 +75,15 @@ on_err() {
     exit "$code"
 }
 
+on_signal() {
+    deploy_reminders
+    exit "$1"
+}
+
 abort_deploy() {
     echo "$1" >&2
     deploy_reminders
-    exit 1
+    exit "${2:-1}"
 }
 
 release_leaderboard_lock() {
@@ -104,9 +109,9 @@ release_leaderboard_lock() {
 
 trap on_err ERR
 trap 'code=$?; release_leaderboard_lock "$code" || true; exit "$code"' EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'on_signal 129' HUP
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 quiesce_leaderboard() {
     local service="gui/$uid_num/$leaderboard_label"
@@ -115,14 +120,18 @@ quiesce_leaderboard() {
         abort_deploy "LEADERBOARD_QUIESCE_SECONDS must be a positive integer of up to nine digits."
     fi
     if "$launchctl_bin" print "$service" >/dev/null 2>&1; then
-        "$launchctl_bin" bootout "$service" 2>/dev/null || true
         leaderboard_stopped=1
+        "$launchctl_bin" bootout "$service" 2>/dev/null || true
         if "$launchctl_bin" print "$service" >/dev/null 2>&1; then
             abort_deploy "Could not bootout $leaderboard_label. Deployment stopped before engine shutdown."
         fi
     fi
 
-    leaderboard_lock_dir="$(mktemp -d)"
+    leaderboard_lock_dir="$(
+        # Bash 3.2 inherits ERR here even when the assignment handles failure.
+        trap - ERR
+        mktemp -d
+    )" || abort_deploy "Could not create the leaderboard capture lock directory. Deployment stopped before engine shutdown." "$?"
     local fifo="$leaderboard_lock_dir/hold"
     local status_file="$leaderboard_lock_dir/status"
     mkfifo "$fifo"
