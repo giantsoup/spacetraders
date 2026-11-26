@@ -185,11 +185,24 @@ class ShipCommandExecutor
         return $action->refresh();
     }
 
+    public const RECEIPT_KEYS = ['response', 'body_sha256', 'response_received_at', 'http_status', 'response_validated'];
+
+    public static function hasReceiptEvidence(ShipAction $action): bool
+    {
+        $outcome = $action->outcome ?? [];
+
+        return $action->command === 'buy_ship'
+            ? array_intersect_key($outcome, array_flip(self::RECEIPT_KEYS)) !== []
+            : isset($outcome['body_sha256']) || isset($outcome['response_received_at']);
+    }
+
     public function clear(Agent $agent, ?int $except = null, bool $defer = false, ?string $ship = null, ?string $command = null, ?string $targetShip = null, ?int $leaseId = null, bool $reservationOnly = false): void
     {
         $others = ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->when($except, fn ($q) => $q->whereKeyNot($except));
         $safety = app(CampaignSafety::class);
-        if ($safety->perShipLocksEnabled($agent) && $ship !== null) {
+        $split = $safety->perShipLocksEnabled($agent) && $ship !== null;
+        $targets = [];
+        if ($split) {
             $nonCredit = [...CampaignSafety::SHIP_COMMANDS, 'transfer'];
             $targets = array_values(array_filter([$ship, $command === 'transfer' ? $targetShip : null], fn ($symbol) => $symbol !== null));
             $primary = CampaignGrant::primaryFor($agent->user_id, $agent->name)->first();
@@ -197,26 +210,46 @@ class ShipCommandExecutor
                 || (! $reservationOnly && CampaignSafety::isCreditCommand($command) && app(StateChain::class)->hasUnresolvedCreditAction($agent, $except))
                 || ($primary && $safety->purchaseConfigurationMismatch($primary, $agent))
                 || (clone $others)->where(fn ($q) => self::reviewFor($q, $ship))->exists()) {
-                throw new GameException('An agent action is uncertain or requires review. Settle it before another command.');
+                throw new ActionInFlight('An agent action is uncertain or requires review. Settle it before another command.',
+                    0, 'agent', kind: 'uncertain_or_review');
             }
             foreach ($targets as $target) {
                 if ($safety->hasShipUncertaintyHold($agent, $target)
                     || app(MiningCluster::class)->hasBlockingLease($agent, $target, $command === 'transfer' ? $leaseId : null)) {
-                    throw new GameException('This ship or its transfer partner has an unresolved action or lease.', retryAfter: $defer ? 5 : 0);
+                    throw new ActionInFlight('This ship or its transfer partner has an unresolved action or lease.',
+                        $defer ? 5 : 0, 'agent', array_slice(array_values(array_unique($targets)), 0, 10), kind: 'uncertain_or_review');
                 }
             }
-            $others->where(function ($query) use ($targets, $command, $nonCredit, $reservationOnly) {
+            $others->where(function ($query) use ($targets, $nonCredit, $reservationOnly) {
                 $query->whereIn('ship_symbol', $targets);
-                if (! $reservationOnly && CampaignSafety::isCreditCommand($command)) {
+                if (! $reservationOnly) {
                     $query->orWhereNotIn('command', $nonCredit);
                 }
             });
         }
-        if ((clone $others)->where(fn ($q) => $q->where('state', 'uncertain')->orWhere(fn ($q) => self::reviewFor($q, $ship)))->exists()) {
-            throw new GameException('An action is pending, uncertain or requires review. Settle it before another command.');
+        $reviews = (clone $others)->where(fn ($q) => $q->where('state', 'uncertain')->orWhere(fn ($q) => self::reviewFor($q, $ship)))
+            ->orderBy('id')->get(['id', 'ship_symbol']);
+        if ($reviews->isNotEmpty()) {
+            throw new ActionInFlight('An action is pending, uncertain or requires review. Settle it before another command.',
+                0, 'agent', $reviews->pluck('ship_symbol')->filter()->unique()->values()->take(10)->all(),
+                $reviews->pluck('id')->take(5)->all(), 'uncertain_or_review');
         }
-        if ((clone $others)->whereIn('state', ['pending', 'sending'])->exists()) {
-            throw new GameException($defer ? 'An action is pending or sending. Wait for it to settle before another command.' : 'An action is pending, uncertain or requires review. Settle it before another command.', retryAfter: $defer ? 5 : 0);
+        $blockers = (clone $others)->whereIn('state', ['pending', 'sending'])->orderBy('id')
+            ->get(['id', 'ship_symbol', 'command', 'outcome']);
+        if ($blockers->isNotEmpty()) {
+            $hasReceipt = $blockers->contains(fn (ShipAction $row) => self::hasReceiptEvidence($row));
+            $local = ! $hasReceipt && $split
+                && $blockers->every(fn (ShipAction $row) => in_array($row->ship_symbol, $targets, true)
+                    && ! CampaignSafety::isCreditCommand($row->command) && $row->command !== 'transfer');
+            throw new ActionInFlight(
+                $defer && ! $hasReceipt ? 'An action is pending or sending. Wait for it to settle before another command.'
+                    : 'An action is pending, uncertain or requires review. Settle it before another command.',
+                $defer && ! $hasReceipt ? 5 : 0,
+                $local ? 'ship' : 'agent',
+                $blockers->pluck('ship_symbol')->filter()->unique()->values()->take(10)->all(),
+                $blockers->pluck('id')->take(5)->all(),
+                $hasReceipt ? 'uncertain_or_review' : 'pending',
+            );
         }
         if (! $agent->canonical_identity || Agent::where('name', $agent->name)->where('reset_id', $agent->reset_id)->whereKeyNot($agent->id)->exists()) {
             throw new GameException('Agent identity is not unique. Synchronize or resolve duplicate imports first.');

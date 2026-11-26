@@ -3826,10 +3826,12 @@ class CampaignDirector
         $plan = [];
         $stop = false;
         $held = [];
+        $skipped = [];
         for ($iteration = 0; $iteration <= 2 && $started < $budget && microtime(true) < $this->deadline; $iteration++) {
-            $plan = $mesh->dispatchPlan($episode, $agent, $busy, $reserved, $this->activeBuyer($episode), $pins);
+            $plan = $mesh->dispatchPlan($episode, $agent, [...$busy, ...$skipped], $reserved, $this->activeBuyer($episode), $pins);
             $probes = collect($mesh->probes($episode, $agent))->keyBy('symbol');
             $freshPins = [];
+            $iterationSkipped = [];
             $floor = $mesh->departureEvidence($episode, $agent);
             $plan['verified_hubs'] = $floor['observers'];
             $plan['queued_departures'] = $floor['departures'];
@@ -3879,17 +3881,27 @@ class CampaignDirector
                     } elseif ($exception->retryAfter > 0) {
                         $hold += ['exception_class' => $exception::class, 'retry_after' => $exception->retryAfter];
                     }
+                    if ($exception instanceof ActionInFlight) {
+                        $hold += ['blocker_scope' => $exception->scope, 'blocker_kind' => $exception->kind, 'blocking_ships' => $exception->ships];
+                    }
                     $held[] = $hold;
                     if (str_starts_with($exception->getMessage(), 'Mesh G3 floor')) {
                         $freshPins[$ship['symbol']] = $move['origin'];
                     }
-                    if ($exception->retryAfter > 0 || $exception->uncertain) {
+                    if ($this->shipLocalMeshBlocker($exception, $ship['symbol'])) {
+                        $iterationSkipped[] = $ship['symbol'];
+
+                        continue;
+                    }
+                    if ($exception instanceof ActionInFlight || $exception instanceof RequestDeferred || $exception->retryAfter > 0 || $exception->uncertain) {
                         $stop = true;
                         break;
                     }
                 }
             }
-            if ($stop || array_diff_key($freshPins, $pins) === []) {
+            $newSkipped = array_diff($iterationSkipped, $skipped);
+            $skipped = array_values(array_unique([...$skipped, ...$iterationSkipped]));
+            if ($stop || (array_diff_key($freshPins, $pins) === [] && $newSkipped === [])) {
                 break;
             }
             $pins += $freshPins;
@@ -3901,6 +3913,12 @@ class CampaignDirector
         $this->recordMeshPlan($grant, $episode, $plan, $pins, $held);
 
         return $started > 0;
+    }
+
+    private function shipLocalMeshBlocker(GameException $exception, string $ship): bool
+    {
+        return $exception instanceof ActionInFlight && $exception->shipLocalPending()
+            && ! $exception->uncertain && $exception->ships === [$ship];
     }
 
     private function launchMeshScout(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, string $destination,
@@ -4179,7 +4197,10 @@ class CampaignDirector
                 return true;
             } catch (GameException $exception) {
                 FleetMetrics::observe($exception);
-                if ($exception->retryAfter > 0 || $exception->uncertain) {
+                if ($this->shipLocalMeshBlocker($exception, $ship['symbol'])) {
+                    continue;
+                }
+                if ($exception instanceof ActionInFlight || $exception instanceof RequestDeferred || $exception->retryAfter > 0 || $exception->uncertain) {
                     break;
                 }
             }
