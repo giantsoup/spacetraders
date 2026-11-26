@@ -203,9 +203,10 @@ class CampaignMesh
         $pool = array_column($probes, null, 'symbol');
         $runs = AutomationRun::where('active_agent_id', $agent->id)->where('reset_id', $agent->reset_id)
             ->where('campaign_episode_id', $episode->id)->whereIn('ship_symbol', array_keys($pool))
-            ->where('strategy', 'scout')->where('plan->mesh_work', 'market')->where('plan->destination', $destination)
+            ->where('strategy', 'scout')->whereNotNull('plan->mesh_work')->where('plan->destination', $destination)
             ->whereIn('state', [RunState::Running, RunState::Waiting])->whereNotNull('started_at')
-            ->whereNull('stop_requested_at')->where('expires_at', '>', now())->get();
+            ->whereNull('stop_requested_at')->where('expires_at', '>', now())->get()
+            ->reject(fn (AutomationRun $run) => self::isYardMove($run->plan));
         $now = now()->timestamp;
         $planner = app(MeshPlanner::class);
         foreach ($runs as $run) {
@@ -365,6 +366,15 @@ class CampaignMesh
     public static function dispatchFailure(string $reason): bool
     {
         return ! preg_match('/Mesh G3 floor|Mesh (movement|pool) authority|Mesh destination is occupied|authority|allowance|request budget|reconcil|uncertain|campaign cutoff|freshness|expired|stopped|purchase cutoff|run cutoff/i', $reason);
+    }
+
+    public const YARD_WORK = ['yard', 'purchase', 'hauler_purchase', 'buy_fleet'];
+
+    /** Whether mesh movement must end at a verified shipyard. */
+    public static function isYardMove(array $plan): bool
+    {
+        return in_array($plan['mesh_work'] ?? null, self::YARD_WORK, true)
+            || ($plan['observe_kind'] ?? null) === 'shipyard';
     }
 
     public function yardWork(CampaignEpisode $episode, Agent $agent, ?int $except = null): bool

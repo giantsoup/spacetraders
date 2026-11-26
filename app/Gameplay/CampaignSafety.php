@@ -346,7 +346,7 @@ class CampaignSafety
                 if ($travel === null || $travel + CampaignMesh::TRANSPORT_CUTOFF_MARGIN_SECONDS >= now()->diffInSeconds($run->expires_at, false)) {
                     throw new GameException('Mesh movement cannot finish before the run cutoff.');
                 }
-                $mesh->assertDeparture($episode, $agent, $ship, $destination, $run->id, $run->plan['mesh_work'] !== 'market');
+                $mesh->assertDeparture($episode, $agent, $ship, $destination, $run->id, CampaignMesh::isYardMove($run->plan));
             } else {
                 $mesh->assertPool($episode, $agent, $ship);
             }
@@ -396,7 +396,7 @@ class CampaignSafety
             if ($command === 'navigate' && in_array($run->strategy, ['scout', 'buy_fleet'], true)
                 && ($departure = $ship->snapshot['nav']['waypointSymbol']) !== $destination
                 && $fleet->isProbe($ship->snapshot) && isset(CampaignMesh::policy($episode)['saturation'])) {
-                app(CampaignMesh::class)->assertDeparture($episode, $agent, $ship->snapshot, $arguments['waypointSymbol'], $run->id, $run->strategy === 'buy_fleet');
+                app(CampaignMesh::class)->assertDeparture($episode, $agent, $ship->snapshot, $arguments['waypointSymbol'], $run->id, $run->strategy === 'buy_fleet' || CampaignMesh::isYardMove($plan));
             }
         }
         $extra = match ($run->strategy) {

@@ -340,7 +340,7 @@ class AutomationRunner
                 $destination = $plan['destination'] ?? $plan['shipyard'] ?? $plan['market'] ?? null;
                 $ship = Ship::where('agent_id', $agent->id)->where('symbol', $run->ship_symbol)->firstOrFail()->snapshot;
                 if ((! $v8 || $run->strategy === 'scout') && ($ship['nav']['waypointSymbol'] !== $destination || $plan['mesh_work'] !== 'purchase')) {
-                    app(CampaignMesh::class)->assertDeparture($episode, $agent, $ship, $destination, $run->id, $plan['mesh_work'] !== 'market');
+                    app(CampaignMesh::class)->assertDeparture($episode, $agent, $ship, $destination, $run->id, CampaignMesh::isYardMove($plan));
                 }
                 if (microtime(true) >= ($deadline ?? INF)) {
                     throw (new RequestDeferred('Mesh start exceeded the pass deadline.', 5, delaySource: 'pass_deadline', deadlineCapped: true))->withDeadline($deadline);
