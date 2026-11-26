@@ -304,7 +304,7 @@ class RequestBudgetPhasesAndAgentCapsTest extends TestCase
             LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
             $run->update(['next_action_at' => now()]);
             $runner->advance($run->id);
-            $commands = ShipAction::where('automation_run_id', $run->id)->where('state', 'confirmed')->pluck('command')->all();
+            $commands = ShipAction::where('automation_run_id', $run->id)->where('state', 'confirmed')->orderBy('id')->pluck('command')->all();
             $this->travel(1)->seconds();
         }
         $this->assertSame(['flight_mode', 'orbit', 'navigate', 'dock', 'refuel', 'sell'], $commands, $run->fresh()->blocked_reason ?? '');
