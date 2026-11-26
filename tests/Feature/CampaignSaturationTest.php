@@ -12,6 +12,7 @@ use App\Gameplay\CampaignProbeBootstrap;
 use App\Gameplay\CampaignSaturation;
 use App\Gameplay\CampaignStatus;
 use App\Gameplay\CampaignTrade;
+use App\Gameplay\ExtractionSites;
 use App\Gameplay\FleetAllocator;
 use App\Gameplay\FleetClaims;
 use App\Gameplay\GameException;
@@ -812,29 +813,83 @@ class CampaignSaturationTest extends TestCase
         $this->assertFalse($rank['admission']['primary_trade_proved']);
     }
 
-    public function test_allocator_reports_declines_and_only_traders_contribute_g8(): void
+    public function test_rank_reports_mixed_trader_g8_failure_and_candidate_skip_declines(): void
+    {
+        $episode = $this->fleetAdmissionEpisode(extraction: true);
+        $episode->update(['next_reset_at' => now()->addHours(25)]);
+        $yard = 'X1-TEST-ROCK';
+        $this->editFixture(function (&$world) use ($yard) {
+            $world['shipyards'][$yard]['shipTypes'][] = ['type' => 'SHIP_MINING_DRONE'];
+            $world['shipyards'][$yard]['ships'][] = $world['offer'];
+            $shuttle = FakeSpaceTraders::lightHauler('OFFER-3', $yard);
+            $shuttle['frame']['symbol'] = 'FRAME_SHUTTLE';
+            $world['shipyards'][$yard]['shipTypes'][] = ['type' => 'SHIP_LIGHT_SHUTTLE'];
+            $world['shipyards'][$yard]['ships'][] = FakeSpaceTraders::shipyardOffer('SHIP_LIGHT_SHUTTLE', $shuttle, 100000);
+        });
+        $command = Ship::where('symbol', 'LOCAL-1')->sole();
+        $command->update(['snapshot->frame->symbol' => 'FRAME_FRIGATE']);
+        $world = $this->world();
+        $sync = app(AgentSynchronizer::class);
+        app(ExtractionSites::class)->recordModifiers($this->agent, $yard, [], now()->toImmutable());
+        $goods = FakeSpaceTraders::withAllMiningBids($world['market_goods']['X1-TEST-PORT']);
+        foreach ($goods as &$good) {
+            if ($good['symbol'] !== 'FUEL') {
+                $good['sellPrice'] = 8000;
+            }
+        }
+        unset($good);
+        $sync->observe($this->agent, 'market', 'X1-TEST-PORT', ['tradeGoods' => $goods, 'imports' => [], 'exports' => [], 'exchange' => []]);
+        $this->seedFleetAdmissionEvidence($episode, $yard);
+        $saturation = $this->partialMock(CampaignSaturation::class);
+        $saturation->shouldReceive('requests')->withArgs(fn ($agent, $policy, $ignoreRun, $type) => $type === 'SHIP_LIGHT_SHUTTLE')
+            ->andReturn(['pass' => false, 'reason' => 'ordinary_hour_headroom', 'staged' => false]);
+        $candidates = array_map(fn ($type) => ['type' => $type, 'yard' => $yard, 'purchaser' => 'LOCAL-1'],
+            ['SHIP_LIGHT_HAULER', 'SHIP_MINING_DRONE', 'SHIP_LIGHT_SHUTTLE']);
+
+        $rank = $saturation->rankFleetPurchases($episode->grant(), $episode, $this->agent->refresh(), $candidates, deliveryFuel: 0);
+
+        $this->assertSame('SHIP_MINING_DRONE', $rank['selected']['type'] ?? null, json_encode($rank));
+        $this->assertSame(['g7_requests' => 1, 'g8' => 1], $rank['declined']);
+        $this->assertSame(['pass' => false, 'reason_code' => 'payback'], $rank['admission']['gates']['G8']);
+        $this->assertArrayNotHasKey('g8_later', $rank['admission']);
+    }
+
+    public function test_rank_reports_a_held_traders_later_g8_failure(): void
+    {
+        $episode = $this->fleetAdmissionEpisode();
+        $episode->update(['next_reset_at' => now()->addHours(25)]);
+        $yard = 'X1-TEST-ROCK';
+        $this->editFixture(fn (&$world) => $world['ships'][] = FakeSpaceTraders::lightHauler('LOCAL-9', $yard));
+        app(AgentSynchronizer::class)->sync($this->agent, false, freshFleet: true);
+        $arm = $this->seedArmEpisode($this->arm('LOCAL-9', 'H1'));
+        $this->load($arm, -240, 300000, 90);
+        $this->load($arm, -15, 300000, 91);
+        // The arm history supplies measured savings while only the command hull is in the observed fleet.
+        Ship::where('symbol', 'LOCAL-9')->delete();
+        $this->seedFleetAdmissionEvidence($episode, $yard);
+        $candidate = ['type' => 'SHIP_LIGHT_HAULER', 'yard' => $yard, 'purchaser' => 'LOCAL-1', 'hold_hours' => 2.0];
+
+        $rank = app(CampaignSaturation::class)->rankFleetPurchases($episode->grant(), $episode, $this->agent->refresh(),
+            [$candidate], deliveryFuel: 0);
+
+        $this->assertNull($rank['selected']);
+        $this->assertSame(['held' => 1], $rank['declined'], json_encode($rank['admission']));
+        $this->assertSame(['pass' => true, 'reason_code' => null], $rank['admission']['gates']['G8']);
+        $this->assertSame(['pass' => false, 'reason_code' => 'time_to_reset'], $rank['admission']['g8_later'] ?? null);
+    }
+
+    public function test_allocator_reports_tier_one_probe_declines_before_evaluating_g8(): void
     {
         $allocator = app(FleetAllocator::class);
         $offer = ['price' => 30000, 'effective_cost' => 30000, 'delta_v' => 1000, 'delta_q' => 1, 'slot' => 'fixture'];
         $trader = ['type' => 'SHIP_LIGHT_SHUTTLE'] + $offer;
-        $miner = ['type' => 'SHIP_MINING_DRONE', 'delta_v' => 10000] + $offer;
         $context = ['hours_to_reset' => 25.0, 'horizon_after_delivery_hours' => 24.0, 'cash' => 900000];
-        $rank = $allocator->rank([$trader, $miner, ['request_fits' => false] + $trader], $context);
-
-        $this->assertSame('SHIP_MINING_DRONE', $rank['selected']['type']);
-        $this->assertSame('payback', $rank['g8_status']);
-        $this->assertSame(['g7_requests' => 1, 'g8' => 1], $rank['declined']);
 
         $rank = $allocator->rank([['type' => 'SHIP_PROBE', 'tier' => 1, 'price' => 20000], ['request_fits' => false] + $trader], $context);
         $this->assertSame('tier_1_probe', $rank['reason']);
         $this->assertSame(['g7_requests' => 1], $rank['declined']);
         $this->assertNull($rank['g8_status']);
         $this->assertNull($rank['g8_later_status']);
-
-        $rank = $allocator->rank([['hold_hours' => 2.0, 'delta_v' => 30000] + $trader], $context + ['saving_rate_per_hour' => 10000]);
-        $this->assertSame('pass', $rank['g8_status']);
-        $this->assertSame('time_to_reset', $rank['g8_later_status']);
-        $this->assertSame(['held' => 1], $rank['declined']);
     }
 
     public function test_mesh_plan_hash_ignores_purchase_measurements_but_retains_gate_verdict_changes(): void
@@ -953,26 +1008,13 @@ class CampaignSaturationTest extends TestCase
     {
         $episode = $this->fleetAdmissionEpisode();
         $grant = $episode->grant();
-        $this->schedulerPass();
         $yard = 'X1-TEST-ROCK';
         $this->editFixture(function (&$world) use ($yard) {
             $world['shipyards'][$yard]['shipTypes'] = [['type' => 'SHIP_LIGHT_HAULER']];
             $world['shipyards'][$yard]['ships'] = array_values(array_filter($world['shipyards'][$yard]['ships'],
                 fn ($offer) => $offer['type'] === 'SHIP_LIGHT_HAULER'));
         });
-        $sync = app(AgentSynchronizer::class);
-        $sync->observe($this->agent, 'shipyard', $yard, $this->world()['shipyards'][$yard]);
-        foreach (Ship::where('snapshot->frame->symbol', 'FRAME_PROBE')->get() as $probe) {
-            $probe->update(['stationed_waypoint' => $probe->snapshot['nav']['waypointSymbol']]);
-        }
-        for ($i = 1; $i <= 3; $i++) {
-            app(CampaignControl::class)->event($grant, $episode, 'load_result', [
-                'proof' => true, 'proof_eligible' => true, 'fully_settled' => true,
-                'buyer' => 'X1-TEST-PORT', 'source' => $yard, 'good' => 'IRON_ORE', 'net' => 30000,
-                'predicted_margin' => 30000, 'realized_ratio' => 1.0, 'run_id' => $i,
-                'finished_at' => now()->subMinutes(5 - $i)->toIso8601String(), 'units' => 20,
-            ]);
-        }
+        $this->seedFleetAdmissionEvidence($episode, $yard);
 
         $budget = app(RequestBudget::class);
         $usage = $budget->usage(agentSymbol: $this->agent->name);
@@ -1018,12 +1060,30 @@ class CampaignSaturationTest extends TestCase
         return [[false, 'ordinary_hour_headroom'], [true, 'staged_request_budget']];
     }
 
-    private function fleetAdmissionEpisode(): CampaignEpisode
+    private function seedFleetAdmissionEvidence(CampaignEpisode $episode, string $yard): void
+    {
+        $this->schedulerPass();
+        app(AgentSynchronizer::class)->observe($this->agent, 'shipyard', $yard, $this->world()['shipyards'][$yard]);
+        foreach (Ship::where('snapshot->frame->symbol', 'FRAME_PROBE')->get() as $probe) {
+            $probe->update(['stationed_waypoint' => $probe->snapshot['nav']['waypointSymbol']]);
+        }
+        for ($i = 1; $i <= 3; $i++) {
+            app(CampaignControl::class)->event($episode->grant(), $episode, 'load_result', [
+                'proof' => true, 'proof_eligible' => true, 'fully_settled' => true,
+                'buyer' => 'X1-TEST-PORT', 'source' => $yard, 'good' => 'IRON_ORE', 'net' => 30000,
+                'predicted_margin' => 30000, 'realized_ratio' => 1.0, 'run_id' => $i,
+                'finished_at' => now()->subMinutes(5 - $i)->toIso8601String(), 'units' => 20,
+            ]);
+        }
+    }
+
+    private function fleetAdmissionEpisode(bool $extraction = false): CampaignEpisode
     {
         $this->setUpSaturation();
         $body = Yaml::parseFile(base_path('campaigns/weekly-system-saturation-fleet.yaml'));
         $body['agent']['symbol'] = $this->agent->name;
         $body['fleet']['auto_arm']['revision_hash'] = $this->armRevision->content_hash;
+        $body['fleet']['saturation']['extraction']['enabled'] = $extraction;
 
         return $this->primary(revision: app(CampaignPlaybook::class)->import(Yaml::dump($body, 12)));
     }
