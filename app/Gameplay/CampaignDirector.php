@@ -3868,7 +3868,8 @@ class CampaignDirector
 
     private function meshStageExit(CampaignEpisode $episode, string $stage, string $reason): array
     {
-        return ['reason' => $reason, 'stage' => $stage, 'remaining_ms' => max(0, (int) round(($this->deadline - microtime(true)) * 1000)),
+        return ['reason' => $reason, 'stage' => $stage,
+            'remaining_ms' => is_finite($this->deadline) ? max(0, (int) round(($this->deadline - microtime(true)) * 1000)) : null,
             'reads_before' => count($this->marketReads), 'reads_after' => count($this->marketReads),
             'reads_cap' => CampaignMesh::policy($episode)['reads_per_pass'] ?? null];
     }
