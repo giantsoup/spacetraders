@@ -85,6 +85,29 @@ class MeshDispatchBlockerScopeTest extends TestCase
         }
     }
 
+    public function test_clear_checks_later_pending_and_sending_rows_for_receipt_evidence(): void
+    {
+        $this->setUpSaturation(hubs: 2, seedCoverage: false);
+        $this->episode(true);
+        $ids = [];
+        foreach (['pending' => [], 'sending' => ['response_received_at' => now()->toIso8601String()]] as $state => $outcome) {
+            $ids[] = ShipAction::create([
+                'agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id, 'key' => 'mixed-evidence-'.$state,
+                'ship_symbol' => 'LOCAL-2', 'origin' => 'manual', 'command' => 'navigate', 'state' => $state,
+                'arguments' => [], 'outcome' => $outcome, 'expires_at' => now()->addMinute(),
+            ])->id;
+        }
+        try {
+            app(ShipCommandExecutor::class)->clear($this->agent->refresh(), defer: true, ship: 'LOCAL-2');
+            $this->fail('The later receipt-bearing blocker must prevent ship-local continuation.');
+        } catch (ActionInFlight $exception) {
+            $this->assertSame('agent', $exception->scope);
+            $this->assertSame('uncertain_or_review', $exception->kind);
+            $this->assertSame(0, $exception->retryAfter);
+            $this->assertSame($ids, $exception->actionIds);
+        }
+    }
+
     #[DataProvider('dispatchBlockers')]
     public function test_director_continues_only_for_a_verified_ship_local_pending_blocker(bool $split, bool $oneTarget, string $blocker, bool $started): void
     {

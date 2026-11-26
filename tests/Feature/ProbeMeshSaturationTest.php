@@ -1857,6 +1857,44 @@ final class ProbeMeshSaturationTest extends TestCase
         $this->assertSame($capped['exit']['stopped_at'], $late['exit']['stopped_at']);
     }
 
+    public function test_routine_poll_prefers_read_cap_then_deadline_over_hold_and_degraded_caps(): void
+    {
+        $this->setUpSaturation(hubs: 2);
+        $episode = $this->primary(revision: $this->meshRevision());
+        $poller = app(MeshPoller::class);
+        $cap = CampaignMesh::policy($episode)['reads_per_pass'];
+        $normal = app(RequestBudget::class)->usage(agentSymbol: $this->agent->name);
+        $mock = $this->partialMock(RequestBudget::class);
+        $usage = $normal;
+        $usage['host']['rate_limits_last_15_minutes'] = 3;
+        $mock->shouldReceive('usage')->andReturnUsing(function () use (&$usage) {
+            return $usage;
+        });
+        $deadline = microtime(true) - 1;
+        $reads = array_fill_keys(range(1, $cap), true);
+
+        $heldAtCap = $poller->refresh($episode, $this->agent, $reads, $deadline, phase: 'routine');
+
+        $this->assertSame('hold', $heldAtCap['mode']);
+        $this->assertSame('read_cap', $heldAtCap['exit']['reason']);
+        $this->assertSame([], $heldAtCap['successful']);
+        $reads = [];
+        $heldBelowCap = $poller->refresh($episode, $this->agent, $reads, $deadline, phase: 'routine');
+        $this->assertSame('hold', $heldBelowCap['mode']);
+        $this->assertSame('deadline', $heldBelowCap['exit']['reason']);
+        $this->assertSame([], $heldBelowCap['successful']);
+
+        $usage = $normal;
+        $usage['agent']['tier2_4_last_hour'] = (int) floor(.8 * config('gameplay.host_tier2_4_per_minute') * 60) - 221;
+        $reads = [1 => true, 2 => true];
+        $degraded = $poller->refresh($episode, $this->agent, $reads, $deadline, phase: 'routine');
+
+        $this->assertSame('degraded', $degraded['mode']);
+        $this->assertSame('deadline', $degraded['exit']['reason']);
+        $this->assertSame([], $degraded['successful']);
+        $this->assertSame('degraded_cap', $poller->refresh($episode, $this->agent, $reads, microtime(true) + 10, phase: 'routine')['exit']['reason']);
+    }
+
     public function test_routine_poll_records_request_deferred_exit_while_governor_reports_normal(): void
     {
         $this->setUpSaturation(hubs: 2);
@@ -1918,9 +1956,11 @@ final class ProbeMeshSaturationTest extends TestCase
         $episode = $this->primary(revision: app(CampaignPlaybook::class)->import(Yaml::dump($body, 12)));
         $realBudget = app(RequestBudget::class);
         $budget = $this->partialMock(RequestBudget::class);
+        $extraLatency = 0;
         $budget->shouldReceive('usage')->andReturnUsing(function (?string $token = null, ?string $account = null, ?string $agentSymbol = null,
-            bool $requireTelemetry = false) use ($realBudget) {
+            bool $requireTelemetry = false) use ($realBudget, &$extraLatency) {
             if ($requireTelemetry) {
+                usleep($extraLatency);
                 throw new RequestDeferred('Missing fixture telemetry', 5, 'budget_storage');
             }
 
@@ -1928,6 +1968,7 @@ final class ProbeMeshSaturationTest extends TestCase
         });
 
         for ($iteration = 0; $iteration < 2; $iteration++) {
+            $extraLatency = $iteration === 0 ? 0 : 100000;
             $state = $episode->refresh()->state;
             $state['mesh_dispatch_failed'] = ['expired' => ['at' => now()->subHour()->toIso8601String()]];
             $episode->update(['state' => $state]);
@@ -1945,6 +1986,7 @@ final class ProbeMeshSaturationTest extends TestCase
             $this->assertSame('stage_skipped', $routine['exit']['reason']);
             $this->assertSame('governor_mode', $routine['exit']['skip_reason']);
         }
+        $this->assertNotSame($passes[0]['mesh_polling']['routine']['exit']['remaining_ms'], $passes[1]['mesh_polling']['routine']['exit']['remaining_ms']);
         $plan = CampaignEvent::where('kind', 'mesh_plan')->sole()->data;
         $this->assertArrayNotHasKey('mesh_polling', $plan);
         $this->assertArrayNotHasKey('exit', $plan);
