@@ -180,17 +180,13 @@ class ShipCommandExecutor
                 throw new GameException('Stop the owning run for automated actions.');
             }
             $stop = ['outcome->stop_requested_at' => now()->utc()->toIso8601String()];
-            $reason = 'Stopped before reservation. No manual request was sent.';
-            if ($this->isQueued($action)) {
-                if ($action->command === 'buy_ship') {
-                    $this->settleGuardedPurchase($action, $reason, $this->hasStopMarker($action) ? [] : $stop);
-                } elseif (self::hasReceiptEvidence($action) || $action->sent_at !== null) {
-                    $action->update($stop + ['state' => ActionState::Uncertain, 'message' => $this->reconciliationMessage($action), 'settled_at' => now()]);
-                    app(StateChain::class)->markUncertain($action->id);
-                } else {
-                    $action->update($stop + ['state' => ActionState::Rejected, 'message' => $reason, 'settled_at' => now()]);
+            if ($this->isQueued($action) && ! $this->stopQueuedManual($action, $stop)) {
+                $action->refresh();
+                if ($this->isQueued($action)) {
+                    $this->stopQueuedManual($action, $stop);
                 }
-            } elseif ($action->state === ActionState::Sending && ! $this->hasStopMarker($action)) {
+            }
+            if ($action->state === ActionState::Sending && ! $this->hasStopMarker($action)) {
                 // The sender still owns the reservation and settles it after observing the stop.
                 if (! $this->purchaseAttemptQuery($action)->whereRaw("json_type(outcome, '$.stop_requested_at') IS NULL")
                     ->update($stop + ['message' => 'Stop requested after reservation. This action may settle; no follow-up is authorized.'])) {
@@ -200,6 +196,27 @@ class ShipCommandExecutor
 
             return $action->refresh();
         });
+    }
+
+    private function stopQueuedManual(ShipAction $action, array $stop): bool
+    {
+        $reason = 'Stopped before reservation. No manual request was sent.';
+        $stop = $this->hasStopMarker($action) ? [] : $stop;
+        if ($action->command === 'buy_ship') {
+            return $this->settleGuardedPurchase($action, $reason, $stop) !== null;
+        }
+
+        $uncertain = self::hasReceiptEvidence($action) || $action->sent_at !== null;
+        $updated = $this->purchaseAttemptQuery($action)->where('outcome', $action->getRawOriginal('outcome'))->update($stop + [
+            'state' => $uncertain ? ActionState::Uncertain : ActionState::Rejected,
+            'message' => $uncertain ? $this->reconciliationMessage($action) : $reason,
+            'settled_at' => now(),
+        ]);
+        if ($updated && $uncertain) {
+            app(StateChain::class)->markUncertain($action->id);
+        }
+
+        return $updated === 1;
     }
 
     public const RECEIPT_KEYS = ['response', 'body_sha256', 'response_received_at', 'http_status', 'response_validated'];

@@ -141,7 +141,9 @@ class HoldIsolationTest extends TestCase
 
         foreach ([$c0, $armRun] as $run) {
             app(AutomationRunner::class)->advance($run->id);
-            $this->assertSame('blocked', $run->fresh()->state->value);
+            $this->assertSame('stopping', $run->refresh()->state->value);
+            $this->assertNotNull($run->stop_requested_at);
+            $this->assertSame($this->agent->id, $run->active_agent_id);
         }
         $this->assertSame('uncertain_action', $grant->fresh()->pause_reason);
         $this->assertSame('uncertain_action', $armGrant->fresh()->pause_reason);
