@@ -892,7 +892,7 @@ class AutomationRunner
             }
             if (ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
                 ->when($split, fn ($q) => $q->where('automation_run_id', $run->id))->whereIn('state', ['pending', 'sending'])->exists()) {
-                $run->update(['next_action_at' => now()->addSeconds(5)]);
+                AutomationRun::whereKey($run->id)->withActiveAuthority($agent->id)->update(['next_action_at' => now()->addSeconds(5)]);
                 $outcome = 'waited';
 
                 return;
@@ -1028,7 +1028,7 @@ class AutomationRunner
                 $enqueuedAction = null;
                 match ($step->kind) {
                     'blocked' => $this->executor->block($run, $step->reason),
-                    'wait' => $run->update(['state' => RunState::Waiting, 'next_action_at' => $step->until]),
+                    'wait' => AutomationRun::whereKey($run->id)->withActiveAuthority($agent->id)->update(['state' => RunState::Waiting, 'next_action_at' => $step->until]),
                     'trip' => match ($run->strategy) {
                         'gate_recon' => app(GateRecon::class)->complete($run),
                         'buy_probe', 'buy_hauler' => app(CampaignProbeBootstrap::class)->complete($run, $ship),
@@ -1077,7 +1077,7 @@ class AutomationRunner
                     }
                 }
                 if ($e->retryAfter > 0 && $e->apiCode === null && $agent->fresh()?->connection_state === 'connected' && (! $e instanceof ReadStateUnavailable || $run->campaign_episode_id)) {
-                    $run->update(['state' => RunState::Waiting, 'next_action_at' => now()->addSeconds(min(180, $e->retryAfter)), 'blocked_reason' => $e->getMessage()]);
+                    AutomationRun::whereKey($run->id)->withActiveAuthority($agent->id)->update(['state' => RunState::Waiting, 'next_action_at' => now()->addSeconds(min(180, $e->retryAfter)), 'blocked_reason' => $e->getMessage()]);
                     $outcome = self::isHold($e->getMessage()) ? 'held' : 'deferred';
                 } else {
                     $this->executor->block($run, $e->getMessage());
@@ -1112,7 +1112,7 @@ class AutomationRunner
                 $outcome = $e->retryAfter > 0 ? 'deferred' : 'blocked';
                 if ($run->fresh()?->active_agent_id === $agent->id) {
                     if ($e->retryAfter > 0) {
-                        $run->update(['state' => RunState::Waiting, 'next_action_at' => now()->addSeconds(min(180, $e->retryAfter)), 'blocked_reason' => $e->getMessage()]);
+                        AutomationRun::whereKey($run->id)->withActiveAuthority($agent->id)->update(['state' => RunState::Waiting, 'next_action_at' => now()->addSeconds(min(180, $e->retryAfter)), 'blocked_reason' => $e->getMessage()]);
                     } else {
                         $this->executor->block($run, $e->getMessage());
                     }
@@ -1144,7 +1144,9 @@ class AutomationRunner
                 || ((! $run->expires_at->isFuture() || ! $safety->settlementDeadline($run)?->isFuture()) && ! $cleanup);
             if ($stopping) {
                 if (! $safety->hasShipUncertaintyHold($agent, $run->ship_symbol)) {
-                    $this->retireSaturationIntents($agent, $run);
+                    if (! $this->retireSaturationIntents($agent, $run)) {
+                        return ['held', null];
+                    }
                     $episode = CampaignEpisode::find($run->campaign_episode_id);
                     if (self::hasTradeCargo($run) && ! $run->stop_requested_at && (! $episode || $episode->closed_at
                         || $episode->reset_id !== $agent->reset_id || $episode->next_reset_at->isPast() || ! $episode->grant()->available())) {
@@ -1173,7 +1175,13 @@ class AutomationRunner
             if ($safety->uncertainCredit($agent) || $safety->creditReview($agent) || $safety->unexplainedBalance($agent)) {
                 $safety->check($run, $agent);
             }
-            $this->executor->promoteCreditIntent($agent);
+            $promotion = $this->executor->promoteCreditIntent($agent);
+            if ($run->refresh()->state === RunState::Stopping) {
+                return ['idle', null];
+            }
+            if ($promotion === CreditPromotionDisposition::EvidenceVeto) {
+                return ['held', null];
+            }
             if ((clone $owned)->whereIn('state', ['preview', 'pending'])->exists()) {
                 return ['waited', null];
             }
@@ -1194,7 +1202,7 @@ class AutomationRunner
                 $ship = app(CommandRules::class)->shipForRun($agent, $run);
                 if ($ship['nav']['status'] === 'IN_TRANSIT') {
                     $wake = CarbonImmutable::parse($ship['nav']['route']['arrival'])->addSecond()->max(now()->toImmutable()->addSecond());
-                    $run->update(['state' => RunState::Waiting, 'next_action_at' => $wake]);
+                    AutomationRun::whereKey($run->id)->withActiveAuthority($agent->id)->update(['state' => RunState::Waiting, 'next_action_at' => $wake]);
 
                     return ['waited', null];
                 }
@@ -1206,7 +1214,7 @@ class AutomationRunner
                         && $ship['cargo']['units'] > 0 && empty($run->totals['acquisition_closed_at'])
                         && ($ready = $safety->planTime($ship['cooldown']['readyAt']))?->isFuture()
                         && ($rendezvous = $this->tenderCutoff($partner)) && $ready->lt($rendezvous)) {
-                        $run->update(['state' => RunState::Waiting, 'next_action_at' => $ready]);
+                        AutomationRun::whereKey($run->id)->withActiveAuthority($agent->id)->update(['state' => RunState::Waiting, 'next_action_at' => $ready]);
 
                         return ['waited', null];
                     }
@@ -1230,7 +1238,7 @@ class AutomationRunner
                 }
                 $action = match ($step->kind) {
                     'blocked' => $this->executor->block($run, $step->reason),
-                    'wait' => $run->update(['state' => RunState::Waiting, 'next_action_at' => $step->until]),
+                    'wait' => AutomationRun::whereKey($run->id)->withActiveAuthority($agent->id)->update(['state' => RunState::Waiting, 'next_action_at' => $step->until]),
                     'trip' => $this->completeSaturation($agent, $run, $ship),
                     'depart' => $run->update(['totals' => array_replace($run->totals, ['phase' => 'deliver']), 'state' => RunState::Running, 'next_action_at' => now()]),
                     'act' => $this->enqueue($run, $step, $freshQuote),
@@ -1420,19 +1428,41 @@ class AutomationRunner
         }
     }
 
-    private function retireSaturationIntents(Agent $agent, AutomationRun $run): void
+    private function retireSaturationIntents(Agent $agent, AutomationRun $run): bool
     {
-        DB::transaction(function () use ($agent, $run) {
+        return DB::transaction(function () use ($agent, $run) {
             $pending = ShipAction::where('agent_id', $agent->id)->where('reset_id', $run->reset_id)->where('automation_run_id', $run->id)
                 ->whereIn('state', ['preview', 'pending'])->get();
+            $reason = 'Run stopped before transport.';
+            $reconciliation = false;
             foreach ($pending as $action) {
-                if (isset($action->outcome['response_received_at']) || isset($action->outcome['body_sha256'])) {
+                if ($action->command === 'buy_ship' && (ShipCommandExecutor::hasReceiptEvidence($action) || $action->sent_at !== null)) {
+                    $this->executor->settleQueuedPurchase($action, $reason);
+                    $reconciliation = true;
+                }
+            }
+            if ($reconciliation) {
+                return false;
+            }
+            foreach ($pending as $action) {
+                if (ShipCommandExecutor::hasReceiptEvidence($action) || $action->sent_at !== null) {
                     throw new GameException('A retained write receipt needs reconciliation before stop.');
                 }
+            }
+            foreach ($pending as $action) {
+                if ($action->command === 'buy_ship') {
+                    if ($this->executor->settleQueuedPurchase($action, $reason, confirmNotSent: true) !== ActionState::Rejected) {
+                        return false;
+                    }
+
+                    continue;
+                }
                 app(StateChain::class)->releaseReservation($action->id);
-                $action->update(['state' => ActionState::Rejected, 'message' => 'Run stopped before transport.', 'settled_at' => now(),
+                $action->update(['state' => ActionState::Rejected, 'message' => $reason, 'settled_at' => now(),
                     'outcome' => array_replace($action->outcome ?? [], ['confirmed_not_sent' => true])]);
             }
+
+            return true;
         });
     }
 
@@ -1442,14 +1472,26 @@ class AutomationRunner
         if (app(CampaignSafety::class)->unexplainedBalance($agent)) {
             throw new GameException('Unexplained balance change after settlement.');
         }
-        DB::transaction(function () use ($agent, $run, $ship) {
+        $completed = DB::transaction(function () use ($agent, $run, $ship) {
             $totals = array_replace($run->totals, ['cycles' => 1, 'ending_fuel' => $ship['fuel']['current'],
                 'unsold' => MiningPlanner::inventory($ship), 'finished_at' => now()->toIso8601String(),
                 'elapsed_seconds' => max(1, (int) $run->started_at->diffInSeconds(now()))]);
-            $run->update(['totals' => $totals, 'active_agent_id' => null, 'state' => RunState::Completed, 'next_action_at' => null]);
+            $fields = ['totals' => $totals, 'active_agent_id' => null, 'state' => RunState::Completed, 'next_action_at' => null];
+            if ($run->strategy === 'buy_fleet') {
+                $fields['totals'] = json_encode($totals, JSON_THROW_ON_ERROR);
+                if (! AutomationRun::whereKey($run->id)->withActiveAuthority($agent->id)->update($fields)) {
+                    return false;
+                }
+            } else {
+                $run->update($fields);
+            }
             $this->releaseSaturationHolds($agent, $run);
+
+            return true;
         });
-        app(MeshGovernor::class)->release($run->plan['mesh_allowance'] ?? null);
+        if ($completed) {
+            app(MeshGovernor::class)->release($run->plan['mesh_allowance'] ?? null);
+        }
     }
 
     private function releaseSaturationHolds(Agent $agent, AutomationRun $run): void
@@ -1598,7 +1640,12 @@ class AutomationRunner
         $created = null;
         DB::transaction(function () use ($agent, $run, $step, $shortened, $v8, $v8Credit, $cleanup, $freshQuote, &$created) {
             $this->gate->check($run->engine_session_id);
-            if (! AutomationRun::whereKey($run->id)->whereNull('stop_requested_at')->whereNotNull('active_agent_id')->when(! $cleanup, fn ($query) => $query->where('expires_at', '>', now()))->update(['state' => 'running', 'next_action_at' => now()->addSeconds(5)])) {
+            if ($step->command === 'buy_ship' && ! app(CampaignSafety::class)->purchaseCutoffsOpen($run->refresh())) {
+                return;
+            }
+            if (! AutomationRun::whereKey($run->id)->withActiveAuthority($agent->id)
+                ->when(! $cleanup, fn ($query) => $query->where('expires_at', '>', now()))
+                ->update(['state' => 'running', 'next_action_at' => now()->addSeconds(5)])) {
                 return;
             }
             if ($shortened) {

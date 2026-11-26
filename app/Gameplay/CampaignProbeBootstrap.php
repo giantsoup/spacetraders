@@ -425,11 +425,7 @@ class CampaignProbeBootstrap
             if (! empty($action->outcome['delivered_ship']) || ! empty($action->outcome['bootstrap_delivered_probe'])) {
                 throw new GameException('The purchase already has delivery evidence.');
             }
-            // Successful write receipt markers are stored before validation, even when sanitized data is empty.
-            $outcome = $action->outcome ?? [];
-            if (array_key_exists('response', $outcome) || array_key_exists('body_sha256', $outcome)
-                || array_key_exists('response_received_at', $outcome) || array_key_exists('http_status', $outcome)
-                || array_key_exists('response_validated', $outcome)) {
+            if (ShipCommandExecutor::hasReceiptEvidence($action)) {
                 throw new GameException('The slot stays held because stored receipt evidence shows the purchase may have happened. Syncing cannot clear this evidence.');
             }
             $beforeFleet = $action->before_state['estimate']['fleet_symbols'] ?? null;
@@ -1195,11 +1191,14 @@ class CampaignProbeBootstrap
             if (self::deliveredShip($existing) && empty($existing->outcome['configuration_mismatch'])) {
                 return AutomationStep::trip();
             }
-            $this->recordShipyardRejection($episode, $run->plan['shipyard'], 'failed', null, $type);
-
-            return AutomationStep::blocked(! empty($existing->outcome['configuration_mismatch'])
+            $blocker = $this->reissueBlocker($run, ! empty($existing->outcome['configuration_mismatch'])
                 ? 'Delivered ship configuration differed from the approved offer. Review required.'
                 : $label.' purchase already attempted for this run.');
+            if ($blocker !== null) {
+                $this->recordShipyardRejection($episode, $run->plan['shipyard'], 'failed', null, $type);
+
+                return AutomationStep::blocked($blocker);
+            }
         }
 
         $grant = $episode->grant();
@@ -1300,6 +1299,21 @@ class CampaignProbeBootstrap
         ] + ($pin ? ['offer_configuration_hash' => $pin] : []));
     }
 
+    public function reissueBlocker(AutomationRun $run, string $defaultMessage): ?string
+    {
+        $owned = ShipAction::where('automation_run_id', $run->id);
+        $attempts = (clone $owned)->where('command', 'buy_ship')->get();
+        if ($attempts->count() > ShipCommandExecutor::MAX_UNSENT_PURCHASE_REISSUES
+            || $attempts->contains(fn (ShipAction $action) => ! ShipCommandExecutor::reissuableExpiry($action))
+            || $owned->where(fn ($query) => $query->whereIn('state', ['preview', 'pending', 'sending', 'uncertain', 'acknowledged'])
+                ->orWhere('review_required', true))->exists()
+            || ! app(CampaignSafety::class)->purchaseCutoffsOpen($run, marginSeconds: 30)) {
+            return $defaultMessage;
+        }
+
+        return null;
+    }
+
     public function complete(AutomationRun $run, array $ship): void
     {
         if ($run->strategy === 'buy_fleet' && $run->state === RunState::Completed) {
@@ -1311,13 +1325,15 @@ class CampaignProbeBootstrap
         $totals['unsold'] = MiningPlanner::inventory($ship);
         $totals['elapsed_seconds'] = $run->started_at ? (int) $run->started_at->diffInSeconds(now()) : 0;
         $totals['finished_at'] = now()->toIso8601String();
-        $run->update([
-            'totals' => $totals,
+        if (! AutomationRun::whereKey($run->id)->withActiveAuthority($run->agent_id)->update([
+            'totals' => json_encode($totals, JSON_THROW_ON_ERROR),
             'state' => RunState::Completed,
             'active_agent_id' => null,
             'next_action_at' => null,
             'blocked_reason' => null,
-        ]);
+        ])) {
+            return;
+        }
         $action = ShipAction::where('automation_run_id', $run->id)->where('command', 'buy_ship')->whereIn('state', ['confirmed', 'acknowledged'])->first();
         if ($action) {
             DB::transaction(fn () => $this->recordDelivery($action));

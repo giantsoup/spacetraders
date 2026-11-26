@@ -392,8 +392,8 @@ class CampaignMesh
             if ($run->agent_id !== $agent->id || $run->reset_id !== $agent->reset_id || $run->started_at || $run->active_agent_id
                 || ! in_array($run->state, [RunState::Preview, RunState::Stopped], true)
                 || ShipAction::where('automation_run_id', $run->id)->where(fn ($query) => $query
-                    ->whereIn('state', ['pending', 'sending', 'uncertain', 'confirmed', 'acknowledged'])->orWhereNotNull('sent_at')
-                    ->orWhereNotNull('outcome->response_received_at')->orWhereNotNull('outcome->body_sha256'))->exists()) {
+                    ->whereIn('state', ['pending', 'sending', 'uncertain', 'confirmed', 'acknowledged'])->orWhereNotNull('sent_at'))->exists()
+                || ShipAction::where('automation_run_id', $run->id)->get(['id', 'command', 'outcome'])->contains(ShipCommandExecutor::hasReceiptEvidence(...))) {
                 return false;
             }
             if ($run->state === RunState::Preview) {

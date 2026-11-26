@@ -114,6 +114,14 @@ class CampaignSafety
         return $cutoff && $buy ? $cutoff->min($buy) : ($cutoff ?? $buy);
     }
 
+    public function purchaseCutoffsOpen(AutomationRun $run, int $marginSeconds = 0): bool
+    {
+        $cutoff = now()->addSeconds($marginSeconds);
+
+        return $run->expires_at->gt($cutoff) && ($run->plan_version !== 8
+            || ($this->settlementDeadline($run)?->gt($cutoff) && $this->planTime($run->plan['acquisition_cutoff'] ?? null)?->gt($cutoff)));
+    }
+
     public function settlementDeadline(AutomationRun $run): ?CarbonImmutable
     {
         return $this->planTime($run->plan['settlement_deadline'] ?? null) ?? $run->expires_at;

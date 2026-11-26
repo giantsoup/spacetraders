@@ -1088,6 +1088,7 @@ class GameplayTest extends TestCase
         $this->world(fn (&$w) => $w['reset'] = '2026-11-01');
         $this->advance($run);
         $this->assertSame(RunState::Blocked, $run->state);
+        $this->assertSame('World reset. Agent archived; old intentions cannot run.', $run->blocked_reason);
         $this->assertNotNull($run->stop_requested_at);
         $this->assertCount(0, $this->world()['writes']);
     }

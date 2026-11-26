@@ -123,10 +123,22 @@ class CreditAccounting
             $totals['survey_actions'] = ($totals['survey_actions'] ?? 0) + 1;
             $totals['surveys_created'] = ($totals['surveys_created'] ?? 0) + ($outcome['surveys_created'] ?? (isset($outcome['surveys']) ? count($outcome['surveys']) : 1));
         }
-        $run->update(['totals' => $totals, 'next_action_at' => now(), 'heartbeat_at' => now(), 'last_dispatched_at' => null]);
+        $wake = ['next_action_at' => now(), 'heartbeat_at' => now(), 'last_dispatched_at' => null];
+        $block = [];
         if (($outcome['price_discrepancy'] ?? false) || ($outcome['fuel_discrepancy'] ?? false) || ! empty($outcome['configuration_mismatch']) || (isset($run->plan['max_fuel']) && ($totals['travel_fuel'] ?? 0) > $run->plan['max_fuel']) || $totals['spending'] > $run->plan['max_spend'] || ($totals['no_progress'] ?? 0) >= 1 || ! empty($totals['leg_short_sale']) || $totals['credit_delta'] < -$run->plan['max_loss']) {
-            $run->update(['state' => 'blocked', 'blocked_reason' => ! empty($outcome['configuration_mismatch']) ? 'Delivered ship configuration differed from the approved offer. Review required.' : 'Execution price, spending, loss or no-progress limit reached.']);
+            $block = ['state' => 'blocked', 'blocked_reason' => ! empty($outcome['configuration_mismatch']) ? 'Delivered ship configuration differed from the approved offer. Review required.' : 'Execution price, spending, loss or no-progress limit reached.'];
         }
+        if ($action->command === 'buy_ship') {
+            $run->update(['totals' => $totals]);
+            AutomationRun::whereKey($run->id)->withActiveAuthority($run->agent_id)->update($wake + $block);
+            $run->refresh();
+        } else {
+            $run->update(['totals' => $totals] + $wake);
+            if ($block !== []) {
+                $run->update($block);
+            }
+        }
+
         app(CycleAccounting::class)->record($run, $ship);
     }
 
