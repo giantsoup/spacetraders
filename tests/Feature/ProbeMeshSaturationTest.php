@@ -43,6 +43,7 @@ use Closure;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Yaml\Yaml;
 use Tests\Support\FakeSpaceTraders;
@@ -843,7 +844,7 @@ final class ProbeMeshSaturationTest extends TestCase
             if ($boundary === 'baseline') {
                 $this->partialMock(CreditAccounting::class)->shouldReceive('baseline')->once()->andThrow($failure);
             } else {
-                $api = \Mockery::mock(SpaceTradersApi::class, [app(SpaceTradersClient::class)])->makePartial();
+                $api = Mockery::mock(SpaceTradersApi::class, [app(SpaceTradersClient::class)])->makePartial();
                 $api->shouldReceive($boundary)->once()->andThrow($failure);
             }
 
@@ -1996,68 +1997,125 @@ final class ProbeMeshSaturationTest extends TestCase
     public function test_escaping_routine_429_preserves_next_pass_capacity_and_due_order(): void
     {
         $this->setUpSaturation(hubs: 2);
-        $episode = $this->primary(revision: $this->meshRevision());
-        $episode->update(['opened_at' => now()->subHours(2)]);
-        $port = collect($this->world()['waypoints'])->firstWhere('symbol', 'X1-TEST-PORT');
-        $port['traits'][] = ['symbol' => 'SHIPYARD'];
-        app(AgentSynchronizer::class)->observe($this->agent, 'waypoint', $port['symbol'], $port, 'listing');
-        $metrics = app(FleetMetrics::class);
-        FleetMetrics::forAgent($this->agent->name, fn () => FleetMetrics::directorPass('director', 'waiting', 1, ['mesh_polling' => [
-            'routine' => ['mode' => 'normal', 'successful' => [$port['symbol']]],
-        ]]));
+        $body = Yaml::parseFile(base_path('campaigns/weekly-system-saturation-fleet.yaml'));
+        $body['agent']['symbol'] = $this->agent->name;
+        $body['fleet']['auto_arm']['revision_hash'] = $this->armRevision->content_hash;
+        $episode = $this->primary(revision: app(CampaignPlaybook::class)->import(Yaml::dump($body, 12)));
+        // Close purchase admission while routine polling still runs.
+        $episode->update(['opened_at' => now()->subHours(2), 'next_reset_at' => now()->addHours(10)]);
+        $port = 'X1-TEST-PORT';
+        $yard = $this->world()['shipyards'][self::YARD];
+        $this->editFixture(function (&$world) use ($port, $yard) {
+            $world['next_reset'] = now()->addHours(10)->toIso8601String();
+            $world['shipyards'][$port] = $yard;
+            foreach ($world['waypoints'] as &$point) {
+                if ($point['symbol'] === $port) {
+                    $point['traits'][] = ['symbol' => 'SHIPYARD'];
+                }
+            }
+        });
+        app(AgentSynchronizer::class)->observe($this->agent, 'waypoint',
+            $port, collect($this->world()['waypoints'])->firstWhere('symbol', $port), 'listing');
+        // One extra eligible pass would leave enough capacity for both yards at their usual interval.
+        $priorEligible = 9;
+        FleetMetrics::forAgent($this->agent->name, function () use ($priorEligible, $port) {
+            for ($pass = 0; $pass < $priorEligible; $pass++) {
+                FleetMetrics::directorPass('director', 'waiting', 1, ['mesh_polling' => [
+                    'routine' => ['mode' => 'normal', 'successful' => $pass === 0 ? [$port] : []],
+                ]]);
+            }
+        });
         FleetMetrics::flush();
-        $this->travel(31)->seconds();
         $exception = new GameException('rate limited', retryAfter: 3, httpStatus: 429);
-        $api = $this->partialMock(SpaceTradersApi::class);
-        $api->shouldReceive('shipyard')->withArgs(fn ($agent, $symbol) => $symbol === $port['symbol'])
-            ->once()->andReturn($this->world()['shipyards'][self::YARD]);
+        $api = Mockery::mock(SpaceTradersApi::class, [app(SpaceTradersClient::class)])->makePartial();
+        $this->app->instance(SpaceTradersApi::class, $api);
+        $api->shouldReceive('shipyard')->withArgs(fn ($agent, $symbol) => $symbol === $port)->once()->andReturn($yard);
         $api->shouldReceive('shipyard')->withArgs(fn ($agent, $symbol) => $symbol === self::YARD)->once()->andThrow($exception);
-        $director = app(CampaignDirector::class);
-        $poll = new \ReflectionMethod($director, 'pollMesh');
-        (new \ReflectionProperty($director, 'deadline'))->setValue($director, microtime(true) + 10);
+        $latestPass = fn () => DB::table('fleet_metrics')->where('kind', 'director_pass')
+            ->where('agent_symbol', $this->agent->name)->latest('id')->first();
 
-        try {
-            $poll->invoke($director, $episode, $this->agent, 'routine');
-            $this->fail('The 429 must escape unchanged.');
-        } catch (GameException $thrown) {
-            $this->assertSame($exception, $thrown);
-        }
+        $this->tickC0();
+        FleetMetrics::flush();
 
-        $stage = (new \ReflectionProperty($director, 'meshPolling'))->getValue($director)['routine'];
+        $failedRow = $latestPass();
+        $pass = json_decode($failedRow->data, true, flags: JSON_THROW_ON_ERROR);
+        $this->assertArrayHasKey('routine', $pass['mesh_polling'] ?? []);
+        $stage = $pass['mesh_polling']['routine'];
         $this->assertSame(['exit'], array_keys($stage));
         $this->assertSame('exception', $stage['exit']['reason']);
         $this->assertSame(429, $stage['exit']['http_status']);
         $this->assertSame('normal', $stage['exit']['governor']['mode']);
         $this->assertSame('shipyard:'.self::YARD, $stage['exit']['stopped_at']['key']);
-        $this->assertSame(['shipyard:'.$port['symbol']], $stage['exit']['partial_successful']);
+        $this->assertSame(['shipyard:'.$port], $stage['exit']['partial_successful']);
+        $metrics = app(FleetMetrics::class);
+        $evidence = $metrics->meshPassEvidence($this->agent->name);
+        $this->assertSame(['eligible' => $priorEligible, 'successful' => 1, 'skipped' => $priorEligible, 'max_successful_pass_gap_seconds' => null], $evidence);
 
-        FleetMetrics::forAgent($this->agent->name, fn () => FleetMetrics::directorPass('director', 'waiting', 2, ['mesh_polling' => ['routine' => $stage]]));
-        FleetMetrics::flush();
-        $this->travel(31)->seconds();
-        $withDiagnostics = $metrics->meshPassEvidence($this->agent->name);
+        // Give the successful yard a quote old enough to be due only if capacity is inflated.
+        GameObservation::where('kind', 'shipyard')->where('symbol', $port)->sole()
+            ->update(['observed_at' => now()->subSeconds(1500)]);
+        $api->shouldReceive('shipyard')->withArgs(fn ($agent, $symbol) => $symbol === self::YARD)->twice()->andReturn($yard);
         $cap = CampaignMesh::policy($episode)['reads_per_pass'];
-        $next = function () use ($episode, $cap) {
-            $director = app(CampaignDirector::class);
-            (new \ReflectionProperty($director, 'deadline'))->setValue($director, microtime(true) + 10);
-            // Calculate the real due order without changing the observation state.
-            (new \ReflectionProperty($director, 'marketReads'))->setValue($director, array_fill_keys(range(1, $cap), true));
-            (new \ReflectionMethod($director, 'pollMesh'))->invoke($director, $episode, $this->agent, 'routine');
-            $evidence = (new \ReflectionProperty($director, 'meshPassEvidence'))->getValue($director);
-            $routine = (new \ReflectionProperty($director, 'meshPolling'))->getValue($director)['routine'];
+        $poller = new class(app(MeshPoller::class), ($priorEligible + 1) * $cap)
+        {
+            public array $routineCapacities = [];
 
-            return [$evidence['eligible'] * $cap, $routine['due']];
+            public array $dueWithInflatedCapacity = [];
+
+            public function __construct(private MeshPoller $poller, private int $inflatedCapacity) {}
+
+            public function demand(CampaignEpisode $episode, Agent $agent, ?string $buyer): array
+            {
+                return $this->poller->demand($episode, $agent, $buyer);
+            }
+
+            public function read(CampaignEpisode $episode, Agent $agent, string $symbol, string $kind, ?string $observer,
+                string $priority, array &$read, ?array &$detailedRead = null, ?float $deadline = null): bool
+            {
+                return $this->poller->read($episode, $agent, $symbol, $kind, $observer, $priority, $read, $detailedRead, $deadline);
+            }
+
+            public function refresh(CampaignEpisode $episode, Agent $agent, array &$read, float $deadline, ?string $buyer = null,
+                ?string $phase = null, array $purchaseYards = [], ?int $capacity = null, ?array &$detailedRead = null, ?array &$exceptionReport = null): array
+            {
+                if ($phase === 'routine') {
+                    $this->routineCapacities[] = $capacity;
+                    $counterfactualReads = $read;
+                    $this->dueWithInflatedCapacity = $this->poller->refresh($episode, $agent, $counterfactualReads, microtime(true) - 1,
+                        $buyer, $phase, $purchaseYards, $this->inflatedCapacity)['due'];
+                }
+
+                return $this->poller->refresh($episode, $agent, $read, $deadline, $buyer, $phase, $purchaseYards, $capacity, $detailedRead, $exceptionReport);
+            }
         };
-        $nextWithDiagnostics = $next();
-        $row = DB::table('fleet_metrics')->where('kind', 'director_pass')->latest('id')->first();
-        $data = json_decode($row->data, true, flags: JSON_THROW_ON_ERROR);
-        unset($data['mesh_polling']);
-        DB::table('fleet_metrics')->where('id', $row->id)->update(['data' => json_encode($data, JSON_THROW_ON_ERROR)]);
+        $this->app->instance(MeshPoller::class, $poller);
 
-        $this->assertSame($withDiagnostics, $metrics->meshPassEvidence($this->agent->name));
-        $this->assertSame(['eligible' => 1, 'successful' => 1, 'skipped' => 1, 'max_successful_pass_gap_seconds' => null], $withDiagnostics);
-        $this->assertSame($cap, $nextWithDiagnostics[0]);
-        $this->assertNotEmpty($nextWithDiagnostics[1]);
-        $this->assertSame($nextWithDiagnostics, $next());
+        $after429 = now();
+        $worldAfter429 = file_get_contents($this->fixture);
+        $nextPass = function () use ($poller, $latestPass, $after429, $worldAfter429) {
+            DB::beginTransaction();
+            try {
+                $poller->routineCapacities = [];
+                $this->tickC0();
+                FleetMetrics::flush();
+                $pass = json_decode($latestPass()->data, true, flags: JSON_THROW_ON_ERROR);
+
+                return [$poller->routineCapacities, $pass['mesh_polling']['routine']['due']];
+            } finally {
+                DB::rollBack();
+                $this->travelTo($after429);
+                file_put_contents($this->fixture, $worldAfter429);
+            }
+        };
+
+        $recorded = $nextPass();
+        $this->assertSame([[$priorEligible * $cap], ['shipyard:'.self::YARD]], $recorded);
+        $this->assertSame(['shipyard:'.self::YARD, 'shipyard:'.$port], $poller->dueWithInflatedCapacity);
+
+        unset($pass['mesh_polling']['routine']);
+        DB::table('fleet_metrics')->where('id', $failedRow->id)->update(['data' => json_encode($pass, JSON_THROW_ON_ERROR)]);
+        $this->assertSame($evidence, $metrics->meshPassEvidence($this->agent->name));
+        $this->assertSame($recorded, $nextPass());
     }
 
     public function test_over_ceiling_tier_two_yard_uses_routine_cadence_until_its_quote_is_stale(): void
