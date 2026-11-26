@@ -5,12 +5,14 @@ namespace Tests\Feature;
 use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\AutomationRunner;
 use App\Gameplay\CampaignControl;
+use App\Gameplay\CampaignDirector;
 use App\Gameplay\CampaignHaulerPurchase;
 use App\Gameplay\CampaignPlaybook;
 use App\Gameplay\CampaignProbeBootstrap;
 use App\Gameplay\CampaignSaturation;
 use App\Gameplay\CampaignStatus;
 use App\Gameplay\CampaignTrade;
+use App\Gameplay\FleetAllocator;
 use App\Gameplay\FleetClaims;
 use App\Gameplay\GameException;
 use App\Gameplay\HostLock;
@@ -782,6 +784,102 @@ class CampaignSaturationTest extends TestCase
     public static function yardAvailability(): array
     {
         return ['alternate corridor' => [true], 'all yards fail' => [false]];
+    }
+
+    public function test_rank_persists_all_evaluated_gates_including_g5_and_g7_and_short_circuits_proof(): void
+    {
+        $episode = $this->fleetAdmissionEpisode();
+        $rank = app(CampaignSaturation::class)->rankFleetPurchases($episode->grant(), $episode, $this->agent->refresh());
+
+        $this->assertNull($rank['selected']);
+        $this->assertSame('gates', $rank['admission']['empty']);
+        $this->assertNull($rank['admission']['primary_trade_proved']);
+        $this->assertSame(['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G9'], array_keys($rank['admission']['gates']));
+        $this->assertSame(['pass' => false, 'reason_code' => 'scheduler_evidence'], $rank['admission']['gates']['G6']);
+        $this->assertSame(['pass' => true, 'reason_code' => null], $rank['admission']['gates']['G7']);
+        $this->assertArrayHasKey('reserve', $rank['admission']['gate_evidence']['G5']);
+    }
+
+    public function test_rank_reports_primary_trade_unproved(): void
+    {
+        $episode = $this->fleetAdmissionEpisode();
+        $this->schedulerPass();
+
+        $rank = app(CampaignSaturation::class)->rankFleetPurchases($episode->grant(), $episode, $this->agent->refresh());
+
+        $this->assertSame('primary_trade_unproved', $rank['admission']['empty']);
+        $this->assertFalse($rank['admission']['primary_trade_proved']);
+    }
+
+    public function test_allocator_reports_declines_and_only_traders_contribute_g8(): void
+    {
+        $allocator = app(FleetAllocator::class);
+        $offer = ['price' => 30000, 'effective_cost' => 30000, 'delta_v' => 1000, 'delta_q' => 1, 'slot' => 'fixture'];
+        $trader = ['type' => 'SHIP_LIGHT_SHUTTLE'] + $offer;
+        $miner = ['type' => 'SHIP_MINING_DRONE', 'delta_v' => 10000] + $offer;
+        $context = ['hours_to_reset' => 25.0, 'horizon_after_delivery_hours' => 24.0, 'cash' => 900000];
+        $rank = $allocator->rank([$trader, $miner, ['request_fits' => false] + $trader], $context);
+
+        $this->assertSame('SHIP_MINING_DRONE', $rank['selected']['type']);
+        $this->assertSame('payback', $rank['g8_status']);
+        $this->assertSame(['g7_requests' => 1, 'g8' => 1], $rank['declined']);
+
+        $rank = $allocator->rank([['type' => 'SHIP_PROBE', 'tier' => 1, 'price' => 20000], ['request_fits' => false] + $trader], $context);
+        $this->assertSame('tier_1_probe', $rank['reason']);
+        $this->assertSame(['g7_requests' => 1], $rank['declined']);
+        $this->assertNull($rank['g8_status']);
+        $this->assertNull($rank['g8_later_status']);
+
+        $rank = $allocator->rank([['hold_hours' => 2.0, 'delta_v' => 30000] + $trader], $context + ['saving_rate_per_hour' => 10000]);
+        $this->assertSame('pass', $rank['g8_status']);
+        $this->assertSame('time_to_reset', $rank['g8_later_status']);
+        $this->assertSame(['held' => 1], $rank['declined']);
+    }
+
+    public function test_mesh_plan_hash_ignores_purchase_measurements_but_retains_gate_verdict_changes(): void
+    {
+        $episode = $this->fleetAdmissionEpisode();
+        $director = app(CampaignDirector::class);
+        $recorder = new \ReflectionMethod($director, 'recordMeshPlan');
+        $diagnostics = new \ReflectionProperty($director, 'saturationDiagnostics');
+        $admission = ['empty' => null, 'primary_trade_proved' => true,
+            'gates' => ['G5' => ['pass' => true, 'reason_code' => null]],
+            'gate_evidence' => ['G6' => ['max_idle_arm_wait_seconds' => 10], 'G7' => ['additional_traders' => 2]],
+            'candidate_g7_failure_codes' => ['ordinary_hour_headroom']];
+        $allocation = ['admission' => $admission, 'declined' => ['g7_requests' => 1],
+            'selected' => ['type' => 'SHIP_LIGHT_HAULER', 'score' => ['h_value' => 48, 'nv' => 500]]];
+        $record = function (array $allocation) use ($episode, $director, $recorder, $diagnostics) {
+            $diagnostics->setValue($director, ['fleet_saturation' => ['allocation' => $allocation]]);
+            $recorder->invoke($director, $episode->grant(), $episode, [], [], []);
+        };
+
+        $record($allocation);
+        $this->travel(31)->seconds();
+        $allocation['admission']['gate_evidence']['G6']['max_idle_arm_wait_seconds'] = 41;
+        $allocation['admission']['gate_evidence']['G7']['additional_traders'] = 4;
+        $allocation['declined']['g7_requests'] = 2;
+        $allocation['selected']['score'] = ['h_value' => 47, 'nv' => 460];
+        $record($allocation);
+
+        $stored = CampaignEvent::where('kind', 'mesh_plan')->sole()->data['fleet_saturation']['allocation'];
+        $this->assertSame(10, $stored['admission']['gate_evidence']['G6']['max_idle_arm_wait_seconds']);
+        $this->assertSame(2, $stored['admission']['gate_evidence']['G7']['additional_traders']);
+        $this->assertSame(500, $stored['selected']['score']['nv']);
+        $this->assertSame(['pass' => true, 'reason_code' => null], $stored['admission']['gates']['G5']);
+
+        $allocation['admission']['gates']['G5'] = ['pass' => false, 'reason_code' => 'liquidity'];
+        $record($allocation);
+        $this->assertSame(2, CampaignEvent::where('kind', 'mesh_plan')->count());
+    }
+
+    private function fleetAdmissionEpisode(): CampaignEpisode
+    {
+        $this->setUpSaturation();
+        $body = Yaml::parseFile(base_path('campaigns/weekly-system-saturation-fleet.yaml'));
+        $body['agent']['symbol'] = $this->agent->name;
+        $body['fleet']['auto_arm']['revision_hash'] = $this->armRevision->content_hash;
+
+        return $this->primary(revision: app(CampaignPlaybook::class)->import(Yaml::dump($body, 12)));
     }
 
     private function load(CampaignEpisode $episode, int $minutes, int $net, int $run): void
