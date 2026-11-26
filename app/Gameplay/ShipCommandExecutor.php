@@ -989,7 +989,7 @@ class ShipCommandExecutor
         }
         $reason = $exception->getMessage();
         if ($run?->plan_version === 8 && $refusedBeforeTransport && $exception->retryAfter > 0 && $attempt->fresh()?->expires_at->isFuture()) {
-            $this->restorePurchase($attempt, $run, $reason, $reserved, $this->localRefusal('pretransport', $reason));
+            $this->restorePurchase($attempt, $run, $reason, $reserved, $this->localRefusal('pretransport', $reason), apiCode: $exception->apiCode);
 
             return;
         }
@@ -1003,7 +1003,7 @@ class ShipCommandExecutor
         }
         if (! $reserved && $exception->retryAfter > 0 && $attempt->fresh()?->expires_at->isFuture() && $exception->apiCode !== 4113
             && $agent->fresh()?->connection_state !== 'invalid_credential') {
-            $this->restorePurchase($attempt, $run, $reason);
+            $this->restorePurchase($attempt, $run, $reason, apiCode: $exception->apiCode);
 
             return;
         }
@@ -1029,9 +1029,10 @@ class ShipCommandExecutor
             attributes: ['api_code' => $exception->apiCode]);
     }
 
-    private function restorePurchase(ShipAction $attempt, ?AutomationRun $run, string $reason, bool $beforeTransportProved = false, array $attributes = []): void
+    private function restorePurchase(ShipAction $attempt, ?AutomationRun $run, string $reason, bool $beforeTransportProved = false,
+        array $attributes = [], ?int $apiCode = null): void
     {
-        DB::transaction(function () use ($attempt, $run, $reason, $beforeTransportProved, $attributes) {
+        DB::transaction(function () use ($attempt, $run, $reason, $beforeTransportProved, $attributes, $apiCode) {
             $current = $this->whilePurchaseUnsent($this->purchaseAttemptQuery($attempt))->first();
             $agent = Agent::find($attempt->agent_id);
             $run = $run?->fresh();
@@ -1043,7 +1044,8 @@ class ShipCommandExecutor
             }
 
             // Lost authority or a TTL lapse after the retry decision settles without a new wake.
-            $this->settleGuardedPurchase($attempt, $reason, $attributes + $this->localRefusal('pretransport', $reason), $beforeTransportProved);
+            $this->settleGuardedPurchase($attempt, $reason, $attributes + ['api_code' => $apiCode] + $this->localRefusal('pretransport', $reason),
+                $beforeTransportProved);
         });
     }
 
@@ -1633,11 +1635,11 @@ class ShipCommandExecutor
             if ($run && ! $this->hasStopMarker($current)) {
                 if ($expiry !== []) {
                     $this->awaitPurchaseReissue($run);
-                } else {
-                    if ($block) {
-                        $this->block($run, $reason, deactivate: $deactivate);
+                } elseif ($block) {
+                    $this->block($run, $reason, deactivate: $deactivate);
+                    if ($deactivate) {
+                        $this->releaseEmptyRunHolds(Agent::findOrFail($expected->agent_id), $run->refresh());
                     }
-                    $this->releaseEmptyRunHolds(Agent::findOrFail($expected->agent_id), $run->refresh());
                 }
             }
 
@@ -1690,13 +1692,16 @@ class ShipCommandExecutor
             return null;
         }
 
+        if (($attributes['api_code'] ?? null) === null) {
+            unset($attributes['api_code']);
+        }
         $queued = $this->isQueued($current);
         $receipt = self::hasReceiptEvidence($current);
         if ($receipt || ($queued && $current->sent_at !== null) || (! $queued && ! $beforeTransportProved && ! $providerRefused)) {
-            $marker = array_intersect_key($attributes, ['outcome->stop_requested_at' => true]);
+            $evidence = array_intersect_key($attributes, ['outcome->stop_requested_at' => true, 'api_code' => true]);
             if (! $this->writePurchaseSettlement($current, ['state' => ActionState::Uncertain,
                 'message' => $queued || ($receipt && $beforeTransportProved) ? $this->reconciliationMessage($current) : $reason,
-                'settled_at' => now()] + $marker)) {
+                'settled_at' => now()] + $evidence)) {
                 return null;
             }
             app(StateChain::class)->markUncertain($current->id, includeReserved: true);
@@ -1716,6 +1721,9 @@ class ShipCommandExecutor
         $agent = Agent::findOrFail($current->agent_id);
         $run = AutomationRun::find($current->automation_run_id);
         $this->releaseUnsent($agent, $current, keepCorridor: ! in_array($run?->state, [RunState::Stopped, RunState::Completed], true));
+        if ($run && $expiry === []) {
+            $this->releaseEmptyRunHolds($agent, $run);
+        }
 
         return ActionState::Rejected;
     }
@@ -1792,7 +1800,9 @@ class ShipCommandExecutor
 
     private function releaseEmptyRunHolds(Agent $agent, AutomationRun $run): void
     {
-        if ((! $run->active_agent_id || $run->stop_requested_at || ! $run->expires_at->isFuture()) && ! AutomationRunner::hasTradeCargo($run)) {
+        $purchaseClosed = $run->strategy === 'buy_fleet' && ! app(CampaignSafety::class)->purchaseCutoffsOpen($run);
+        if ((! $run->active_agent_id || $run->stop_requested_at || ! $run->expires_at->isFuture() || $purchaseClosed)
+            && ! AutomationRunner::hasTradeCargo($run)) {
             app(StateChain::class)->releaseRunHolds($agent, $run->id);
             app(CorridorBook::class)->releaseOwner($agent, 'run', (string) $run->id, keepUnresolved: true);
         }

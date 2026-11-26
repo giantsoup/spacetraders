@@ -30,6 +30,7 @@ use App\Models\ShipAction;
 use App\Services\SpaceTradersClient;
 use Closure;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Mockery;
@@ -214,6 +215,7 @@ class PurchaseIntentReissueTest extends TestCase
     public function test_fleet_final_transport_veto_settles_the_action_and_only_writes_under_run_authority(string $veto): void
     {
         [$run, $action] = $this->fleetIntent();
+        $fuelHold = $this->reserveDeliveryFuel($run);
         $originalWake = $run->fresh()->next_action_at;
         $reached = false;
         $stop = null;
@@ -249,6 +251,8 @@ class PurchaseIntentReissueTest extends TestCase
 
         $this->assertTrue($reached, $action->fresh()->message ?? '');
         $this->assertSame(0, $this->purchasePosts());
+        $this->assertSame(in_array($veto, ['run_expired', 'acquisition_cutoff', 'settlement_deadline', 'lost_owner', 'stop'], true) ? 'released' : 'reserved',
+            DB::table('credit_reservations')->where('id', $fuelHold)->value('state'));
         $run->refresh();
         $action->refresh();
         if ($veto === 'intent_expired') {
@@ -290,6 +294,59 @@ class PurchaseIntentReissueTest extends TestCase
         foreach (['stop', 'run_expired', 'acquisition_cutoff', 'settlement_deadline', 'lost_owner', 'reset', 'different_attempt', 'receipt', 'intent_expired'] as $veto) {
             yield $veto => [$veto];
         }
+    }
+
+    public function test_ambiguous_provider_purchase_failure_keeps_its_code_and_send_reservation(): void
+    {
+        [$run, $action] = $this->fleetIntent();
+        $exposure = $this->hold($action)->exposure;
+        $sendAt = now();
+        $this->editFixture(function (&$world) {
+            $world['failure'] = '429';
+            $world['advance_after_write'] = 2;
+        });
+
+        $this->job($action);
+
+        $requests = Http::recorded(fn ($request) => $request->method() === 'POST' && str_ends_with($request->url(), '/my/ships'));
+        $this->assertCount(1, $requests);
+        $this->assertSame(429, $requests->sole()[1]->status());
+        $this->assertSame(ActionState::Uncertain, $action->refresh()->state);
+        $this->assertEquals($sendAt, $action->sent_at);
+        $this->assertEquals(now(), $action->settled_at);
+        $this->assertSame(429, $action->api_code);
+        $this->assertSame('uncertain', $this->hold($action)->state);
+        $this->assertSame($exposure, $this->hold($action)->exposure);
+        $this->assertSame(RunState::Blocked, $run->fresh()->state);
+        $this->assertFalse(ShipCommandExecutor::reissuableExpiry($action));
+    }
+
+    public function test_retryable_provider_read_failure_keeps_its_code_if_the_run_expires_before_restore(): void
+    {
+        [$run, $action] = $this->fleetIntent();
+        $fuelHold = $this->reserveDeliveryFuel($run);
+        $this->editFixture(function (&$world) {
+            $world['failure'] = 'read_429';
+        });
+        $reached = false;
+        DB::connection()->beforeStartingTransaction(function () use ($run, &$reached) {
+            if (! $reached && $this->startingExecutorTransaction('restorePurchase')) {
+                $reached = true;
+                $run->update(['expires_at' => now()->subSecond()]);
+            }
+        });
+
+        $this->job($action);
+
+        $this->assertTrue($reached, $action->fresh()->message ?? '');
+        Http::assertSent(fn ($request, $response) => $request->method() === 'GET' && $response->status() === 429);
+        $this->assertSame(0, $this->purchasePosts());
+        $this->assertSame(ActionState::Rejected, $action->refresh()->state);
+        $this->assertNull($action->sent_at);
+        $this->assertSame(429, $action->api_code);
+        $this->assertSame('released', $this->hold($action)->state);
+        $this->assertSame('released', DB::table('credit_reservations')->where('id', $fuelHold)->value('state'));
+        $this->assertFalse(ShipCommandExecutor::reissuableExpiry($action));
     }
 
     #[DataProvider('queueVetoes')]
@@ -959,6 +1016,8 @@ class PurchaseIntentReissueTest extends TestCase
     {
         $this->setUpSaturation(seedCoverage: false);
         $action = $this->manualPurchase('SHIP_PROBE');
+        $exposure = 30000;
+        app(StateChain::class)->reserveCredit($this->agent, 'manual:'.$action->id, 'purchase', 'buy_ship', $exposure, $action->id);
         $pending = in_array($race, ['queued_stop', 'engine_close', 'retry_without_race'], true);
         $defer = fn () => throw new RequestDeferred('Fixture retry', 5, 'blocked_until');
         $this->atWriteReservation($pending ? null : $defer, read: $pending ? $defer : null);
@@ -997,6 +1056,7 @@ class PurchaseIntentReissueTest extends TestCase
         if ($race === 'retry_without_race') {
             $this->assertSame(ActionState::Pending, $action->state);
             $this->assertNull($action->sent_at);
+            $this->assertSame('reserved', $this->hold($action)->state);
 
             return;
         }
@@ -1004,9 +1064,12 @@ class PurchaseIntentReissueTest extends TestCase
             $this->assertSame($race === 'receipt' ? ActionState::Uncertain : ActionState::Sending, $action->state);
             $this->assertEquals($winner->sent_at, $action->sent_at);
             $this->assertSame($winner->outcome, $action->outcome);
+            $this->assertSame($race === 'receipt' ? 'uncertain' : 'reserved', $this->hold($action)->state);
+            $this->assertSame($exposure, $this->hold($action)->exposure);
         } else {
             $this->assertSame(ActionState::Rejected, $action->state);
             $this->assertNull($action->sent_at);
+            $this->assertSame('released', $this->hold($action)->state);
             if (in_array($race, ['queued_stop', 'engine_close'], true)) {
                 $this->assertSame($winner->getAttributes(), $action->getAttributes());
             } elseif ($race === 'sending_stop') {
@@ -1174,6 +1237,7 @@ class PurchaseIntentReissueTest extends TestCase
     public function test_purchase_reservation_and_retry_preserve_a_committed_run_stop_or_loss_of_owner(string $boundary, bool $stop): void
     {
         [$run, $action] = $this->fleetIntent();
+        $fuelHold = $this->reserveDeliveryFuel($run);
         $winner = null;
         $retryableVeto = false;
         if ($boundary === 'budget') {
@@ -1183,7 +1247,7 @@ class PurchaseIntentReissueTest extends TestCase
         DB::connection()->beforeStartingTransaction(function () use ($run, $action, $boundary, $stop, $seam, &$winner, &$retryableVeto) {
             if ($boundary === 'v8_retry' && ! $retryableVeto && $this->startingExecutorTransaction('finalPurchaseTransportCheck')) {
                 $retryableVeto = true;
-                throw new GameException('Fixture availability change after verification', retryAfter: 1);
+                throw new GameException('Fixture availability change after verification', apiCode: 503, retryAfter: 1);
             }
             if ($winner !== null || ! $this->startingExecutorTransaction($seam)) {
                 return;
@@ -1204,8 +1268,10 @@ class PurchaseIntentReissueTest extends TestCase
         $this->assertSame($boundary === 'v8_retry', $retryableVeto);
         $this->assertSame(ActionState::Rejected, $action->refresh()->state);
         $this->assertNull($action->sent_at);
+        $this->assertSame($boundary === 'v8_retry' ? 503 : null, $action->api_code);
         $this->assertFalse(ShipCommandExecutor::reissuableExpiry($action));
         $this->assertSame('released', $this->hold($action)->state);
+        $this->assertSame('released', DB::table('credit_reservations')->where('id', $fuelHold)->value('state'));
         $this->assertSame($winner->state, $run->refresh()->state);
         $this->assertSame($winner->active_agent_id, $run->active_agent_id);
         $this->assertEquals($winner->next_action_at, $run->next_action_at);
@@ -1445,6 +1511,12 @@ class PurchaseIntentReissueTest extends TestCase
     private function reserve(AutomationRun $run, ShipAction $action): int
     {
         return app(StateChain::class)->reserveCredit($this->agent, 'run:'.$run->id, 'purchase', 'buy_ship', 350000, $action->id, $run->id, $run->ship_symbol);
+    }
+
+    private function reserveDeliveryFuel(AutomationRun $run): int
+    {
+        return app(StateChain::class)->reserveCredit($this->agent, 'run:'.$run->id, 'delivery_fuel', 'refuel', 500,
+            runId: $run->id, shipSymbol: $run->ship_symbol);
     }
 
     private function hold(ShipAction $action): object
