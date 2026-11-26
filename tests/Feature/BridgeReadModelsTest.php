@@ -109,12 +109,13 @@ class BridgeReadModelsTest extends TestCase
         $this->assertSame(100, BridgeRoutes::detail($this->scope(), 'IRON_ORE', 'X1-TEST-A', 'X1-TEST-B')['first_seen']);
     }
 
-    public function test_blocked_stop_keeps_the_route_and_ship_unsettled_until_slot_releases(): void
+    public function test_stop_with_price_review_keeps_the_route_and_ship_unsettled_until_slot_releases(): void
     {
         $ship = $this->ship('BRIDGE-1', 'COMMAND');
         $run = $this->tradeRun($this->episode, $ship->symbol);
         $runner = app(AutomationRunner::class);
         $runner->stop($run);
+        $stop = $run->fresh();
 
         $scope = $this->scope();
         $this->assertSame('Stopping · settling commands', BridgeRoutes::read($scope)['settling'][0]['status']);
@@ -123,11 +124,13 @@ class BridgeReadModelsTest extends TestCase
         ShipAction::create(['agent_id' => $this->agent->id, 'automation_run_id' => $run->id, 'key' => 'price-review',
             'reset_id' => self::RESET, 'ship_symbol' => $ship->symbol, 'origin' => 'automation', 'command' => 'sell',
             'state' => 'confirmed', 'review_required' => true, 'arguments' => [], 'expires_at' => now()->addHour()]);
+        $this->travel(1)->second();
         $runner->advance($run->id);
 
-        $this->assertSame(RunState::Blocked, $run->fresh()->state);
-        $this->assertNotNull($run->fresh()->stop_requested_at);
-        $this->assertNotNull($run->fresh()->active_agent_id);
+        $this->assertSame(RunState::Stopping, $run->refresh()->state);
+        $this->assertEquals($stop->stop_requested_at, $run->stop_requested_at);
+        $this->assertEquals($stop->next_action_at, $run->next_action_at);
+        $this->assertSame($this->agent->id, $run->active_agent_id);
         $scope = $this->scope();
         $this->assertSame([], BridgeRoutes::read($scope)['running']);
         $this->assertSame('Unsettled · price review required', BridgeRoutes::read($scope)['settling'][0]['status']);
