@@ -1382,7 +1382,8 @@ class FleetSaturationTransportTest extends TestCase
     {
         return [
             '6015s conservative arrival exactly on bound' => ['exact'],
-            'one second late after switching to DRIFT' => ['late dispatch'], ['expired intent'],
+            'one second late after switching to DRIFT' => ['late dispatch'],
+            'expired intent at transport' => ['expired intent'],
             'sent arrival exceeds the conservative bound' => ['late receipt'],
         ];
     }

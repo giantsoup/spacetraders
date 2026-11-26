@@ -331,6 +331,74 @@ class PurchaseIntentReissueTest extends TestCase
         return [['receipt', false], ['sent_at', false], ['receipt', true]];
     }
 
+    #[DataProvider('purchaseSendVetoes')]
+    public function test_purchase_job_honors_rejected_purchase_evidence_at_transport(bool $manual, string $holdState, string $evidence): void
+    {
+        if ($manual) {
+            $this->setUpSaturation(seedCoverage: false);
+            $action = $this->manualPurchase('SHIP_PROBE');
+        } else {
+            [, $action] = $this->fleetIntent();
+            $this->assertSame('pending', $this->hold($action)->state);
+        }
+        $rejected = $this->copyIntent($action, ActionState::Rejected);
+        $rejected->update($evidence === 'receipt' ? ['outcome' => ['response' => []]] : ['sent_at' => now()]);
+        DB::table('credit_reservations')->where('id', app(StateChain::class)->reserveCredit(
+            $this->agent, 'purchase:'.$rejected->id, 'purchase', 'buy_ship', 25000, $rejected->id,
+        ))->update(['state' => $holdState]);
+        $rejected->refresh();
+        $hold = $this->hold($rejected);
+
+        $this->assertSame(CreditPromotionDisposition::EvidenceVeto, app(ShipCommandExecutor::class)->promoteCreditIntent($this->agent));
+        Queue::fake();
+        $this->job($action);
+
+        $this->assertSame(0, $this->purchasePosts());
+        $this->assertSame(ActionState::Rejected, $action->refresh()->state);
+        $this->assertSame('final_transport_check', $action->outcome['local_refusal']['stage']);
+        $this->assertStringContainsString("Rejected purchase {$rejected->id} has retained transport evidence", $action->message);
+        $this->assertNull($action->sent_at);
+        $this->assertFalse(ShipCommandExecutor::reissuableExpiry($action));
+        if (! $manual) {
+            $this->assertSame('released', $this->hold($action)->state);
+        }
+        $this->assertSame($rejected->getAttributes(), $rejected->fresh()->getAttributes());
+        $this->assertEquals($hold, $this->hold($rejected));
+        Queue::assertNothingPushed();
+    }
+
+    public static function purchaseSendVetoes(): array
+    {
+        return [
+            'already promoted with rejected receipt' => [false, 'reserved', 'receipt'],
+            'manual with rejected receipt' => [true, 'reserved', 'receipt'],
+            'already promoted with rejected timestamp' => [false, 'pending', 'sent_at'],
+            'manual with rejected timestamp' => [true, 'pending', 'sent_at'],
+        ];
+    }
+
+    public function test_runner_records_a_promotion_veto_without_a_waiting_action(): void
+    {
+        [$run, $rejected] = $this->fleetIntent();
+        $rejected->update(['state' => ActionState::Rejected, 'outcome' => ['response' => []]]);
+        DB::table('credit_reservations')->where('ship_action_id', $rejected->id)->update(['state' => 'reserved']);
+        $hold = $this->hold($rejected);
+        $wake = $run->next_action_at;
+        Queue::fake();
+
+        app(AutomationRunner::class)->advance($run->id);
+        FleetMetrics::flush();
+
+        $metric = DB::table('fleet_metrics')->where('agent_symbol', $this->agent->name)
+            ->where('kind', 'rejected_purchase_evidence')->sole();
+        $this->assertSame(1.0, (float) $metric->value);
+        $this->assertSame($rejected->ship_symbol, $metric->ship);
+        $this->assertSame($rejected->getAttributes(), $rejected->fresh()->getAttributes());
+        $this->assertEquals($hold, $this->hold($rejected));
+        $this->assertEquals($wake, $run->fresh()->next_action_at);
+        Queue::assertNothingPushed();
+    }
+
     #[DataProvider('queuedEvidence')]
     public function test_purchase_job_routes_each_receipt_key_to_reconciliation_without_posting(string $key, mixed $value, bool $expired): void
     {
@@ -709,6 +777,52 @@ class PurchaseIntentReissueTest extends TestCase
     public static function manualExpiries(): array
     {
         return [['preflight'], ['budget']];
+    }
+
+    public function test_manual_purchase_budget_retry_cannot_restore_a_send_after_engine_close(): void
+    {
+        $this->setUpSaturation(seedCoverage: false);
+        $action = $this->manualPurchase('SHIP_PROBE');
+        $this->atWriteReservation(function () use ($action) {
+            $this->assertSame(ActionState::Sending, $action->fresh()->state);
+            $this->assertNotNull($action->fresh()->sent_at);
+            app(EngineGate::class)->close();
+            $this->assertSame(ActionState::Sending, $action->fresh()->state);
+            throw new RequestDeferred('Fixture budget wait after engine close', 5);
+        });
+
+        $this->job($action);
+
+        $this->assertFalse(LocalEngine::findOrFail(1)->gate_open);
+        $this->assertSame(0, $this->purchasePosts());
+        $this->assertSame(ActionState::Rejected, $action->refresh()->state);
+        $this->assertNull($action->sent_at);
+        $this->assertNotNull($action->settled_at);
+        $this->assertArrayHasKey('local_refusal', $action->outcome);
+        $this->assertArrayNotHasKey('expiry', $action->outcome);
+        $this->assertOldIntentIsNotDispatched($action);
+    }
+
+    public function test_manual_purchase_approval_reports_refusal_after_committing_settlement(): void
+    {
+        $this->setUpSaturation(seedCoverage: false);
+        $executor = app(ShipCommandExecutor::class);
+        $action = $this->previewManualPurchase('SHIP_PROBE');
+        Queue::fake();
+        $this->atWriteReservation(null, read: fn () => ShipAction::whereKey($action->id)
+            ->update(['outcome->response' => []]));
+
+        try {
+            $executor->approve($this->agent, $action);
+            $this->fail('Approval must report the refused preview.');
+        } catch (GameException $exception) {
+            $this->assertSame('Preview was stopped or already approved.', $exception->getMessage());
+        }
+
+        $this->assertSame(ActionState::Uncertain, $action->refresh()->state);
+        $this->assertSame([], $action->outcome['response']);
+        $this->assertNotNull($action->settled_at);
+        Queue::assertNothingPushed();
     }
 
     public function test_unrelated_failure_crossing_expiry_is_never_marked_reissuable(): void
@@ -1311,10 +1425,13 @@ class PurchaseIntentReissueTest extends TestCase
 
     private function manualPurchase(string $type): ShipAction
     {
-        $executor = app(ShipCommandExecutor::class);
-        $action = $executor->preview($this->agent, 'LOCAL-1', 'buy_ship', ['shipType' => $type, 'waypointSymbol' => self::YARD, 'maxTotal' => 30000], (string) Str::uuid());
+        return app(ShipCommandExecutor::class)->approve($this->agent, $this->previewManualPurchase($type));
+    }
 
-        return $executor->approve($this->agent, $action);
+    private function previewManualPurchase(string $type): ShipAction
+    {
+        return app(ShipCommandExecutor::class)->preview($this->agent, 'LOCAL-1', 'buy_ship',
+            ['shipType' => $type, 'waypointSymbol' => self::YARD, 'maxTotal' => 30000], (string) Str::uuid());
     }
 
     private function copyIntent(ShipAction $action, ActionState $state): ShipAction

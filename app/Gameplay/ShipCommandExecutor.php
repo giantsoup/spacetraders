@@ -114,7 +114,8 @@ class ShipCommandExecutor
                 $this->assertManualPurchaseSlot($agent, $action);
                 $before = $this->rules->inspect($agent, $action->ship_symbol, $action->command, $action->arguments);
                 $this->unchangedApproval($action, $before);
-                DB::transaction(function () use ($agent, $action) {
+                $refusal = 'Preview was stopped or already approved.';
+                DB::transaction(function () use ($agent, $action, $refusal) {
                     $this->assertManualPurchaseSlot($agent, $action);
                     $this->gate->check($action->engine_session_id);
                     $purchase = $action->command === 'buy_ship';
@@ -122,23 +123,23 @@ class ShipCommandExecutor
                         ? $this->whilePurchaseUnsent($this->purchaseAttemptQuery($action))->whereNull('sent_at')->where('expires_at', '>', now())
                         : ShipAction::whereKey($action->id)->where('state', 'preview');
                     if (! $preview->update(['state' => 'pending', 'last_dispatched_at' => now()])) {
-                        $reason = 'Preview was stopped or already approved.';
                         if (! $purchase) {
-                            throw new GameException($reason);
+                            throw new GameException($refusal);
                         }
-                        $this->settleGuardedPurchase($action, $reason, $this->localRefusal('approval', $reason));
+                        $this->settleGuardedPurchase($action, $refusal, $this->localRefusal('approval', $refusal));
                     }
                     $action->refresh();
                 });
+                if ($action->state !== ActionState::Pending) {
+                    throw new GameException($refusal);
+                }
             } catch (\Throwable $e) {
                 if (ExplorationPolicy::command($action->command) && isset($action->arguments['question'])) {
                     ShipAction::whereKey($action->id)->where('state', 'preview')->update(['state' => 'rejected', 'message' => 'Exploration approval preflight failed. Create a fresh preview; no automatic retry.', 'settled_at' => now()]);
                 }
                 throw $e;
             }
-            if ($action->state === ActionState::Pending) {
-                ExecuteShipCommand::dispatch($action->id)->afterCommit();
-            }
+            ExecuteShipCommand::dispatch($action->id)->afterCommit();
 
             return $action;
         });
@@ -1033,14 +1034,15 @@ class ShipCommandExecutor
         DB::transaction(function () use ($attempt, $run, $reason, $beforeTransportProved, $attributes) {
             $current = $this->whilePurchaseUnsent($this->purchaseAttemptQuery($attempt))->first();
             $agent = Agent::find($attempt->agent_id);
+            $run = $run?->fresh();
             if ($current && $current->expires_at->isFuture() && $agent?->reset_id === $current->reset_id
-                && $this->purchaseRunAuthority($current, $run?->fresh())
+                && $this->purchaseRunAuthority($current, $run) && $this->purchaseEngineSessionOpen($current, $run)
                 && $this->whilePurchaseUnsent($this->purchaseAttemptQuery($attempt))->where('expires_at', '>', now())
                     ->update(['state' => ActionState::Pending, 'sent_at' => null, 'message' => $reason] + $attributes)) {
                 return;
             }
 
-            // A TTL that lapses after the retry decision settles terminally without a new wake.
+            // Lost authority or a TTL lapse after the retry decision settles without a new wake.
             $this->settleGuardedPurchase($attempt, $reason, $attributes + $this->localRefusal('pretransport', $reason), $beforeTransportProved);
         });
     }
@@ -1101,12 +1103,11 @@ class ShipCommandExecutor
         $veto = DB::transaction(function () use (&$attempt, $before, $reason) {
             $current = $this->purchaseAttemptQuery($attempt)->first();
             $run = AutomationRun::find($attempt->automation_run_id);
+            $rejected = $current ? $this->rejectedPurchaseWithEvidence($current->agent_id, $current->reset_id) : null;
             if ($current && $attempt->state === ActionState::Sending && $attempt->sent_at !== null
                 && Agent::find($attempt->agent_id)?->reset_id === $attempt->reset_id
                 && ! self::hasReceiptEvidence($current) && ! $this->hasStopMarker($current) && $this->purchaseRunAuthority($current, $run)
-                && (! $this->gate->enabled() || LocalEngine::whereKey(1)->where('session_id', $current->engine_session_id)
-                    ->when($run, fn ($query) => $query->where('session_id', $run->engine_session_id))
-                    ->where('state', 'running')->where('gate_open', true)->where('heartbeat_at', '>=', now()->subSeconds(15))->exists())) {
+                && $this->purchaseEngineSessionOpen($current, $run) && $rejected === null) {
                 if (! $current->expires_at->isFuture()) {
                     return new IntentExpiredBeforeTransport($reason, 'pretransport');
                 }
@@ -1133,6 +1134,9 @@ class ShipCommandExecutor
             // TTL-only vetoes take the expiry route. Other proven-unsent vetoes block an active
             // owner without reissue fields. Evidence requires reconciliation. A stop or loss
             // of ownership leaves run state to the writer that changed it.
+            if ($rejected !== null) {
+                $reason = "Rejected purchase {$rejected->id} has retained transport evidence and an open credit reservation.";
+            }
             $state = $this->settleGuardedPurchase($attempt, $reason, $this->localRefusal('final_transport_check', $reason), beforeTransportProved: true);
             if ($state === ActionState::Uncertain) {
                 $this->retainUncertainty(Agent::findOrFail($attempt->agent_id), $current);
@@ -1147,6 +1151,17 @@ class ShipCommandExecutor
         if ($veto !== null) {
             throw $veto;
         }
+    }
+
+    private function purchaseEngineSessionOpen(ShipAction $action, ?AutomationRun $run): bool
+    {
+        if (! $this->gate->enabled()) {
+            return true;
+        }
+
+        return $action->engine_session_id && LocalEngine::whereKey(1)->where('session_id', $action->engine_session_id)
+            ->when($run, fn ($query) => $query->where('session_id', $run->engine_session_id))
+            ->where('state', 'running')->where('gate_open', true)->where('heartbeat_at', '>=', now()->subSeconds(15))->exists();
     }
 
     private function checkSaturationTransport(Agent $agent, ShipAction $action, AutomationRun $run, array &$before, bool $credit, ?int $leaseId, ShipAction &$attempt): void
@@ -1359,30 +1374,41 @@ class ShipCommandExecutor
         return false;
     }
 
+    private function rejectedPurchaseWithEvidence(int $agentId, ?string $resetId): ?ShipAction
+    {
+        // A reserved hold is invisible to the selector's unresolved-credit check.
+        $holds = DB::table('credit_reservations')->where('agent_id', $agentId)->where('reset_id', $resetId)
+            ->whereIn('state', ['reserved', 'pending'])->whereNotNull('ship_action_id');
+
+        return ShipAction::where('command', 'buy_ship')->where('state', ActionState::Rejected)
+            ->whereIn('id', $holds->select('ship_action_id'))->orderBy('id')->get()
+            ->first(fn (ShipAction $action) => $action->sent_at !== null || self::hasReceiptEvidence($action));
+    }
+
     public function promoteCreditIntent(Agent $agent, ?ShipAction $waiting = null): int|CreditPromotionDisposition|null
     {
         return DB::transaction(function () use ($agent, $waiting) {
-            $queued = DB::table('credit_reservations')->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereNotNull('ship_action_id');
-            $reservations = (clone $queued)->whereIn('state', ['reserved', 'pending'])->orderBy('id')->get();
-            $actions = ShipAction::whereIn('id', $reservations->pluck('ship_action_id'))->get()->keyBy('id');
-            // A reserved hold is invisible to the selector's unresolved-credit check.
-            foreach ($actions as $action) {
-                if ($action->command === 'buy_ship' && $action->state === ActionState::Rejected
-                    && ($action->sent_at !== null || self::hasReceiptEvidence($action))) {
-                    if ($waiting !== null) {
-                        ShipAction::whereKey($waiting->id)->where('state', ActionState::Pending)->update([
-                            'outcome->promotion_vetoed' => ['reason_code' => 'rejected_purchase_evidence', 'action_id' => $action->id],
-                        ]);
-                    }
-
-                    return CreditPromotionDisposition::EvidenceVeto;
+            $rejected = $this->rejectedPurchaseWithEvidence($agent->id, $agent->reset_id);
+            if ($rejected !== null) {
+                if ($waiting !== null) {
+                    ShipAction::whereKey($waiting->id)->where('state', ActionState::Pending)->update([
+                        'outcome->promotion_vetoed' => ['reason_code' => 'rejected_purchase_evidence', 'action_id' => $rejected->id],
+                    ]);
+                } else {
+                    FleetMetrics::forAgent($agent->name, fn () => FleetMetrics::as($rejected->ship_symbol ?: null,
+                        fn () => FleetMetrics::note('rejected_purchase_evidence')), $agent->reset_id);
                 }
+
+                return CreditPromotionDisposition::EvidenceVeto;
             }
 
             $safety = app(CampaignSafety::class);
             if ($safety->uncertainCredit($agent) || $safety->creditReview($agent)) {
                 return null;
             }
+            $queued = DB::table('credit_reservations')->where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)->whereNotNull('ship_action_id');
+            $reservations = (clone $queued)->whereIn('state', ['reserved', 'pending'])->orderBy('id')->get();
+            $actions = ShipAction::whereIn('id', $reservations->pluck('ship_action_id'))->get()->keyBy('id');
             foreach ($reservations as $reservation) {
                 $id = (int) $reservation->ship_action_id;
                 $action = $actions->get($id);
