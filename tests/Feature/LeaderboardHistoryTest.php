@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Gameplay\HostLock;
 use App\Gameplay\LeaderboardHistory;
 use App\Models\LeaderboardSnapshot;
 use Carbon\CarbonImmutable;
@@ -125,6 +126,38 @@ class LeaderboardHistoryTest extends TestCase
         $this->artisan('leaderboard:capture --if-due')->expectsOutput('Leaderboard capture not due.')->assertExitCode(0);
 
         Http::assertNothingSent();
+    }
+
+    public function test_capture_cli_shares_the_fixed_checkout_lock_across_config_overrides(): void
+    {
+        Http::fake();
+        $path = HostLock::leaderboardCaptureLockPath(base_path());
+        if (! is_dir(dirname($path))) {
+            mkdir(dirname($path), 0700, true);
+        }
+        $handle = fopen($path, 'c');
+        $this->assertTrue(flock($handle, LOCK_EX | LOCK_NB));
+        try {
+            config(['gameplay.lock_path' => config('gameplay.lock_path').'/override']);
+            foreach (['leaderboard:capture', 'leaderboard:capture --if-due'] as $command) {
+                $this->artisan($command)->expectsOutput('Leaderboard capture already running in another process.')->assertExitCode(0);
+            }
+            Http::assertNothingSent();
+            $this->assertSame(0, LeaderboardSnapshot::count());
+        } finally {
+            fclose($handle);
+        }
+    }
+
+    public function test_if_due_rechecks_freshness_inside_the_lock(): void
+    {
+        $this->fakeApi($this->statusBody(), [], 0);
+
+        $this->artisan('leaderboard:capture --if-due --top-only')->expectsOutput('Capture due: no snapshot saved yet.')->assertExitCode(0);
+        $this->artisan('leaderboard:capture --if-due --top-only')->expectsOutput('Leaderboard capture not due.')->assertExitCode(0);
+
+        Http::assertSentCount(1);
+        $this->assertSame(1, LeaderboardSnapshot::count());
     }
 
     public function test_history_lists_the_last_snapshot_of_each_wipe(): void

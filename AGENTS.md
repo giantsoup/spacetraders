@@ -37,6 +37,11 @@ or "prod", or to deploy), do these steps in order:
    `campaign:resume`. The separate campaign watchdog is installed per checkout and remains
    independent of engine restarts. A faulted or stopping engine makes the deploy refuse; then
    ask the user to review it on spacetraders.test.
+   For the first deploy that adds leaderboard capture, the pre-merge script cannot install
+   the LaunchAgent. After that deploy succeeds, run `./scripts/mac/leaderboard-capture.sh --install`
+   from the Mac production checkout and verify that `--status` exits 0. Later deploys
+   automatically check, quiesce, and install the job. See [Leaderboard history](docs/leaderboard-history.md)
+   for the schedule and how deploy handles an in-flight capture.
 3. **Report** the deployed commit and the script's `OK:` lines.
 
 Keep Herd Settings → AI → **Enable Herd Developer Tools** off. When it's on, Herd injects

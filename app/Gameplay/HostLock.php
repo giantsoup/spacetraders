@@ -2,8 +2,16 @@
 
 namespace App\Gameplay;
 
+// The macOS deploy lock holder requires this file without bootstrapping Laravel.
 class HostLock
 {
+    public const LEADERBOARD_CAPTURE_KEY = 'leaderboard-capture';
+
+    public static function leaderboardCaptureLockPath(string $checkoutRoot): string
+    {
+        return $checkoutRoot.'/storage/framework/game-locks/'.hash('sha256', self::LEADERBOARD_CAPTURE_KEY).'.lock';
+    }
+
     private array $held = [];
 
     private array $nested = [];
@@ -115,11 +123,14 @@ class HostLock
         if ($held && ($reuse || ($this->nested[$key] ?? false))) {
             return $work();
         }
-        $directory = config('gameplay.lock_path');
+        $path = $key === self::LEADERBOARD_CAPTURE_KEY
+            ? self::leaderboardCaptureLockPath(base_path())
+            : config('gameplay.lock_path').'/'.hash('sha256', $key).'.lock';
+        $directory = dirname($path);
         if (! is_dir($directory)) {
             @mkdir($directory, 0700, true);
         }
-        $handle = fopen($directory.'/'.hash('sha256', $key).'.lock', 'c');
+        $handle = fopen($path, 'c');
         if ($handle === false || ! flock($handle, $mode | LOCK_NB)) {
             if (is_resource($handle)) {
                 fclose($handle);

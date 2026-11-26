@@ -24,7 +24,7 @@ class LeaderboardHistory
 
     private const MAX_DEFERRALS = 5;
 
-    public function __construct(private SpaceTradersApi $api) {}
+    public function __construct(private SpaceTradersApi $api, private HostLock $lock) {}
 
     /** Why a capture is due now, or null. Uses saved state only; no API call. */
     public function dueReason(?CarbonImmutable $now = null): ?string
@@ -46,7 +46,32 @@ class LeaderboardHistory
         return $age >= self::ROUTINE_MINUTES ? 'routine hourly capture' : null;
     }
 
-    /** Read the status leaderboards and, optionally, the whole public agent directory. */
+    public function captureExclusive(bool $directory = true, bool $ifDue = false): array
+    {
+        $entered = false;
+        try {
+            return $this->lock->exclusive(HostLock::LEADERBOARD_CAPTURE_KEY, function () use ($directory, $ifDue, &$entered) {
+                $entered = true;
+                $reason = $ifDue ? $this->dueReason() : null;
+                if ($ifDue && $reason === null) {
+                    return ['status' => 'not_due'];
+                }
+
+                return ['status' => 'captured', 'reason' => $reason] + $this->capture($directory);
+            });
+        } catch (GameException $exception) {
+            if ($entered) {
+                throw $exception;
+            }
+
+            return ['status' => 'busy'];
+        }
+    }
+
+    /**
+     * Read the status leaderboards and, optionally, the public agent directory.
+     * Call outside a write transaction so HTTP and budget waits leave SQLite's writer free.
+     */
     public function capture(bool $directory = true): array
     {
         $status = $this->retrying(fn () => $this->api->publicStatus());
