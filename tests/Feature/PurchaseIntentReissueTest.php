@@ -485,6 +485,40 @@ class PurchaseIntentReissueTest extends TestCase
         ];
     }
 
+    public function test_fleet_intent_expiring_at_transport_reissues_after_fresh_ranked_admission(): void
+    {
+        $ranked = [];
+        [$run, $action] = $this->fleetIntent(onRank: function ($ignoreRun, $exact) use (&$ranked) {
+            if ($ignoreRun !== null) {
+                $intentCount = ShipAction::where('automation_run_id', $ignoreRun)->where('command', 'buy_ship')->count();
+                $ranked[] = [$ignoreRun, $exact, $intentCount];
+            }
+        });
+        $duringBudget = false;
+        $this->atWriteReservation(function () use ($action, &$duringBudget) {
+            $duringBudget = true;
+            $this->assertSame(ActionState::Sending, $action->fresh()->state);
+            $this->assertNotNull($action->fresh()->sent_at);
+            $this->travelTo($action->expires_at->copy()->addSecond());
+            LocalEngine::whereKey(1)->update(['heartbeat_at' => now()]);
+        });
+
+        $this->job($action);
+
+        $this->assertTrue($duringBudget);
+        $this->assertTrue(ShipCommandExecutor::reissuableExpiry($action->refresh()));
+        $this->assertSame('pretransport', $action->outcome['expiry']['stage']);
+        $this->assertNull($action->sent_at);
+        $this->assertSame('released', $this->hold($action)->state);
+        $this->assertSame(RunState::Waiting, $run->refresh()->state);
+        $this->assertEquals(now()->addSeconds(5), $run->next_action_at);
+        $this->assertSame(0, $this->purchasePosts());
+
+        $ranked = [];
+        $this->completeReplacement($run, $action);
+        $this->assertContains([$run->id, [$run->plan['ship_type'], self::YARD, $run->ship_symbol], 1], $ranked);
+    }
+
     public function test_expired_queued_fleet_intent_reissues_after_fresh_ranked_admission(): void
     {
         [$run, $action] = $this->fleetIntent();
@@ -500,6 +534,27 @@ class PurchaseIntentReissueTest extends TestCase
         $this->assertEquals(now()->addSeconds(5), $run->next_action_at);
         $this->assertSame('released', $this->hold($action)->state);
         $this->completeReplacement($run, $action);
+    }
+
+    public function test_credit_job_preserves_the_queued_purchase_expiry_wake(): void
+    {
+        [$run, $expired] = $this->fleetIntent();
+        $this->returnToCreditQueue($expired);
+        $expired->update(['expires_at' => now()->subSecond()]);
+        $waiting = $this->copyIntent($expired, ActionState::Pending);
+        $waiting->update(['expires_at' => now()->addMinute()]);
+        $this->reserve($run, $waiting);
+
+        $this->job($waiting);
+
+        $this->assertTrue(ShipCommandExecutor::reissuableExpiry($expired->refresh()));
+        $this->assertSame('credit_queue', $expired->outcome['expiry']['stage']);
+        $this->assertSame('released', $this->hold($expired)->state);
+        $this->assertSame(ActionState::Pending, $waiting->refresh()->state);
+        $this->assertSame('reserved', $this->hold($waiting)->state);
+        $this->assertSame(RunState::Waiting, $run->refresh()->state);
+        $this->assertEquals(now()->addSeconds(5), $run->next_action_at);
+        $this->assertSame(0, $this->purchasePosts());
     }
 
     public function test_credit_queue_keeps_real_engine_invalidation_when_the_recheck_fails(): void
@@ -563,6 +618,8 @@ class PurchaseIntentReissueTest extends TestCase
             $this->assertSame('mesh_governor', $action->outcome['expiry']['stage']);
             $this->assertSame(RunState::Waiting, $run->state);
             $this->assertSame($this->agent->id, $run->active_agent_id);
+            $this->app->instance(RequestBudget::class, $realBudget);
+            $this->completeReplacement($run, $action);
         } elseif (in_array($case, ['stop during check', 'engine closes'], true)) {
             $this->assertSame(RunState::Stopping, $run->state);
             $this->assertSame($this->agent->id, $run->active_agent_id);
@@ -697,7 +754,13 @@ class PurchaseIntentReissueTest extends TestCase
         $this->job($action);
         $this->assertTrue(ShipCommandExecutor::reissuableExpiry($action->refresh()));
 
-        $run->update(['plan' => array_replace($run->plan, ['acquisition_cutoff' => now()->addSeconds(20)->toIso8601String()])]);
+        $run->update([
+            'expires_at' => now()->addMinutes(10),
+            'plan' => array_replace($run->plan, [
+                'acquisition_cutoff' => now()->addSeconds(20)->toIso8601String(),
+                'settlement_deadline' => now()->addMinutes(10)->toIso8601String(),
+            ]),
+        ]);
         $this->travel(5)->seconds();
         app(AutomationRunner::class)->advance($run->id);
 
@@ -1196,14 +1259,19 @@ class PurchaseIntentReissueTest extends TestCase
         return $runner->startCampaign($this->agent, $run, $episode);
     }
 
-    private function fleetIntent(?int $runSeconds = null): array
+    private function fleetIntent(?int $runSeconds = null, ?Closure $onRank = null): array
     {
         $this->setUpSaturation();
         $episode = $this->episode('fleet');
         $this->observeYard();
         $type = 'SHIP_LIGHT_HAULER';
         $candidate = ['type' => $type, 'yard' => self::YARD, 'purchaser' => 'LOCAL-1', 'slot' => 'trader', 'approved_ceiling' => 375000];
-        $this->partialMock(CampaignSaturation::class)->shouldReceive('rankFleetPurchases')->atLeast()->twice()->andReturn(['selected' => $candidate]);
+        $this->partialMock(CampaignSaturation::class)->shouldReceive('rankFleetPurchases')->atLeast()->twice()
+            ->andReturnUsing(function ($grant, $episode, $agent, $candidates, $ignoreRun = null, $deadline = null, $exact = null) use ($candidate, $onRank) {
+                $onRank?->__invoke($ignoreRun, $exact);
+
+                return ['selected' => $candidate];
+            });
         $runner = app(AutomationRunner::class);
         $run = $runner->preview($this->agent, 'LOCAL-1', ['minutes' => 15, 'strategy' => 'buy_fleet', 'plan_version' => 8,
             'shipyard' => self::YARD, 'ship_type' => $type, 'allocation_candidate' => $candidate], $episode);
