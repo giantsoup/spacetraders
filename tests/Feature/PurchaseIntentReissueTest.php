@@ -115,9 +115,12 @@ class PurchaseIntentReissueTest extends TestCase
         $this->assertTrue(DB::table('fleet_metrics')->where('kind', 'purchase_intent_expired')->exists());
 
         $this->travel(5)->seconds();
+        $before = count($this->world()['calls']);
         $runner->advance($run->id);
         $runner->advance($run->id);
         $replacement = ShipAction::where('automation_run_id', $run->id)->where('command', 'buy_ship')->whereKeyNot($original->id)->sole();
+        $this->assertContains('/systems/X1-TEST/waypoints/'.self::YARD.'/shipyard',
+            array_column(array_slice($this->world()['calls'], $before), 'path'));
         $this->job($original);
         $this->job($replacement);
         $this->job($replacement);
@@ -156,6 +159,8 @@ class PurchaseIntentReissueTest extends TestCase
         $this->assertNull($original->sent_at);
         $this->assertSame(0, $this->purchasePosts());
         $this->travel(5)->seconds();
+        $saturation = $this->partialMock(CampaignSaturation::class);
+        $saturation->shouldReceive('assertPurchase')->once()->passthru();
         $runner->advance($run->id);
         $replacement = ShipAction::where('automation_run_id', $run->id)->where('command', 'buy_ship')->whereKeyNot($original->id)->sole();
         $this->assertSame($pin, $replacement->arguments['offer_configuration_hash']);
@@ -177,6 +182,8 @@ class PurchaseIntentReissueTest extends TestCase
         $this->setUpSaturation(seedCoverage: false);
         $this->addManualOffer();
         $action = $this->manualPurchase('SHIP_MINING_DRONE');
+        $holdId = app(StateChain::class)->reserveCredit($this->agent, 'manual:'.$action->id, 'purchase', 'buy_ship',
+            $action->arguments['maxTotal'], $action->id);
         $marker = now()->utc()->toIso8601String();
         $stopped = false;
         $stop = function () use ($action, &$stopped) {
@@ -203,6 +210,10 @@ class PurchaseIntentReissueTest extends TestCase
         $this->assertSame($boundary === 'early' ? 'pretransport' : 'final_transport_check', $action->outcome['local_refusal']['stage']);
         $this->assertNull($action->sent_at);
         $this->assertArrayNotHasKey('expired_unsent', $action->outcome);
+        $this->assertArrayNotHasKey('expiry', $action->outcome);
+        $hold = $this->hold($action);
+        $this->assertSame($holdId, $hold->id);
+        $this->assertSame('released', $hold->state);
         $this->assertSame(0, $this->purchasePosts());
     }
 
@@ -229,6 +240,8 @@ class PurchaseIntentReissueTest extends TestCase
             if ($veto === 'stop') {
                 app(AutomationRunner::class)->stop($run);
                 $stop = $run->fresh();
+                $this->assertSame(ActionState::Sending, $action->fresh()->state);
+                $this->assertSame('pending', $this->hold($action)->state);
                 $this->travel(1)->second();
             } elseif ($veto === 'run_expired') {
                 $run->update(['expires_at' => now()->subSecond()]);
@@ -277,6 +290,7 @@ class PurchaseIntentReissueTest extends TestCase
             $this->assertNull($action->sent_at);
             $this->assertSame('released', $this->hold($action)->state);
             $this->assertArrayNotHasKey('expired_unsent', $action->outcome);
+            $this->assertArrayNotHasKey('expiry', $action->outcome);
             if ($veto === 'stop') {
                 $this->assertSame(RunState::Stopping, $run->state);
                 $this->assertEquals($stop->stop_requested_at, $run->stop_requested_at);
@@ -361,18 +375,23 @@ class PurchaseIntentReissueTest extends TestCase
         $rejected = $this->copyIntent($waiting, ActionState::Rejected);
         $this->reserve($run, $rejected);
         $rejected->update($evidence === 'receipt' ? ['outcome' => ['response' => []]] : ['sent_at' => now()]);
+        $rejected->update(['outcome->local_refusal' => ['stage' => 'prior_writer']]);
+        $rejected->refresh();
+        $rejectedHold = $this->hold($rejected);
         if ($review) {
             $this->copyIntent($waiting, ActionState::Rejected)->update(['review_required' => true]);
         }
         $wake = $run->fresh()->next_action_at;
+        $engine = app(EngineHost::class);
+        $engine->calls = [];
         Queue::fake();
 
         $this->assertSame(CreditPromotionDisposition::EvidenceVeto, app(ShipCommandExecutor::class)->promoteCreditIntent($this->agent));
+        $this->assertSame([], $engine->calls);
         $this->job($waiting);
 
-        $this->assertSame(ActionState::Rejected, $rejected->fresh()->state);
-        $this->assertSame($rejected->outcome, $rejected->fresh()->outcome);
-        $this->assertEquals($rejected->sent_at, $rejected->fresh()->sent_at);
+        $this->assertSame($rejected->getAttributes(), $rejected->fresh()->getAttributes());
+        $this->assertEquals($rejectedHold, $this->hold($rejected));
         $this->assertSame('reserved', $this->hold($rejected)->state);
         $this->assertSame(ActionState::Preview, $eligible->fresh()->state);
         $this->assertSame('reserved', $this->hold($eligible)->state);
@@ -457,21 +476,41 @@ class PurchaseIntentReissueTest extends TestCase
     }
 
     #[DataProvider('queuedEvidence')]
-    public function test_purchase_job_routes_each_receipt_key_to_reconciliation_without_posting(string $key, mixed $value, bool $expired): void
+    public function test_purchase_job_routes_queued_transport_evidence_to_reconciliation_without_posting(?string $key, mixed $value,
+        bool $expired, bool $stop = false): void
     {
         [$run, $action] = $this->fleetIntent();
-        $outcome = [$key => $value];
-        $action->update(['outcome' => $outcome, 'expires_at' => $expired ? now()->subSecond() : now()->addMinute()]);
-        $exposure = $this->hold($action)->exposure;
+        $outcome = $key === null ? [] : [$key => $value];
+        $sentAt = $key === null ? now()->subMinute() : null;
+        $action->update(['outcome' => $outcome, 'sent_at' => $sentAt, 'expires_at' => $expired ? now()->subSecond() : now()->addMinute()]);
+        $originalHold = $this->hold($action);
+        if ($stop) {
+            app(AutomationRunner::class)->stop($run);
+            $run->refresh();
+            $this->travel(1)->second();
+        }
 
         $this->job($action);
+        $currentRun = $run->fresh();
+        $this->assertSame($stop ? RunState::Stopping : RunState::Blocked, $currentRun->state);
+        if ($stop) {
+            $this->assertEquals($run->next_action_at, $currentRun->next_action_at);
+            $this->assertEquals($run->stop_requested_at, $currentRun->stop_requested_at);
+        }
+        $this->assertOldIntentIsNotDispatched($action);
+        app(AutomationRunner::class)->advance($run->id);
         $this->job($action);
 
         $this->assertSame(ActionState::Uncertain, $action->refresh()->state);
         $this->assertSame($outcome, $action->outcome);
-        $this->assertSame('uncertain', $this->hold($action)->state);
-        $this->assertSame($exposure, $this->hold($action)->exposure);
-        $this->assertSame(RunState::Blocked, $run->fresh()->state);
+        $this->assertEquals($sentAt, $action->sent_at);
+        $this->assertStringContainsString('Reconcile without replay.', $action->message);
+        $hold = $this->hold($action);
+        $this->assertSame('uncertain', $hold->state);
+        $this->assertSame($originalHold->id, $hold->id);
+        $this->assertSame($originalHold->exposure, $hold->exposure);
+        $this->assertSame($action->id, ShipAction::where('automation_run_id', $run->id)->sole()->id);
+        $this->assertSame($originalHold->id, DB::table('credit_reservations')->where('automation_run_id', $run->id)->sole()->id);
         $this->assertSame($this->agent->id, $run->fresh()->active_agent_id);
         $this->assertSame(0, $this->purchasePosts());
     }
@@ -482,6 +521,8 @@ class PurchaseIntentReissueTest extends TestCase
             yield $key.' before expiry' => [$key, $value, false];
             yield $key.' after expiry' => [$key, $value, true];
         }
+        yield 'sent timestamp only after expiry' => [null, null, true];
+        yield 'response after operator stop' => ['response', [], false, true];
     }
 
     #[DataProvider('terminalQueueCases')]
@@ -499,6 +540,7 @@ class PurchaseIntentReissueTest extends TestCase
         }
         $sentAt = $evidence === 'sent_at' ? now()->subMinute() : null;
         $action->update(['outcome' => $outcome, 'sent_at' => $sentAt]);
+        $originalHold = $this->hold($action);
         if ($boundary === 'engine') {
             app(EngineGate::class)->close();
         } else {
@@ -511,11 +553,21 @@ class PurchaseIntentReissueTest extends TestCase
         $this->assertEquals($sentAt, $action->sent_at);
         $this->assertSame($marker, $action->outcome['stop_requested_at']);
         $this->assertArrayNotHasKey('expired_unsent', $action->outcome);
-        $this->assertSame($evidence === 'none' ? 'released' : 'uncertain', $this->hold($action)->state);
+        $this->assertArrayNotHasKey('expiry', $action->outcome);
+        $hold = $this->hold($action);
+        $this->assertSame($evidence === 'none' ? 'released' : 'uncertain', $hold->state);
+        $this->assertSame($originalHold->id, $hold->id);
+        $this->assertSame($originalHold->exposure, $hold->exposure);
         $this->assertSame($evidence === 'none' && $boundary !== 'engine' ? RunState::Stopped : RunState::Stopping, $run->fresh()->state);
+        if ($evidence === 'none' && $boundary === 'runner') {
+            $this->assertTrue($action->outcome['confirmed_not_sent']);
+            $this->assertNull($run->fresh()->active_agent_id);
+        }
         if ($evidence !== 'none') {
             $this->assertSame($outcome, $action->outcome);
             $this->assertSame($this->agent->id, $run->fresh()->active_agent_id);
+            app(AutomationRunner::class)->advance($run->id);
+            $this->assertSame($action->id, ShipAction::where('automation_run_id', $run->id)->sole()->id);
         }
         $this->assertSame(0, $this->purchasePosts());
     }
@@ -528,6 +580,46 @@ class PurchaseIntentReissueTest extends TestCase
                 yield "$boundary pending $evidence" => [$boundary, $evidence, false];
             }
         }
+    }
+
+    #[DataProvider('queuedPurchaseStates')]
+    public function test_operator_stop_commits_purchase_reconciliation_with_a_queued_navigation_receipt(ActionState $state): void
+    {
+        [$run, $purchase] = $this->fleetIntent();
+        if ($state === ActionState::Preview) {
+            $this->returnToCreditQueue($purchase);
+        }
+        $purchase->update(['outcome' => ['response' => []]]);
+        $originalHold = $this->hold($purchase);
+        $this->assertSame($state === ActionState::Preview ? 'reserved' : 'pending', $originalHold->state);
+        $navigation = $this->copyIntent($purchase, ActionState::Pending);
+        $navigation->update(['command' => 'navigate', 'arguments' => ['waypointSymbol' => self::YARD],
+            'outcome' => ['body_sha256' => 'navigation-receipt']]);
+        $this->assertTrue(ShipCommandExecutor::hasReceiptEvidence($navigation->refresh()));
+        $navigationBefore = $navigation->fresh()->getAttributes();
+
+        $this->assertSame(0, DB::transactionLevel());
+        $runner = app(AutomationRunner::class);
+        $runner->stop($run);
+        $runner->advance($run->id);
+        $this->assertSame(0, DB::transactionLevel());
+
+        $this->assertSame(ActionState::Uncertain, $purchase->refresh()->state);
+        $this->assertSame(['response' => []], $purchase->outcome);
+        $this->assertNull($purchase->sent_at);
+        $hold = $this->hold($purchase);
+        $this->assertSame($originalHold->id, $hold->id);
+        $this->assertSame($originalHold->exposure, $hold->exposure);
+        $this->assertSame('uncertain', $hold->state);
+        $this->assertSame($navigationBefore, $navigation->fresh()->getAttributes());
+        $this->assertSame(RunState::Stopping, $run->refresh()->state);
+        $this->assertSame($this->agent->id, $run->active_agent_id);
+        $this->assertSame(0, $this->purchasePosts());
+    }
+
+    public static function queuedPurchaseStates(): array
+    {
+        return ['reserved preview' => [ActionState::Preview], 'pending purchase' => [ActionState::Pending]];
     }
 
     #[DataProvider('preflightBlockers')]
@@ -563,6 +655,17 @@ class PurchaseIntentReissueTest extends TestCase
         }
         $reached = false;
         $lookups = 0;
+        $stop = null;
+        $wake = $run->next_action_at;
+        if ($case === 'stop after loss') {
+            DB::connection()->beforeStartingTransaction(function () use ($run, &$lookups, &$stop) {
+                if ($lookups === 2 && $stop === null && $this->startingExecutorTransaction('rejectGuardedPurchase')) {
+                    app(AutomationRunner::class)->stop($run);
+                    $stop = $run->fresh();
+                    $this->travel(1)->second();
+                }
+            });
+        }
         $this->atWriteReservation(function () use ($action, &$reached) {
             $reached = true;
             $this->assertSame(ActionState::Sending, $action->fresh()->state);
@@ -579,6 +682,7 @@ class PurchaseIntentReissueTest extends TestCase
             return $answer;
         });
         $oldCreditExposure = $this->hold($action)->exposure;
+        Queue::fake();
 
         $this->job($action);
 
@@ -591,14 +695,28 @@ class PurchaseIntentReissueTest extends TestCase
         $eligible = in_array($case, ['exempt', 'bound'], true);
         $this->assertSame($eligible, ShipCommandExecutor::reissuableExpiry($action));
         $this->assertSame($eligible ? 'budget_wait' : null, $action->outcome['expiry']['stage'] ?? null);
-        $this->assertSame($eligible ? RunState::Waiting : RunState::Blocked, $run->refresh()->state);
         $this->assertSame(0, $this->purchasePosts());
+        $this->assertSame($action->id, ShipAction::where('automation_run_id', $run->id)->sole()->id);
+        Queue::assertNothingPushed();
+        $run->refresh();
         if ($eligible) {
+            $this->assertSame(RunState::Waiting, $run->state);
             $this->assertEquals(now()->addSeconds(5), $run->next_action_at);
             $this->completeReplacement($run, $action);
-        } elseif ($answers[1] === false) {
-            $this->assertNull($run->active_agent_id);
-            $this->assertNull($run->next_action_at);
+        } elseif ($case === 'stop after loss') {
+            $this->assertNotNull($stop);
+            $this->assertSame(RunState::Stopping, $run->state);
+            $this->assertSame($stop->active_agent_id, $run->active_agent_id);
+            $this->assertEquals($stop->next_action_at, $run->next_action_at);
+            $this->assertEquals($stop->stop_requested_at, $run->stop_requested_at);
+        } else {
+            $this->assertSame(RunState::Blocked, $run->state);
+            if ($answers[1] === false) {
+                $this->assertNull($run->active_agent_id);
+                $this->assertNull($run->next_action_at);
+            } else {
+                $this->assertEquals($wake, $run->next_action_at);
+            }
         }
     }
 
@@ -606,7 +724,7 @@ class PurchaseIntentReissueTest extends TestCase
     {
         return [
             ['exempt', []], ['bound', [true]], ['unbound', [false, false]], ['store unavailable', [null, null]],
-            ['unavailable then lost', [null, false]], ['unavailable then bound', [null, true]],
+            ['unavailable then lost', [null, false]], ['unavailable then bound', [null, true]], ['stop after loss', [false, false]],
         ];
     }
 
@@ -646,7 +764,10 @@ class PurchaseIntentReissueTest extends TestCase
 
     public function test_expired_queued_fleet_intent_reissues_after_fresh_ranked_admission(): void
     {
-        [$run, $action] = $this->fleetIntent();
+        $ranked = [];
+        [$run, $action] = $this->fleetIntent(onRank: function ($ignoreRun, $exact) use (&$ranked) {
+            $ranked[] = [$ignoreRun, $exact];
+        });
         $action->update(['state' => ActionState::Preview, 'expires_at' => now()->subSecond()]);
         DB::table('credit_reservations')->where('ship_action_id', $action->id)->update(['state' => 'reserved']);
 
@@ -658,7 +779,22 @@ class PurchaseIntentReissueTest extends TestCase
         $this->assertSame(RunState::Waiting, $run->refresh()->state);
         $this->assertEquals(now()->addSeconds(5), $run->next_action_at);
         $this->assertSame('released', $this->hold($action)->state);
+
+        $ranked = [];
+        $queued = false;
+        DB::connection()->beforeStartingTransaction(function () use ($run, $action, &$queued) {
+            if (! $queued && $this->startingExecutorTransaction('promoteCreditIntent')) {
+                $replacement = ShipAction::where('automation_run_id', $run->id)->whereKeyNot($action->id)->first();
+                if ($replacement) {
+                    $queued = true;
+                    $this->assertSame(ActionState::Preview, $replacement->state);
+                    $this->assertSame('reserved', $this->hold($replacement)->state);
+                }
+            }
+        });
         $this->completeReplacement($run, $action);
+        $this->assertTrue($queued);
+        $this->assertContains([$run->id, [$run->plan['ship_type'], self::YARD, $run->ship_symbol]], $ranked);
     }
 
     public function test_credit_job_preserves_the_queued_purchase_expiry_wake(): void
@@ -682,25 +818,50 @@ class PurchaseIntentReissueTest extends TestCase
         $this->assertSame(0, $this->purchasePosts());
     }
 
-    public function test_credit_queue_keeps_real_engine_invalidation_when_the_recheck_fails(): void
+    #[DataProvider('engineRecheckBoundaries')]
+    public function test_credit_queue_keeps_real_engine_invalidation_when_the_recheck_fails(bool $job): void
     {
         [$run, $action] = $this->fleetIntent();
-        $action->update(['state' => ActionState::Preview, 'expires_at' => now()->subSecond()]);
-        DB::table('credit_reservations')->where('ship_action_id', $action->id)->update(['state' => 'reserved']);
+        $this->returnToCreditQueue($action);
+        $action->update(['expires_at' => now()->subSecond()]);
         $host = app(EngineHost::class);
-        $host->alive['supervisor'] = false;
         $host->calls = [];
+        $calls = $this->world()['calls'];
+        if ($job) {
+            $waiting = $this->copyIntent($action, ActionState::Pending);
+            $waiting->update(['expires_at' => now()->addMinute()]);
+            $this->reserve($run, $waiting);
+            $tripped = false;
+            DB::connection()->beforeStartingTransaction(function () use ($host, &$tripped) {
+                if (! $tripped && $this->startingExecutorTransaction('promoteCreditIntent')) {
+                    $tripped = true;
+                    $host->alive['supervisor'] = false;
+                }
+            });
+            $this->job($waiting);
+            $this->assertTrue($tripped);
+            $this->assertSame(ActionState::Rejected, $waiting->fresh()->state);
+            $this->assertSame('released', $this->hold($waiting)->state);
+        } else {
+            $host->alive['supervisor'] = false;
+            app(AutomationRunner::class)->advance($run->id);
+            $this->assertSame([['alive', $run->engine_session_id, 'supervisor']], $host->calls);
+        }
 
-        app(AutomationRunner::class)->advance($run->id);
-
-        $this->assertSame([['alive', $run->engine_session_id, 'supervisor']], $host->calls);
         $this->assertSame(ActionState::Rejected, $action->refresh()->state);
         $this->assertSame('Owned engine processes are no longer alive. Fresh session and preview required.', $action->message);
         $this->assertArrayNotHasKey('expired_unsent', $action->outcome ?? []);
+        $this->assertSame('released', $this->hold($action)->state);
         $this->assertSame(RunState::Stopping, $run->refresh()->state);
         $this->assertEquals(now(), $run->next_action_at);
-        $this->assertSame(1, ShipAction::where('automation_run_id', $run->id)->where('command', 'buy_ship')->count());
+        $this->assertSame($job ? 2 : 1, ShipAction::where('automation_run_id', $run->id)->where('command', 'buy_ship')->count());
+        $this->assertSame($calls, $this->world()['calls']);
         $this->assertSame(0, $this->purchasePosts());
+    }
+
+    public static function engineRecheckBoundaries(): array
+    {
+        return ['runner advance' => [false], 'credit job promotion' => [true]];
     }
 
     #[DataProvider('governorExpiryCases')]
@@ -794,6 +955,7 @@ class PurchaseIntentReissueTest extends TestCase
             $this->assertNotContains('/my/agent', $calls);
         }
         $this->assertSame(1, ShipAction::where('automation_run_id', $run->id)->where('command', 'buy_ship')->count());
+        $this->assertSame($action->id, DB::table('credit_reservations')->where('automation_run_id', $run->id)->sole()->ship_action_id);
         $this->assertSame(0, $this->purchasePosts());
         $this->assertSame(RunState::Blocked, $run->fresh()->state);
     }
@@ -826,6 +988,7 @@ class PurchaseIntentReissueTest extends TestCase
         $this->assertNotNull($action->settled_at);
         $this->assertArrayHasKey('local_refusal', $action->outcome);
         $this->assertArrayNotHasKey('expiry', $action->outcome);
+        $this->assertArrayNotHasKey('expired_unsent', $action->outcome);
         $this->assertNull($action->sent_at);
         $this->assertTrue($bootstrap->reservations($this->agent)->isEmpty());
         $this->assertSame(0, $this->purchasePosts());
@@ -834,6 +997,38 @@ class PurchaseIntentReissueTest extends TestCase
     public static function manualExpiries(): array
     {
         return [['preflight'], ['budget']];
+    }
+
+    #[DataProvider('manualStopEvidence')]
+    public function test_manual_queued_purchase_stop_preserves_the_slot_and_hold_when_transport_is_uncertain(string $evidence): void
+    {
+        $this->setUpSaturation(seedCoverage: false);
+        $action = $this->manualPurchase('SHIP_PROBE');
+        $holdId = app(StateChain::class)->reserveCredit($this->agent, 'manual:'.$action->id, 'purchase', 'buy_ship',
+            $action->arguments['maxTotal'], $action->id);
+        $marker = now()->subSecond()->utc()->toIso8601String();
+        $sentAt = $evidence === 'sent_at' ? now()->subMinute() : null;
+        $outcome = ['stop_requested_at' => $marker] + ($evidence === 'receipt' ? ['response' => []] : []);
+        $action->update(['outcome' => $outcome, 'sent_at' => $sentAt]);
+
+        app(ShipCommandExecutor::class)->stopManual($action);
+
+        $uncertain = $evidence !== 'none';
+        $this->assertSame($uncertain ? ActionState::Uncertain : ActionState::Rejected, $action->refresh()->state);
+        $this->assertSame($outcome, $action->outcome);
+        $this->assertEquals($sentAt, $action->sent_at);
+        $hold = $this->hold($action);
+        $this->assertSame($holdId, $hold->id);
+        $this->assertSame($action->arguments['maxTotal'], $hold->exposure);
+        $this->assertSame($uncertain ? 'uncertain' : 'released', $hold->state);
+        $this->assertSame($uncertain, app(CampaignProbeBootstrap::class)->reservations($this->agent)->isNotEmpty());
+        $this->assertOldIntentIsNotDispatched($action);
+        $this->assertSame(0, $this->purchasePosts());
+    }
+
+    public static function manualStopEvidence(): array
+    {
+        return [['none'], ['receipt'], ['sent_at']];
     }
 
     public function test_manual_purchase_budget_retry_cannot_restore_a_send_after_engine_close(): void
@@ -1314,11 +1509,14 @@ class PurchaseIntentReissueTest extends TestCase
         }
     }
 
-    public function test_promotion_reconciles_a_preview_with_response_only_evidence_before_any_dispatch(): void
+    #[DataProvider('previewTransportEvidence')]
+    public function test_promotion_reconciles_a_preview_with_transport_evidence_before_any_dispatch(bool $receipt): void
     {
         [$run, $action] = $this->fleetIntent();
         $this->returnToCreditQueue($action);
-        $action->update(['outcome' => ['response' => []]]);
+        $outcome = $receipt ? ['response' => []] : [];
+        $sentAt = $receipt ? null : now()->subMinute();
+        $action->update(['outcome' => $outcome, 'sent_at' => $sentAt]);
         $hold = $this->hold($action);
         $engine = app(EngineHost::class);
         $engine->calls = [];
@@ -1327,12 +1525,19 @@ class PurchaseIntentReissueTest extends TestCase
         $this->assertSame(CreditPromotionDisposition::PurchaseTransition, app(ShipCommandExecutor::class)->promoteCreditIntent($this->agent));
 
         $this->assertSame(ActionState::Uncertain, $action->refresh()->state);
-        $this->assertSame(['response' => []], $action->outcome);
+        $this->assertSame($outcome, $action->outcome);
+        $this->assertEquals($sentAt, $action->sent_at);
         $this->assertSame('uncertain', $this->hold($action)->state);
+        $this->assertSame($hold->id, $this->hold($action)->id);
         $this->assertSame($hold->exposure, $this->hold($action)->exposure);
         $this->assertSame(RunState::Blocked, $run->refresh()->state);
         $this->assertSame([], $engine->calls);
         Queue::assertNothingPushed();
+    }
+
+    public static function previewTransportEvidence(): array
+    {
+        return ['response only' => [true], 'send timestamp only' => [false]];
     }
 
     #[DataProvider('rejectionHelperVetoes')]
@@ -1404,10 +1609,12 @@ class PurchaseIntentReissueTest extends TestCase
     private function completeReplacement(AutomationRun $run, ShipAction $action): void
     {
         $this->travel(5)->seconds();
+        Queue::fake();
         app(AutomationRunner::class)->advance($run->id);
         $replacement = ShipAction::where('automation_run_id', $run->id)->where('command', 'buy_ship')->whereKeyNot($action->id)->sole();
         $this->assertSame(ActionState::Pending, $replacement->state);
         $this->assertSame('pending', $this->hold($replacement)->state);
+        Queue::assertPushed(ExecuteShipCommand::class, fn ($job) => $job->actionId === $replacement->id);
         $this->job($action);
         $this->job($replacement);
         $this->assertSame(ActionState::Confirmed, $replacement->fresh()->state, $replacement->fresh()->message ?? '');
