@@ -7,21 +7,25 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Artisan;
 
 Artisan::command('leaderboard:capture {--if-due : Capture only when the schedule says one is due} {--top-only : Skip the full public agent directory}', function (LeaderboardHistory $history) {
-    if ($this->option('if-due')) {
-        $reason = $history->dueReason();
-        if (! $reason) {
-            $this->line('Leaderboard capture not due.');
-
-            return 0;
-        }
-        $this->line('Capture due: '.$reason.'.');
-    }
     try {
-        $result = $history->capture(directory: ! $this->option('top-only'));
+        $result = $history->captureExclusive(directory: ! $this->option('top-only'), ifDue: $this->option('if-due'));
     } catch (GameException $e) {
         $this->error('Leaderboard capture failed: '.$e->getMessage());
 
         return 1;
+    }
+    if ($result['status'] === 'busy') {
+        $this->line('Leaderboard capture already running in another process.');
+
+        return 0;
+    }
+    if ($result['status'] === 'not_due') {
+        $this->line('Leaderboard capture not due.');
+
+        return 0;
+    }
+    if ($this->option('if-due')) {
+        $this->line('Capture due: '.$result['reason'].'.');
     }
     $snapshot = $result['snapshot'];
     $leader = $snapshot->standings()[0] ?? null;

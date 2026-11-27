@@ -5,23 +5,28 @@ namespace Tests\Feature;
 use App\Gameplay\AgentSynchronizer;
 use App\Gameplay\AutomationRunner;
 use App\Gameplay\CampaignControl;
+use App\Gameplay\CampaignDirector;
 use App\Gameplay\CampaignHaulerPurchase;
 use App\Gameplay\CampaignPlaybook;
 use App\Gameplay\CampaignProbeBootstrap;
 use App\Gameplay\CampaignSaturation;
 use App\Gameplay\CampaignStatus;
 use App\Gameplay\CampaignTrade;
+use App\Gameplay\ExtractionSites;
+use App\Gameplay\FleetAllocator;
 use App\Gameplay\FleetClaims;
 use App\Gameplay\GameException;
 use App\Gameplay\HostLock;
 use App\Gameplay\RequestBudget;
 use App\Gameplay\SpaceTradersApi;
+use App\Gameplay\TraderAssigner;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
 use App\Models\CampaignGrant;
 use App\Models\GameObservation;
 use App\Models\LocalEngine;
+use App\Models\Ship;
 use App\Models\ShipAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -782,6 +787,304 @@ class CampaignSaturationTest extends TestCase
     public static function yardAvailability(): array
     {
         return ['alternate corridor' => [true], 'all yards fail' => [false]];
+    }
+
+    public function test_rank_persists_all_evaluated_gates_including_g5_and_g7_and_short_circuits_proof(): void
+    {
+        $episode = $this->fleetAdmissionEpisode();
+        $rank = app(CampaignSaturation::class)->rankFleetPurchases($episode->grant(), $episode, $this->agent->refresh());
+
+        $this->assertNull($rank['selected']);
+        $this->assertSame('gates', $rank['admission']['empty']);
+        $this->assertNull($rank['admission']['primary_trade_proved']);
+        $this->assertSame(['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G9'], array_keys($rank['admission']['gates']));
+        $this->assertSame(['pass' => false, 'reason_code' => 'scheduler_evidence'], $rank['admission']['gates']['G6']);
+        $this->assertSame(['pass' => true, 'reason_code' => null], $rank['admission']['gates']['G7']);
+        $this->assertArrayHasKey('reserve', $rank['admission']['gate_evidence']['G5']);
+    }
+
+    public function test_rank_reports_primary_trade_unproved(): void
+    {
+        $episode = $this->fleetAdmissionEpisode();
+        $this->schedulerPass();
+
+        $rank = app(CampaignSaturation::class)->rankFleetPurchases($episode->grant(), $episode, $this->agent->refresh());
+
+        $this->assertSame('primary_trade_unproved', $rank['admission']['empty']);
+        $this->assertFalse($rank['admission']['primary_trade_proved']);
+    }
+
+    public function test_rank_reports_mixed_trader_g8_failure_and_candidate_skip_declines(): void
+    {
+        $episode = $this->fleetAdmissionEpisode(extraction: true);
+        $episode->update(['next_reset_at' => now()->addHours(25)]);
+        $yard = 'X1-TEST-ROCK';
+        $this->editFixture(function (&$world) use ($yard) {
+            $world['shipyards'][$yard]['shipTypes'][] = ['type' => 'SHIP_MINING_DRONE'];
+            $world['shipyards'][$yard]['ships'][] = $world['offer'];
+            $shuttle = FakeSpaceTraders::lightHauler('OFFER-3', $yard);
+            $shuttle['frame']['symbol'] = 'FRAME_SHUTTLE';
+            $world['shipyards'][$yard]['shipTypes'][] = ['type' => 'SHIP_LIGHT_SHUTTLE'];
+            $world['shipyards'][$yard]['ships'][] = FakeSpaceTraders::shipyardOffer('SHIP_LIGHT_SHUTTLE', $shuttle, 100000);
+        });
+        $command = Ship::where('symbol', 'LOCAL-1')->sole();
+        $command->update(['snapshot->frame->symbol' => 'FRAME_FRIGATE']);
+        $world = $this->world();
+        $sync = app(AgentSynchronizer::class);
+        app(ExtractionSites::class)->recordModifiers($this->agent, $yard, [], now()->toImmutable());
+        $goods = FakeSpaceTraders::withAllMiningBids($world['market_goods']['X1-TEST-PORT']);
+        foreach ($goods as &$good) {
+            if ($good['symbol'] !== 'FUEL') {
+                $good['sellPrice'] = 8000;
+            }
+        }
+        unset($good);
+        $sync->observe($this->agent, 'market', 'X1-TEST-PORT', ['tradeGoods' => $goods, 'imports' => [], 'exports' => [], 'exchange' => []]);
+        $this->seedFleetAdmissionEvidence($episode, $yard);
+        $saturation = $this->partialMock(CampaignSaturation::class);
+        $saturation->shouldReceive('requests')->withArgs(fn ($agent, $policy, $ignoreRun, $type) => $type === 'SHIP_LIGHT_SHUTTLE')
+            ->andReturn(['pass' => false, 'reason' => 'ordinary_hour_headroom', 'staged' => false]);
+        $candidates = array_map(fn ($type) => ['type' => $type, 'yard' => $yard, 'purchaser' => 'LOCAL-1'],
+            ['SHIP_LIGHT_HAULER', 'SHIP_MINING_DRONE', 'SHIP_LIGHT_SHUTTLE']);
+
+        $rank = $saturation->rankFleetPurchases($episode->grant(), $episode, $this->agent->refresh(), $candidates, deliveryFuel: 0);
+
+        $this->assertSame('SHIP_MINING_DRONE', $rank['selected']['type'] ?? null, json_encode($rank));
+        $this->assertSame(['g7_requests' => 1, 'g8' => 1], $rank['declined']);
+        $this->assertSame(['pass' => false, 'reason_code' => 'payback'], $rank['admission']['gates']['G8']);
+        $this->assertArrayNotHasKey('g8_later', $rank['admission']);
+    }
+
+    public function test_rank_reports_a_held_traders_later_g8_failure(): void
+    {
+        $episode = $this->fleetAdmissionEpisode();
+        $episode->update(['next_reset_at' => now()->addHours(25)]);
+        $yard = 'X1-TEST-ROCK';
+        $this->editFixture(fn (&$world) => $world['ships'][] = FakeSpaceTraders::lightHauler('LOCAL-9', $yard));
+        app(AgentSynchronizer::class)->sync($this->agent, false, freshFleet: true);
+        $arm = $this->seedArmEpisode($this->arm('LOCAL-9', 'H1'));
+        $this->load($arm, -240, 300000, 90);
+        $this->load($arm, -15, 300000, 91);
+        // The arm history supplies measured savings while only the command hull is in the observed fleet.
+        Ship::where('symbol', 'LOCAL-9')->delete();
+        $this->seedFleetAdmissionEvidence($episode, $yard);
+        $candidate = ['type' => 'SHIP_LIGHT_HAULER', 'yard' => $yard, 'purchaser' => 'LOCAL-1', 'hold_hours' => 2.0];
+
+        $rank = app(CampaignSaturation::class)->rankFleetPurchases($episode->grant(), $episode, $this->agent->refresh(),
+            [$candidate], deliveryFuel: 0);
+
+        $this->assertNull($rank['selected']);
+        $this->assertSame(['held' => 1], $rank['declined'], json_encode($rank['admission']));
+        $this->assertSame(['pass' => true, 'reason_code' => null], $rank['admission']['gates']['G8']);
+        $this->assertSame(['pass' => false, 'reason_code' => 'time_to_reset'], $rank['admission']['g8_later'] ?? null);
+    }
+
+    public function test_allocator_reports_tier_one_probe_declines_before_evaluating_g8(): void
+    {
+        $allocator = app(FleetAllocator::class);
+        $offer = ['price' => 30000, 'effective_cost' => 30000, 'delta_v' => 1000, 'delta_q' => 1, 'slot' => 'fixture'];
+        $trader = ['type' => 'SHIP_LIGHT_SHUTTLE'] + $offer;
+        $context = ['hours_to_reset' => 25.0, 'horizon_after_delivery_hours' => 24.0, 'cash' => 900000];
+
+        $rank = $allocator->rank([['type' => 'SHIP_PROBE', 'tier' => 1, 'price' => 20000], ['request_fits' => false] + $trader], $context);
+        $this->assertSame('tier_1_probe', $rank['reason']);
+        $this->assertSame(['g7_requests' => 1], $rank['declined']);
+        $this->assertNull($rank['g8_status']);
+        $this->assertNull($rank['g8_later_status']);
+    }
+
+    public function test_mesh_plan_hash_ignores_purchase_measurements_but_retains_gate_verdict_changes(): void
+    {
+        $episode = $this->fleetAdmissionEpisode();
+        $director = app(CampaignDirector::class);
+        $recorder = new \ReflectionMethod($director, 'recordMeshPlan');
+        $diagnostics = new \ReflectionProperty($director, 'saturationDiagnostics');
+        $admission = ['empty' => null, 'primary_trade_proved' => true,
+            'gates' => ['G5' => ['pass' => true, 'reason_code' => null]],
+            'gate_evidence' => ['G6' => ['max_idle_arm_wait_seconds' => 10], 'G7' => ['additional_traders' => 2]],
+            'candidate_g7_failure_codes' => ['ordinary_hour_headroom']];
+        $allocation = ['admission' => $admission, 'declined' => ['g7_requests' => 1],
+            'selected' => ['type' => 'SHIP_LIGHT_HAULER', 'score' => ['h_value' => 48, 'nv' => 500]]];
+        $record = function (array $allocation) use ($episode, $director, $recorder, $diagnostics) {
+            $diagnostics->setValue($director, ['fleet_saturation' => ['allocation' => $allocation]]);
+            $recorder->invoke($director, $episode->grant(), $episode, [], [], []);
+        };
+
+        $record($allocation);
+        $this->travel(31)->seconds();
+        $allocation['admission']['gate_evidence']['G6']['max_idle_arm_wait_seconds'] = 41;
+        $allocation['admission']['gate_evidence']['G7']['additional_traders'] = 4;
+        $allocation['declined']['g7_requests'] = 2;
+        $allocation['selected']['score'] = ['h_value' => 47, 'nv' => 460];
+        $record($allocation);
+
+        $stored = CampaignEvent::where('kind', 'mesh_plan')->sole()->data['fleet_saturation']['allocation'];
+        $this->assertSame(10, $stored['admission']['gate_evidence']['G6']['max_idle_arm_wait_seconds']);
+        $this->assertSame(2, $stored['admission']['gate_evidence']['G7']['additional_traders']);
+        $this->assertSame(500, $stored['selected']['score']['nv']);
+        $this->assertSame(['pass' => true, 'reason_code' => null], $stored['admission']['gates']['G5']);
+
+        $allocation['admission']['gates']['G5'] = ['pass' => false, 'reason_code' => 'liquidity'];
+        $record($allocation);
+        $this->assertSame(2, CampaignEvent::where('kind', 'mesh_plan')->count());
+    }
+
+    #[DataProvider('recordedAllocations')]
+    public function test_real_director_tick_dedupes_admission_measurement_changes(bool $selected): void
+    {
+        $episode = $this->fleetAdmissionEpisode();
+        $this->schedulerPass();
+        $this->editFixture(function (&$world) {
+            $world['shipyards']['X1-TEST-ROCK'] = ['shipTypes' => [], 'ships' => []];
+            foreach ($world['market_goods'] as &$goods) {
+                foreach ($goods as &$good) {
+                    $good['purchasePrice'] = $good['sellPrice'] = 100;
+                }
+            }
+            foreach ($world['goods'] as &$good) {
+                $good['purchasePrice'] = $good['sellPrice'] = 100;
+            }
+        });
+        foreach (GameObservation::where('kind', 'market')->get() as $market) {
+            $data = $market->data;
+            foreach ($data['tradeGoods'] as &$good) {
+                $good['purchasePrice'] = $good['sellPrice'] = 100;
+            }
+            $market->update(['data' => $data]);
+        }
+        app(AgentSynchronizer::class)->observe($this->agent, 'shipyard', 'X1-TEST-ROCK', $this->world()['shipyards']['X1-TEST-ROCK']);
+        $usage = app(RequestBudget::class)->usage(agentSymbol: $this->agent->name);
+        $this->partialMock(RequestBudget::class)->shouldReceive('usage')->andReturn($usage);
+        $rank = [
+            'selected' => $selected ? ['type' => 'SHIP_LIGHT_HAULER', 'yard' => 'X1-TEST-ROCK', 'purchaser' => 'LOCAL-NO-LONGER-AVAILABLE',
+                'slot' => 'trader', 'score' => ['h_value' => 48, 'nv' => 500]] : null,
+            'reason' => null, 'wait_for_trader' => false, 'declined' => ['g7_requests' => 1],
+            'admission' => ['empty' => $selected ? null : 'allocator_declined', 'primary_trade_proved' => true,
+                'gates' => ['G5' => ['pass' => true, 'reason_code' => null], 'G7' => ['pass' => true, 'reason_code' => null]],
+                'gate_evidence' => ['G6' => ['max_idle_arm_wait_seconds' => 10], 'G7' => ['additional_traders' => 2]],
+                'candidate_g7_failure_codes' => ['staged_request_budget']],
+        ];
+        $saturation = $this->partialMock(CampaignSaturation::class);
+        $saturation->shouldReceive('rankFleetPurchases')->andReturnUsing(function () use (&$rank) {
+            return $rank;
+        });
+        $tick = function () use ($episode) {
+            $state = $episode->refresh()->state;
+            $state['mesh_dispatch_failed'] = ['expired' => ['at' => now()->subHour()->toIso8601String()]];
+            $episode->update(['state' => $state]);
+            $this->tickC0();
+            $this->assertSame([], $episode->refresh()->state['mesh_dispatch_failed']);
+        };
+
+        $tick();
+        $rank['admission']['gate_evidence']['G6']['max_idle_arm_wait_seconds'] = 41;
+        $rank['admission']['gate_evidence']['G7']['additional_traders'] = 5;
+        $rank['admission']['gate_evidence']['G7']['candidate_failures'] = [['reason' => 'Five trader slots exhausted']];
+        $rank['declined']['g7_requests'] = 4;
+        if ($selected) {
+            $rank['selected']['score'] = ['h_value' => 45, 'nv' => 460];
+        }
+        $tick();
+
+        $data = CampaignEvent::where('kind', 'mesh_plan')->selectRaw(
+            "json_extract(data, '$.fleet_saturation.allocation.admission.gates.G5.pass') as pass,
+             json_extract(data, '$.fleet_saturation.allocation.admission.gate_evidence.G6.max_idle_arm_wait_seconds') as wait_seconds,
+             json_extract(data, '$.fleet_saturation.allocation.admission.gate_evidence.G7.additional_traders') as trader_count")->sole();
+        $this->assertSame(1, $data->pass);
+        $this->assertSame(10, $data->wait_seconds);
+        $this->assertSame(2, $data->trader_count);
+
+        $rank['admission']['gates']['G5'] = ['pass' => false, 'reason_code' => 'liquidity'];
+        $tick();
+        $this->assertSame(2, CampaignEvent::where('kind', 'mesh_plan')->count());
+        $stored = CampaignEvent::where('kind', 'mesh_plan')->latest('id')->firstOrFail()->data['fleet_saturation']['allocation'];
+        $this->assertSame(['pass' => false, 'reason_code' => 'liquidity'], $stored['admission']['gates']['G5']);
+        $this->assertSame(['staged_request_budget'], $stored['admission']['candidate_g7_failure_codes']);
+        $this->assertSame('Five trader slots exhausted', $stored['admission']['gate_evidence']['G7']['candidate_failures'][0]['reason']);
+        $this->assertSame(['g7_requests' => 4], $stored['declined']);
+    }
+
+    public static function recordedAllocations(): array
+    {
+        return [['selected' => false], ['selected' => true]];
+    }
+
+    #[DataProvider('requestGateCases')]
+    public function test_candidate_request_failure_persists_when_generic_g7_passes(bool $staged, string $code): void
+    {
+        $headroom = 0.8;
+        $episode = $this->fleetAdmissionEpisode(requestHeadroom: $headroom);
+        $yard = 'X1-TEST-ROCK';
+        $this->editFixture(function (&$world) use ($yard) {
+            $world['shipyards'][$yard]['shipTypes'] = [['type' => 'SHIP_LIGHT_HAULER']];
+            $world['shipyards'][$yard]['ships'] = array_values(array_filter($world['shipyards'][$yard]['ships'],
+                fn ($offer) => $offer['type'] === 'SHIP_LIGHT_HAULER'));
+        });
+        $this->seedFleetAdmissionEvidence($episode, $yard);
+        $this->partialMock(TraderAssigner::class)->shouldReceive('assignGreedy')->andReturn(['assignments' => []]);
+
+        $budget = app(RequestBudget::class);
+        $usage = $budget->usage(agentSymbol: $this->agent->name);
+        $ordinaryHour = (int) floor($headroom * config('gameplay.host_tier2_4_per_minute') * 60) - 220;
+        $mock = $this->partialMock(RequestBudget::class);
+        $mock->shouldReceive('usage')->andReturnUsing(function (?string $token = null, ?string $account = null, ?string $agentSymbol = null,
+            bool $requireTelemetry = false) use ($usage, $ordinaryHour) {
+            $result = $usage;
+            if (! $requireTelemetry) {
+                $result['agent']['tier2_4_last_hour'] = $ordinaryHour;
+            }
+
+            return $result;
+        });
+        if ($staged) {
+            $saturation = $this->partialMock(CampaignSaturation::class);
+            $saturation->shouldReceive('requests')->andReturnUsing(fn ($agent, $policy, $ignoreRun = null, $incomingType = null,
+                $projectedRequests = null, $usage = null) => [
+                    'pass' => $projectedRequests === null, 'reason' => $projectedRequests === null ? null : 'Fixture staged exception with 4 trader slots',
+                    'staged' => true, 'projected_arm_requests' => $projectedRequests ?? 220,
+                ]);
+        }
+        $this->tickC0();
+        $allocation = CampaignEvent::where('kind', 'mesh_plan')->sole()->data['fleet_saturation']['allocation'];
+
+        $this->assertNull($allocation['selected']);
+        $this->assertSame(['pass' => true, 'reason_code' => null], $allocation['admission']['gates']['G7']);
+        $this->assertSame([$code], $allocation['admission']['candidate_g7_failure_codes'], json_encode($allocation));
+        $this->assertSame(['g7_requests' => 1], $allocation['declined']);
+    }
+
+    public static function requestGateCases(): array
+    {
+        return [[false, 'ordinary_hour_headroom'], [true, 'staged_request_budget']];
+    }
+
+    private function seedFleetAdmissionEvidence(CampaignEpisode $episode, string $yard): void
+    {
+        $this->schedulerPass();
+        app(AgentSynchronizer::class)->observe($this->agent, 'shipyard', $yard, $this->world()['shipyards'][$yard]);
+        foreach (Ship::where('snapshot->frame->symbol', 'FRAME_PROBE')->get() as $probe) {
+            $probe->update(['stationed_waypoint' => $probe->snapshot['nav']['waypointSymbol']]);
+        }
+        for ($i = 1; $i <= 3; $i++) {
+            app(CampaignControl::class)->event($episode->grant(), $episode, 'load_result', [
+                'proof' => true, 'proof_eligible' => true, 'fully_settled' => true,
+                'buyer' => 'X1-TEST-PORT', 'source' => $yard, 'good' => 'IRON_ORE', 'net' => 30000,
+                'predicted_margin' => 30000, 'realized_ratio' => 1.0, 'run_id' => $i,
+                'finished_at' => now()->subMinutes(5 - $i)->toIso8601String(), 'units' => 20,
+            ]);
+        }
+    }
+
+    private function fleetAdmissionEpisode(bool $extraction = false, float $requestHeadroom = 0.8): CampaignEpisode
+    {
+        $this->setUpSaturation();
+        $body = Yaml::parseFile(base_path('campaigns/weekly-system-saturation-fleet.yaml'));
+        $body['agent']['symbol'] = $this->agent->name;
+        $body['fleet']['auto_arm']['revision_hash'] = $this->armRevision->content_hash;
+        $body['fleet']['haulers']['request_headroom'] = $requestHeadroom;
+        $body['fleet']['saturation']['extraction']['enabled'] = $extraction;
+
+        return $this->primary(revision: app(CampaignPlaybook::class)->import(Yaml::dump($body, 12)));
     }
 
     private function load(CampaignEpisode $episode, int $minutes, int $net, int $run): void

@@ -50,6 +50,13 @@ final class FleetAllocator
             'h_value' => $horizon, 'g' => $gain, 'nv' => $value, 'rho' => $density, 'payback' => $payback,
             'within_ceilings' => $withinCeilings, 'inflation_overrun' => $overBand,
             'normal' => $normal, 'g8' => $g8, 'canary' => $canary,
+            'g8_applicable' => $class === 'trader',
+            'g8_reason' => match (true) {
+                $g8 => null,
+                $hoursToReset < 24.0 || $horizon <= 0.0 => 'time_to_reset',
+                $reference <= 0 => 'nonpositive_reference_yield',
+                default => 'payback',
+            },
             'pass' => $g8 && ($canaryMode ? $canary : $normal),
         ];
     }
@@ -132,7 +139,8 @@ final class FleetAllocator
      */
     public function rank(array $candidates, array $context): array
     {
-        $result = ['selected' => null, 'ranked' => [], 'capital_binds' => false, 'slot_cash' => 0, 'wait_for_trader' => false, 'reason' => null];
+        $result = ['selected' => null, 'ranked' => [], 'capital_binds' => false, 'slot_cash' => 0, 'wait_for_trader' => false, 'reason' => null,
+            'declined' => [], 'g8_status' => null, 'g8_later_status' => null];
         if ($context['unresolved_g2'] ?? false) {
             return array_replace($result, ['reason' => 'unresolved_g2']);
         }
@@ -151,7 +159,15 @@ final class FleetAllocator
         $economic = $canaries = $heldTraders = $possible = [];
 
         foreach ($candidates as $candidate) {
-            if (! ($candidate['eligible'] ?? true) || ! ($candidate['request_fits'] ?? true) || ! ($candidate['fundable'] ?? true)) {
+            $decline = match (true) {
+                ! ($candidate['eligible'] ?? true) => 'ineligible',
+                ! ($candidate['request_fits'] ?? true) => 'g7_requests',
+                ! ($candidate['fundable'] ?? true) => 'unfundable_input',
+                default => null,
+            };
+            if ($decline !== null) {
+                $result['declined'][$decline] = ($result['declined'][$decline] ?? 0) + 1;
+
                 continue;
             }
             $candidate['class'] = $this->hulls->spec($candidate['type'] ?? '')['class'] ?? $candidate['class'] ?? null;
@@ -168,6 +184,7 @@ final class FleetAllocator
         foreach ([1, 2] as $tier) {
             usort($probeTiers[$tier], fn (array $left, array $right) => $probeKey($left) <=> $probeKey($right));
         }
+        ksort($result['declined']);
         if ($probeTiers[1] !== []) {
             return array_replace($result, ['selected' => $probeTiers[1][0], 'ranked' => $probeTiers[1], 'reason' => 'tier_1_probe']);
         }
@@ -183,7 +200,11 @@ final class FleetAllocator
             $candidate['horizon_after_delivery_hours'] = $horizon;
             $canaryMode = $candidate['canary'] ?? false;
             $score = $this->evaluateCandidate($candidate, $shadow, $reset, $horizon, $reference, $hurdle, $canaryMode);
+            $result['g8_status'] = $this->aggregateG8($result['g8_status'], $score);
             if (! $score['pass']) {
+                $decline = $score['g8'] ? 'score_other' : 'g8';
+                $result['declined'][$decline] = ($result['declined'][$decline] ?? 0) + 1;
+
                 continue;
             }
             $candidate['score'] = $score;
@@ -194,9 +215,13 @@ final class FleetAllocator
                 if (($context['phase'] ?? 1) >= 2 && $freeCash >= 1000000 && $fundable && $holdHours <= 0
                     && in_array($class, ['miner', 'siphon'], true) && ! in_array($class, $context['canaries_used'] ?? [], true)) {
                     $canaries[] = $candidate;
+                } else {
+                    $result['declined']['canary_ineligible'] = ($result['declined']['canary_ineligible'] ?? 0) + 1;
                 }
             } elseif ($holdHours <= 0) {
                 $economic[] = $candidate;
+            } else {
+                $result['declined']['held'] = ($result['declined']['held'] ?? 0) + 1;
             }
             if ($candidate['class'] === 'trader' && ! $canaryMode && (! $fundable || $holdHours > 0)) {
                 $heldTraders[] = $candidate;
@@ -206,7 +231,12 @@ final class FleetAllocator
         $offers = array_map(fn (array $candidate) => [$candidate['slot'], $candidate['cash_spend'], $candidate['capital_weight']], $economic);
         $slotCash = $this->slotCapitalRequirement($offers, $baseCapital, $minCapital);
         $capitalBinds = $offers !== [] && $slotCash > $freeCash;
-        $economic = array_values(array_filter($economic, fn (array $candidate) => $candidate['cash_required'] <= $freeCash));
+        $fundable = array_values(array_filter($economic, fn (array $candidate) => $candidate['cash_required'] <= $freeCash));
+        if (($unfundable = count($economic) - count($fundable)) > 0) {
+            $result['declined']['unfundable'] = $unfundable;
+        }
+        $economic = $fundable;
+        ksort($result['declined']);
         $scoreKey = fn (array $candidate) => [...($capitalBinds ? [-$candidate['score']['rho']] : []), -$candidate['score']['nv'], ...$this->tieKey($candidate)];
         usort($economic, fn (array $left, array $right) => $scoreKey($left) <=> $scoreKey($right));
         $canaryKey = fn (array $candidate) => [$candidate['class'] === 'miner' ? 0 : 1, -$candidate['score']['nv'], ...$this->tieKey($candidate)];
@@ -224,6 +254,7 @@ final class FleetAllocator
                 }
                 $wait = max($trader['hold_hours'] ?? 0.0, max(0, $trader['cash_gate'] - $cash) / $savingRate);
                 $later = $this->evaluateCandidate($trader, $shadow, $reset - $wait, $trader['horizon_after_delivery_hours'] - $wait, $reference, $hurdle);
+                $result['g8_later_status'] = $this->aggregateG8($result['g8_later_status'], $later);
                 if ($later['pass'] && ($selected === null || $this->shouldWaitForTrader($cash, $savingRate, $trader['cash_gate'],
                     $selected['cash_required'], $trader['score']['g'], $selected['score']['g'],
                     $selected['deploy_hours'] ?? 0.0, $trader['hold_hours'] ?? 0.0))) {
@@ -233,6 +264,21 @@ final class FleetAllocator
         }
 
         return $result;
+    }
+
+    private function aggregateG8(?string $current, array $score): ?string
+    {
+        if (! $score['g8_applicable']) {
+            return $current;
+        }
+        $observed = $score['g8'] ? 'pass' : $score['g8_reason'];
+        foreach (['pass', 'time_to_reset', 'nonpositive_reference_yield', 'payback'] as $status) {
+            if ($current === $status || $observed === $status) {
+                return $status;
+            }
+        }
+
+        return $current;
     }
 
     private function tieKey(array $candidate): array

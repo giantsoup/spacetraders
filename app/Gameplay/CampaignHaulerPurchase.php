@@ -184,11 +184,17 @@ class CampaignHaulerPurchase
         if ($ship['nav']['status'] === 'IN_TRANSIT') {
             return AutomationStep::wait(max(CarbonImmutable::parse($ship['nav']['route']['arrival']), CarbonImmutable::now()->addSeconds(5)));
         }
+        $reissue = false;
         $action = ShipAction::where('automation_run_id', $run->id)->where('command', 'buy_ship')->latest('id')->first();
         if ($action) {
-            return CampaignProbeBootstrap::deliveredShip($action) && empty($action->outcome['configuration_mismatch'])
-                ? AutomationStep::trip()
-                : AutomationStep::blocked('This fleet purchase already has a pending, failed or reviewed attempt.');
+            if (CampaignProbeBootstrap::deliveredShip($action) && empty($action->outcome['configuration_mismatch'])) {
+                return AutomationStep::trip();
+            }
+            $blocker = app(CampaignProbeBootstrap::class)->reissueBlocker($run, 'This fleet purchase already has a pending, failed or reviewed attempt.');
+            if ($blocker !== null) {
+                return AutomationStep::blocked($blocker);
+            }
+            $reissue = true;
         }
         if (! empty($run->totals['purchased_ships'])) {
             return AutomationStep::trip();
@@ -225,10 +231,17 @@ class CampaignHaulerPurchase
         }
 
         $continuation = $route['continuation_ceiling'];
+        if ($reissue && ! app(CommandRules::class)->refreshCredits($agent, $run, true, reconcile: true)) {
+            throw new GameException('Purchase balance refresh deferred.', retryAfter: 30);
+        }
         $rank = app(CampaignSaturation::class)->rankFleetPurchases($grant, $episode, $agent, [$plan['allocation_candidate']], $run->id,
             exact: [$type, $yard, $ship['symbol']], deliveryFuel: $continuation, approvedCeiling: $plan['max_price']);
         if (! $rank['selected'] || $agent->credits < $price + $reserve + $continuation) {
             return AutomationStep::blocked('Fleet purchase no longer clears the allocation gates and additive reserve.');
+        }
+
+        if ($reissue && ! app(CampaignSafety::class)->purchaseCutoffsOpen($run->refresh(), marginSeconds: 30)) {
+            return AutomationStep::blocked('Fleet purchase authority or purchaser configuration changed.');
         }
 
         return AutomationStep::act('buy_ship', ['shipType' => $type, 'waypointSymbol' => $yard, 'maxTotal' => $price,

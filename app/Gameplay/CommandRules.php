@@ -165,7 +165,8 @@ class CommandRules
         return $this->sync->refreshShip($agent, $run->ship_symbol, fresh: true)->snapshot;
     }
 
-    public function refreshCredits(Agent $agent, AutomationRun $run, bool $creditWrite, bool $reconcile = false, ?int $except = null): void
+    /** Whether the provider balance was refreshed. */
+    public function refreshCredits(Agent $agent, AutomationRun $run, bool $creditWrite, bool $reconcile = false, ?int $except = null): bool
     {
         $safety = app(CampaignSafety::class);
         $policy = $safety->saturationPolicy($run);
@@ -173,13 +174,15 @@ class CommandRules
         $unresolved = $safety->uncertainCredit($agent) || app(StateChain::class)->hasUnresolvedCreditAction($agent, $except);
         $mismatch = $safety->unexplainedBalance($agent);
         if ($unresolved || (! $reconcile && ! $mismatch && ((! empty($policy['compression']) && (! $creditWrite || $fresh)) || ($except !== null && $fresh)))) {
-            return;
+            return false;
         }
         if (app(HostLock::class)->holdsShared('agent-'.$agent->id)) {
-            return;
+            return false;
         }
         $agent->update(['credits' => $this->api->agent($agent, fresh: true)['credits'], 'synced_at' => now()]);
         app(CreditAccounting::class)->baseline($agent);
+
+        return true;
     }
 
     /**

@@ -180,6 +180,8 @@ class CampaignDirector
                     $busy[] = $purchase->ship_symbol;
                     $this->decision($grant, $episode, $agent, $considered, $purchase->strategy, $purchase->id);
                 }
+            } else {
+                $this->recordPurchaseSkip('deadline');
             }
             $routine = $hasMesh && microtime(true) < $this->deadline
                 && ! in_array(RequestShadowPrice::T6, $shadow['paused_tiers'], true) && $shadow['residual_excess'] === 0;
@@ -193,6 +195,17 @@ class CampaignDirector
 
                 return;
             }
+        } else {
+            $this->recordPurchaseSkip($status['mode'] !== 'normal' ? 'governor_mode' : 'deadline');
+        }
+        if ($hasMesh && ! isset($this->meshPolling['routine'])) {
+            $skip = match (true) {
+                $status['mode'] !== 'normal' => 'governor_mode',
+                microtime(true) >= $this->deadline => 'pass_deadline',
+                in_array(RequestShadowPrice::T6, $shadow['paused_tiers'], true) => 'shadow_t6_paused',
+                default => 'residual_excess',
+            };
+            $this->meshPolling['routine'] = ['exit' => $this->meshStageExit($episode, 'routine', 'stage_skipped') + ['skip_reason' => $skip]];
         }
         $this->recordMeshPlan($grant, $episode, [], [], []);
         if ($started === []) {
@@ -1268,9 +1281,17 @@ class CampaignDirector
         $bootstrap = app(CampaignProbeBootstrap::class);
         $governor = app(MeshGovernor::class);
         $status = $governor->evaluate($agent, $episode);
-        if ($status['mode'] !== 'normal' || in_array(RequestShadowPrice::T5, $status['shadow_price']['paused_tiers'], true)
-            || $status['shadow_price']['residual_excess'] > 0 || $bootstrap->reservations($agent)->isNotEmpty()
-            || CampaignGrant::pendingFor($grant->user_id, $agent->name)->exists()) {
+        $skip = match (true) {
+            $status['mode'] !== 'normal' => 'governor_mode',
+            in_array(RequestShadowPrice::T5, $status['shadow_price']['paused_tiers'], true) => 'shadow_t5_paused',
+            $status['shadow_price']['residual_excess'] > 0 => 'residual_excess',
+            $bootstrap->reservations($agent)->isNotEmpty() => 'purchase_reservation',
+            CampaignGrant::pendingFor($grant->user_id, $agent->name)->exists() => 'pending_grant',
+            default => null,
+        };
+        if ($skip !== null) {
+            $this->recordPurchaseSkip($skip);
+
             return null;
         }
         app(CampaignControl::class)->autoArm($grant, $episode, $agent);
@@ -1291,19 +1312,27 @@ class CampaignDirector
         $tier1 = $allocator->rank(array_filter($probes, fn (array $probe) => $probe['tier'] === 1), [])['selected'];
         if ($tier1 !== null) {
             try {
-                return $this->startFleetProbe($grant, $episode, $agent, $tier1);
+                $run = $this->startFleetProbe($grant, $episode, $agent, $tier1);
+                $this->recordPurchaseSkip('tier1_probe_started');
+
+                return $run;
             } catch (GameException $exception) {
                 $considered[] = ['strategy' => 'buy_probe', 'yard' => $tier1['yard'], 'rejected' => $exception->getMessage()];
                 if ($exception->retryAfter > 0 || $exception->uncertain) {
+                    $this->recordPurchaseSkip('tier1_probe_deferred');
+
                     return null;
                 }
             }
         }
         if (microtime(true) >= $this->deadline) {
+            $this->recordPurchaseSkip('deadline');
+
             return null;
         }
         $rank = app(CampaignSaturation::class)->rankFleetPurchases($grant, $episode, $agent, deadline: $this->deadline);
         $this->saturationDiagnostics['fleet_saturation']['allocation'] = ['reason' => $rank['reason'] ?? null,
+            'admission' => $rank['admission'] ?? null, 'declined' => $rank['declined'] ?? [],
             'capital_binds' => $rank['capital_binds'] ?? false, 'slot_cash' => $rank['slot_cash'] ?? 0,
             'selected' => $rank['selected'] ? array_intersect_key($rank['selected'], array_flip(['type', 'yard', 'purchaser', 'slot', 'score'])) : null];
         $candidate = $rank['selected'];
@@ -1326,7 +1355,12 @@ class CampaignDirector
                 }
             }
         }
-        if ($rank['wait_for_trader'] || microtime(true) >= $this->deadline) {
+        if ($rank['wait_for_trader']) {
+            return null;
+        }
+        if (microtime(true) >= $this->deadline) {
+            $this->recordPurchaseSkip('deadline');
+
             return null;
         }
         $tier2 = $allocator->rank(array_filter($probes, fn (array $probe) => $probe['tier'] === 2), [])['selected'];
@@ -1340,6 +1374,11 @@ class CampaignDirector
         FleetMetrics::withWorkload('discovery', fn () => $this->discoverIfDue($episode, $agent));
 
         return null;
+    }
+
+    private function recordPurchaseSkip(string $reason): void
+    {
+        $this->saturationDiagnostics['fleet_saturation']['allocation']['admission']['skipped'][$reason] = true;
     }
 
     private function startFleetProbe(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $candidate): AutomationRun
@@ -3805,7 +3844,8 @@ class CampaignDirector
     private function pollMesh(CampaignEpisode $episode, Agent $agent, string $stage, ?string $buyer = null): void
     {
         if (microtime(true) >= $this->deadline) {
-            $this->meshPolling[$stage] = ['hold' => 'pass_deadline'];
+            $this->meshPolling[$stage] = ['hold' => 'pass_deadline',
+                'exit' => $this->meshStageExit($episode, $stage, 'pass_deadline_before_stage')];
 
             return;
         }
@@ -3813,8 +3853,25 @@ class CampaignDirector
         $this->meshPassEvidence ??= app(FleetMetrics::class)->meshPassEvidence($agent->name);
         $passes = $this->meshPassEvidence['eligible'];
         $capacity = $episode->opened_at->lte(now()->subHour()) && $passes > 0 ? $passes * $policy['reads_per_pass'] : null;
-        $this->meshPolling[$stage] = app(MeshPoller::class)->refresh($episode, $agent, $this->marketReads, $this->deadline,
-            $buyer ?? $this->activeBuyer($episode), $stage, $this->meshPurchaseYards, $capacity, $this->detailedMarketReads);
+        $exceptionReport = null;
+        try {
+            $this->meshPolling[$stage] = app(MeshPoller::class)->refresh($episode, $agent, $this->marketReads, $this->deadline,
+                $buyer ?? $this->activeBuyer($episode), $stage, $this->meshPurchaseYards, $capacity, $this->detailedMarketReads, $exceptionReport);
+        } catch (GameException $exception) {
+            $this->meshPolling[$stage] = ['exit' => $exceptionReport ?? $this->meshStageExit($episode, $stage, 'exception') + [
+                'exception_class' => $exception::class, 'retry_after' => $exception->retryAfter,
+                'api_code' => $exception->apiCode, 'http_status' => $exception->httpStatus, 'message' => $exception->getMessage(),
+            ]];
+            throw $exception;
+        }
+    }
+
+    private function meshStageExit(CampaignEpisode $episode, string $stage, string $reason): array
+    {
+        return ['reason' => $reason, 'stage' => $stage,
+            'remaining_ms' => is_finite($this->deadline) ? max(0, (int) round(($this->deadline - microtime(true)) * 1000)) : null,
+            'reads_before' => count($this->marketReads), 'reads_after' => count($this->marketReads),
+            'reads_cap' => CampaignMesh::policy($episode)['reads_per_pass'] ?? null];
     }
 
     private function dispatchSaturationMesh(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array &$busy, array &$reserved, array &$considered): bool
@@ -3826,10 +3883,12 @@ class CampaignDirector
         $plan = [];
         $stop = false;
         $held = [];
+        $skipped = [];
         for ($iteration = 0; $iteration <= 2 && $started < $budget && microtime(true) < $this->deadline; $iteration++) {
-            $plan = $mesh->dispatchPlan($episode, $agent, $busy, $reserved, $this->activeBuyer($episode), $pins);
+            $plan = $mesh->dispatchPlan($episode, $agent, [...$busy, ...$skipped], $reserved, $this->activeBuyer($episode), $pins);
             $probes = collect($mesh->probes($episode, $agent))->keyBy('symbol');
             $freshPins = [];
+            $iterationSkipped = [];
             $floor = $mesh->departureEvidence($episode, $agent);
             $plan['verified_hubs'] = $floor['observers'];
             $plan['queued_departures'] = $floor['departures'];
@@ -3879,17 +3938,27 @@ class CampaignDirector
                     } elseif ($exception->retryAfter > 0) {
                         $hold += ['exception_class' => $exception::class, 'retry_after' => $exception->retryAfter];
                     }
+                    if ($exception instanceof ActionInFlight) {
+                        $hold += ['blocker_scope' => $exception->scope, 'blocker_kind' => $exception->kind, 'blocking_ships' => $exception->ships];
+                    }
                     $held[] = $hold;
                     if (str_starts_with($exception->getMessage(), 'Mesh G3 floor')) {
                         $freshPins[$ship['symbol']] = $move['origin'];
                     }
-                    if ($exception->retryAfter > 0 || $exception->uncertain) {
+                    if ($this->shipLocalMeshBlocker($exception, $ship['symbol'])) {
+                        $iterationSkipped[] = $ship['symbol'];
+
+                        continue;
+                    }
+                    if ($exception instanceof ActionInFlight || $exception instanceof RequestDeferred || $exception->retryAfter > 0 || $exception->uncertain) {
                         $stop = true;
                         break;
                     }
                 }
             }
-            if ($stop || array_diff_key($freshPins, $pins) === []) {
+            $newSkipped = array_diff($iterationSkipped, $skipped);
+            $skipped = array_values(array_unique([...$skipped, ...$iterationSkipped]));
+            if ($stop || (array_diff_key($freshPins, $pins) === [] && $newSkipped === [])) {
                 break;
             }
             $pins += $freshPins;
@@ -3901,6 +3970,12 @@ class CampaignDirector
         $this->recordMeshPlan($grant, $episode, $plan, $pins, $held);
 
         return $started > 0;
+    }
+
+    private function shipLocalMeshBlocker(GameException $exception, string $ship): bool
+    {
+        return $exception instanceof ActionInFlight && $exception->shipLocalPending()
+            && ! $exception->uncertain && $exception->ships === [$ship];
     }
 
     private function launchMeshScout(CampaignGrant $grant, CampaignEpisode $episode, Agent $agent, array $ship, string $destination,
@@ -3950,6 +4025,14 @@ class CampaignDirector
         $stable = $payload;
         $stable['holds'] = array_map(fn ($hold) => array_diff_key($hold,
             array_flip(['delay_seconds', 'remaining_deadline_seconds', 'retry_after'])), $holds);
+        if (isset($stable['fleet_saturation']['allocation'])) {
+            $allocation = &$stable['fleet_saturation']['allocation'];
+            unset($allocation['declined'], $allocation['selected']['score']['h_value'], $allocation['selected']['score']['nv']);
+            if (isset($allocation['admission'])) {
+                $allocation['admission'] = $this->stablePurchaseAdmission($allocation['admission']);
+            }
+            unset($allocation);
+        }
         $hash = hash('sha256', json_encode($stable, JSON_THROW_ON_ERROR));
         if (($state['mesh_plan_hash'] ?? null) !== $hash) {
             app(CampaignControl::class)->event($grant, $episode, 'mesh_plan', $payload + ['elapsed_ms' => $plan['elapsed_ms'] ?? null]);
@@ -3961,6 +4044,28 @@ class CampaignDirector
         if ($state !== ($episode->state ?? [])) {
             $episode->update(['state' => $state]);
         }
+    }
+
+    private function stablePurchaseAdmission(array $admission): array
+    {
+        $stable = array_intersect_key($admission, array_flip(['empty', 'primary_trade_proved']));
+        if (isset($admission['gates'])) {
+            $gates = array_map(fn (array $gate) => array_intersect_key($gate, ['pass' => true, 'reason_code' => true]), $admission['gates']);
+            ksort($gates);
+            $stable['gates'] = $gates;
+        }
+        if (isset($admission['g8_later'])) {
+            $stable['g8_later'] = array_intersect_key($admission['g8_later'], ['pass' => true, 'reason_code' => true]);
+        }
+        foreach (['candidate_g7_failure_codes', 'skipped'] as $key) {
+            if (isset($admission[$key])) {
+                $codes = $key === 'skipped' ? array_keys($admission[$key]) : $admission[$key];
+                sort($codes);
+                $stable[$key] = $codes;
+            }
+        }
+
+        return $stable;
     }
 
     /** @return list<string> Other waypoints in the ship's system at exactly its coordinates. */
@@ -4179,7 +4284,10 @@ class CampaignDirector
                 return true;
             } catch (GameException $exception) {
                 FleetMetrics::observe($exception);
-                if ($exception->retryAfter > 0 || $exception->uncertain) {
+                if ($this->shipLocalMeshBlocker($exception, $ship['symbol'])) {
+                    continue;
+                }
+                if ($exception instanceof ActionInFlight || $exception instanceof RequestDeferred || $exception->retryAfter > 0 || $exception->uncertain) {
                     break;
                 }
             }

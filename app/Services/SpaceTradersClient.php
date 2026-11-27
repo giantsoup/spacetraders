@@ -121,6 +121,8 @@ class SpaceTradersClient
             $options['query'] = implode('&', $pairs);
         }
         if ($beforeTransport !== null) {
+            // For purchases, the final check sees stops committed before it acquires the database writer.
+            // HTTP runs outside that transaction, so a later stop can still commit before send().
             $beforeTransport();
         }
         $category = FleetMetrics::category($method, $path);

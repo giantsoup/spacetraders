@@ -1308,7 +1308,7 @@ class FleetSaturationTransportTest extends TestCase
     #[DataProvider('driftBoundaries')]
     public function test_drift_positioning_restores_cruise_after_arrival_or_a_refused_navigation(string $case): void
     {
-        $late = $case === 'late dispatch';
+        $late = in_array($case, ['late dispatch', 'expired intent'], true);
         $lateArrival = $case === 'late receipt';
         $this->campaign(true);
         $this->world['ships'][0]['nav']['status'] = 'IN_ORBIT';
@@ -1336,8 +1336,11 @@ class FleetSaturationTransportTest extends TestCase
         $this->advance($run);
         $this->assertSame('DRIFT', $this->fields()['nav']['value']['flightMode']);
         if ($late) {
-            $this->afterWriteReservation(function () use ($run) {
-                $this->assertTrue(ShipAction::where('automation_run_id', $run->id)->where('command', 'navigate')->where('state', 'sending')->exists());
+            $this->afterWriteReservation(function () use ($run, $case) {
+                $pending = ShipAction::where('automation_run_id', $run->id)->where('command', 'navigate')->where('state', 'sending')->sole();
+                if ($case === 'expired intent') {
+                    $pending->update(['expires_at' => now()->subSecond()]);
+                }
                 $this->at(1);
             });
         }
@@ -1347,6 +1350,7 @@ class FleetSaturationTransportTest extends TestCase
             $failed = ShipAction::where('automation_run_id', $run->id)->where('command', 'navigate')->sole();
             $this->assertSame('rejected', $failed->state->value);
             $this->assertNull($failed->sent_at);
+            $this->assertArrayNotHasKey('expired_unsent', $failed->outcome);
             $this->assertSame('cleanup', $run->totals['position_phase']);
         } else {
             $this->assertSame('IN_TRANSIT', $this->fields()['nav']['value']['status']);
@@ -1379,6 +1383,7 @@ class FleetSaturationTransportTest extends TestCase
         return [
             '6015s conservative arrival exactly on bound' => ['exact'],
             'one second late after switching to DRIFT' => ['late dispatch'],
+            'expired intent at transport' => ['expired intent'],
             'sent arrival exceeds the conservative bound' => ['late receipt'],
         ];
     }
@@ -2637,13 +2642,23 @@ class FleetSaturationTransportTest extends TestCase
         $this->assertSame(0, $chain->outstandingExposure($this->agent));
     }
 
-    public function test_legacy_advance_preserves_the_local_balance_during_an_uncertain_credit_write(): void
+    #[TestWith(['running', true])]
+    #[TestWith(['running', false])]
+    #[TestWith(['stopping', false])]
+    #[TestWith(['blocked', false])]
+    public function test_legacy_advance_preserves_the_local_balance_during_an_uncertain_credit_write(string $state, bool $withArm): void
     {
-        $this->campaign(true);
+        $this->campaign($withArm);
         $this->seedWorld();
-        $arm = $this->armEpisode('LOCAL-2');
+        $arm = $withArm ? $this->armEpisode('LOCAL-2') : null;
         $run = $this->campaignRun('trade', shipSymbol: 'LOCAL-2');
-        $run->update(['plan_version' => 3, 'campaign_episode_id' => $arm->id]);
+        $run->update(['plan_version' => 3, 'campaign_episode_id' => $arm?->id, 'state' => $state, 'next_action_at' => now(),
+            'blocked_reason' => $state === 'blocked' ? 'Existing review' : null,
+            'stop_requested_at' => $state === 'stopping' ? now() : null]);
+        if ($state !== 'running') {
+            $run->update(['totals' => $run->totals + ['accounting' => ['state' => 'saved']]]);
+        }
+        $original = $run->fresh();
         $write = $this->action('refuel', ['units' => 10], state: 'uncertain', ship: self::SHIP);
         $write->update(['sent_at' => now()]);
         $stored = $this->agent->credits;
@@ -2655,8 +2670,16 @@ class FleetSaturationTransportTest extends TestCase
 
         $this->assertSame($stored, $this->agent->fresh()->credits);
         $this->assertSame($syncedAt, $this->agent->fresh()->synced_at->toIso8601String());
-        $this->assertSame('blocked', $run->state->value);
-        $this->assertSame('uncertain_action', $arm->grant()->pause_reason);
+        $this->assertSame($withArm ? 'stopping' : ($state === 'running' ? 'blocked' : $state), $run->state->value);
+        if ($withArm) {
+            $this->assertSame('uncertain_action', $arm->grant()->pause_reason);
+        }
+        if ($state !== 'running') {
+            $this->assertEquals($original->next_action_at, $run->next_action_at);
+            $this->assertEquals($original->stop_requested_at, $run->stop_requested_at);
+            $this->assertSame($original->blocked_reason, $run->blocked_reason);
+            $this->assertSame($original->totals, $run->totals);
+        }
         $this->assertNotContains('/my/agent', array_column($this->world['calls'], 'path'));
         $this->assertCount(0, $this->world['writes']);
     }

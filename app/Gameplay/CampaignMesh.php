@@ -203,9 +203,10 @@ class CampaignMesh
         $pool = array_column($probes, null, 'symbol');
         $runs = AutomationRun::where('active_agent_id', $agent->id)->where('reset_id', $agent->reset_id)
             ->where('campaign_episode_id', $episode->id)->whereIn('ship_symbol', array_keys($pool))
-            ->where('strategy', 'scout')->where('plan->mesh_work', 'market')->where('plan->destination', $destination)
+            ->where('strategy', 'scout')->whereNotNull('plan->mesh_work')->where('plan->destination', $destination)
             ->whereIn('state', [RunState::Running, RunState::Waiting])->whereNotNull('started_at')
-            ->whereNull('stop_requested_at')->where('expires_at', '>', now())->get();
+            ->whereNull('stop_requested_at')->where('expires_at', '>', now())->get()
+            ->reject(fn (AutomationRun $run) => self::isYardMove($run->plan));
         $now = now()->timestamp;
         $planner = app(MeshPlanner::class);
         foreach ($runs as $run) {
@@ -367,6 +368,15 @@ class CampaignMesh
         return ! preg_match('/Mesh G3 floor|Mesh (movement|pool) authority|Mesh destination is occupied|authority|allowance|request budget|reconcil|uncertain|campaign cutoff|freshness|expired|stopped|purchase cutoff|run cutoff/i', $reason);
     }
 
+    public const YARD_WORK = ['yard', 'purchase', 'hauler_purchase', 'buy_fleet'];
+
+    /** Whether mesh movement must end at a verified shipyard. */
+    public static function isYardMove(array $plan): bool
+    {
+        return in_array($plan['mesh_work'] ?? null, self::YARD_WORK, true)
+            || ($plan['observe_kind'] ?? null) === 'shipyard';
+    }
+
     public function yardWork(CampaignEpisode $episode, Agent $agent, ?int $except = null): bool
     {
         return AutomationRun::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
@@ -382,8 +392,8 @@ class CampaignMesh
             if ($run->agent_id !== $agent->id || $run->reset_id !== $agent->reset_id || $run->started_at || $run->active_agent_id
                 || ! in_array($run->state, [RunState::Preview, RunState::Stopped], true)
                 || ShipAction::where('automation_run_id', $run->id)->where(fn ($query) => $query
-                    ->whereIn('state', ['pending', 'sending', 'uncertain', 'confirmed', 'acknowledged'])->orWhereNotNull('sent_at')
-                    ->orWhereNotNull('outcome->response_received_at')->orWhereNotNull('outcome->body_sha256'))->exists()) {
+                    ->whereIn('state', ['pending', 'sending', 'uncertain', 'confirmed', 'acknowledged'])->orWhereNotNull('sent_at'))->exists()
+                || ShipAction::where('automation_run_id', $run->id)->get(['id', 'command', 'outcome'])->contains(ShipCommandExecutor::hasReceiptEvidence(...))) {
                 return false;
             }
             if ($run->state === RunState::Preview) {

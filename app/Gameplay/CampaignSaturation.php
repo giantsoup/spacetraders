@@ -223,14 +223,32 @@ class CampaignSaturation
         $body = $grant->revision()->body;
         $policy = CampaignPlaybook::saturationPolicy($body);
         $allocator = app(FleetAllocator::class);
+        $admission = ['empty' => null, 'primary_trade_proved' => null, 'gates' => [], 'gate_evidence' => [],
+            'candidate_g7_failure_codes' => []];
         if (! $policy || microtime(true) >= ($deadline ?? INF)) {
-            return $allocator->rank([], []);
+            $admission['empty'] = $policy ? 'deadline' : 'no_policy';
+
+            return $allocator->rank([], []) + ['admission' => $admission];
         }
 
         $gates = $this->evaluate($grant, $episode, $agent, ignoreRun: $ignoreRun, offerIndependentOnly: true, deadline: $deadline)['gates'];
-        if (collect($gates)->only(['G1', 'G2', 'G3', 'G6', 'G9'])->contains(fn (array $gate) => ! $gate['pass'])
-            || ! $this->primaryTradeProved($agent, $body['trade']['proof']['min_realized_ratio'])) {
-            return $allocator->rank([], ['unresolved_g2' => ! $gates['G2']['pass']]);
+        ksort($gates);
+        foreach ($gates as $key => $gate) {
+            $admission['gates'][$key] = $this->purchaseGateVerdict($key, $gate);
+        }
+        $admission['gate_evidence'] = $gates;
+        $failed = collect($gates)->only(['G1', 'G2', 'G3', 'G6', 'G9'])->reject(fn (array $gate) => $gate['pass']);
+        if ($failed->isNotEmpty()) {
+            $admission['empty'] = $failed->keys()->all() === ['G2'] ? 'unresolved_g2' : 'gates';
+
+            return $allocator->rank([], ['unresolved_g2' => ! $gates['G2']['pass']]) + ['admission' => $admission];
+        }
+
+        $admission['primary_trade_proved'] = $this->primaryTradeProved($agent, $body['trade']['proof']['min_realized_ratio']);
+        if (! $admission['primary_trade_proved']) {
+            $admission['empty'] = 'primary_trade_unproved';
+
+            return $allocator->rank([], []) + ['admission' => $admission];
         }
 
         $bootstrap = app(CampaignProbeBootstrap::class);
@@ -239,7 +257,9 @@ class CampaignSaturation
         try {
             $parts = $bootstrap->reserveParts($agent, $grant, $haulers, $ignoreRun, episode: $episode);
         } catch (GameException) {
-            return array_replace($allocator->rank([], []), ['reason' => 'unknown_commitments']);
+            $admission['empty'] = 'unknown_commitments';
+
+            return array_replace($allocator->rank([], []), ['reason' => 'unknown_commitments', 'admission' => $admission]);
         }
         $frames = $bootstrap->traderFrames($agent, $episode);
         $weight = $haulers['working_capital_per_trader'];
@@ -261,7 +281,9 @@ class CampaignSaturation
         $candidates = $candidates ?: $this->fleetOffers($episode, $agent, $policy, $ships, $exact, $ignoreRun);
         foreach ($candidates as $candidate) {
             if (microtime(true) >= ($deadline ?? INF)) {
-                return $allocator->rank([], []) + ['search_incomplete' => true];
+                $admission['empty'] = 'search_incomplete';
+
+                return $allocator->rank([], []) + ['search_incomplete' => true, 'admission' => $admission];
             }
             $type = $candidate['type'] ?? '';
             $yard = $candidate['yard'] ?? '';
@@ -302,7 +324,9 @@ class CampaignSaturation
             if ($spec['class'] === 'trader') {
                 $forecast = $forecasts[$key] ??= $this->opportunity($grant, $episode, $agent, $grant->revision(), $yard, $offer['offer'], $offer['price'], $fuel, $parts, $deadline);
                 if (! empty($forecast['search_incomplete'])) {
-                    return $allocator->rank([], []) + ['search_incomplete' => true];
+                    $admission['empty'] = 'search_incomplete';
+
+                    return $allocator->rank([], []) + ['search_incomplete' => true, 'admission' => $admission];
                 }
                 $realized = $this->fleetRealization($agent, $allocator, $forecast);
                 if (($forecast['score'] ?? 0) <= 0 || ! isset($realized['permille'])) {
@@ -330,6 +354,14 @@ class CampaignSaturation
                 }
             }
             $g7 = $this->requests($agent, $haulers, $ignoreRun, $type, $candidate['delta_q']);
+            if (! $g7['pass']) {
+                $code = $this->purchaseGateVerdict('G7', $g7)['reason_code'];
+                if (! in_array($code, $admission['candidate_g7_failure_codes'], true)) {
+                    $admission['candidate_g7_failure_codes'][] = $code;
+                    sort($admission['candidate_g7_failure_codes']);
+                }
+                $admission['gate_evidence']['G7']['candidate_failures'][] = $g7;
+            }
             $economic[] = array_replace($candidate, ['slot' => $candidate['slot'] ?? ($spec['class'] === 'trader' ? 'trader' : $spec['class'].'@'.$candidate['site']), 'type' => $type, 'yard' => $yard, 'purchaser' => $purchaser,
                 'price' => $offer['price'], 'p_min' => $offer['p_min'], 'hard_cap' => $cap,
                 'inflation_cap_pct' => $spec['class'] === 'trader' ? $policy['hull_inflation_cap_pct'] : $policy['drone_inflation_cap_pct'],
@@ -339,7 +371,7 @@ class CampaignSaturation
                 'request_fits' => $g7['pass']]);
         }
 
-        return $allocator->rank($economic, ['cash' => $agent->credits, 'grant_reserve' => $parts['grant'],
+        $rank = $allocator->rank($economic, ['cash' => $agent->credits, 'grant_reserve' => $parts['grant'],
             'commitments' => $parts['commitments'], 'recon_return' => $parts['recon_return'],
             'base_capital' => $hulls->workingCapital($frames, minWorkingCapital: 0, workingCapitalPerTrader: $weight),
             'min_working_capital' => max(200000, $haulers['min_working_capital']), 'working_capital_per_trader' => $weight,
@@ -348,6 +380,43 @@ class CampaignSaturation
             'phase' => $episode->phase === 'earn' && ($policy['extraction']['enabled'] ?? false) ? 2 : 1,
             'saving_rate_per_hour' => $reference['assumed'] ? 0 : max(0, (int) $reference['net_per_hour']),
             'canaries_used' => $canariesUsed, 'shadow_price' => $shadow]);
+
+        if ($rank['g8_status'] !== null) {
+            $admission['gates']['G8'] = $this->g8Verdict($rank['g8_status']);
+            ksort($admission['gates']);
+        }
+        if ($rank['g8_later_status'] !== null) {
+            $admission['g8_later'] = $this->g8Verdict($rank['g8_later_status']);
+        }
+        $admission['empty'] = match (true) {
+            $rank['selected'] !== null => null,
+            $rank['wait_for_trader'] => 'wait_for_trader',
+            $candidates === [] => 'no_offers',
+            $economic === [] => 'candidates_filtered',
+            default => 'allocator_declined',
+        };
+
+        return $rank + ['admission' => $admission];
+    }
+
+    private function purchaseGateVerdict(string $key, array $gate): array
+    {
+        $reason = $gate['reason'] ?? null;
+        $code = match (true) {
+            $gate['pass'] => null,
+            $key === 'G1' && ! in_array($reason, ['authority_unavailable', 'draining', 'wind_down', 'awaiting_pending_activation',
+                'uncertain_action', 'unexplained_change', 'arm_loss_stop', 'consecutive_losing_loads'], true) => 'authority_blocked',
+            $key === 'G5' => $gate['reserve'] === null ? 'unknown_commitments' : 'liquidity',
+            $key === 'G7' && $gate['staged'] => 'staged_request_budget',
+            default => $reason,
+        };
+
+        return ['pass' => $gate['pass'], 'reason_code' => $code];
+    }
+
+    private function g8Verdict(string $status): array
+    {
+        return ['pass' => $status === 'pass', 'reason_code' => $status === 'pass' ? null : $status];
     }
 
     private function fleetRealization(Agent $agent, FleetAllocator $allocator, array $forecast): array

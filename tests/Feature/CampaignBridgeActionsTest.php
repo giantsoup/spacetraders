@@ -540,11 +540,14 @@ class CampaignBridgeActionsTest extends TestCase
         $price = $this->action($agent, $ship->symbol, 'confirmed', $run, true);
         $runner = app(AutomationRunner::class);
         $runner->stop($run);
-        $this->assertSame('stopping', $run->fresh()->state->value);
+        $stop = $run->fresh();
+        $this->assertSame('stopping', $stop->state->value);
+        $this->travel(1)->second();
         $runner->advance($run->id);
-        $this->assertSame('blocked', $run->fresh()->state->value);
-        $this->assertNotNull($run->fresh()->active_agent_id);
-        $this->assertNotNull($run->fresh()->stop_requested_at);
+        $this->assertSame('stopping', $run->refresh()->state->value);
+        $this->assertSame($agent->id, $run->active_agent_id);
+        $this->assertEquals($stop->stop_requested_at, $run->stop_requested_at);
+        $this->assertEquals($stop->next_action_at, $run->next_action_at);
 
         $review = $this->review($agent, 'fleet_resume');
         $this->assertSame([], (array) $review['expected']);

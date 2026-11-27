@@ -114,6 +114,14 @@ class CampaignSafety
         return $cutoff && $buy ? $cutoff->min($buy) : ($cutoff ?? $buy);
     }
 
+    public function purchaseCutoffsOpen(AutomationRun $run, int $marginSeconds = 0): bool
+    {
+        $cutoff = now()->addSeconds($marginSeconds);
+
+        return $run->expires_at->gt($cutoff) && ($run->plan_version !== 8
+            || ($this->settlementDeadline($run)?->gt($cutoff) && $this->planTime($run->plan['acquisition_cutoff'] ?? null)?->gt($cutoff)));
+    }
+
     public function settlementDeadline(AutomationRun $run): ?CarbonImmutable
     {
         return $this->planTime($run->plan['settlement_deadline'] ?? null) ?? $run->expires_at;
@@ -346,7 +354,7 @@ class CampaignSafety
                 if ($travel === null || $travel + CampaignMesh::TRANSPORT_CUTOFF_MARGIN_SECONDS >= now()->diffInSeconds($run->expires_at, false)) {
                     throw new GameException('Mesh movement cannot finish before the run cutoff.');
                 }
-                $mesh->assertDeparture($episode, $agent, $ship, $destination, $run->id, $run->plan['mesh_work'] !== 'market');
+                $mesh->assertDeparture($episode, $agent, $ship, $destination, $run->id, CampaignMesh::isYardMove($run->plan));
             } else {
                 $mesh->assertPool($episode, $agent, $ship);
             }
@@ -396,7 +404,7 @@ class CampaignSafety
             if ($command === 'navigate' && in_array($run->strategy, ['scout', 'buy_fleet'], true)
                 && ($departure = $ship->snapshot['nav']['waypointSymbol']) !== $destination
                 && $fleet->isProbe($ship->snapshot) && isset(CampaignMesh::policy($episode)['saturation'])) {
-                app(CampaignMesh::class)->assertDeparture($episode, $agent, $ship->snapshot, $arguments['waypointSymbol'], $run->id, $run->strategy === 'buy_fleet');
+                app(CampaignMesh::class)->assertDeparture($episode, $agent, $ship->snapshot, $arguments['waypointSymbol'], $run->id, $run->strategy === 'buy_fleet' || CampaignMesh::isYardMove($plan));
             }
         }
         $extra = match ($run->strategy) {

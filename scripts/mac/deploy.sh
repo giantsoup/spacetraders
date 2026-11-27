@@ -49,15 +49,143 @@ cd "$root"
 php_bin="$root/scripts/herd-php"
 composer_bin="$root/scripts/composer"
 
-engine_ended=0
+engine_shutdown=
+leaderboard_stopped=0
+reminders_printed=0
+holder_pid=
+leaderboard_lock_dir=
+leaderboard_fd_open=0
+leaderboard_lock_ready=0
+leaderboard_label="local.spacetraders.leaderboard-capture"
+leaderboard_installer="$root/scripts/mac/leaderboard-capture.sh"
+launchctl_bin="${LAUNCHCTL_BIN:-launchctl}"
+uid_num="$(id -u)"
+
+deploy_reminders() {
+    if [[ "$reminders_printed" -eq 1 ]]; then
+        return 0
+    fi
+    local reminders=
+    if [[ "$engine_shutdown" == ended ]]; then
+        reminders="The engine was ended for this deploy and was not restarted; start it from spacetraders.test or run ./scripts/herd-php artisan spacetraders:engine-service start."$'\n'
+    elif [[ "$engine_shutdown" == ending ]]; then
+        reminders="Check the engine with ./scripts/herd-php artisan spacetraders:engine-service status. If it stopped, run ./scripts/herd-php artisan spacetraders:engine-service start."$'\n'
+    fi
+    if [[ "$leaderboard_stopped" -eq 1 ]]; then
+        reminders+="Leaderboard capture may have been stopped for this deploy. Run ./scripts/mac/leaderboard-capture.sh --install to restore it."$'\n'
+    fi
+    if [[ -n "$reminders" ]]; then
+        reminders_printed=1
+        printf '%s' "$reminders" >&2
+    fi
+}
+
 on_err() {
     local code=$?
-    if [[ "$engine_ended" -eq 1 ]]; then
-        echo "The engine was ended for this deploy and was not restarted; start it from spacetraders.test or run ./scripts/herd-php artisan spacetraders:engine-service start." >&2
-    fi
+    deploy_reminders
     exit "$code"
 }
+
+on_signal() {
+    deploy_reminders
+    exit "$1"
+}
+
+abort_deploy() {
+    echo "$1" >&2
+    deploy_reminders
+    exit "${2:-1}"
+}
+
+release_leaderboard_lock() {
+    if [[ "$leaderboard_fd_open" -eq 1 ]]; then
+        exec 8>&-
+        leaderboard_fd_open=0
+    fi
+    if [[ -n "$holder_pid" ]]; then
+        # Bash 3.2 can still hold its saved copy of FD 8 when ERR exits the protected function.
+        if [[ "$leaderboard_lock_ready" -eq 0 || "${1:-0}" -ne 0 ]]; then
+            kill "$holder_pid" 2>/dev/null || true
+        fi
+        wait "$holder_pid" || true
+        holder_pid=
+        leaderboard_lock_ready=0
+    fi
+    if [[ -n "$leaderboard_lock_dir" ]]; then
+        rm -f "$leaderboard_lock_dir/hold" "$leaderboard_lock_dir/status"
+        rmdir "$leaderboard_lock_dir"
+        leaderboard_lock_dir=
+    fi
+}
+
 trap on_err ERR
+trap 'code=$?; release_leaderboard_lock "$code" || true; exit "$code"' EXIT
+trap 'on_signal 129' HUP
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+
+quiesce_leaderboard() {
+    local service="gui/$uid_num/$leaderboard_label"
+    local wait_seconds="${LEADERBOARD_QUIESCE_SECONDS:-15}"
+    if ! [[ "$wait_seconds" =~ ^[1-9][0-9]*$ ]] || [[ "${#wait_seconds}" -gt 9 ]]; then
+        abort_deploy "LEADERBOARD_QUIESCE_SECONDS must be a positive integer of up to nine digits."
+    fi
+    if "$launchctl_bin" print "$service" >/dev/null 2>&1; then
+        leaderboard_stopped=1
+        "$launchctl_bin" bootout "$service" 2>/dev/null || true
+        if "$launchctl_bin" print "$service" >/dev/null 2>&1; then
+            abort_deploy "Could not bootout $leaderboard_label. Deployment stopped before engine shutdown."
+        fi
+    fi
+
+    leaderboard_lock_dir="$(
+        # Bash 3.2 inherits ERR here even when the assignment handles failure.
+        trap - ERR
+        mktemp -d
+    )" || abort_deploy "Could not create the leaderboard capture lock directory. Deployment stopped before engine shutdown." "$?"
+    local fifo="$leaderboard_lock_dir/hold"
+    local status_file="$leaderboard_lock_dir/status"
+    mkfifo "$fifo"
+    # macOS and Linux allow opening a FIFO read-write when no other process has opened it.
+    exec 8<>"$fifo"
+    leaderboard_fd_open=1
+    "$php_bin" -r '
+        require $argv[1]."/app/Gameplay/HostLock.php";
+        $path = App\Gameplay\HostLock::leaderboardCaptureLockPath($argv[1]);
+        $directory = dirname($path);
+        if (!is_dir($directory) && !@mkdir($directory, 0700, true) && !is_dir($directory)) {
+            exit(1);
+        }
+        $lock = @fopen($path, "c");
+        if (!$lock) {
+            exit(1);
+        }
+        $deadline = hrtime(true) + (int) $argv[2] * 1000000000;
+        do {
+            if (flock($lock, LOCK_EX | LOCK_NB)) {
+                echo "LOCKED\n";
+                fflush(STDOUT);
+                stream_get_contents(STDIN);
+                exit(0);
+            }
+            usleep(50000);
+        } while (hrtime(true) < $deadline);
+        exit(1);
+    ' -- "$root" "$wait_seconds" <"$fifo" 8>&- >"$status_file" &
+    holder_pid=$!
+
+    local ready_deadline=$((SECONDS + wait_seconds + 2))
+    local status
+    while (( SECONDS <= ready_deadline )) && kill -0 "$holder_pid" 2>/dev/null; do
+        if [[ -f "$status_file" ]] && IFS= read -r status <"$status_file" && [[ "$status" == "LOCKED" ]] \
+            && kill -0 "$holder_pid" 2>/dev/null; then
+            leaderboard_lock_ready=1
+            return
+        fi
+        sleep 0.05 8>&-
+    done
+    abort_deploy "Leaderboard capture lock is busy or the lock holder failed to start. Deployment stopped before engine shutdown."
+}
 
 find_pnpm() {
     if command -v pnpm >/dev/null 2>&1; then
@@ -225,6 +353,9 @@ if [[ "$engine_state" == "running" || "$engine_state" == "starting" ]]; then
 fi
 
 if [[ "$yes" -ne 1 ]]; then
+    if [[ -x "$leaderboard_installer" ]] && ! "$leaderboard_installer" --status; then
+        echo "(will install/update on --yes)"
+    fi
     if [[ "$restart_engine" -eq 1 ]]; then
         echo "Engine is $engine_state; the deploy will end it gracefully and start it again afterwards. Approved campaigns resume automatically; plain automation runs need re-approval."
     fi
@@ -236,56 +367,66 @@ pnpm_bin="$(find_pnpm)"
 resolved_composer="$(find_composer)"
 export COMPOSER_BIN="$resolved_composer"
 
-if [[ "$restart_engine" -eq 1 ]]; then
-    "$php_bin" artisan spacetraders:engine-service end
-    engine_ended=1
-fi
+set -E
+quiesce_leaderboard
 
-"$php_bin" artisan config:clear
-"$root/scripts/mac/backup.sh"
-
-git checkout -- public/build
-git clean -fq -- public/build
-if [[ "$head_sha" != "$target_sha" ]]; then
-    git merge --ff-only origin/main
-fi
-
-"$composer_bin" install --no-interaction
-"$pnpm_bin" install --frozen-lockfile --strict-peer-dependencies
-"$php_bin" artisan config:clear
-"$php_bin" artisan migrate --force --no-interaction
-"$pnpm_bin" build
-"$php_bin" artisan optimize:clear
-assert_no_dev_processes
-
-# Reload tailnet nginx LaunchAgent cleanly when installed and loaded.
-tailnet_label="local.spacetraders.tailnet-web"
-uid_num="$(id -u)"
-if launchctl print "gui/$uid_num/$tailnet_label" >/dev/null 2>&1; then
-    launchctl kickstart -k "gui/$uid_num/$tailnet_label"
-    sleep 1
-    echo "OK: Reloaded $tailnet_label"
-fi
-
-test_page "http://spacetraders.test/login"
-test_page "http://127.0.0.1:8081/login"
-
-if ts_bin="$(find_tailscale)"; then
-    ts_hosts="$("$ts_bin" serve status 2>/dev/null | awk '/^https:\/\// {host=$1; sub(/^https:\/\//, "", host)} /127\.0\.0\.1:8081/ && host != "" {print host}' | sort -u)"
-    if [[ -z "$ts_hosts" ]]; then
-        echo "Warning: tailscale serve publishes nothing that proxies to 127.0.0.1:8081; the tailnet site was not checked." >&2
-    else
-        while IFS= read -r host; do
-            [[ -n "$host" ]] || continue
-            test_page "https://$host/login"
-        done <<< "$ts_hosts"
+apply_deploy() {
+    if [[ "$restart_engine" -eq 1 ]]; then
+        engine_shutdown=ending
+        "$php_bin" artisan spacetraders:engine-service end
+        engine_shutdown=ended
     fi
-fi
 
-if [[ "$restart_engine" -eq 1 ]]; then
-    "$php_bin" artisan spacetraders:engine-service start
-    engine_ended=0
-    echo "OK: Engine restarted."
-fi
+    "$php_bin" artisan config:clear
+    "$root/scripts/mac/backup.sh"
+
+    git checkout -- public/build
+    git clean -fq -- public/build
+    if [[ "$head_sha" != "$target_sha" ]]; then
+        git merge --ff-only origin/main
+    fi
+
+    "$composer_bin" install --no-interaction
+    "$pnpm_bin" install --frozen-lockfile --strict-peer-dependencies
+    "$php_bin" artisan config:clear
+    "$php_bin" artisan migrate --force --no-interaction
+    "$pnpm_bin" build
+    "$php_bin" artisan optimize:clear
+    assert_no_dev_processes
+
+    # Reload tailnet nginx LaunchAgent cleanly when installed and loaded.
+    tailnet_label="local.spacetraders.tailnet-web"
+    if "$launchctl_bin" print "gui/$uid_num/$tailnet_label" >/dev/null 2>&1; then
+        "$launchctl_bin" kickstart -k "gui/$uid_num/$tailnet_label"
+        sleep 1
+        echo "OK: Reloaded $tailnet_label"
+    fi
+
+    test_page "http://spacetraders.test/login"
+    test_page "http://127.0.0.1:8081/login"
+
+    if ts_bin="$(find_tailscale)"; then
+        ts_hosts="$("$ts_bin" serve status 2>/dev/null | awk '/^https:\/\// {host=$1; sub(/^https:\/\//, "", host)} /127\.0\.0\.1:8081/ && host != "" {print host}' | sort -u)"
+        if [[ -z "$ts_hosts" ]]; then
+            echo "Warning: tailscale serve publishes nothing that proxies to 127.0.0.1:8081; the tailnet site was not checked." >&2
+        else
+            while IFS= read -r host; do
+                [[ -n "$host" ]] || continue
+                test_page "https://$host/login"
+            done <<< "$ts_hosts"
+        fi
+    fi
+
+    if [[ "$restart_engine" -eq 1 ]]; then
+        "$php_bin" artisan spacetraders:engine-service start
+        engine_shutdown=
+        echo "OK: Engine restarted."
+    fi
+}
+
+apply_deploy 8>&-
+release_leaderboard_lock
+"$leaderboard_installer" --install
+leaderboard_stopped=0
 
 echo "Deployed $(git rev-parse --short HEAD) to production."

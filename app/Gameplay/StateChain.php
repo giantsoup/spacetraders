@@ -211,10 +211,12 @@ class StateChain
 
             $pending->state = 'pending';
             $pending->updated_at = now();
-            $query->where('id', $pending->id)->where('state', 'reserved')->update([
+            if ($query->where('id', $pending->id)->where('state', 'reserved')->update([
                 'state' => $pending->state,
                 'updated_at' => $pending->updated_at,
-            ]);
+            ]) !== 1) {
+                return null;
+            }
 
             return $pending;
         }, 3);
@@ -286,9 +288,9 @@ class StateChain
         $recoveryHolds->where('id', '!=', $hold->id)->update(['state' => 'released', 'updated_at' => now()]);
     }
 
-    public function markUncertain(int $actionId): void
+    public function markUncertain(int $actionId, bool $includeReserved = false): void
     {
-        DB::table('credit_reservations')->where('ship_action_id', $actionId)->whereIn('state', ['pending', 'sending'])
+        DB::table('credit_reservations')->where('ship_action_id', $actionId)->whereIn('state', $includeReserved ? ['reserved', 'pending', 'sending'] : ['pending', 'sending'])
             ->update(['state' => 'uncertain', 'updated_at' => now()]);
     }
 

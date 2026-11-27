@@ -41,7 +41,7 @@ final class BridgeWork
 
     public static function reviews(BridgeScope $scope, Collection $runs): Collection
     {
-        if ($scope->agent === null || ! $runs->contains(fn (AutomationRun $run) => $run->state === RunState::Blocked)) {
+        if ($scope->agent === null || ! $runs->contains(self::unsettled(...))) {
             return collect();
         }
 
@@ -99,7 +99,7 @@ final class BridgeWork
 
     public static function settlementStatus(AutomationRun $run, Collection $reviews): string
     {
-        if ($run->state === RunState::Blocked) {
+        if (self::unsettled($run)) {
             if ($reviews->contains(fn (ShipAction $action) => $action->state->value === 'uncertain')) {
                 return 'Unsettled · command outcome uncertain';
             }
@@ -108,7 +108,9 @@ final class BridgeWork
                     || ($run->campaign_episode_id !== null && $run->campaign_episode_id === $action->campaign_episode_id)))) {
                 return 'Unsettled · price review required';
             }
+        }
 
+        if ($run->state === RunState::Blocked) {
             return $run->blocked_reason ? 'Unsettled · '.Str::limit($run->blocked_reason, 120) : 'Unsettled · review required';
         }
 

@@ -17,6 +17,22 @@ snapshot of a wipe is its final record, so its accuracy depends on how close to 
 If the directory is incomplete, the snapshot still keeps the status top lists and the command
 prints a warning.
 
-Nothing runs this automatically yet. A Windows Scheduled Task running
-`leaderboard:capture --if-due` every 5 minutes, like `scripts/windows/watchdog.ps1`, would
-capture final standings within 5 minutes of each reset.
+## macOS schedule
+
+The LaunchAgent runs `leaderboard:capture --if-due` every 10 minutes and once when it
+loads after install or deploy. In the last two hours before a reset, that extra check
+can capture sooner if the latest snapshot is at least five minutes old. A full capture
+of about 184 agents uses about 11 public requests. The regular schedule can capture
+up to six times per hour in the final window. Each read has five attempts, with up to
+four waits of at most 15 seconds. The directory has a 100-page limit.
+
+The first production deploy runs the pre-merge copy of `deploy.sh`. After the
+authorized `./scripts/mac/deploy.sh --yes` succeeds, run
+`./scripts/mac/leaderboard-capture.sh --install` from `/Users/homemac/Sites/spacetraders`.
+Run `./scripts/mac/leaderboard-capture.sh --status` and verify it exits 0. Subsequent
+deploys show the job status in preview, require capture to be idle before proceeding,
+and install the current LaunchAgent after deployment.
+
+`launchctl bootout` sends SIGTERM if the scheduled capture is running. SQLite rolls
+back any uncommitted snapshot write. The deploy lock primarily waits for manual
+captures, which use the same lock file as the scheduled command.

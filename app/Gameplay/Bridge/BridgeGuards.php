@@ -256,7 +256,7 @@ class BridgeGuards
         if (! $run) {
             return null;
         }
-        $actions = $run->state->value === 'blocked' ? ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
+        $actions = BridgeWork::unsettled($run) ? ShipAction::where('agent_id', $agent->id)->where('reset_id', $agent->reset_id)
             ->where(fn ($query) => $query->where('automation_run_id', $run->id)->orWhere('ship_symbol', $run->ship_symbol))
             ->where(fn ($query) => $query->where('state', 'uncertain')->orWhere('review_required', true))
             ->get(['state', 'review_required']) : collect();
@@ -266,11 +266,11 @@ class BridgeGuards
 
     private function runBlocker(AutomationRun $run, Agent $agent, Collection $actions): array
     {
-        $reason = $run->state->value === 'blocked' ? match (true) {
+        $reason = match (true) {
             $actions->contains('state', 'uncertain') => 'command outcome uncertain',
             $actions->contains('review_required', true) => 'price review required',
             default => $run->blocked_reason,
-        } : $run->blocked_reason;
+        };
         $detail = $reason ? ' '.$reason : '';
 
         return $this->blocker('settling', 'Run #'.$run->id.' for '.$run->ship_symbol.' is still unsettled.'.$detail, $agent);
