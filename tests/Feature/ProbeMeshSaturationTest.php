@@ -25,6 +25,7 @@ use App\Gameplay\OperationPlanner;
 use App\Gameplay\ProbeYardSelector;
 use App\Gameplay\RequestBudget;
 use App\Gameplay\RequestDeferred;
+use App\Gameplay\RequestShadowPrice;
 use App\Gameplay\ShipCommandExecutor;
 use App\Gameplay\SpaceTradersApi;
 use App\Jobs\AdvanceAutomationRun;
@@ -1914,6 +1915,46 @@ final class ProbeMeshSaturationTest extends TestCase
         $this->assertSame('deferred', $result['exit']['outcomes']['shipyard:'.self::YARD]);
     }
 
+    #[DataProvider('pollExitsAfterSuccess')]
+    public function test_routine_poll_preserves_successful_reads_before_an_early_exit(string $reason): void
+    {
+        $this->setUpSaturation(hubs: 2);
+        $episode = $this->primary(revision: $this->meshRevision());
+        $port = 'X1-TEST-PORT';
+        $point = $this->point($port, 1, ['MARKETPLACE', 'SHIPYARD']);
+        app(AgentSynchronizer::class)->observe($this->agent, 'waypoint', $port, $point, 'listing');
+        $cap = CampaignMesh::policy($episode)['reads_per_pass'];
+        $read = $reason === 'read_cap' ? array_fill_keys(range(1, $cap - 1), true) : [];
+        $deadline = microtime(true) + ($reason === 'deadline' ? 0.5 : 10);
+        $yard = $this->world()['shipyards'][self::YARD];
+        $api = $this->partialMock(SpaceTradersApi::class);
+        $api->shouldReceive('shipyard')->withArgs(fn ($agent, $symbol) => $symbol === $port)->once()
+            ->andReturnUsing(function () use ($reason, $deadline, $yard) {
+                if ($reason === 'deadline') {
+                    time_sleep_until($deadline + 0.001);
+                }
+
+                return $yard;
+            });
+        if ($reason === 'request_deferred') {
+            $api->shouldReceive('shipyard')->withArgs(fn ($agent, $symbol) => $symbol === self::YARD)->once()
+                ->andThrow(new RequestDeferred('Fixture read deferral', 4, 'budget_storage'));
+        }
+
+        $result = app(MeshPoller::class)->refresh($episode, $this->agent, $read, $deadline,
+            phase: 'routine', purchaseYards: [$port]);
+
+        $this->assertSame('normal', $result['mode']);
+        $this->assertSame(['shipyard:'.$port], $result['successful']);
+        $this->assertSame($reason, $result['exit']['reason']);
+        $this->assertSame('shipyard:'.self::YARD, $result['exit']['stopped_at']['key']);
+    }
+
+    public static function pollExitsAfterSuccess(): array
+    {
+        return [['read_cap'], ['deadline'], ['request_deferred']];
+    }
+
     public function test_routine_poll_records_governor_hold_phase_filter_and_read_false(): void
     {
         $this->setUpSaturation(hubs: 2);
@@ -1994,6 +2035,92 @@ final class ProbeMeshSaturationTest extends TestCase
         $this->assertSame(['governor_mode' => true], $plan['fleet_saturation']['allocation']['admission']['skipped']);
     }
 
+    #[DataProvider('fleetPurchaseSkips')]
+    public function test_normal_director_tick_persists_inner_fleet_purchase_skip_codes(string $case, string $code): void
+    {
+        $this->setUpSaturation(hubs: 2, seedCoverage: false);
+        $this->market(self::YARD);
+        $this->market('X1-TEST-PORT');
+        $this->yardPrice(25000, persist: true);
+        $body = Yaml::parseFile(base_path('campaigns/weekly-system-saturation-fleet.yaml'));
+        $body['agent']['symbol'] = $this->agent->name;
+        $body['fleet']['auto_arm']['revision_hash'] = $this->armRevision->content_hash;
+        $episode = $this->primary(revision: app(CampaignPlaybook::class)->import(Yaml::dump($body, 12)));
+        $director = app(CampaignDirector::class);
+        $this->app->instance(CampaignDirector::class, $director);
+        $saturation = $this->partialMock(CampaignSaturation::class);
+        $rank = $saturation->shouldReceive('rankFleetPurchases');
+
+        if (in_array($case, ['governor_mode', 'residual_excess', 'pending_grant'], true)) {
+            $shadow = app(RequestShadowPrice::class);
+            $usage = app(RequestBudget::class)->usage(agentSymbol: $this->agent->name);
+            $changed = false;
+            $this->partialMock(RequestBudget::class)->shouldReceive('usage')->andReturnUsing(
+                function (?string $token = null, ?string $account = null, ?string $agentSymbol = null, bool $requireTelemetry = false) use ($usage, $shadow, $case, $episode, &$changed): array {
+                    $current = $usage;
+                    $state = $shadow->loadState($this->agent);
+                    // The purchase gate reads fresh telemetry after the pass has computed its normal status.
+                    if ($requireTelemetry && ! $changed && isset($state['tiers'])) {
+                        $changed = true;
+                        if ($case === 'governor_mode') {
+                            $current['host']['rate_limits_last_15_minutes'] = 3;
+                        } elseif ($case === 'residual_excess') {
+                            $shadow->saveState($this->agent, array_replace($state, ['residual_excess' => 1]));
+                        } else {
+                            $episode->grant()->replicate()->fill(['slot' => 2])->save();
+                        }
+                    }
+
+                    return $current;
+                });
+        } elseif ($case === 'shadow_t5_paused') {
+            app(RequestShadowPrice::class)->saveState($this->agent, ['tiers' => [RequestShadowPrice::T5 => ['paused' => true]]]);
+        } elseif ($case === 'purchase_reservation') {
+            ShipAction::create(['agent_id' => $this->agent->id, 'reset_id' => $this->agent->reset_id,
+                'ship_symbol' => 'LOCAL-2', 'key' => 'outstanding-purchase', 'origin' => 'manual', 'command' => 'buy_ship',
+                'state' => 'pending', 'arguments' => ['shipType' => 'SHIP_PROBE'], 'expires_at' => now()->addMinutes(2)]);
+        } elseif ($case === 'tier1_probe_deferred') {
+            $this->partialMock(CampaignProbeBootstrap::class)->shouldReceive('assertPurchaseBudget')->once()
+                ->andThrow(new RequestDeferred('Fixture probe admission deferral', 5));
+        }
+
+        if ($case === 'deadline_before_rank' || $case === 'deadline_after_rank') {
+            $expire = fn () => (new \ReflectionProperty($director, 'deadline'))->setValue($director, microtime(true) - 1);
+            $this->partialMock(CampaignProbeBootstrap::class)->shouldReceive('probeTarget')->once()
+                ->andReturnUsing(function () use ($case, $expire) {
+                    if ($case === 'deadline_before_rank') {
+                        $expire();
+                    }
+
+                    return [1, 1];
+                });
+        }
+        if ($case === 'deadline_after_rank') {
+            $rank->once()->andReturnUsing(function () use ($expire) {
+                $expire();
+
+                return ['selected' => null, 'wait_for_trader' => false, 'admission' => ['empty' => 'search_incomplete']];
+            });
+        } else {
+            $rank->never();
+        }
+
+        $this->tickC0();
+
+        $fleet = CampaignEvent::where('kind', 'mesh_plan')->sole()->data['fleet_saturation'];
+        $this->assertSame('normal', $fleet['mode']);
+        $this->assertSame([$code => true], $fleet['allocation']['admission']['skipped'] ?? []);
+        $this->assertSame($case === 'tier1_probe_started', AutomationRun::where('strategy', 'buy_probe')->whereNotNull('started_at')->exists());
+    }
+
+    public static function fleetPurchaseSkips(): iterable
+    {
+        foreach (['governor_mode', 'shadow_t5_paused', 'residual_excess', 'purchase_reservation', 'pending_grant',
+            'tier1_probe_started', 'tier1_probe_deferred', 'deadline_before_rank', 'deadline_after_rank'] as $case) {
+            yield $case => [$case, str_starts_with($case, 'deadline') ? 'deadline' : $case];
+        }
+    }
+
     public function test_escaping_routine_429_preserves_next_pass_capacity_and_due_order(): void
     {
         $this->setUpSaturation(hubs: 2);
@@ -2026,7 +2153,7 @@ final class ProbeMeshSaturationTest extends TestCase
             }
         });
         FleetMetrics::flush();
-        $exception = new GameException('rate limited', retryAfter: 3, httpStatus: 429);
+        $exception = new GameException('rate limited', apiCode: 429, retryAfter: 3, httpStatus: 429);
         $api = Mockery::mock(SpaceTradersApi::class, [app(SpaceTradersClient::class)])->makePartial();
         $this->app->instance(SpaceTradersApi::class, $api);
         $api->shouldReceive('shipyard')->withArgs(fn ($agent, $symbol) => $symbol === $port)->once()->andReturn($yard);
@@ -2044,6 +2171,8 @@ final class ProbeMeshSaturationTest extends TestCase
         $this->assertSame(['exit'], array_keys($stage));
         $this->assertSame('exception', $stage['exit']['reason']);
         $this->assertSame(429, $stage['exit']['http_status']);
+        $this->assertSame(429, $stage['exit']['api_code']);
+        $this->assertSame(3, $stage['exit']['retry_after']);
         $this->assertSame('normal', $stage['exit']['governor']['mode']);
         $this->assertSame('shipyard:'.self::YARD, $stage['exit']['stopped_at']['key']);
         $this->assertSame(['shipyard:'.$port], $stage['exit']['partial_successful']);
@@ -2113,6 +2242,9 @@ final class ProbeMeshSaturationTest extends TestCase
         $this->assertSame(['shipyard:'.self::YARD, 'shipyard:'.$port], $poller->dueWithInflatedCapacity);
 
         unset($pass['mesh_polling']['routine']);
+        if ($pass['mesh_polling'] === []) {
+            unset($pass['mesh_polling'], $pass['mesh_pass_evidence']);
+        }
         DB::table('fleet_metrics')->where('id', $failedRow->id)->update(['data' => json_encode($pass, JSON_THROW_ON_ERROR)]);
         $this->assertSame($evidence, $metrics->meshPassEvidence($this->agent->name));
         $this->assertSame($recorded, $nextPass());

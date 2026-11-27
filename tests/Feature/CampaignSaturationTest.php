@@ -19,6 +19,7 @@ use App\Gameplay\GameException;
 use App\Gameplay\HostLock;
 use App\Gameplay\RequestBudget;
 use App\Gameplay\SpaceTradersApi;
+use App\Gameplay\TraderAssigner;
 use App\Models\AutomationRun;
 use App\Models\CampaignEpisode;
 use App\Models\CampaignEvent;
@@ -996,6 +997,11 @@ class CampaignSaturationTest extends TestCase
         $rank['admission']['gates']['G5'] = ['pass' => false, 'reason_code' => 'liquidity'];
         $tick();
         $this->assertSame(2, CampaignEvent::where('kind', 'mesh_plan')->count());
+        $stored = CampaignEvent::where('kind', 'mesh_plan')->latest('id')->firstOrFail()->data['fleet_saturation']['allocation'];
+        $this->assertSame(['pass' => false, 'reason_code' => 'liquidity'], $stored['admission']['gates']['G5']);
+        $this->assertSame(['staged_request_budget'], $stored['admission']['candidate_g7_failure_codes']);
+        $this->assertSame('Five trader slots exhausted', $stored['admission']['gate_evidence']['G7']['candidate_failures'][0]['reason']);
+        $this->assertSame(['g7_requests' => 4], $stored['declined']);
     }
 
     public static function recordedAllocations(): array
@@ -1006,8 +1012,8 @@ class CampaignSaturationTest extends TestCase
     #[DataProvider('requestGateCases')]
     public function test_candidate_request_failure_persists_when_generic_g7_passes(bool $staged, string $code): void
     {
-        $episode = $this->fleetAdmissionEpisode();
-        $grant = $episode->grant();
+        $headroom = 0.8;
+        $episode = $this->fleetAdmissionEpisode(requestHeadroom: $headroom);
         $yard = 'X1-TEST-ROCK';
         $this->editFixture(function (&$world) use ($yard) {
             $world['shipyards'][$yard]['shipTypes'] = [['type' => 'SHIP_LIGHT_HAULER']];
@@ -1015,10 +1021,11 @@ class CampaignSaturationTest extends TestCase
                 fn ($offer) => $offer['type'] === 'SHIP_LIGHT_HAULER'));
         });
         $this->seedFleetAdmissionEvidence($episode, $yard);
+        $this->partialMock(TraderAssigner::class)->shouldReceive('assignGreedy')->andReturn(['assignments' => []]);
 
         $budget = app(RequestBudget::class);
         $usage = $budget->usage(agentSymbol: $this->agent->name);
-        $ordinaryHour = (int) floor(.8 * config('gameplay.host_tier2_4_per_minute') * 60) - 220;
+        $ordinaryHour = (int) floor($headroom * config('gameplay.host_tier2_4_per_minute') * 60) - 220;
         $mock = $this->partialMock(RequestBudget::class);
         $mock->shouldReceive('usage')->andReturnUsing(function (?string $token = null, ?string $account = null, ?string $agentSymbol = null,
             bool $requireTelemetry = false) use ($usage, $ordinaryHour) {
@@ -1037,16 +1044,7 @@ class CampaignSaturationTest extends TestCase
                     'staged' => true, 'projected_arm_requests' => $projectedRequests ?? 220,
                 ]);
         }
-        $director = app(CampaignDirector::class);
-        (new \ReflectionProperty($director, 'deadline'))->setValue($director, microtime(true) + 10);
-        $policy = CampaignPlaybook::saturationPolicy($grant->revision()->body);
-        $considered = [];
-        $dispatch = new \ReflectionMethod($director, 'dispatchFleetPurchase');
-        $lock = app(HostLock::class);
-        $arguments = [$grant, $episode, $this->agent->refresh(), [], $policy, &$considered];
-        $this->assertNull($lock->scoped('campaign', fn () => $lock->scoped('agent-'.$this->agent->id,
-            fn () => $dispatch->invokeArgs($director, $arguments))));
-        (new \ReflectionMethod($director, 'recordMeshPlan'))->invoke($director, $grant, $episode, [], [], []);
+        $this->tickC0();
         $allocation = CampaignEvent::where('kind', 'mesh_plan')->sole()->data['fleet_saturation']['allocation'];
 
         $this->assertNull($allocation['selected']);
@@ -1077,12 +1075,13 @@ class CampaignSaturationTest extends TestCase
         }
     }
 
-    private function fleetAdmissionEpisode(bool $extraction = false): CampaignEpisode
+    private function fleetAdmissionEpisode(bool $extraction = false, float $requestHeadroom = 0.8): CampaignEpisode
     {
         $this->setUpSaturation();
         $body = Yaml::parseFile(base_path('campaigns/weekly-system-saturation-fleet.yaml'));
         $body['agent']['symbol'] = $this->agent->name;
         $body['fleet']['auto_arm']['revision_hash'] = $this->armRevision->content_hash;
+        $body['fleet']['haulers']['request_headroom'] = $requestHeadroom;
         $body['fleet']['saturation']['extraction']['enabled'] = $extraction;
 
         return $this->primary(revision: app(CampaignPlaybook::class)->import(Yaml::dump($body, 12)));
