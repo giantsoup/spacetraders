@@ -49,8 +49,9 @@ cd "$root"
 php_bin="$root/scripts/herd-php"
 composer_bin="$root/scripts/composer"
 
-engine_ended=0
+engine_shutdown=
 leaderboard_stopped=0
+reminders_printed=0
 holder_pid=
 leaderboard_lock_dir=
 leaderboard_fd_open=0
@@ -61,11 +62,21 @@ launchctl_bin="${LAUNCHCTL_BIN:-launchctl}"
 uid_num="$(id -u)"
 
 deploy_reminders() {
-    if [[ "$engine_ended" -eq 1 ]]; then
-        echo "The engine was ended for this deploy and was not restarted; start it from spacetraders.test or run ./scripts/herd-php artisan spacetraders:engine-service start." >&2
+    if [[ "$reminders_printed" -eq 1 ]]; then
+        return 0
+    fi
+    local reminders=
+    if [[ "$engine_shutdown" == ended ]]; then
+        reminders="The engine was ended for this deploy and was not restarted; start it from spacetraders.test or run ./scripts/herd-php artisan spacetraders:engine-service start."$'\n'
+    elif [[ "$engine_shutdown" == ending ]]; then
+        reminders="Check the engine with ./scripts/herd-php artisan spacetraders:engine-service status. If it stopped, run ./scripts/herd-php artisan spacetraders:engine-service start."$'\n'
     fi
     if [[ "$leaderboard_stopped" -eq 1 ]]; then
-        echo "Leaderboard capture was stopped for this deploy. Run ./scripts/mac/leaderboard-capture.sh --install to restore it." >&2
+        reminders+="Leaderboard capture may have been stopped for this deploy. Run ./scripts/mac/leaderboard-capture.sh --install to restore it."$'\n'
+    fi
+    if [[ -n "$reminders" ]]; then
+        reminders_printed=1
+        printf '%s' "$reminders" >&2
     fi
 }
 
@@ -361,8 +372,9 @@ quiesce_leaderboard
 
 apply_deploy() {
     if [[ "$restart_engine" -eq 1 ]]; then
+        engine_shutdown=ending
         "$php_bin" artisan spacetraders:engine-service end
-        engine_ended=1
+        engine_shutdown=ended
     fi
 
     "$php_bin" artisan config:clear
@@ -407,7 +419,7 @@ apply_deploy() {
 
     if [[ "$restart_engine" -eq 1 ]]; then
         "$php_bin" artisan spacetraders:engine-service start
-        engine_ended=0
+        engine_shutdown=
         echo "OK: Engine restarted."
     fi
 }

@@ -108,6 +108,8 @@ class MacLeaderboardScheduleScriptTest extends TestCase
         $deploy = $this->script('deploy.sh', '--yes');
         $this->assertSame(1, $deploy->run(env: ['BOOTOUT_STUCK' => '1', 'ENGINE_STATE' => 'running']));
         $this->assertStringContainsString('Could not bootout', $deploy->getErrorOutput());
+        $this->assertFileExists($this->fixture.'/loaded');
+        $this->assertStringContainsString('Leaderboard capture may have been stopped', $deploy->getErrorOutput());
         $this->assertQuiesceFailed($deploy);
     }
 
@@ -148,6 +150,21 @@ class MacLeaderboardScheduleScriptTest extends TestCase
     }
 
     #[DataProvider('deploySignals')]
+    public function test_signal_at_engine_shutdown_completion_reports_how_to_recover(string $signal, int $status): void
+    {
+        touch($this->fixture.'/loaded');
+        $deploy = $this->script('deploy.sh', '--yes');
+
+        $this->assertSame($status, $deploy->run(env: ['SIGNAL_DURING_ENGINE_END' => $signal, 'ENGINE_STATE' => 'running']));
+        $this->assertStringContainsString('engine-service end', $this->trace());
+        $this->assertStringContainsString('spacetraders:engine-service status', $deploy->getErrorOutput());
+        $this->assertStringContainsString('spacetraders:engine-service start', $deploy->getErrorOutput());
+        $this->assertStringContainsString('leaderboard-capture.sh --install', $deploy->getErrorOutput());
+        $this->assertStringNotContainsString('backup called', $this->trace());
+        $this->assertLockReleased();
+    }
+
+    #[DataProvider('deploySignals')]
     public function test_signal_after_engine_stop_reports_both_recovery_commands(string $signal, int $status): void
     {
         touch($this->fixture.'/loaded');
@@ -163,6 +180,33 @@ class MacLeaderboardScheduleScriptTest extends TestCase
     public static function deploySignals(): array
     {
         return [['HUP', 129], ['INT', 130], ['TERM', 143]];
+    }
+
+    public function test_signal_during_abort_reminders_does_not_repeat_them(): void
+    {
+        touch($this->fixture.'/loaded');
+        $bashEnv = $this->fixture.'/interrupt-reminders.sh';
+        file_put_contents($bashEnv, <<<'BASH'
+            interrupt_reminder() {
+                if [[ "$*" == *'Run ./scripts/mac/leaderboard-capture.sh --install'* && "${reminder_interrupted:-0}" == 0 ]]; then
+                    reminder_interrupted=1
+                    kill -TERM "$$"
+                fi
+            }
+            echo() {
+                builtin echo "$@"
+                interrupt_reminder "$@"
+            }
+            printf() {
+                builtin printf "$@"
+                interrupt_reminder "$@"
+            }
+            BASH);
+        $deploy = $this->script('deploy.sh', '--yes');
+
+        $this->assertSame(143, $deploy->run(env: ['BASH_ENV' => $bashEnv, 'BOOTOUT_STUCK' => '1']));
+        $this->assertQuiesceFailed($deploy);
+        $this->assertSame(1, substr_count($deploy->getErrorOutput(), 'leaderboard-capture.sh --install'));
     }
 
     public function test_deploy_preview_preserves_an_unloaded_job_and_exits_successfully(): void
@@ -311,6 +355,9 @@ class MacLeaderboardScheduleScriptTest extends TestCase
             echo "$*" >>"$FIXTURE/trace"
             if [[ "$*" == "artisan spacetraders:engine-service status" ]]; then
                 echo "Engine state: ${ENGINE_STATE:-off}"
+            fi
+            if [[ "$*" == "artisan spacetraders:engine-service end" && -n "${SIGNAL_DURING_ENGINE_END:-}" ]]; then
+                kill -s "$SIGNAL_DURING_ENGINE_END" "$PPID" "$$"
             fi
             BASH);
         $this->stub('/checkout/scripts/mac/backup.sh', <<<'BASH'
